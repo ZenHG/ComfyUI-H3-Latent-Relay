@@ -68,6 +68,7 @@ H3 VAE 的时序跨度为 `(1,4,4,4,4)`：每 5 个 latent token 覆盖 17 像�
 | 🔗 **H3 续接 Latent 读** | 读回上一段（段号 - 1），断点续跑时可指定 `explicit_path` 换源 |
 | 🔗 **H3 续接 Latent 桥** | 上一段尾段钉进本段 conditioning；`context_latent` 不接则直通 |
 | 🔗 **H3 续接裁重叠** | **裁掉本段头部的重生成帧（视频音频同裁）** —— 不裁就会在拼接处重播 |
+| 🔗 **H3 续接连跑 Chain** | 自动连跑控制器：同分组框内自动推进「桥 + 落盘」段号并排队（详见下方「Chain 自动连跑」） |
 
 ## 接线
 
@@ -180,7 +181,7 @@ python tests/test_relay_core.py
 脚本会自动上溯定位 ComfyUI 根目录；装在别处时用
 `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。
 
-**80 项断言，零 GPU、不加载模型**，覆盖九个方面：
+**96 项断言，零 GPU、不加载模型**，覆盖九个方面：
 
 | 组 | 覆盖 |
 |---|---|

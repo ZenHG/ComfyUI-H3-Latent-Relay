@@ -12,7 +12,7 @@ python tests/test_relay_core.py
 ```
 - 零 GPU、不加载模型、秒级完成。会自动上溯定位 ComfyUI 根目录；装在别处时用
   `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py` 指定。
-- 覆盖九个方面（共 80 项断言），是本包正确性的主要保障。
+- 覆盖九个方面（共 96 项断言），是本包正确性的主要保障。
 
 ## 代码纪律
 - **硬错误必须 raise，绝不静默降级**（如帧数不在网格上、分辨率不匹配、段号与取源矛盾）。

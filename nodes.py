@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """H3 Relay Kit · 节点层
 
-三个节点，覆盖"用作者的续接方式"所需的全部接线：
+五个节点，覆盖"用作者的续接方式"所需的全部接线：
 
   🔗 H3 续接 Latent 存   —— 把本段的 AV latent 落盘，供下一段读
   🔗 H3 续接 Latent 读   —— 读回上一段的 AV latent
   🔗 H3 续接 Latent 桥   —— 把上一段尾段钉进本段 conditioning（latent 直取，零重编码）
+  🔗 H3 续接裁重叠        —— 裁掉续接段头部的重叠帧（视频 + 音频同裁）
+  🔗 H3 续接连跑 Chain    —— 同分组框内自动推进「桥 + 落盘」段号并排队连跑
 
 接线（替换像素续接时）：
     CSGlideCastCS[0] ─ conditioning ─┐
