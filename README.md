@@ -16,6 +16,62 @@ H3 分段生成时，"续接"要回答一件事：**新的一段怎么知道上�
 本包做的是**latent 桥**：直接从上一段的 AV latent 里切出尾段，切成逐 token 的块，
 按真实位置写进 `minimax_keyframes`。**不重编码**，锚点与采样同源。
 
+## 🚀 5 分钟跑通（最小可用）
+
+> 懒人路线：直接打开 `examples/minimal_relay_official.json`（全官方节点 + 本包，16 个节点），
+> 把 4 个加载器的下拉改成你本机的模型文件，然后按下面三步跑。
+> 图的画布上有一个**注释框**写着同样的步骤，不用回来翻 README。
+
+**第 1 段**
+
+1. 把「① 段号」那个数字填成 `0`。
+2. 在官方条件节点（`MiniMaxH3ImageToVideo` / `MiniMaxH3ReferenceToVideo`）里填好 prompt。
+3. 点 Queue。
+
+判据（日志里应看到）：
+
+```
+[H3 Relay] 无 context_latent → 直通（独立段，不续接）。
+[H3 Relay] 裁 0 帧 → 不裁（独立段或纯首段）。
+```
+
+**第 2 段**
+
+4. 把「① 段号」改成 `1` —— **只改这一个数**（桥和落盘都由它驱动，不用改第二处）。
+5. prompt 换成第 2 段要拍的内容（开头直接接住上一段的动作/机位，别重新起手）。
+6. 再点 Queue。
+
+判据（三行，缺一不可）：
+
+```
+[H3 Relay] latent 桥续接：钉住 22 帧 / 7 步，锚位 0..18，裁首 23 帧（含沉降 1），音频 37 步
+[H3 Relay] 裁首 23 帧 = 钉住 22 + 沉降 1 ｜ 自动检测：窗内最大帧差 203.0 / 段内基线 3.0
+[H3 Relay] 接缝自检：前 40 帧无突变（最大帧差 6.00，段内基线 3.00）→ 起点干净。
+```
+
+| 看到 | 说明 |
+|---|---|
+| `钉住 22 帧` | 上一段尾部**已接进来** |
+| `裁首 N 帧 = 钉住 22 + 沉降 Y` | 接缝处理**已生效**（Y 由本段画面量出，逐段不同） |
+| `起点干净` | 没有跳变，可以拼 |
+
+**关键参数两张表**
+
+| 参数 | 第 1 段 | 第 2 段起 | 在哪填 |
+|---|---|---|---|
+| 段号 `stage_index` | `0` | `1`、`2`、`3`… | 桥 + 落盘（**必须一样大**；示例图用同一个「段号」节点驱动，所以只改一处） |
+| `run_id` | 同一个片子名，比如 `myfilm` | **与第 1 段一字不差** | 桥 + 落盘（两边一致） |
+| `trim_frames` | `22` | `22`（不用动） | 桥（钉住窗口长度，只能 5/22/39/56/73/90/107/124） |
+| `settle_frames` | —（首段不裁） | 保持 `-1`（自动，不用管） | **裁重叠**节点 |
+
+**三个最常见的翻车点**
+
+| 症状 | 原因 | 处置 |
+|---|---|---|
+| 日志写「静默直通」并直接报错 | 段号填了 ≥1，但 `run_id` 与上一段不一致，或上一段文件不在 | 两处 `run_id` 必须一字不差 |
+| 画面从第 1 帧就开始重播上一段 | 「裁重叠」节点没接上，或它的 `trim_frames` 没接桥的**第 3 路输出** | 按下面接线图检查 |
+| 换了新片子，结果接的是旧片的尾巴 | 没换 `run_id`（同名会覆盖/复读同段号文件） | 换新名字 |
+
 ## 与像素续接的关系
 
 两者写的是**同一个 conditioning 协议**，因此可以互换：
@@ -72,22 +128,80 @@ H3 VAE 的时序跨度为 `(1,4,4,4,4)`：每 5 个 latent token 覆盖 17 像�
 
 ## 接线
 
+### 官方节点路线（推荐，`examples/minimal_relay_official.json` 就是这个）
+
 ```
-第 N 段：
-    CSGlideCastCS[0] ─ conditioning ─┐
-    CSGlideCastCS[1] ─ latent ───────┤→ 🔗 续接 Latent 桥 [0] → 采样器 positive
-    🔗 续接 Latent 读 ─ context ─────┘
-
-    采样器 latent → 🔗 续接 Latent 存（OUTPUT_NODE，无下游也会执行）
-
-    VAEDecode[0] ─────── images ──┐
-    🔗 桥 [2] (trim_frames) ──────┤→ 🔗 续接裁重叠 → VideoCombine
-    VAEDecodeAudio[0] ── audio ───┘
-
-第 1 段：
-    不接 🔗 读（或让段的 context 留空）→ 桥直通，按独立段处理
-    🔗 桥 [2] 输出 0 → 裁重叠节点不裁，原样通过
+UNETLoader ────────────── MODEL ─────────────┐
+CLIPLoader ──── CLIP ─┐                      │
+VAELoader(视频) ─ VAE ─┤                      │
+VAELoader(音频) ─ VAE ─┤                      │
+MiniMaxH3ImageToVideo ─┤                      │
+  (= 官方出词节点，输出   │                      │
+   positive + LATENT)   │                      │
+   │                    │                      │
+   ├─ positive ─────────┴→ 🔗 续接 Latent 桥 [0] conditioning ─┐
+   ├─ LATENT ─────────────→ 🔗 续接 Latent 桥 [1] latent ─────┤
+   │                       （[2] context_latent 留空，自动读）  │
+   │                                                            │
+   ├─ positive → ConditioningZeroOut ──────────────→ KSampler negative
+   └─ LATENT ──────────────────────────────────────→ KSampler latent_image
+                                                     KSampler positive ← 桥 [0]
+                                                     KSampler ──────→ LATENT
+                                                                        │
+                    ┌───────────────────────────────────────────────────┤
+                    │                                                   │
+        🔗 续接 Latent 存 [0] latent（另外 [2] stage_index 与桥一致）    │
+                    │                                                   │
+                    └────────────→ VAEDecode ── IMAGE ──┐               │
+                    └────────────→ VAEDecodeAudio ── AUDIO ──┐          │
+                                                             │          │
+        🔗 续接裁重叠 [0] images ←────────────────────────────┘          │
+                     [1] audio ←───────────────────────────────────────┘
+                     [2] trim_frames ← 🔗 桥 [2]  ★必需，别漏
+                     [4] settle_frames = -1（自动，不用动）
+                     │
+                     ├─ [0] images ─┐
+                     └─ [1] audio ──┴→ CreateVideo → SaveVideo
 ```
+
+**第 1 段**：桥 [2] 输出 `0` → 裁重叠原样通过；桥不读上下文（直通）。
+**第 2 段起**：填好 `run_id` + `stage_index`，桥自己从
+`output/relay_kit/<run_id>/stage_NNNNN.safetensors` 读上一段。
+
+### 第三方出词 / 采样节点也一样
+
+只要那个节点**输出 `CONDITIONING` + `LATENT`**，就是同样的接法 —— 把上面图里的
+`MiniMaxH3ImageToVideo` 换成它即可。常见组合：
+
+| 用到的节点 | 来自哪个包 |
+|---|---|
+| `CSGlideCastCS`（出词 + 规格） | `ComfyUI-Banzhang-All`（第三方，**不在本包依赖里**） |
+| `SelfLiftH3Sampler`（AV 采样器） | `comfyui-SelfLift`（第三方，**不在本包依赖里**） |
+| `MiniMaxH3ReferenceToVideo` / `MiniMaxH3ImageToVideo` / `MiniMaxH3AddGuide` | ComfyUI **内置**（`comfy_extras/nodes_minimax_h3.py`） |
+
+> 本包**只依赖 ComfyUI 原生协议**（`minimax_keyframes` / `minimax_refs` /
+> `resolved_frame_index`），不 import 也不要求任何第三方 H3 节点包。
+> 上面两个第三方包只是"能用"的例子，不是"要用"的前提。
+
+### 可选：显式接「续接 Latent 读」
+
+`context_latent` 留空时桥会自己按 `run_id` + `stage_index - 1` 推导路径。
+想在图上把来源画出来（或断点续跑换源），就接 `🔗 H3 续接 Latent 读`：
+
+```
+🔗 续接 Latent 读 ── context_latent ──→ 🔗 续接 Latent 桥 [2]
+   run_id 同桥；stage_index = 本段段号 - 1（第 2 段填 1）
+   可选 explicit_path：直接指定某个 safetensors
+```
+
+### 可选：Chain 自动连跑
+
+`🔗 H3 续接连跑 Chain` 是**纯控制节点，不参与连线**（没有输入输出口）。
+它靠**前端**去找同一张图里的桥和落盘，所以：
+
+**必须把 Chain、桥、落盘三个节点拉进同一个分组框**（框选 → 右键 → 添加分组），
+否则按钮点了没反应 —— 状态会写在 Chain 的 `status` 格子里（点之前先看那一格）。
+
 
 ## ⚠️ 为什么必须裁头
 
@@ -179,6 +293,10 @@ git clone https://github.com/ZenHG/ComfyUI-H3-Relay-Kit.git
 
 装好后**重启 ComfyUI 后端**（装了 ComfyUI-Manager 就点 *Restart*；没装就重启 Python 进程）——
 仅刷新浏览器不会加载新节点。节点列表里搜 `🔗 H3 续接` 即可看到本包的全部节点。
+
+随包还带 **`examples/`**：一份可以直接打开的**最小演示工作流**
+（`minimal_relay_official.json`，全官方节点 + 本包）和它的生成器脚本 ——
+见 [`examples/README.md`](examples/README.md)。
 
 **依赖**：只用 `torch` 与 `safetensors`（ComfyUI 自带；清单见 `requirements.txt`）。
 二者都是**函数内延迟 import**，所以缺了也不会导致节点注册失败，只在真正用到时提示。

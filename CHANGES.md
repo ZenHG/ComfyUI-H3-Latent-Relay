@@ -48,9 +48,39 @@ ComfyUI 前端会把它**隐藏**，用户根本改不了；要改只能断线�
 | 想维持旧行为 | `settle_frames = 0` |
 | `plan_relay` 默认参数 | `settle_frames=0` → 库调用者不受影响 |
 
+### 文档 / 上手体验
+
+- **README 新增「🚀 5 分钟跑通」**：编号步骤（第 1 段 → 只改一个「段号」→ 第 2 段）、
+  **跑通判据**（应看到哪三行日志）、**参数填值对照表**（`stage_index` / `run_id` 在第 1 段与
+  第 2 段分别填什么）、以及三个最常见的翻车点。
+- **接线一节重写**：主图改成**官方节点路线**（`MiniMaxH3ImageToVideo` /
+  `MiniMaxH3ReferenceToVideo`，ComfyUI 内置），带全部端口下标；
+  `CSGlideCastCS`（→ `ComfyUI-Banzhang-All`）与 `SelfLiftH3Sampler`（→ `comfyui-SelfLift`）
+  明确标注为**第三方、非本包依赖**，并给出"只要求该节点输出 CONDITIONING + LATENT"的换法。
+  另补 **Chain 必须与桥/落盘同分组框**的说明（此前只在 0.2.1 的一行注释里）。
+- **新增 `examples/`**：`minimal_relay_official.json`（16 节点最小演示，画布内含步骤注释框，
+  一个 `PrimitiveInt`「段号」同时驱动桥与落盘，所以跑下一段只改一个数）+ 生成器
+  `make_minimal_workflow.py`。生成器从 live `/object_info` 读真实 schema 拼 JSON ——
+  **手写 UI 工作流必然踩 `widgets_values` 按位置对应 + `control_after_generate` 注入的坑**
+  （见 0.2.1 记录），生成器把这两件事变成 schema 推导。
+- **计数口径更正**：0.2.1 写的"96 项断言"是按**源码行数**统计的（含互斥分支），
+  **实测执行数是 80**；本版起一律报实测执行数（现 103）。
+
+### 本版验证记录（2026-09-11）
+
+| 验证 | 结果 |
+|---|---|
+| `tests/test_relay_core.py`（真实 ComfyUI 环境，`COMFYUI_PATH=I:\ComfyUI`） | **103 / 103 通过**；运行时契约打印「上游 FRAME_PER_TOKEN = (1, 4, 4, 4, 4)，与本包一致」 |
+| `tools/check_ui_workflow.py examples/minimal_relay_official.json` | **问题合计 0 条**（`Note` 是前端虚拟节点，1 条提示属正常） |
+| **向后兼容**：把 0.2.1 存的真实工作流放到 0.3.0 schema 下校验 | **「槽位与取值全部合法」** —— 裁节点该格尾缺 → 取默认 `-1`，旧工作流不用重连 |
+| 生成器 vs 真实工作流的槽位顺序逐节点比对 | 桥 / 落盘**完全一致**；裁节点仅差新增的 `settle_frames`（预期） |
+
+仍未做：真机 A/B（见下方「已知遗留」）。
+
 ### 测试
 
-`tests/test_relay_core.py` 新增第 12 组，覆盖：`settle` 只动 crop 不动 pin/锚位/音频窗、
+`tests/test_relay_core.py` 新增第 12 组，覆盖：
+`settle` 只动 crop 不动 pin/锚位/音频窗、
 `pin+settle ≥ 段长` 必须 raise、自动检测四个场景（切换点在钉住区内 / 恰在 pin→pin+1 /
 段内有切镜 / 远超上限）、裁节点三条分支（自动 / 关闭 / 固定）、`trim_frames=0` 不触发检测、
 `settle_frames` 位于 `optional` 末位。

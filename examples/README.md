@@ -1,0 +1,56 @@
+# examples — 最小可用演示
+
+## `minimal_relay_official.json`
+
+**全官方节点 + 本包**的最小续接工作流（16 个节点），只回答一个问题：
+**「第 2 段要接对哪些线？」**
+
+```
+4 个官方加载器 → 官方出词节点(MiniMaxH3ImageToVideo) → 🔗 续接 Latent 桥
+              → KSampler → 🔗 续接 Latent 存
+              → VAEDecode / VAEDecodeAudio → 🔗 续接裁重叠 → CreateVideo → SaveVideo
+```
+
+图里有一个 `段号`（`PrimitiveInt`）同时喂给「桥」和「落盘」的 `stage_index`，
+所以**跑下一段只需要改这一个数**；画布上还有一个注释框写着步骤，不用回来翻 README。
+
+**怎么用**
+1. 把 JSON 丢进 `ComfyUI/user/default/workflows/`，在 ComfyUI 里打开（或直接拖进画布）。
+2. 把 4 个加载器的下拉改成你本机的模型文件（UNET / CLIP / 视频 VAE / 音频 VAE）。
+3. 段号 = 0 → 填 prompt → Queue（第 1 段）。
+4. 段号 = 1 → 换 prompt → Queue（第 2 段）。
+5. 日志出现 `钉住 22 帧` + `裁首 N 帧 = 钉住 22 + 沉降 Y` + `起点干净` = 接通了。
+
+## `make_minimal_workflow.py`
+
+生成上面那份 JSON 的脚本。
+
+**为什么不直接手写一份 JSON 交上去？**
+
+UI 格式工作流的 `widgets_values` 是**按位置**对应前端 widget 槽位的，而前端还会
+**自动注入**一些不在 `INPUT_TYPES` 里的格子（典型：带 `control_after_generate: True`
+的 `seed` 后面会多一格下拉）。手写只要漏掉中间任意一格，其后所有取值**整体前移一位** ——
+文件照样能打开、能提交、**不报任何错**，但参数全是错的（实测记录见 `CHANGES.md` 0.2.1）。
+
+所以这里从**正在运行的 ComfyUI** 的 `/object_info` 读真实 schema 来拼，槽位顺序由 schema
+推导；另外输入数组的排列也按 ComfyUI 保存时的真实约定（可连线输入在前、widget 在后），
+links 的目标下标才不会错位。
+
+```bash
+# 1) 另开一个终端启动 ComfyUI
+python main.py
+
+# 2) 生成（默认写到本目录）
+python examples/make_minimal_workflow.py
+python examples/make_minimal_workflow.py --api http://127.0.0.1:8188 \
+    --length 73 --width 448 --height 768 --out examples/minimal_relay_official.json
+
+# 3) 复核：必须「问题合计 0 条」（Note 是前端虚拟节点，会有 1 条提示，正常）
+python tools/check_ui_workflow.py examples/minimal_relay_official.json
+```
+
+脚本自己也会做一遍结构自检（节点/连线 id 唯一、连线两端存在、槽位下标不越界、
+类型相容、每个节点的 `widgets_values` 项数与 schema 推导出的槽位数一致），
+不通过就不写文件。
+
+**上游升级后重跑一次即可**（比如 ComfyUI 改了官方节点端口）。
