@@ -150,12 +150,20 @@ latent 无法缩放，不一致只能让上一段重跑或从本段重启链 —
 
 ## 安装
 
-把整个目录放进 `ComfyUI/custom_nodes/`，重启 ComfyUI（或刷新前端）。
+### 方式一：git clone（推荐）
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone <本仓库地址> ComfyUI-H3-Relay-Kit
+git clone https://github.com/ZenHG/ComfyUI-H3-Relay-Kit.git
 ```
+
+### 方式二：下载 ZIP
+
+在仓库页面点 **Code → Download ZIP**，解压后把文件夹改名为
+`ComfyUI-H3-Relay-Kit`，放进 `ComfyUI/custom_nodes/` 下。
+
+装好后**重启 ComfyUI 后端**（装了 ComfyUI-Manager 就点 *Restart*；没装就重启 Python 进程）——
+仅刷新浏览器不会加载新节点。节点列表里搜 `🔗 H3 续接` 即可看到本包的全部节点。
 
 **依赖**：只用 `torch` 与 `safetensors`（ComfyUI 自带；清单见 `requirements.txt`）。
 二者都是**函数内延迟 import**，所以缺了也不会导致节点注册失败，只在真正用到时提示。
