@@ -1,0 +1,39 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.ruff_cache/
+
+# ---- 运行时产物（本包产生的续接 latent / 备份，不入库）----
+*.safetensors
+*.bak*
+*.ckpt
+*.pt
+*.pth
+*.gguf
+
+# ---- 编辑器 / OS ----
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# ---- 日志 / 本地缓存 / 测试产物 ----
+*.log
+.coverage
+.cache/
+output/
+tmp/
+
+# ---- 密钥 / 环境变量（绝不入库）----
+.env
+.env.*
+*.local
+secrets.json
+
+# ---- Node 工具链（若将来扩展前端）----
+node_modules/

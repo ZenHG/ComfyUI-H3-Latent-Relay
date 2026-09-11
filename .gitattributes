@@ -1,0 +1,10 @@
+# 统一换行符，Windows / macOS / Linux 协作友好
+* text=auto eol=lf
+
+*.py text
+*.js text
+*.md text
+*.json text
+*.toml text
+*.css text
+*.html text

@@ -1,0 +1,11 @@
+# ComfyUI-H3-Relay-Kit 运行时依赖
+#
+# 只列「本包直接 import 的第三方库」。
+# ComfyUI 本身（comfy.* / folder_paths / node_helpers）由宿主提供，不在此列。
+#
+# 注意：本包在 **import 期**只依赖标准库；
+# torch / safetensors 都是**函数内延迟 import**（见 relay_core.save_av_latent /
+# load_av_latent），因此缺少它们时节点仍能注册，只是真正用到时才会报错。
+
+safetensors>=0.4
+torch>=2.0

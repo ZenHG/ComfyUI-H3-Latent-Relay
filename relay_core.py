@@ -1,0 +1,595 @@
+# -*- coding: utf-8 -*-
+"""H3 Relay Kit · 核心算法层（纯张量，零 GPU、零模型、可离线单测）
+
+【这是什么】
+MiniMax-H3 多段续接的 **latent 桥**：把上一段的 AV latent 切出尾段，
+以 `minimax_keyframes`（多块，按 `resolved_frame_index` 排位）
++ `minimax_refs`（音频）注入本段的 conditioning。
+
+【与像素续接的区别（本包存在的理由）】
+  像素续接：上一段 mp4 → 解码帧 → VAE 重编码 → 单块 keyframe @frame0
+            —— 多一次 VAE 往返，有量化损失，且曝光可能漂移。
+  latent 桥：上一段 AV latent → 直接切尾段 → 多块 keyframe 按位置
+            —— 零重编码，与采样时的 latent 逐位同源。
+
+二者走的是**同一个 ComfyUI 原生协议**（`minimax_keyframes`），
+故可互换；本包提供后者，并保持与前者完全兼容的键结构。
+
+【协议出处（本机实测，非推测）】
+  comfy/ldm/minimax/model.py:376
+      cond_t = cursor + FRAME_RESCALE * kf["resolved_frame_index"]
+  comfy/model_base.py:2186-2196
+      keyframes = kwargs.get("minimax_keyframes")   → payload["keyframes"]
+      refs      = kwargs.get("minimax_refs")        → payload["refs"]
+  → 原生支持任意位置的 keyframe 锚，无需任何 monkey patch。
+
+【帧 / latent 网格】
+  H3 VAE 的时序跨度为 (1,4,4,4,4)：每 5 个 latent token 覆盖 17 像素帧。
+  因此**只有落在网格上的窗口**才能被整步切出，合法窗口（GUIDE_RUNS）：
+      1, 5, 22, 39, 56, 73, 90, 107, 124 ...
+  22 帧 = 7 个 latent token；39 帧 = 12 个 token。
+  不在网格上 → raise（而不是悄悄挪一格，那会渲染出位移的接缝）。
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import os
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+import torch
+
+
+# ---------------------------------------------------------------- 网格常量
+# 与 H3 VAE 的时序跨度一致。改这里等于改 H3 的 VAE，必须同步。
+FRAME_PER_TOKEN: Tuple[int, ...] = (1, 4, 4, 4, 4)
+FPS: float = 24.0
+FRAME_RESCALE: float = 5.0 / 3.0   # 像素帧 → 音频 latent 步的换算
+AUDIO_HZ: float = 40.0             # 音频 latent 的采样率（步/秒）
+
+# 合法窗口，降序。必须与 FRAME_PER_TOKEN 自洽（见 self_check）。
+GUIDE_RUNS: Tuple[int, ...] = (124, 107, 90, 73, 56, 39, 22, 5, 1)
+
+# Apt_Preset 在 latent 里留下的导出尾段键（有则优先复用，避免二次切片）
+KEY_EXPORT_TAIL_VIDEO = "apt_h3_export_tail_latent"
+KEY_EXPORT_TAIL_AUDIO = "apt_h3_export_tail_audio_latent"
+KEY_EXPORT_FRAMES = "apt_h3_export_context_frames"
+
+
+# ---------------------------------------------------------------- 网格工具
+def pixel_frames(latent_t: int) -> int:
+    """latent token 数 → 覆盖的像素帧数。"""
+    return sum(FRAME_PER_TOKEN[k % 5] for k in range(int(latent_t)))
+
+
+def step_offsets(latent_t: int) -> List[int]:
+    """每个 latent token 对应的**起始像素帧位置**。"""
+    out, acc = [], 0
+    for k in range(int(latent_t)):
+        out.append(acc)
+        acc += FRAME_PER_TOKEN[k % 5]
+    return out
+
+
+def steps_for_frames(n: int) -> Optional[int]:
+    """像素帧数 → 整步的 latent token 数；不在网格上返回 None。"""
+    n = int(n)
+    k, covered = 0, 0
+    while covered < n:
+        covered += FRAME_PER_TOKEN[k % 5]
+        k += 1
+    return k if covered == n else None
+
+
+def snap_guide_run(n: int) -> int:
+    """向下吸附到最近的合法窗口（供 UI 侧提示用；核心路径仍会硬校验）。"""
+    n = int(n)
+    for g in GUIDE_RUNS:
+        if g <= n:
+            return g
+    return 0
+
+
+def self_check() -> List[str]:
+    """自洽性检查：GUIDE_RUNS 必须全部落在网格上。返回问题列表（空=通过）。"""
+    bad = []
+    for g in GUIDE_RUNS:
+        if steps_for_frames(g) is None:
+            bad.append(f"GUIDE_RUNS 含非网格值 {g}（pixel_frames 无法整步覆盖）")
+    return bad
+
+
+# ---------------------------------------------------------------- latent 取流
+def streams_from_latent(latent: Any) -> List[torch.Tensor]:
+    """从 LATENT 取 [video, audio, ...]。
+
+    支持三种形态：
+      - ``NestedTensor``（H3 AV 联合 latent，本产线常态）→ 按 ``.tensors`` 拆流
+      - list/tuple（已拆开的流）
+      - 单个 ``torch.Tensor``（video-only latent）→ 当作**一条**流
+
+    ⚠️ 不要用 ``hasattr(samples, "unbind")`` 来判定"是不是 NestedTensor" ——
+    **任何 torch.Tensor 都有 unbind**，普通 ``[B,C,T,H,W]`` 会被沿 batch 维拆开，
+    B=1 时碰巧看不出错、B>1 时静默产出垃圾流。故这里显式按类型分支。
+    """
+    if latent is None:
+        raise ValueError("latent 为空：续接需要一段真实的 H3 AV latent。")
+    samples = latent["samples"] if isinstance(latent, dict) else latent
+    nested = getattr(samples, "tensors", None)
+    if nested is not None:
+        parts = list(nested)
+    elif isinstance(samples, (tuple, list)):
+        parts = list(samples)
+    elif torch.is_tensor(samples):
+        parts = [samples]
+    else:
+        raise ValueError(
+            "期望 H3 的 AV latent（nested 视频/音频对），得到 %r。\n"
+            "    接续接错的常见原因：把 video-only latent 接到了 context_latent。" % type(samples)
+        )
+    parts = [t for t in parts if torch.is_tensor(t)]
+    if not parts:
+        raise ValueError("AV latent 里没有可用的张量流。")
+    return parts
+
+
+def video_from_latent(latent: Any) -> torch.Tensor:
+    """取视频流，规范成 [B,C,T,H,W]。"""
+    v = streams_from_latent(latent)[0]
+    if v.ndim == 4:
+        v = v.unsqueeze(0)
+    if v.ndim != 5:
+        raise ValueError(
+            "期望视频 latent 形状 [B,C,T,H,W]，得到 %s。" % (tuple(v.shape),)
+        )
+    return v
+
+
+def audio_from_latent(latent: Any) -> torch.Tensor:
+    """取音频流，规范成 [B,C,2,T]。"""
+    parts = streams_from_latent(latent)
+    if len(parts) < 2:
+        raise ValueError(
+            "context_latent 没有音频流。\n"
+            "    续接需要采样器的 AV 输出（视频+音频同源），不是纯视频 latent。"
+        )
+    a = parts[1]
+    if a.ndim == 3:
+        a = a.unsqueeze(0)
+    if a.ndim != 4:
+        raise ValueError("期望音频 latent 形状 [B,C,2,T]，得到 %s。" % (tuple(a.shape),))
+    return a
+
+
+# ---------------------------------------------------------------- 尾段切片
+def video_tail_from_latent(
+    latent: Any, frames: int
+) -> Tuple[List[torch.Tensor], List[int], int]:
+    """从 AV latent 切出 ``frames`` 帧的**视频尾段**，切成逐 token 的块。
+
+    返回 ``(blocks, offsets, covered)``：
+      - ``blocks[k]`` 是第 k 个 latent token（[1,C,1,H,W]）
+      - ``offsets[k]`` 是该 token 的起始像素帧位置
+      - ``covered`` 是实际覆盖帧数（等于 frames，否则 raise）
+
+    三条硬约束（违反即 raise，绝不静默降级）：
+      1. ``frames`` 必须落在网格上；
+      2. 尾段不得长于 latent 本身；
+      3. 尾段起始必须落在 5-token 周期边界，否则各 token 的帧跨度
+         会和写入的位置对不上 → 渲染出**整体位移的接缝**。
+    """
+    frames = int(frames)
+
+    # 优先复用外层（Apt 链）已经写好的导出尾段，省一次切片
+    exported = latent.get(KEY_EXPORT_TAIL_VIDEO) if isinstance(latent, dict) else None
+    exported_frames = int(
+        latent.get(KEY_EXPORT_FRAMES, 0) if isinstance(latent, dict) else 0
+    )
+    if exported is not None and exported_frames and frames == exported_frames:
+        if exported.ndim == 4:
+            exported = exported.unsqueeze(0)
+        steps = steps_for_frames(frames)
+        if exported.ndim != 5 or int(exported.shape[2]) != steps:
+            raise ValueError(
+                "latent 内附的导出尾段与 %d 帧的 H3 网格不符（形状 %s，期望 %d 步）。"
+                % (frames, tuple(exported.shape), steps)
+            )
+        blocks = [exported[:1, :, k:k + 1].clone() for k in range(steps)]
+        return blocks, step_offsets(steps), frames
+
+    video = video_from_latent(latent)
+    total = int(video.shape[2])
+    steps = steps_for_frames(frames)
+    if steps is None:
+        raise ValueError(
+            "%d 帧不是 H3 latent 的整步窗口，无法从 latent 切片。\n"
+            "    合法窗口：%s。\n"
+            "    若确实要用这个帧数，请改用像素路径（context_frames）而不是 context_latent。"
+            % (frames, ", ".join(str(g) for g in GUIDE_RUNS if g > 1))
+        )
+    if steps > total:
+        raise ValueError(
+            "需要 %d 个 latent 步（%d 帧），但 context_latent 只有 %d 步。\n"
+            "    上一段太短，或分辨率/时长与这一段不匹配。"
+            % (steps, frames, total)
+        )
+    start = total - steps
+    if start % 5 != 0:
+        raise RuntimeError(
+            "%d 步的尾段在 %d 步的 latent 里起始于周期位置 %d（非 0），"
+            "各 token 的帧跨度会与写入位置错位 → 接缝整体位移。\n"
+            "    通常说明段长不匹配；调整段长使 (总步数 - %d) 是 5 的倍数。"
+            % (steps, total, start % 5, steps)
+        )
+    covered = pixel_frames(steps)
+    if covered != frames:
+        raise RuntimeError(
+            "%d 步覆盖 %d 帧，期望 %d 帧（网格自洽性被破坏）。" % (steps, covered, frames)
+        )
+    blocks = [video[:1, :, start + k:start + k + 1].clone() for k in range(steps)]
+    return blocks, step_offsets(steps), covered
+
+
+def audio_tail_from_latent(
+    latent: Any, a_frames: int, video_frames: int
+) -> Tuple[torch.Tensor, int, float, float]:
+    """从 AV latent 切出 ``a_frames`` 帧对应的**音频尾段**。
+
+    返回 ``(tail, ref_audio_t, overhang, raw_steps)``。
+    非 40Hz 网格整步的 ``a_frames`` 会向上拓宽到最近整步（``ref_audio_t``），
+    ``raw_steps`` 是换算的理论步数，供上层留注记。
+    """
+    a_frames = int(a_frames)
+
+    exported = latent.get(KEY_EXPORT_TAIL_AUDIO) if isinstance(latent, dict) else None
+    if exported is not None:
+        if exported.ndim == 3:
+            exported = exported.unsqueeze(0)
+        if exported.ndim != 4:
+            raise ValueError("latent 内附的导出音频尾段形状非法。")
+        return exported[:1].clone(), int(exported.shape[-1]), 0.0
+
+    audio = audio_from_latent(latent)
+    total_t = int(audio.shape[-1])
+    overhang = total_t - FRAME_RESCALE * int(video_frames)
+    if not (-0.5 < overhang < 0.5):
+        # H3 把音频栅格四舍五入到最近的步；偏差过大只可能是输入不对，
+        # 这里按无外溢处理并留痕，交给上层决定是否告警。
+        overhang = 0.0
+
+    raw_steps = a_frames / float(FPS) * AUDIO_HZ
+    # 非 40Hz 网格整步的值一律**向上拓宽**到最近整步：
+    # 音频窗的作用是给模型"已经播过的声音"当上下文，多带半步是安全的，
+    # 截短半步则可能丢掉节拍点。换算误差只往"多带"方向偏。
+    rt = int(math.ceil(raw_steps - 1e-9))
+    if rt > total_t:
+        rt = total_t
+    if rt < 1:
+        raise ValueError("音频窗口为空（%d 帧换算后不足一步）。" % a_frames)
+    tail = audio[:1, ..., total_t - rt:].clone()
+    return tail, rt, float(overhang), raw_steps
+
+
+# ---------------------------------------------------------------- 续接计划
+@dataclass
+class RelayPlan:
+    """一次续接的完整计划（可打印、可序列化，便于留痕排障）。"""
+
+    applied: bool = False
+    span: int = 0                      # 被钉住的像素帧数
+    steps: int = 0                     # 被钉住的 latent token 数
+    trim: int = 0                      # 采样器应裁掉的首部帧数（锚在 head 时等于 span）
+    indices: List[int] = field(default_factory=list)
+    keyframes: List[Dict[str, Any]] = field(default_factory=list)
+    audio_ref: Optional[Dict[str, Any]] = None
+    clipped_channels: Optional[int] = None
+    notes: List[str] = field(default_factory=list)
+
+    def summary(self) -> str:
+        if not self.applied:
+            return "未应用（context_latent 未接）"
+        line = (
+            "钉住 %d 帧 / %d 步，锚位 %d..%d，裁首 %d 帧，音频 %s"
+            % (
+                self.span, self.steps,
+                self.indices[0] if self.indices else -1,
+                self.indices[-1] if self.indices else -1,
+                self.trim,
+                ("%d 步" % self.audio_ref["ref_audio_t"]) if self.audio_ref else "关",
+            )
+        )
+        return line
+
+
+def plan_relay(
+    latent: Any,
+    context_latent: Any,
+    trim_frames: int = 22,
+    audio_frames: Optional[int] = None,
+) -> RelayPlan:
+    """生成续接计划。
+
+    参数
+      latent          本段的目标 latent（提供分辨率 / 步数 / 帧数）
+      context_latent  上一段的 AV latent（提供被钉住的尾段）
+      trim_frames     钉住的像素帧数，必须在 GUIDE_RUNS 上
+      audio_frames    音频钉住窗口（像素帧口径）；默认与视频同窗
+
+    分辨率必须一致 —— latent 无法缩放，不一致只能重跑上一段或从本段重启链。
+    """
+    plan = RelayPlan()
+    if context_latent is None:
+        plan.notes.append("未接 context_latent：本段不续接（按独立段处理）。")
+        return plan
+
+    trim_frames = int(trim_frames)
+    dst = video_from_latent(latent)
+    src = video_from_latent(context_latent)
+    w, h = int(dst.shape[4]) * 16, int(dst.shape[3]) * 16
+    sw, sh = int(src.shape[4]) * 16, int(src.shape[3]) * 16
+    if (sw, sh) != (w, h):
+        raise ValueError(
+            "context_latent 是 %dx%d，本段是 %dx%d。latent 无法缩放，"
+            "续接要求两段同分辨率。\n"
+            "    解决：让上一段用同分辨率重跑，或把链从这里重启。"
+            % (sw, sh, w, h)
+        )
+    if int(src.shape[1]) != int(dst.shape[1]):
+        raise ValueError(
+            "context_latent 有 %d 个通道，本段有 %d 个 —— 不是同一底模产出的 H3 视频 latent。"
+            % (int(src.shape[1]), int(dst.shape[1]))
+        )
+
+    frame_count = pixel_frames(int(dst.shape[2]))
+    if trim_frames not in GUIDE_RUNS:
+        # 不静默吸附：改了帧数就是改了续接窗口，必须让你知道。
+        near = snap_guide_run(trim_frames)
+        hint = ("最接近的合法窗口是 %d。" % near) if near else "没有比它更小的合法窗口。"
+        raise ValueError(
+            "%d 帧不是 H3 的整步续接窗口。\n"
+            "    合法值：%s（= 5 + 17k，配 17k+5 帧段长时尾段起点正好落在 5 步周期边界）。\n"
+            "    %s"
+            % (trim_frames, ", ".join(str(g) for g in sorted(GUIDE_RUNS) if g >= 5), hint)
+        )
+    if trim_frames >= frame_count:
+        raise ValueError(
+            "钉住 %d 帧、本段只有 %d 帧 —— 没有新内容可生成。\n"
+            "    缩短窗口或加长本段。" % (trim_frames, frame_count)
+        )
+
+    blocks, offsets, covered = video_tail_from_latent(context_latent, trim_frames)
+    plan.span = covered
+    plan.steps = len(blocks)
+    plan.indices = list(offsets)
+    plan.trim = covered        # 锚在 head → 采样器裁掉首部 span 帧
+
+    plan.keyframes = [
+        {"resolved_frame_index": int(p), "latent": blk}
+        for p, blk in zip(plan.indices, blocks)
+    ]
+
+    a_frames = int(audio_frames) if audio_frames else trim_frames
+    tail, rt, overhang, raw_steps = audio_tail_from_latent(context_latent, a_frames, covered)
+    if rt > raw_steps + 1e-6:
+        plan.notes.append(
+            "音频窗 %d 帧换算 %.2f 步，已拓宽到 %d 整步（宁多带、不截短）。"
+            % (a_frames, raw_steps, rt)
+        )
+    dst_audio_t = None
+    try:
+        dst_audio_t = int(audio_from_latent(latent).shape[-1])
+    except ValueError:
+        dst_audio_t = None
+    if dst_audio_t is not None and rt > dst_audio_t:
+        plan.notes.append(
+            "音频窗口 %d 步超过本段音频栅格 %d 步，已截断。" % (rt, dst_audio_t)
+        )
+        tail = tail[..., :dst_audio_t].clone()
+        rt = dst_audio_t
+    plan.audio_ref = {"kind": "audio", "ref_audio_t": int(rt), "audio_latent": tail}
+    if overhang:
+        plan.notes.append("音频栅格外溢 %.3f 步（已在放置时对齐）。" % overhang)
+
+    plan.applied = True
+    return plan
+
+
+def apply_relay(conditioning, plan: RelayPlan):
+    """把计划注入 conditioning：keyframes 合并 + 音频 ref 追加。
+
+    与上游既有 keyframes（如 first/last 帧锚）**合并而非替换**；
+    落在钉住区内的旧锚会被丢弃（它们与钉住区冲突）。
+    """
+    import node_helpers
+
+    if not plan.applied:
+        return conditioning
+
+    head_end = plan.span
+    out, dropped = [], []
+    for emb, extra in conditioning:
+        d = dict(extra)
+        prior = list(d.get("minimax_keyframes") or [])
+        kept = []
+        for kf in prior:
+            pos = int(kf.get("resolved_frame_index", 0))
+            if pos < head_end:
+                dropped.append(pos)
+                continue
+            kept.append(dict(kf))
+        d["minimax_keyframes"] = kept + [dict(k) for k in plan.keyframes]
+        out.append([emb, d])
+
+    if dropped:
+        plan.notes.append(
+            "丢弃 %d 个落在钉住区（0..%d）内的旧锚，避免与续接区冲突。"
+            % (len(set(dropped)), head_end - 1)
+        )
+
+    if plan.audio_ref is not None:
+        out = node_helpers.conditioning_set_values(
+            out, {"minimax_refs": [plan.audio_ref]}, append=True
+        )
+    return out
+
+
+# ---------------------------------------------------------------- AV latent 存取
+# 磁盘格式：一个 safetensors，内含 streams.video / streams.audio + metadata。
+# NestedTensor 无法直接 safetensors 序列化，故按流拆开存。
+_LATENT_META_KEY = "relay_kit_meta"
+
+
+def save_av_latent(latent: Any, path: str, note: str = "") -> str:
+    """把 H3 的 AV latent 落盘，供下一段当 context_latent 读回。"""
+    from safetensors.torch import save_file
+
+    parts = streams_from_latent(latent)
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    tensors: Dict[str, torch.Tensor] = {}
+    names = []
+    for i, t in enumerate(parts):
+        name = "video" if i == 0 else ("audio" if i == 1 else "stream_%d" % i)
+        names.append(name)
+        # safetensors 要求连续内存且无共享存储
+        tensors["streams." + name] = t.detach().to("cpu").contiguous().clone()
+    meta = {
+        "format": 1,
+        "streams": names,
+        "shapes": [list(t.shape) for t in parts],
+        "note": str(note),
+    }
+    tensors[_LATENT_META_KEY] = torch.tensor(
+        [ord(c) for c in json.dumps(meta, ensure_ascii=False)], dtype=torch.uint8
+    )
+    save_file(tensors, path)
+    return path
+
+
+def load_av_latent(path: str):
+    """读回落盘的 AV latent，重建 NestedTensor。"""
+    from safetensors.torch import load_file
+
+    try:
+        import comfy.nested_tensor as _nt
+    except Exception:  # pragma: no cover - ComfyUI 运行时一定可用
+        _nt = None
+
+    if not os.path.isfile(path):
+        raise FileNotFoundError("读不到续接 latent：%s" % path)
+    raw = load_file(path)
+    meta_t = raw.pop(_LATENT_META_KEY, None)
+    if meta_t is None:
+        raise ValueError("%s 不是本工具写的 AV latent（缺少元数据）。" % path)
+    meta = json.loads(bytes(meta_t.tolist()).decode("utf-8"))
+    parts = [raw["streams." + n] for n in meta["streams"]]
+    if _nt is not None:
+        samples = _nt.NestedTensor(parts)
+    else:  # pragma: no cover
+        samples = parts
+    return {"samples": samples}
+
+
+def trim_head_frames(images: torch.Tensor, frames: int) -> torch.Tensor:
+    """裁掉 IMAGE 的前 ``frames`` 帧（沿第 0 维）。
+
+    续接段的前 ``trim_frames`` 帧是对上一段尾部的**重生成**（实测逐帧 MAE ≈ 6/255），
+    它们是钉住区的产物，不属于新内容 —— 不裁就会在拼接处看到约 0.9s 重播。
+    """
+    frames = int(frames)
+    if frames <= 0:
+        return images
+    n = int(images.shape[0])
+    if frames >= n:
+        raise ValueError(
+            "要裁 %d 帧，但本段只有 %d 帧 —— 裁完就没画面了。\n"
+            "    检查 trim_frames 是否误填成整段长度。" % (frames, n)
+        )
+    return images[frames:]
+
+
+def trim_audio_head(audio: Any, frames: int, fps: float = FPS) -> Any:
+    """把 AUDIO 的前 ``frames`` 帧对应的采样点裁掉（与视频同裁，保住 A/V 同步）。"""
+    frames = int(frames)
+    if frames <= 0 or audio is None:
+        return audio
+    wf = audio["waveform"]
+    sr = int(audio["sample_rate"])
+    n = int(round(frames / float(fps) * sr))
+    total = int(wf.shape[-1])
+    if n >= total:
+        raise ValueError(
+            "要裁 %d 帧（%d 个采样点），但音频只有 %d 点。"
+            % (frames, n, total)
+        )
+    return {"waveform": wf[..., n:], "sample_rate": sr}
+
+
+# ---------------------------------------------------------------- 接缝自检
+# 实测（2026-09-11）：续接段的「钉住区 → 新内容」切换**不总落在 trim 值上**。
+# 73 帧段实测切换点在原第 22→23 帧之间（MAE 6.5 → 102.3），
+# 而 trim=22 恰好把切换点前的那一帧留在裁剪后的第 0 帧 → 首帧突变。
+# 107 帧段同一 trim 值则无此现象（切换点被完整裁掉）。
+# ⇒ trim 值必须按**本段的实际切换点**定，不能写死。
+JUMP_RATIO: float = 4.0       # 首帧差 / 段内基线 的报警阈值
+BASELINE_FLOOR: float = 1.0   # 基线过小时的保护下限（避免除零/噪声放大）
+
+
+def find_head_jump(images: torch.Tensor, scan: int = 40) -> Tuple[int, float, float]:
+    """在前 ``scan`` 帧内找「本段起点」处的突变。
+
+    返回 ``(jump_index, jump_mae, baseline_mae)``：
+      - ``baseline_mae``：段内相邻帧差的中位数（跳过前 2 帧）
+      - ``jump_mae``：``images[jump_index]`` 与后一帧的差
+      - ``jump_index``：突变发生在前一帧的下标（即"应当再往前裁 1 帧"的位置）
+    找不到突变时返回 ``(-1, 0.0, baseline)``。
+
+    纯 CPU、纯张量：不依赖 cv2/PIL，可在节点里直接调。
+    """
+    n = int(images.shape[0])
+    if n < 4:
+        return -1, 0.0, 0.0
+    f = images.to(torch.float32)
+    if f.dim() == 4 and f.shape[-1] in (1, 3, 4):   # [N,H,W,C] → 按通道均值
+        diff = (f[1:] - f[:-1]).abs().mean(dim=(1, 2, 3))
+    else:
+        diff = (f[1:] - f[:-1]).abs().flatten(1).mean(dim=1)
+    hi = min(scan, n - 1)
+    if hi <= 2:
+        return -1, 0.0, 0.0
+    baseline = float(diff[2:hi].median()) if hi > 2 else float(diff[1:hi].median())
+    base = max(baseline, BASELINE_FLOOR)
+    seg = diff[:hi]
+    j = int(torch.argmax(seg).item())
+    jump = float(seg[j].item())
+    if jump > JUMP_RATIO * base:
+        return j, jump, baseline
+    return -1, jump, baseline
+
+
+def describe_head_jump(images: torch.Tensor, scan: int = 40) -> str:
+    """给日志用的一行接缝自检结论。"""
+    j, jump, baseline = find_head_jump(images, scan)
+    if j < 0:
+        return ("[H3 Relay] 接缝自检：前 %d 帧无突变（最大帧差 %.2f，段内基线 %.2f）→ 起点干净。"
+                % (scan, jump, baseline))
+    return ("[H3 Relay] ⚠ 接缝自检：第 %d→%d 帧有突变（%.2f vs 基线 %.2f，比值 %.1f×）"
+            "→ 建议 trim 再加 %d 帧（把突变前那帧也裁掉）。"
+            % (j, j + 1, jump, baseline, jump / max(baseline, BASELINE_FLOOR), j + 1))
+
+
+def describe_latent(latent: Any) -> str:
+    """一行摘要，用于日志与节点输出。"""
+    try:
+        parts = streams_from_latent(latent)
+    except Exception as e:
+        return "无法解析 latent：%s" % e
+    bits = []
+    for i, t in enumerate(parts):
+        name = "视频" if i == 0 else ("音频" if i == 1 else "#%d" % i)
+        bits.append("%s%s" % (name, tuple(t.shape)))
+    v = parts[0]
+    if v.ndim >= 5:
+        bits.append("%d 帧 @ %dx%d" % (pixel_frames(int(v.shape[2])), int(v.shape[4]) * 16, int(v.shape[3]) * 16))
+    return " | ".join(bits)

@@ -1,0 +1,446 @@
+# -*- coding: utf-8 -*-
+"""H3 Relay Kit 离线单测（零 GPU、零模型、秒级）
+
+跑法（在包目录下）：
+    python tests/test_relay_core.py
+
+脚本会自动往上找到 ComfyUI 根目录（本包装在 ``<ComfyUI>/custom_nodes/`` 下时）。
+装在别处 / 只 clone 了本包时，用环境变量指定：
+
+    COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py
+
+只需要 ``torch`` 与 ``safetensors``；不加载任何模型、不碰显存。
+
+覆盖：
+  1. 时序网格自洽（22 帧=7 步 / 39 帧=12 步 / 192 帧=57 步）
+  2. 尾段切片逐位正确 + 起始必须落在 5 步周期边界
+  3. 硬错误：分辨率不一致 / 非网格帧数 / 窗口大于段长 → 必须 raise
+  4. conditioning 注入：keyframes 合并、钉住区旧锚丢弃、音频 ref 追加
+  5. AV latent 落盘往返一致
+  6. 裁头重叠：画面音频同裁逐位正确、时长对齐、越界 raise
+  7. 节点返回值契约：每个分支返回路数 == len(RETURN_TYPES)
+  8. 接缝自检 find_head_jump / describe_head_jump
+  9. 段号声明与取源矛盾必须 raise（不得静默直通）
+"""
+
+import os
+import sys
+import tempfile
+import traceback
+
+import torch
+
+# ---------------------------------------------------------------- 定位 ComfyUI
+# 本包通常装在 <ComfyUI>/custom_nodes/<本包>/，往上两级就是 ComfyUI 根。
+# 装在别处时用 COMFYUI_PATH 显式指定。
+_KIT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_COMFY = os.environ.get("COMFYUI_PATH") or os.path.dirname(os.path.dirname(_KIT_DIR))
+if not os.path.isdir(os.path.join(_COMFY, "comfy")):
+    sys.stderr.write(
+        "\n[FAIL] 找不到 ComfyUI 根目录（试过：%s）\n"
+        "       请把本包装在 <ComfyUI>/custom_nodes/ 下，或设环境变量：\n"
+        "       COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py\n\n"
+        % _COMFY)
+    raise SystemExit(2)
+sys.path.insert(0, _COMFY)
+sys.path.insert(0, _KIT_DIR)
+
+import comfy.nested_tensor as NT  # noqa: E402
+
+import relay_core as CORE  # noqa: E402
+
+
+PASS, FAIL = [], []
+
+
+def check(name, cond, detail=""):
+    (PASS if cond else FAIL).append(name)
+    print(("  [OK]   " if cond else "  [FAIL] ") + name + (("  " + detail) if detail else ""))
+
+
+def expect_raise(name, fn, needle=""):
+    try:
+        fn()
+    except Exception as e:
+        ok = (needle in str(e)) if needle else True
+        check(name, ok, "→ %s: %s" % (type(e).__name__, str(e).splitlines()[0][:90]))
+        return
+    check(name, False, "→ 未抛异常（应当 raise）")
+
+
+def make_latent(frames, width=768, height=448, seed=0):
+    """合成一段 H3 AV latent：视频 [1,24,T,28,48]、音频 [1,32,2,~] 。"""
+    steps = CORE.steps_for_frames(frames)
+    assert steps is not None, "%d 帧不是合法网格窗口" % frames
+    g = torch.Generator().manual_seed(seed)
+    v = torch.randn(1, 24, steps, height // 16, width // 16, generator=g)
+    at = int(round(CORE.FRAME_RESCALE * frames))
+    a = torch.randn(1, 32, 2, at, generator=g)
+    return {"samples": NT.NestedTensor([v, a])}, v, a
+
+
+print("=" * 78)
+print("1) 时序网格自洽")
+print("=" * 78)
+check("pixel_frames(7) == 22", CORE.pixel_frames(7) == 22, "得到 %d" % CORE.pixel_frames(7))
+check("pixel_frames(12) == 39", CORE.pixel_frames(12) == 39, "得到 %d" % CORE.pixel_frames(12))
+check("steps_for_frames(22) == 7", CORE.steps_for_frames(22) == 7, "得到 %s" % CORE.steps_for_frames(22))
+check("steps_for_frames(39) == 12", CORE.steps_for_frames(39) == 12, "得到 %s" % CORE.steps_for_frames(39))
+check("steps_for_frames(192) == 57", CORE.steps_for_frames(192) == 57, "得到 %s" % CORE.steps_for_frames(192))
+check("steps_for_frames(30) == 9（30 也在网格上）", CORE.steps_for_frames(30) == 9, "得到 %s" % CORE.steps_for_frames(30))
+check("GUIDE_RUNS 是「配 17k+5 段长」的推荐集，非全部网格值",
+      CORE.steps_for_frames(30) is not None and 30 not in CORE.GUIDE_RUNS)
+check("snap_guide_run(35) == 22", CORE.snap_guide_run(35) == 22, "得到 %d" % CORE.snap_guide_run(35))
+check("GUIDE_RUNS 全部落在网格上", not CORE.self_check(), str(CORE.self_check()))
+check("step_offsets(7) 首位 0", CORE.step_offsets(7)[0] == 0, str(CORE.step_offsets(7)))
+
+print()
+print("=" * 78)
+print("2) 尾段切片逐位正确")
+print("=" * 78)
+prev, pv, pa = make_latent(192, seed=1)
+cur, cv, ca = make_latent(192, seed=2)
+
+blocks, offsets, covered = CORE.video_tail_from_latent(prev, 22)
+check("22 帧尾段切出 7 块", len(blocks) == 7, "得到 %d" % len(blocks))
+check("覆盖帧数 == 22", covered == 22, "得到 %d" % covered)
+check("锚位起点 == 0", offsets[0] == 0, str(offsets))
+total = int(pv.shape[2])
+start = total - 7
+same = all(torch.equal(blocks[k], pv[:1, :, start + k:start + k + 1]) for k in range(7))
+check("每块与源 latent 尾段逐位相同", same)
+check("尾段最后一块 == 源 latent 最后一 token",
+      torch.equal(blocks[-1], pv[:1, :, -1:]))
+
+tail_a, rt, overhang, raw_steps = CORE.audio_tail_from_latent(prev, 22, 22)
+check("音频尾段步数 == ceil(22/24*40) = 37（拓宽到整步）", rt == 37, "得到 %d" % rt)
+check("raw_steps 报告理论步数 36.67", abs(raw_steps - 22 / 24.0 * 40) < 1e-6,
+      "得到 %.4f" % raw_steps)
+check("音频尾段与源尾段逐位相同", torch.equal(tail_a, pa[:1, ..., int(pa.shape[-1]) - rt:]))
+check("音频栅格外溢在容差内", abs(overhang) < 0.5, "overhang=%.3f" % overhang)
+_, rt7, _, raw7 = CORE.audio_tail_from_latent(prev, 7, 22)
+check("off-grid 音频窗 7 帧 → 拓宽到 12 整步（11.67 向上）", rt7 == 12, "得到 %d" % rt7)
+check("off-grid 报告理论步数 11.67", abs(raw7 - 7 / 24.0 * 40) < 1e-6, "得到 %.4f" % raw7)
+
+print()
+print("=" * 78)
+print("3) 硬错误必须 raise")
+print("=" * 78)
+wide, _, _ = make_latent(192, width=928, height=1600, seed=3)
+expect_raise("分辨率不一致 → raise",
+             lambda: CORE.plan_relay(cur, wide, 22), "无法缩放")
+expect_raise("非推荐窗口 30 帧 → raise（不静默吸附）",
+             lambda: CORE.plan_relay(cur, prev, 30), "整步续接窗口")
+lat124, l124v, _ = make_latent(124, seed=5)
+expect_raise("窗口 >= 段长 → raise",
+             lambda: CORE.plan_relay(lat124, lat124, 124), "没有新内容")
+check("未接 context → 直通（applied=False）",
+      not CORE.plan_relay(cur, None, 22).applied)
+
+# 短段：128 帧(38 步) 取 22 帧尾段 → start=31, 31%5=1 → 必须 raise
+short, _, _ = make_latent(124, seed=4)
+st = int(short["samples"].tensors[0].shape[2])
+print("      （124 帧 = %d 步；取 22 帧尾段 start=%d, %%5=%d）" % (st, st - 7, (st - 7) % 5))
+if (st - 7) % 5 == 0:
+    ok = CORE.plan_relay(cur, short, 22).applied
+    check("124 帧上取 22 帧尾段（周期对齐）→ 通过", ok)
+else:
+    expect_raise("124 帧上取 22 帧尾段（周期错位）→ raise",
+                 lambda: CORE.plan_relay(cur, short, 22), "周期位置")
+
+print()
+print("=" * 78)
+print("4) conditioning 注入")
+print("=" * 78)
+import node_helpers  # noqa: E402
+
+MARK = 7.0
+cond = [[torch.zeros(1, 8), {"minimax_keyframes": [
+    {"resolved_frame_index": 0, "latent": torch.full((1, 24, 1, 28, 48), MARK)},
+    {"resolved_frame_index": 191, "latent": torch.ones(1, 24, 1, 28, 48)},
+]}]]
+plan = CORE.plan_relay(cur, prev, 22)
+out = CORE.apply_relay(cond, plan)
+kfs = out[0][1]["minimax_keyframes"]
+check("keyframes 数量 = 保留 1 + 新增 7", len(kfs) == 8, "得到 %d" % len(kfs))
+f0 = [k for k in kfs if int(k["resolved_frame_index"]) == 0]
+check("钉住区内的旧锚（标记 latent）被丢弃，只剩续接块自带的 frame 0",
+      len(f0) == 1 and float(f0[0]["latent"].max()) != MARK,
+      "frame0 锚数=%d" % len(f0))
+check("末帧锚（frame 191）被保留",
+      any(int(k["resolved_frame_index"]) == 191 for k in kfs))
+check("音频 ref 已追加到 minimax_refs",
+      len(out[0][1].get("minimax_refs") or []) == 1
+      and out[0][1]["minimax_refs"][0]["kind"] == "audio")
+check("直通路径不改 conditioning",
+      CORE.apply_relay(cond, CORE.plan_relay(cur, None, 22)) is cond)
+
+print()
+print("=" * 78)
+print("5) AV latent 落盘往返")
+print("=" * 78)
+tmp = os.path.join(tempfile.gettempdir(), "relay_kit_test", "stage_00000.safetensors")
+CORE.save_av_latent(prev, tmp, note="unit test")
+back = CORE.load_av_latent(tmp)
+bv, ba = CORE.streams_from_latent(back)
+check("视频流往返逐位相同", torch.equal(bv, pv))
+check("音频流往返逐位相同", torch.equal(ba, pa))
+check("往返后仍是 NestedTensor", hasattr(back["samples"], "unbind"))
+check("往返后可再次切尾段",
+      all(torch.equal(blocks[k], bv[:1, :, start + k:start + k + 1]) for k in range(7)))
+print("      " + CORE.describe_latent(back))
+
+print()
+print("=" * 78)
+print("6) 裁头部重叠（H3RelayTrimAV 的底层：视频音频同裁）")
+print("=" * 78)
+SR = 32000
+N_FRAMES = 73
+N_SAMPLES = int(round(N_FRAMES / 24.0 * SR))
+imgs = torch.arange(N_FRAMES * 2 * 2 * 3, dtype=torch.float32).reshape(N_FRAMES, 2, 2, 3)
+wave = torch.arange(2 * N_SAMPLES, dtype=torch.float32).reshape(1, 2, N_SAMPLES)
+aud = {"waveform": wave, "sample_rate": SR}
+
+t_imgs = CORE.trim_head_frames(imgs, 22)
+t_aud = CORE.trim_audio_head(aud, 22, 24.0)
+check("画面 73 → 51 帧", int(t_imgs.shape[0]) == 51, "得到 %d" % int(t_imgs.shape[0]))
+check("裁后首帧 == 原第 22 帧（逐位）", torch.equal(t_imgs[0], imgs[22]))
+check("裁后尾帧 == 原尾帧", torch.equal(t_imgs[-1], imgs[-1]))
+check("音频 97333 → 68000 采样点",
+      int(t_aud["waveform"].shape[-1]) == N_SAMPLES - int(round(22 / 24.0 * SR)),
+      "得到 %d" % int(t_aud["waveform"].shape[-1]))
+check("裁后音画时长一致（51 帧 == 68000 点 @32k）",
+      abs(int(t_aud["waveform"].shape[-1]) / SR - 51 / 24.0) < 1e-6,
+      "%.4fs" % (int(t_aud["waveform"].shape[-1]) / SR))
+check("音频裁后首点 == 原第 29333 点（逐位）",
+      float(t_aud["waveform"][0, 0, 0]) == float(wave[0, 0, int(round(22 / 24.0 * SR))]))
+check("trim=0 → 画面原样返回", CORE.trim_head_frames(imgs, 0) is imgs)
+check("trim=0 → 音频原样返回", CORE.trim_audio_head(aud, 0, 24.0) is aud)
+check("audio=None → 返回 None（不炸）", CORE.trim_audio_head(None, 22, 24.0) is None)
+check("采样率原样保留", int(t_aud["sample_rate"]) == SR)
+expect_raise("裁的帧数 >= 段长 → raise（裁完没画面）",
+             lambda: CORE.trim_head_frames(imgs, 73), "裁完就没画面")
+expect_raise("裁的采样点 >= 音频长度 → raise",
+             lambda: CORE.trim_audio_head(aud, 999, 24.0), "音频只有")
+
+print()
+print("=" * 78)
+print("7) 节点返回值契约（每个分支的返回路数必须 == len(RETURN_TYPES)）")
+print("=" * 78)
+import importlib.util  # noqa: E402
+import types  # noqa: E402
+
+# 目录名含连字符，不能直接当包名 → 伪造一个包壳再按文件加载 nodes.py
+_KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_pkg = types.ModuleType("h3relay_kit")
+_pkg.__path__ = [_KIT]
+sys.modules["h3relay_kit"] = _pkg
+_spec = importlib.util.spec_from_file_location("h3relay_kit.nodes", os.path.join(_KIT, "nodes.py"))
+NODES = importlib.util.module_from_spec(_spec)
+sys.modules["h3relay_kit.nodes"] = NODES
+_spec.loader.exec_module(NODES)
+
+
+def arity(cls, kw):
+    out = getattr(cls(), cls.FUNCTION)(**kw)
+    return len(out) == len(cls.RETURN_TYPES), out
+
+
+ok, out = arity(NODES.H3RelayMotionContext,
+                dict(conditioning=cond, latent=cur, trim_frames=22, context_latent=None))
+check("MotionContext 直通分支返回 3 路（曾漏第 3 路 → list index out of range）", ok, "实得 %d" % len(out))
+check("直通分支 trim_frames 输出 = 0（首段不裁）", int(out[2]) == 0, "得到 %r" % (out[2],))
+
+ok, out = arity(NODES.H3RelayMotionContext,
+                dict(conditioning=cond, latent=cur, trim_frames=22, context_latent=prev))
+check("MotionContext 续接分支返回 3 路", ok, "实得 %d" % len(out))
+check("续接分支 trim_frames 输出 = 22（供裁剪节点）", int(out[2]) == 22, "得到 %r" % (out[2],))
+
+img73 = torch.zeros(73, 2, 2, 3)
+ok, out = arity(NODES.H3RelayTrimAV, dict(images=img73, trim_frames=0, fps=24.0, audio=None))
+check("TrimAV trim=0 分支返回 3 路", ok, "实得 %d" % len(out))
+ok, out = arity(NODES.H3RelayTrimAV, dict(images=img73, trim_frames=22, fps=24.0, audio=aud))
+check("TrimAV 裁剪分支返回 3 路", ok, "实得 %d" % len(out))
+check("裁剪分支画面 73 → 51 帧", int(out[0].shape[0]) == 51, "得到 %d" % int(out[0].shape[0]))
+check("裁剪分支音频与画面同裁（68000 点）",
+      int(out[1]["waveform"].shape[-1]) == 68000, "得到 %d" % int(out[1]["waveform"].shape[-1]))
+
+ok, out = arity(NODES.H3RelayLatentSave,
+                dict(latent=prev, run_id="unittest_arity", stage_index=0, note="arity test"))
+check("LatentSave 返回 2 路", ok, "实得 %d" % len(out))
+ok, out = arity(NODES.H3RelayLatentLoad,
+                dict(run_id="unittest_arity", stage_index=1, explicit_path=""))
+check("LatentLoad 返回 2 路（stage_index=本段号，读的是上一段）", ok, "实得 %d" % len(out))
+check("LatentLoad 读回上一段 latent（192 帧 @768x448）",
+      CORE.pixel_frames(int(out[0]["samples"].tensors[0].shape[2])) == 192)
+
+# ---------------------------------------------------------------- 第 8 组：接缝自检
+print()
+print("[8] 接缝自检 find_head_jump / describe_head_jump")
+
+# 8.1 干净起点：全段缓慢变化（帧差稳定在 3 左右）→ 不应报突变
+seq_clean = torch.zeros(30, 8, 8, 3)
+for i in range(30):
+    seq_clean[i] = (i % 3) * 10.0        # 帧差恒定 ≈ 小幅
+j, jump, base = CORE.find_head_jump(seq_clean)
+check("8.1 平稳序列无突变（j<0）", j < 0, "j=%d jump=%.2f base=%.2f" % (j, jump, base))
+
+# 8.2 首帧突变（模拟实测：第 0 帧独立、之后稳定）→ 应报 j=0
+seq_jump = torch.zeros(30, 8, 8, 3)
+for i in range(1, 30):
+    seq_jump[i] = 50.0                    # 第 1 帧起基本一致
+j, jump, base = CORE.find_head_jump(seq_jump)
+check("8.2 首帧突变被检出（j=0）", j == 0, "j=%d jump=%.2f base=%.2f" % (j, jump, base))
+check("8.2 突变比值超过阈值", jump > CORE.JUMP_RATIO * max(base, CORE.BASELINE_FLOOR),
+      "jump=%.1f base=%.2f" % (jump, base))
+
+# 8.3 中段突变（模拟实测：第 22→23 帧跳）→ 应报 j=22
+seq_mid = torch.zeros(40, 8, 8, 3)
+for i in range(1, 23):
+    seq_mid[i] = 50.0 + (i % 2)
+for i in range(23, 40):
+    seq_mid[i] = 200.0 + (i % 2)
+j, jump, base = CORE.find_head_jump(seq_mid)
+check("8.3 第 22→23 帧突变被检出（j=22）", j == 22, "j=%d jump=%.2f base=%.2f" % (j, jump, base))
+
+# 8.4 报告文案：有突变时给"再加 N 帧"的建议
+msg = CORE.describe_head_jump(seq_mid)
+check("8.4 突变报告含「建议 trim 再加 23 帧」", "23 帧" in msg, msg[:90])
+msg2 = CORE.describe_head_jump(seq_clean)
+check("8.4 平稳报告含「起点干净」", "起点干净" in msg2, msg2[:90])
+
+# 8.5 帧数过少不应崩
+j, jump, base = CORE.find_head_jump(torch.zeros(3, 8, 8, 3))
+check("8.5 帧数过少返回 (-1,0,0) 不抛异常", j == -1, "j=%d" % j)
+
+# ---------------------------------------------------------------- 第 9 组：段号声明与取源的矛盾必须硬拦
+print()
+print("[9] stage_index 声明了第 N 段却拿不到上一段 → 必须 raise（不得静默直通）")
+
+ctx = NODES.H3RelayMotionContext()
+
+# 9.1 stage_index>=1 + run_id 空 + 无 context_latent → 旧行为是静默直通（坏片），必须 raise
+try:
+    ctx.apply(cond, cur, trim_frames=22, context_latent=None, audio_frames=0,
+              run_id="", stage_index=1)
+    check("9.1 段号≥1 且无来源 → raise", False, "竟然没报错（会产出无续接的哑剧）")
+except RuntimeError as e:
+    check("9.1 段号≥1 且无来源 → raise", "静默直通" in str(e), str(e).split("\n")[0])
+except Exception as e:  # noqa: BLE001
+    check("9.1 段号≥1 且无来源 → raise", False, "抛的是 %s：%s" % (type(e).__name__, e))
+
+# 9.2 run_id 只有空白也算空
+try:
+    ctx.apply(cond, cur, trim_frames=22, context_latent=None, audio_frames=0,
+              run_id="   ", stage_index=3)
+    check("9.2 run_id 全空白同样 raise", False, "竟然没报错")
+except RuntimeError as e:
+    check("9.2 run_id 全空白同样 raise", "静默直通" in str(e), str(e).split("\n")[0])
+
+# 9.3 stage_index=0 仍应正常直通（独立段，合法）
+try:
+    out0 = ctx.apply(cond, cur, trim_frames=22, context_latent=None, audio_frames=0,
+                     run_id="", stage_index=0)
+    check("9.3 stage_index=0 仍直通不报错（独立段合法）", int(out0[2]) == 0, "trim=%r" % (out0[2],))
+except Exception as e:  # noqa: BLE001
+    check("9.3 stage_index=0 仍直通不报错（独立段合法）", False, "抛了 %s" % type(e).__name__)
+
+# 9.4 手动接了 context_latent 时，段号≥1 不应被拦（高级用法）
+try:
+    out1 = ctx.apply(cond, cur, trim_frames=22, context_latent=prev, audio_frames=0,
+                     run_id="", stage_index=1)
+    check("9.4 手动接 context_latent → 段号≥1 不拦", int(out1[2]) == 22, "trim=%r" % (out1[2],))
+except Exception as e:  # noqa: BLE001
+    check("9.4 手动接 context_latent → 段号≥1 不拦", False, "抛了 %s：%s" % (type(e).__name__, e))
+
+# 9.5 run_id 有值但文件不存在 → FileNotFoundError（不是静默直通）
+try:
+    ctx.apply(cond, cur, trim_frames=22, context_latent=None, audio_frames=0,
+              run_id="unittest_no_such_run", stage_index=1)
+    check("9.5 run_id 有值但无文件 → FileNotFoundError", False, "竟然没报错")
+except FileNotFoundError:
+    check("9.5 run_id 有值但无文件 → FileNotFoundError", True)
+except Exception as e:  # noqa: BLE001
+    check("9.5 run_id 有值但无文件 → FileNotFoundError", False, "抛的是 %s" % type(e).__name__)
+
+# ---------------------------------------------------------------- 第 10 组：latent 取流对非 NestedTensor 的健壮性
+print()
+print("[10] streams_from_latent：不能把普通张量当 NestedTensor 拆 batch 维")
+
+# 10.1 NestedTensor → 按 .tensors 拆成两条流
+nt_latent = {"samples": NT.NestedTensor([torch.zeros(1, 24, 57, 48, 28),
+                                         torch.zeros(1, 32, 2, 320)])}
+sp = CORE.streams_from_latent(nt_latent)
+check("10.1 NestedTensor → 2 条流（视频+音频）", len(sp) == 2 and sp[0].shape[1] == 24,
+      "得到 %d 条" % len(sp))
+
+# 10.2 普通 [B,C,T,H,W] 张量（B=1）→ 必须当成**一条**流，不能沿 batch 维拆
+plain1 = {"samples": torch.zeros(1, 24, 57, 48, 28)}
+sp1 = CORE.streams_from_latent(plain1)
+check("10.2 普通张量 B=1 → 1 条流（不是被 unbind 成 1 条 4 维）",
+      len(sp1) == 1 and sp1[0].ndim == 5, "得到 %d 条，ndim=%d" % (len(sp1), sp1[0].ndim))
+
+# 10.3 B=4 → 仍然只能是一条流（旧写法会拆成 4 条"伪音频流"）
+plain4 = {"samples": torch.zeros(4, 24, 57, 48, 28)}
+sp4 = CORE.streams_from_latent(plain4)
+check("10.3 普通张量 B=4 → 仍是 1 条流（旧写法会错拆成 4 条）",
+      len(sp4) == 1 and sp4[0].shape[0] == 4, "得到 %d 条" % len(sp4))
+
+# 10.4 video-only latent 去当 context_latent → 必须明确 raise，不能静默当"有音频"
+try:
+    CORE.audio_from_latent(plain1)
+    check("10.4 video-only → audio_from_latent 必须 raise", False, "竟然没报错")
+except ValueError as e:
+    check("10.4 video-only → audio_from_latent 必须 raise", "没有音频流" in str(e), str(e).split("\n")[0])
+except Exception as e:  # noqa: BLE001
+    check("10.4 video-only → audio_from_latent 必须 raise", False, "抛的是 %s" % type(e).__name__)
+
+# 10.5 list 形态（已拆开的流）仍可用
+sp_list = CORE.streams_from_latent([torch.zeros(1, 24, 57, 48, 28), torch.zeros(1, 32, 2, 320)])
+check("10.5 list 形态仍拆成 2 条流", len(sp_list) == 2, "得到 %d 条" % len(sp_list))
+
+# 10.6 完全不是张量的输入 → 明确报错
+try:
+    CORE.streams_from_latent({"samples": "not a tensor"})
+    check("10.6 非张量输入 → raise", False, "竟然没报错")
+except ValueError:
+    check("10.6 非张量输入 → raise", True)
+
+# ---------------------------------------------------------------- 第 11 组：Chain 的状态格子
+print()
+print("[11] H3RelayChain：前端要往 status 写状态，后端必须有这一格")
+
+chain_cls = NODES.H3RelayChain
+req = chain_cls.INPUT_TYPES().get("required") or {}
+opt = chain_cls.INPUT_TYPES().get("optional") or {}
+check("11.1 status 作为可选 widget 存在（否则前端提示无处显示）", "status" in opt,
+      "optional=%s" % list(opt))
+check("11.2 status 排在最后一个（旧工作流少这一格也不会让前面取值错位）",
+      list(req) == ["segments"] and list(opt)[-1] == "status",
+      "required=%s optional=%s" % (list(req), list(opt)))
+
+# 11.3 前端会把 status 一起传进来 → noop 必须能吃下
+try:
+    chain_cls().noop(segments=3, status="第 2 段")
+    check("11.3 noop 能吃下 status 参数（不会 TypeError）", True)
+except Exception as e:  # noqa: BLE001
+    check("11.3 noop 能吃下 status 参数（不会 TypeError）", False, repr(e))
+
+# 11.4 前端 JS 确实在找这个 widget 名
+_js = os.path.join(_KIT_DIR, "web", "relay_kit_chain.js")
+try:
+    _src = open(_js, encoding="utf-8").read()
+    check("11.4 前端 JS 找的 widget 名与后端一致（status）",
+          'x.name === "status"' in _src, "未在 relay_kit_chain.js 里找到该查找")
+except Exception as e:  # noqa: BLE001
+    check("11.4 前端 JS 找的 widget 名与后端一致（status）", False, repr(e))
+
+print()
+print("=" * 78)
+print("结果：通过 %d / 失败 %d" % (len(PASS), len(FAIL)))
+if FAIL:
+    print("失败项：")
+    for f in FAIL:
+        print("   -", f)
+print("=" * 78)
+sys.exit(1 if FAIL else 0)
