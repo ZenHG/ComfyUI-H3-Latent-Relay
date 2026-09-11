@@ -21,6 +21,9 @@
   7. 节点返回值契约：每个分支返回路数 == len(RETURN_TYPES)
   8. 接缝自检 find_head_jump / describe_head_jump
   9. 段号声明与取源矛盾必须 raise（不得静默直通）
+ 10. streams_from_latent 对非 NestedTensor 的健壮性（不得按 batch 维误拆）
+ 11. H3RelayChain 的 status 槽位与前端一致
+ 12. 沉降帧 settle：pin 与 crop 解耦 + 自动检测（观测端决定，用户零配置）
 """
 
 import os
@@ -434,6 +437,98 @@ try:
           'x.name === "status"' in _src, "未在 relay_kit_chain.js 里找到该查找")
 except Exception as e:  # noqa: BLE001
     check("11.4 前端 JS 找的 widget 名与后端一致（status）", False, repr(e))
+
+# ---------------------------------------------------------------- 第 12 组：沉降帧
+print()
+print("[12] 沉降帧：pin 与 crop 解耦 + 自动检测（观测端决定，用户零配置）")
+
+
+def seam_seg(n, switch_at, level=200.0, cut_every=None):
+    """合成一段"续接段 decode 结果"。
+
+    [0, switch_at) = 上一段尾部的**复现**（帧差 ≈ 0~3）；[switch_at, n) = 本段新内容
+    （基准亮度不同 → 切换处 1 帧硬跳）。cut_every 用来塞一个"段内真实切镜"。
+    """
+    im = torch.zeros(n, 8, 8, 3)
+    for i in range(n):
+        im[i] = (0.0 if i < switch_at else level) + (i % 3) * 3.0
+    if cut_every:
+        for i in range(cut_every, n, cut_every):
+            im[i] = 250.0 - (i % 5)
+    return im
+
+
+# 12.1~12.5 core 层：settle 只动 crop，不动 pin / 锚位 / 音频窗
+pl0 = CORE.plan_relay(cur, prev, 22)
+check("12.1 settle=0 → trim == 22 且 settle == 0（旧行为逐位不变，回归保护）",
+      pl0.trim == 22 and pl0.settle == 0, "trim=%d settle=%d" % (pl0.trim, pl0.settle))
+check("12.1b summary() 正常格式化（带沉降字段）", "裁首 22 帧（含沉降 0）" in pl0.summary(), pl0.summary())
+pl3 = CORE.plan_relay(cur, prev, 22, settle_frames=3)
+check("12.2 settle=3 → trim == 25，但 span 仍 22、锚位不变（pin 未被污染）",
+      pl3.trim == 25 and pl3.span == 22 and pl3.indices == pl0.indices,
+      "trim=%d span=%d" % (pl3.trim, pl3.span))
+check("12.3 settle 不影响音频窗（仍 37 步）",
+      pl3.audio_ref["ref_audio_t"] == pl0.audio_ref["ref_audio_t"] == 37)
+check("12.4 settle<0 → 归零，不报错",
+      CORE.plan_relay(cur, prev, 22, settle_frames=-5).trim == 22)
+expect_raise("12.5 pin + settle >= 段长 → raise（裁完没画面）",
+             lambda: CORE.plan_relay(lat124, lat124, 22, settle_frames=103), "裁完就没画面")
+
+# 12.6~12.10 检测器：窄窗 + 上限 + 失败安全
+sA, _, _ = CORE.detect_settle(seam_seg(107, 15), 22)
+check("12.6 切换点(15) 落在钉住区之内 → settle=0（不该多裁）", sA == 0, "settle=%d" % sA)
+sB, jB, _ = CORE.detect_settle(seam_seg(73, 23), 22)
+check("12.7 切换点在原第 22→23 帧 → settle=1（正是 0.1.1 实测的那个场景）",
+      sB == 1, "settle=%d jump=%.1f" % (sB, jB))
+sC, _, _ = CORE.detect_settle(seam_seg(73, 23, cut_every=25), 22)
+check("12.8 段内第 25 帧有真实切镜 → 仍取 1，不把新内容裁掉（D3 回归）",
+      0 <= sC <= CORE.MAX_SETTLE, "settle=%d" % sC)
+sD, _, _ = CORE.detect_settle(seam_seg(120, 40), 22)
+check("12.9 切换点远超 pin+MAX_SETTLE → 回退 0（宁可维持旧行为也不赌）", sD == 0, "settle=%d" % sD)
+check("12.10 pin<=0 时不检测（首段/独立段绝不触发）",
+      CORE.detect_settle(seam_seg(73, 23), 0) == (0, 0.0, 0.0))
+
+# 12.11~12.13 自检文案：只有**可执行**的才给建议（D3）
+msg_far = CORE.describe_head_jump(seq_mid)      # 突变在裁后第 22 帧 → 太远
+check("12.11 突变位置超出可执行范围 → 不再建议「再裁」（D3）",
+      "不动刀" in msg_far and "settle_frames" not in msg_far, msg_far[:100])
+check("12.12 但仍然报出位置（含「第 22→23 帧」）", "第 22→23 帧" in msg_far)
+seq_near = torch.zeros(30, 8, 8, 3)
+for i in range(3, 30):
+    seq_near[i] = 200.0
+msg_near = CORE.describe_head_jump(seq_near)    # 突变就在裁后头部 → 可执行
+check("12.13 突变就在头部 → 给出可执行的 settle_frames 建议", "settle_frames" in msg_near, msg_near[:90])
+
+# 12.14~12.22 裁节点：默认自动、可关、可固定
+seg73 = seam_seg(73, 23)
+aud73 = {"waveform": torch.zeros(1, 2, int(round(73 / 24.0 * SR))), "sample_rate": SR}
+ok, out = arity(NODES.H3RelayTrimAV, dict(images=seg73, trim_frames=22, fps=24.0, audio=aud73))
+check("12.14 裁节点默认 settle_frames=-1 → 自动裁 23 帧（73 → 50）",
+      int(out[0].shape[0]) == 50, "得到 %d 帧" % int(out[0].shape[0]))
+check("12.15 自动裁后首帧 == 原第 23 帧（切换点被裁掉，逐位）",
+      torch.equal(out[0][0], seg73[23]))
+check("12.16 自动裁后音频同裁 23 帧 → 音画时长一致（容差 = 1 个采样点）",
+      abs(int(out[1]["waveform"].shape[-1]) / SR - 50 / 24.0) < 1.0 / SR,
+      "%.4fs" % (int(out[1]["waveform"].shape[-1]) / SR))
+check("12.17 报告里写清「钉住 + 沉降」两段账", "钉住 22 + 沉降 1" in out[2], out[2].splitlines()[0][:80])
+check("12.18 自动裁后自检「起点干净」（接缝真的修好了）",
+      "起点干净" in out[2], out[2].splitlines()[-1][:90])
+ok, out0 = arity(NODES.H3RelayTrimAV, dict(images=seg73, trim_frames=0, fps=24.0, audio=None))
+check("12.19 trim_frames=0（首段/独立段）→ 原样返回，绝不触发自动检测",
+      out0[0] is seg73 and int(out0[0].shape[0]) == 73)
+ok, outx = arity(NODES.H3RelayTrimAV, dict(images=seg73, trim_frames=22, fps=24.0,
+                                          audio=None, settle_frames=0))
+check("12.20 settle_frames=0 → 回到 0.2.x 旧行为（73 → 51 帧）",
+      int(outx[0].shape[0]) == 51, "得到 %d" % int(outx[0].shape[0]))
+ok, outm = arity(NODES.H3RelayTrimAV, dict(images=seg73, trim_frames=22, fps=24.0,
+                                          audio=None, settle_frames=9))
+check("12.21 settle_frames=9（手动固定）→ 裁 31 帧，供各段等长用",
+      int(outm[0].shape[0]) == 42, "得到 %d" % int(outm[0].shape[0]))
+_req = NODES.H3RelayTrimAV.INPUT_TYPES()["required"]
+_opt = NODES.H3RelayTrimAV.INPUT_TYPES()["optional"]
+check("12.22 settle_frames 追加在 optional 末位（旧工作流少这一格不前移）",
+      list(_opt)[-1] == "settle_frames" and list(_req) == ["images", "trim_frames", "fps"],
+      "required=%s optional=%s" % (list(_req), list(_opt)))
 
 print()
 print("=" * 78)

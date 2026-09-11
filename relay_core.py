@@ -280,7 +280,8 @@ class RelayPlan:
     applied: bool = False
     span: int = 0                      # 被钉住的像素帧数
     steps: int = 0                     # 被钉住的 latent token 数
-    trim: int = 0                      # 采样器应裁掉的首部帧数（锚在 head 时等于 span）
+    trim: int = 0                      # 下游应裁掉的首部**像素帧**数 = span + settle
+    settle: int = 0                    # 其中属于「沉降区」的帧数（不受 5+17k 网格约束）
     indices: List[int] = field(default_factory=list)
     keyframes: List[Dict[str, Any]] = field(default_factory=list)
     audio_ref: Optional[Dict[str, Any]] = None
@@ -291,12 +292,13 @@ class RelayPlan:
         if not self.applied:
             return "未应用（context_latent 未接）"
         line = (
-            "钉住 %d 帧 / %d 步，锚位 %d..%d，裁首 %d 帧，音频 %s"
+            "钉住 %d 帧 / %d 步，锚位 %d..%d，裁首 %d 帧（含沉降 %d），音频 %s"
             % (
                 self.span, self.steps,
                 self.indices[0] if self.indices else -1,
                 self.indices[-1] if self.indices else -1,
                 self.trim,
+                self.settle,
                 ("%d 步" % self.audio_ref["ref_audio_t"]) if self.audio_ref else "关",
             )
         )
@@ -308,6 +310,7 @@ def plan_relay(
     context_latent: Any,
     trim_frames: int = 22,
     audio_frames: Optional[int] = None,
+    settle_frames: int = 0,
 ) -> RelayPlan:
     """生成续接计划。
 
@@ -316,6 +319,11 @@ def plan_relay(
       context_latent  上一段的 AV latent（提供被钉住的尾段）
       trim_frames     钉住的像素帧数，必须在 GUIDE_RUNS 上
       audio_frames    音频钉住窗口（像素帧口径）；默认与视频同窗
+      settle_frames   沉降帧数（默认 0 = 只裁钉住区）。钉住区之后模型还会先
+                      **复现**上一段若干帧才切到本段 prompt，那几帧一并裁掉
+                      才能保证拼接处不跳变、上段文字不串入。不受 5+17k 网格
+                      约束 —— 裁的是 decode 之后的像素帧，不动 latent 相位。
+                      （UI 上的自动检测由 H3RelayTrimAV 做，见 detect_settle）
 
     分辨率必须一致 —— latent 无法缩放，不一致只能重跑上一段或从本段重启链。
     """
@@ -325,6 +333,7 @@ def plan_relay(
         return plan
 
     trim_frames = int(trim_frames)
+    settle_frames = max(0, int(settle_frames))
     dst = video_from_latent(latent)
     src = video_from_latent(context_latent)
     w, h = int(dst.shape[4]) * 16, int(dst.shape[3]) * 16
@@ -358,12 +367,25 @@ def plan_relay(
             "钉住 %d 帧、本段只有 %d 帧 —— 没有新内容可生成。\n"
             "    缩短窗口或加长本段。" % (trim_frames, frame_count)
         )
+    if trim_frames + settle_frames >= frame_count:
+        raise ValueError(
+            "钉住 %d 帧 + 沉降 %d 帧 = %d 帧 ≥ 本段 %d 帧 —— 裁完就没画面了。\n"
+            "    调小沉降帧数，或加长本段。"
+            % (trim_frames, settle_frames, trim_frames + settle_frames, frame_count)
+        )
 
     blocks, offsets, covered = video_tail_from_latent(context_latent, trim_frames)
     plan.span = covered
     plan.steps = len(blocks)
     plan.indices = list(offsets)
-    plan.trim = covered        # 锚在 head → 采样器裁掉首部 span 帧
+    plan.settle = settle_frames
+    # pin 受 5+17k 网格约束（上面已硬校验）；settle 裁的是像素帧，不影响 latent 相位。
+    plan.trim = covered + settle_frames
+    if settle_frames:
+        plan.notes.append(
+            "沉降 %d 帧：钉住区之后模型还会先复现若干帧才切到本段 prompt，"
+            "这几帧一并裁掉，避免拼接处跳变与上段文字串入。" % settle_frames
+        )
 
     plan.keyframes = [
         {"resolved_frame_index": int(p), "latent": blk}
@@ -532,8 +554,43 @@ def trim_audio_head(audio: Any, frames: int, fps: float = FPS) -> Any:
 # 而 trim=22 恰好把切换点前的那一帧留在裁剪后的第 0 帧 → 首帧突变。
 # 107 帧段同一 trim 值则无此现象（切换点被完整裁掉）。
 # ⇒ trim 值必须按**本段的实际切换点**定，不能写死。
+#
+# 落点：切换点是**逐段不同的随机变量**，所以它不该是用户填的配置，而是
+# **观测出来的量**。裁节点手里就是完整 decode 序列（含钉住区），真实切换点
+# 此刻就在手上 —— `detect_settle` 就在那里量，量不出就退回只裁钉住区。
 JUMP_RATIO: float = 4.0       # 首帧差 / 段内基线 的报警阈值
 BASELINE_FLOOR: float = 1.0   # 基线过小时的保护下限（避免除零/噪声放大）
+MAX_SETTLE: int = 12          # 沉降帧上限（≈0.5 s）。自动检测不会超过它
+# 裁后仍见突变时，只有位置在这么靠前才值得动刀：
+# 裁后下标 j 表示"还差 j+1 帧沉降"，所以上限是 MAX_SETTLE-1。
+ADVISE_WITHIN: int = MAX_SETTLE - 1
+
+
+def _frame_diffs(images: torch.Tensor) -> torch.Tensor:
+    """相邻帧差的逐帧标量（纯 CPU、纯张量，不依赖 cv2/PIL）。"""
+    f = images.to(torch.float32)
+    if f.dim() == 4 and f.shape[-1] in (1, 3, 4):   # [N,H,W,C] → 按通道均值
+        return (f[1:] - f[:-1]).abs().mean(dim=(1, 2, 3))
+    return (f[1:] - f[:-1]).abs().flatten(1).mean(dim=1)
+
+
+def scan_head_jump(images: torch.Tensor, scan: int = 40) -> Tuple[int, float, float]:
+    """段首扫描的**原始观测**：返回 ``(argmax 下标, 该处帧差, 段内基线)``。
+
+    不做显著性判断、不加范围限制 —— 由上层按各自口径解释：
+    ``find_head_jump`` 只判显著性，``describe_head_jump`` 再叠加"可执行范围"。
+    """
+    n = int(images.shape[0])
+    if n < 4:
+        return -1, 0.0, 0.0
+    diff = _frame_diffs(images)
+    hi = min(scan, n - 1)
+    if hi <= 2:
+        return -1, 0.0, 0.0
+    baseline = float(diff[2:hi].median())
+    seg = diff[:hi]
+    j = int(torch.argmax(seg).item())
+    return j, float(seg[j].item()), baseline
 
 
 def find_head_jump(images: torch.Tensor, scan: int = 40) -> Tuple[int, float, float]:
@@ -547,36 +604,82 @@ def find_head_jump(images: torch.Tensor, scan: int = 40) -> Tuple[int, float, fl
 
     纯 CPU、纯张量：不依赖 cv2/PIL，可在节点里直接调。
     """
-    n = int(images.shape[0])
-    if n < 4:
-        return -1, 0.0, 0.0
-    f = images.to(torch.float32)
-    if f.dim() == 4 and f.shape[-1] in (1, 3, 4):   # [N,H,W,C] → 按通道均值
-        diff = (f[1:] - f[:-1]).abs().mean(dim=(1, 2, 3))
-    else:
-        diff = (f[1:] - f[:-1]).abs().flatten(1).mean(dim=1)
-    hi = min(scan, n - 1)
-    if hi <= 2:
-        return -1, 0.0, 0.0
-    baseline = float(diff[2:hi].median()) if hi > 2 else float(diff[1:hi].median())
-    base = max(baseline, BASELINE_FLOOR)
-    seg = diff[:hi]
-    j = int(torch.argmax(seg).item())
-    jump = float(seg[j].item())
-    if jump > JUMP_RATIO * base:
+    j, jump, baseline = scan_head_jump(images, scan)
+    if j < 0:
+        return -1, jump, baseline
+    if jump > JUMP_RATIO * max(baseline, BASELINE_FLOOR):
         return j, jump, baseline
     return -1, jump, baseline
 
 
-def describe_head_jump(images: torch.Tensor, scan: int = 40) -> str:
-    """给日志用的一行接缝自检结论。"""
-    j, jump, baseline = find_head_jump(images, scan)
-    if j < 0:
+def detect_settle(
+    images: torch.Tensor,
+    pin: int,
+    max_settle: int = MAX_SETTLE,
+    ratio: float = JUMP_RATIO,
+) -> Tuple[int, float, float]:
+    """在**未裁剪**的段首附近量出真实切换点，返回建议的沉降帧数。
+
+    ``images`` 是完整 decode 结果（长度 N，前 ``pin`` 帧是钉住区的复现）。
+    返回 ``(settle, jump_mae, baseline_mae)``：
+
+      - 扫描边界下标 ``i ∈ [pin-1, pin+max_settle]``；``i`` 处突变 ⇒ 应裁到 ``i+1`` 帧
+        ⇒ ``settle = i + 1 - pin``。
+      - **窄窗**：窗口刻意贴着 ``pin``，而不是全局 argmax。段内第 25 帧的真实切镜
+        根本不在窗内，不会误判成接缝（老实现扫前 40 帧全局 argmax，会建议把新内容裁掉）。
+      - **上限**：``settle ≤ max_settle``；超出即回退 0。
+      - **失败安全**：测不准 ⇒ 0 ⇒ 与"只裁钉住区"的旧行为逐位一致，最坏不会更差。
+
+    基线取自**钉住区内部**（那里是上一段尾部的复现，帧差天然小），
+    所以"本段新内容动得厉害"不会把基线抬起来。
+    """
+    pin, max_settle = int(pin), max(0, int(max_settle))
+    if pin <= 0 or max_settle <= 0:
+        return 0, 0.0, 0.0
+    n = int(images.shape[0])
+    if n < pin + 2:
+        return 0, 0.0, 0.0
+    # ★ 只算用得到的那一小段，别对整段做差（120 帧 448x768 实测 39 ms vs 187 ms）
+    win = images[: min(n, pin + max_settle + 2)]
+    diff = _frame_diffs(win)
+    inner = diff[2:max(3, pin - 1)]
+    baseline = float(inner.median()) if inner.numel() else float(diff.median())
+    lo = max(2, pin - 1)
+    hi = min(int(diff.shape[0]), pin + max_settle)
+    if hi <= lo:
+        return 0, 0.0, baseline
+    seg = diff[lo:hi]
+    j = lo + int(torch.argmax(seg).item())
+    val = float(diff[j].item())
+    if val > ratio * max(baseline, BASELINE_FLOOR):
+        return max(0, min(max_settle, j + 1 - pin)), val, baseline
+    return 0, val, baseline
+
+
+def describe_head_jump(images: torch.Tensor, scan: int = 40,
+                       within: Optional[int] = None) -> str:
+    """给日志用的一行接缝自检结论。
+
+    ``within`` 之内才给"再裁 N 帧"这种**可执行**的建议（默认 ``ADVISE_WITHIN``）。
+    超出的突变只报位置与数值 —— 那多半是本段自己的真实切镜而不是接缝，
+    照它动刀会把新内容裁掉（v0.3.0 之前就是这个行为）。
+    """
+    if within is None:
+        within = ADVISE_WITHIN
+    j, jump, baseline = scan_head_jump(images, scan)
+    ratio = jump / max(baseline, BASELINE_FLOOR)
+    if j < 0 or jump <= JUMP_RATIO * max(baseline, BASELINE_FLOOR):
         return ("[H3 Relay] 接缝自检：前 %d 帧无突变（最大帧差 %.2f，段内基线 %.2f）→ 起点干净。"
                 % (scan, jump, baseline))
-    return ("[H3 Relay] ⚠ 接缝自检：第 %d→%d 帧有突变（%.2f vs 基线 %.2f，比值 %.1f×）"
-            "→ 建议 trim 再加 %d 帧（把突变前那帧也裁掉）。"
-            % (j, j + 1, jump, baseline, jump / max(baseline, BASELINE_FLOOR), j + 1))
+    if j > int(within):
+        return ("[H3 Relay] ⚠ 接缝自检：第 %d→%d 帧有突变（%.2f vs 基线 %.2f，比值 %.1f×），"
+                "但位置超出自动沉降上限（%d 帧）→ 大概率是本段自己的切镜，不是接缝，不动刀。"
+                % (j, j + 1, jump, baseline, ratio, MAX_SETTLE))
+    return ("[H3 Relay] ⚠ 接缝自检：第 %d→%d 帧有突变（%.2f vs 基线 %.2f，比值 %.1f×）\n"
+            "            → 把「续接裁重叠」的 settle_frames 从 -1（自动）改成 %d 再跑"
+            "（多裁掉突变前那帧）。\n"
+            "            别改 trim_frames —— 那一格已被连线接管，前端会藏起来，改不了。"
+            % (j, j + 1, jump, baseline, ratio, j + 1))
 
 
 def describe_latent(latent: Any) -> str:

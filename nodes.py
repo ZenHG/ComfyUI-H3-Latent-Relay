@@ -279,6 +279,11 @@ class H3RelayTrimAV:
 
     口径与作者一致：裁 **decode 之后的像素帧**（不是裁 latent）——
     latent 的帧跨度按 token 在序列里的相位（k%5）决定，砍头会让相位错位。
+
+    为什么还要多裁几帧（沉降）：钉住区之后模型还会先**复现**上一段若干帧，
+    然后才切到本段 prompt；切换点**逐段不同**，可能落在钉住区之外。
+    `settle_frames=-1`（默认）时本节点直接在这段已 decode 的画面上量出切换点，
+    把它一并裁掉 —— 用户不需要配置任何东西。
     """
 
     @classmethod
@@ -306,6 +311,18 @@ class H3RelayTrimAV:
                     "tooltip": "【务必接线】从音频解码节点（VAEDecodeAudio）拉线过来。\n"
                                "画面和声音按同一帧数一起裁，保证音画不串位。不接的话声音会比画面长出一截。",
                 }),
+                # ⚠ 新 widget 必须追加在**最后一个**：widgets_values 按位置对应，
+                #    插在中间会让旧工作流里它后面的取值整体错位（见 CHANGES 0.2.1）。
+                "settle_frames": ("INT", {
+                    "default": -1, "min": -1, "max": 34, "step": 1,
+                    "tooltip": "【不用动，保持 -1】钉住区后面，模型还会先「复现」上一段几帧才切到本段画面。\n"
+                               "这几帧不裁掉，拼接处会看到 1 帧硬跳、上一段的字幕/文字被带过来。\n"
+                               "  · -1（默认）= 自动：按本段实际画面量出该多裁几帧（推荐，不用管）\n"
+                               "  ·  0 = 关闭（与 0.2.x 旧版行为一致）\n"
+                               "  ·  N = 固定多裁 N 帧（想各段等长时用：全片填同一个数）\n"
+                               "自动模式量不出来时会退回成 0，不会比旧版更差。\n"
+                               "日志里「裁首 X 帧 = 钉住 Y + 沉降 Z」就是它的结果。",
+                }),
             },
         }
 
@@ -313,28 +330,47 @@ class H3RelayTrimAV:
     RETURN_NAMES = ("images", "audio", "report")
     FUNCTION = "trim"
     CATEGORY = CATEGORY
-    DESCRIPTION = "裁掉续接段头部的重叠帧；视频与音频同裁，避免重播与音画失步。"
+    DESCRIPTION = (
+        "裁掉续接段头部的重叠帧，并自动把钉住区之后那段「复现帧」一并裁掉"
+        "（settle_frames=-1 自动，无需配置）；视频与音频同裁，避免重播与音画失步。"
+    )
 
-    def trim(self, images, trim_frames=0, fps=24.0, audio=None):
+    def trim(self, images, trim_frames=0, fps=24.0, audio=None, settle_frames=-1):
         CONTRACT.enforce()   # 裁帧算术同样依赖上游网格，先过契约
-        n = int(trim_frames)
+        pin = int(trim_frames)
         before = int(images.shape[0])
-        if n <= 0:
-            msg = "[H3 Relay] trim_frames=0 → 不裁（独立段或纯首段）。"
+        if pin <= 0:
+            msg = "[H3 Relay] 裁 0 帧 → 不裁（独立段或纯首段）。"
             print(msg)
             return (images, audio, msg)
+
+        # 沉降帧：钉住区之后模型还会先复现上一段若干帧才切到本段 prompt。
+        # 切换点是**逐段不同的量**，所以默认让它自己量（-1），而不是让用户猜。
+        want = int(settle_frames)
+        if want < 0:
+            settle, jump, base = CORE.detect_settle(images, pin)
+            why = ("自动检测：窗内最大帧差 %.1f / 段内基线 %.1f" % (jump, base)) if settle \
+                else ("自动检测：未检出显著切换点（窗内最大帧差 %.1f / 基线 %.1f）" % (jump, base))
+        else:
+            settle, why = want, "手动指定"
+        if pin + settle >= before:
+            settle = max(0, before - 1 - pin)
+            why += "（已夹到本段长度上限）"
+
+        n = pin + settle
         out = CORE.trim_head_frames(images, n)
         audio_out = CORE.trim_audio_head(audio, n, float(fps)) if audio is not None else None
         after = int(out.shape[0])
-        line = ("[H3 Relay] 裁重叠 %d 帧：画面 %d → %d 帧（%.3fs → %.3fs）"
-                % (n, before, after, before / float(fps), after / float(fps)))
+        line = ("[H3 Relay] 裁首 %d 帧 = 钉住 %d + 沉降 %d ｜ %s\n"
+                "           画面 %d → %d 帧（%.3fs → %.3fs）"
+                % (n, pin, settle, why, before, after, before / float(fps), after / float(fps)))
         if audio is not None:
             line += "；音频 %d → %d 采样点" % (
                 int(audio["waveform"].shape[-1]), int(audio_out["waveform"].shape[-1]))
         else:
             line += "；⚠ 未接 audio，画面裁了但音频没裁 → 可能音画不同步"
         print(line)
-        # 接缝自检：裁后起点若仍有突变，说明 trim 值不够（实测 73 帧段需 23 而非 22）
+        # 接缝自检：裁后起点若仍有突变，说明沉降量不够
         check = CORE.describe_head_jump(out)
         print(check)
         return (out, audio_out, line + "\n" + check)
