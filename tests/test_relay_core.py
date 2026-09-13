@@ -294,7 +294,7 @@ for i in range(1, 30):
     seq_jump[i] = 50.0                    # 第 1 帧起基本一致
 j, jump, base = CORE.find_head_jump(seq_jump)
 check("8.2 首帧突变被检出（j=0）", j == 0, "j=%d jump=%.2f base=%.2f" % (j, jump, base))
-check("8.2 突变比值超过阈值", jump > CORE.JUMP_RATIO * max(base, CORE.BASELINE_FLOOR),
+check("8.2 突变比值超过阈值", jump > CORE.JUMP_RATIO * max(base, CORE._baseline_floor(seq_jump)),
       "jump=%.1f base=%.2f" % (jump, base))
 
 # 8.3 中段突变（模拟实测：第 22→23 帧跳）→ 应报 j=22
@@ -567,6 +567,165 @@ check("13.5 长塌陷(12帧)窗内可见恢复 → settle=12（贴满上限）",
 sI, _, _ = CORE.detect_settle(blur_seg(seed=11), 22)         # 换 seed 回归
 check("13.6 换随机种子结论稳定（6 ≤ settle ≤ 12）",
       6 <= sI <= CORE.MAX_SETTLE, "settle=%d" % sI)
+
+# —— v0.3.2 双基准：复现区自身发软时，窗外新内容区才是真基准 ——
+
+def blur_seg_mild(n=40, pin=22, blur=(22, 26), seed=9):
+    """HD-mild 动机案例：复现区本身半软（振幅 20），塌陷区 0.3-0.5×源
+    （对软复现基准不可见），新内容全锐（振幅 60）。
+    0.3.1 单基准（复现区）→ dip>0.35×ref 返回 0；0.3.2 双基准 → 量出 settle。"""
+    g = torch.Generator().manual_seed(seed)
+    texA = 100.0 + torch.rand(8, 8, 3, generator=g) * 20.0
+    texB = 110.0 + (torch.rand(8, 8, 3, generator=g) - 0.5) * 60.0
+    meanA = float(texA.mean())
+    im = torch.zeros(n, 8, 8, 3)
+    for i in range(n):
+        if i < pin:
+            im[i] = texA + (i % 2) * 6.0
+        elif blur[0] <= i < blur[1]:
+            im[i] = 0.5 * texA + 0.5 * meanA + (i % 3) * 1.5
+        else:
+            im[i] = texB + (i % 3) * 3.0
+    return im
+
+
+sM, jM, bM = CORE.detect_settle(blur_seg_mild(), 22)
+check("13.7 HD-mild：对软复现基准不可见 → 双基准量出 settle=4",
+      sM == 4, "settle=%d dip=%.1f ref=%.1f" % (sM, jM, bM))
+_imM = blur_seg_mild()
+_shM = CORE._sharpness(_imM[:36])
+_faM = CORE._sharpness(_imM[36:76])
+_expM = max(float(_shM[:22].median()), float(_faM.median()))
+check("13.8 双基准语义：ref = max(复现区锐度, 窗外新内容区锐度)",
+      abs(bM - _expM) < 1e-4, "ref=%.2f expect=%.2f" % (bM, _expM))
+# —— v0.3.2 量纲不变性：0-1 产线数据与 0-255 测试数据必须同一结论 ——
+
+check("13.9 量纲不变（帧差路）：0-255 的 settle=1 在 0-1 数据上同为 1（BASELINE_FLOOR 量纲 bug 回归）",
+      CORE.detect_settle(seam_seg(73, 23) / 255.0, 22)[0] == 1,
+      "settle=%d" % CORE.detect_settle(seam_seg(73, 23) / 255.0, 22)[0])
+check("13.10 量纲不变（锐度路）：0-1 的 HD-mild 同样量出 settle=4",
+      CORE.detect_settle(blur_seg_mild() / 255.0, 22)[0] == 4,
+      "settle=%d" % CORE.detect_settle(blur_seg_mild() / 255.0, 22)[0])
+
+# —— v0.3.3 段体自参考 + 假跳否决 ——
+
+def soft_uniform_seg(n=40, pin=22, seed=5):
+    """全段一致偏软（4 步低清风格）：头与体都是弱纹理，整体量级低但无塌陷差。"""
+    g = torch.Generator().manual_seed(seed)
+    im = torch.zeros(n, 8, 8, 3)
+    for i in range(n):
+        base = 100.0 + torch.rand(8, 8, 3, generator=g) * (6.0 if i < pin else 9.0)
+        im[i] = base + (i % 3) * 1.0
+    return im
+
+
+sS, _, _ = CORE.detect_settle(soft_uniform_seg(), 22)
+check("13.11 全段一致偏软（整体量级低、头体无差）→ 0（量纲无关的决策）",
+      sS == 0, "settle=%d" % sS)
+
+def ramp_blur_seg(n=40, pin=22, seed=3):
+    """渐进模糊：f22-25 纹理振幅按 t=0.4/0.55/0.7/0.85 递减到深塌陷，f26 起新内容。"""
+    g = torch.Generator().manual_seed(seed)
+    texA = 100.0 + torch.rand(8, 8, 3, generator=g) * 20.0
+    texB = 110.0 + (torch.rand(8, 8, 3, generator=g) - 0.5) * 30.0
+    meanA = float(texA.mean())
+    im = torch.zeros(n, 8, 8, 3)
+    ts = [0.4, 0.55, 0.7, 0.85]
+    for i in range(n):
+        if i < pin:
+            im[i] = texA + (i % 3) * 3.0
+        elif i < pin + 4:
+            tt = ts[i - pin]
+            im[i] = (1 - tt) * texA + tt * meanA
+        else:
+            im[i] = texB + (i % 3) * 3.0
+    return im
+
+
+sR, vR, _ = CORE.detect_settle(ramp_blur_seg(), 22)
+check("13.12 渐进模糊（缓坡到底才过深线）→ settle=4（覆盖整个塌陷前缀）",
+      sR == 4, "settle=%d" % sR)
+
+def fake_jump_seg(n=40, pin=22, seed=4):
+    """假跳：f22 既是深塌陷又是一次大跳（亮常帧），f23 起新内容——
+    跳点必须被验身否决，由锐度路定界（返回值 = 塌陷谷底而非跳变帧差）。"""
+    g = torch.Generator().manual_seed(seed)
+    texA = 100.0 + torch.rand(8, 8, 3, generator=g) * 20.0
+    texB = 110.0 + (torch.rand(8, 8, 3, generator=g) - 0.5) * 30.0
+    im = torch.zeros(n, 8, 8, 3)
+    for i in range(n):
+        if i < pin:
+            im[i] = texA + (i % 3) * 3.0
+        elif i == pin:
+            im[i] = 250.0
+        else:
+            im[i] = texB + (i % 3) * 3.0
+    return im
+
+
+sF, vF, bF = CORE.detect_settle(fake_jump_seg(), 22)
+check("13.13 假跳被验身否决 → 锐度路定界 settle=1，信号=塌陷谷底（非跳变帧差）",
+      sF == 1 and vF < 10.0 and bF > 100.0,
+      "settle=%d val=%.1f ref=%.1f" % (sF, vF, bF))
+
+# ============ 组14：拷贝桥（0.4.0）——latent 硬拷贝 + 噪声掩码 ============
+
+def av_latent(t_steps, a_ticks=48, seed=0, w=8, h=8):
+    g = torch.Generator().manual_seed(seed)
+    video = torch.rand(1, 4, t_steps, h, w, generator=g)
+    audio = torch.rand(1, 2, 2, a_ticks, generator=g)
+    return {"samples": CORE._nested_pair(video, audio)}
+
+
+tgt = av_latent(12, seed=1)
+prv = av_latent(12, seed=2)
+outC, trimC, repC = CORE.build_continue_latent(tgt, prv, 22)
+sv = CORE.video_from_latent(outC)
+pv = CORE.video_from_latent(prv)
+tv = CORE.video_from_latent(tgt)
+check("14.1 拷贝位级一致：前缀 7 步 == 上段尾部 7 步（start=5 对齐）",
+      torch.equal(sv[:, :, :7], pv[:, :, 5:12]))
+check("14.2 前缀之后保留本段原 latent", torch.equal(sv[:, :, 7:], tv[:, :, 7:]))
+check("14.3 输入 target 未被变异", torch.equal(tv, CORE.video_from_latent(tgt)))
+m = outC["noise_mask"]
+check("14.4 hard 掩码：形状 [1,1,12,8,8]，前 7 步=0 其余=1，有限",
+      tuple(m.shape) == (1, 1, 12, 8, 8) and bool((m[:, :, :7] == 0).all())
+      and bool((m[:, :, 7:] == 1).all()) and bool(torch.isfinite(m).all()))
+check("14.5 trim 输出 = covered = 22（接 TrimAV）", trimC == 22 and "22" in repC)
+oa = CORE.audio_from_latent(outC)
+pa = CORE.audio_from_latent(prv)
+ta = CORE.audio_from_latent(tgt)
+rt = int(oa.shape[-1] - round(22 / 24.0 * 40.0) + 0)  # 期望 37
+check("14.6 音频尾拷贝：前 37 tick == 上段尾部，其后保留本段",
+      torch.equal(oa[..., :37], pa[..., 11:48]) and torch.equal(oa[..., 37:], ta[..., 37:]))
+outT, _, trimT = CORE.build_continue_latent(av_latent(12, seed=3), av_latent(12, seed=4), 22,
+                                            mask_mode="taper")
+wexp = CORE.prefix_taper_weights(7, 4, 0.10)
+mT = outT["noise_mask"]
+check("14.7 taper 掩码：头 1.0 线性降到缝端 0.10",
+      torch.allclose(mT[:, :, :7, 0, 0], torch.tensor(wexp, dtype=torch.float32), atol=1e-6)
+      and abs(float(mT[:, :, 6, 0, 0]) - 0.10) < 1e-6, "weights=%s" % (wexp,))
+expect_raise("14.8 跨分辨率 → raise（拷贝桥禁止）",
+             lambda: CORE.build_continue_latent(tgt, av_latent(12, seed=5, w=8, h=16), 22), "跨分辨率")
+big_prev = av_latent(22, seed=6)
+expect_raise("14.9 前缀占满整段（73f→22 步 ≥ 目标 12 步）→ raise",
+             lambda: CORE.build_continue_latent(tgt, big_prev, 73), "没有新内容")
+mis_prev = av_latent(13, seed=7)
+expect_raise("14.10 尾段起点非 5 对齐 → raise（接缝位移防线复用）",
+             lambda: CORE.build_continue_latent(tgt, mis_prev, 22), "起始于周期位置")
+expect_raise("14.11 mask_mode 非法 → raise",
+             lambda: CORE.build_continue_latent(tgt, prv, 22, mask_mode="soft"), "mask_mode")
+okC, outN = arity(NODES.H3RelayCopyBridge, dict(latent=av_latent(12, seed=8),
+                                                context_latent=av_latent(12, seed=9),
+                                                context_frames=22))
+check("14.12 节点返回 3 路（latent/report/trim）", okC, "实得 %d" % len(outN))
+check("14.13 节点 trim 输出 = 22", int(outN[2]) == 22)
+_it = NODES.H3RelayCopyBridge.INPUT_TYPES()
+check("14.14 节点注册 + required 键序 + optional 末位（追加铁律）",
+      "H3RelayCopyBridge" in NODES.NODE_CLASS_MAPPINGS
+      and list(_it["required"]) == ["latent", "context_latent", "context_frames"]
+      and list(_it["optional"])[-1] == "pin_audio",
+      "required=%s optional=%s" % (list(_it["required"]), list(_it["optional"])))
 
 print()
 print("=" * 78)

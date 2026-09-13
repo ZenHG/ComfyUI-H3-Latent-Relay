@@ -559,29 +559,72 @@ def trim_audio_head(audio: Any, frames: int, fps: float = FPS) -> Any:
 # **观测出来的量**。裁节点手里就是完整 decode 序列（含钉住区），真实切换点
 # 此刻就在手上 —— `detect_settle` 就在那里量，量不出就退回只裁钉住区。
 JUMP_RATIO: float = 4.0       # 首帧差 / 段内基线 的报警阈值
-BASELINE_FLOOR: float = 1.0   # 基线过小时的保护下限（避免除零/噪声放大）
+# 基线过小时的保护下限——**随数据量纲缩放**（v0.3.2）：ComfyUI decode 张量是 0-1，
+# 旧写死 1.0（0-255 量纲）会把 0-1 数据的帧差路径整个抬死（基线 0.0076 被抬到 1.0，
+# 阈值 4.0 永不可达 → 帧差法在产线上从未生效过）。0.004 ≈ 1/255 满量程，
+# 对 0-255 的旧测试行为不变（0.004×250 ≈ 1.0）。
+BASELINE_FLOOR_REL: float = 0.004
 MAX_SETTLE: int = 12          # 沉降帧上限（≈0.5 s）。自动检测不会超过它
 # 裁后仍见突变时，只有位置在这么靠前才值得动刀：
 # 裁后下标 j 表示"还差 j+1 帧沉降"，所以上限是 MAX_SETTLE-1。
 ADVISE_WITHIN: int = MAX_SETTLE - 1
 # —— 模糊型沉降（v0.3.1）：切换不是硬跳而是「重绘发虚」——帧差法看不见，改看高频能量。——
-BLUR_ZONE_RATIO: float = 0.55      # 锐度 < 复现区基准×此比例 → 记为塌陷帧
+# 度量用 **Laplacian 响应的均方**（≈方差）：模糊先杀高对比边缘，平方放大这一损失。
+# mean-abs 版实测钝 3 倍（HD mild 塌陷 0.29-0.45× 在它眼里是 0.79-0.83×，过不了 0.35 阈）。
+BLUR_ZONE_RATIO: float = 0.55      # 锐度 < 基准×此比例 → 记为塌陷帧
 BLUR_COLLAPSE_RATIO: float = 0.35  # 塌陷最深要低于基准×此比例才算真模糊（防误伤天生偏软的段）
 BLUR_RECOVER_RATIO: float = 0.5    # 窗内必须看到恢复到基准×此比例，才敢裁（看不到恢复宁少勿多）
+# —— v0.3.3 稳健统计层：参考分布来自段体（窗外体区），z 分数定位，深度比值做证据闸 ——
+# 动机（GG 2026-09-13）：分辨率/步数/LoRA/场景内容都会整体移动锐度与帧差的绝对量级，
+# 任何"绝对常数"都会在某个参数组合下失效。因此：
+#   · 参考分布 = 段体自身（窗外 ≥8 帧，median + MAD）——4 步软渲染、运动模糊、平坦场景
+#     自动进基准，零配置、零量纲；
+#   · z 分数（|x-med|/(1.4826·MAD)）负责"是不是异常"，比值门槛（0.35/0.55/0.5，本来就
+#     无量纲）负责"是不是深到值得动刀"——两道闸缺一不可：只有 z 会把"段体天生比头锐"
+#     的正常渐变误裁，只有比值会在分布漂移时定位失准；
+#   · 硬跳必须**验身**：跳后 2-5 帧锐度回到体分布才采信，否则视为假跳/闪烁交给锐度路。
+Z_JUMP: float = 8.0                # 硬跳的稳健 z 门槛（对段体帧差 MAD 标准化；实测真跳 z≈90）
+_LAP_KERNEL = None                 # 惰性初始化的 3×3 Laplacian 卷积核
+
+
+def _robust_stats(x: torch.Tensor) -> Tuple[float, float]:
+    """稳健 (median, 1.4826×MAD)。空输入返回 (0, 0)。"""
+    if x.numel() == 0:
+        return 0.0, 0.0
+    med = float(x.median())
+    mad = float((x - med).abs().median()) * 1.4826
+    return med, mad
+
+
+def _baseline_floor(images: torch.Tensor) -> float:
+    """帧差基线的保护下限，随数据实际量纲缩放（0-1 产线 / 0-255 测试同一套阈值）。"""
+    try:
+        scale = float(images.detach().abs().max())
+    except Exception:
+        return 0.0
+    return BASELINE_FLOOR_REL * scale if scale > 0 else 0.0
 
 
 def _sharpness(images: torch.Tensor) -> torch.Tensor:
-    """逐帧高频能量代理：``帧 − 3×3 均值模糊`` 的绝对差均值。纯 torch，不依赖 cv2/PIL。
+    """逐帧高频能量代理：3×3 **Laplacian 响应的均方**（≈锐度方差）。纯 torch，不依赖 cv2/PIL。
 
-    带纹理的画面显著大于 0；重绘发虚（模糊）会把它压到接近 0。
+    带纹理的画面显著大于 0；重绘发虚（模糊）先杀高对比边缘，平方度量把它放大
+    （实测：HD mild 塌陷帧在方差度量下 0.29-0.45×基准，mean-abs 度量下只见 0.79-0.83×）。
     """
+    global _LAP_KERNEL
     f = images.to(torch.float32)
     if f.dim() != 4:
         return torch.zeros(0)
     g = f.mean(dim=-1).unsqueeze(1)                    # [N,1,H,W]
-    soft = torch.nn.functional.avg_pool2d(g, kernel_size=3, stride=1, padding=1,
-                                          count_include_pad=False)
-    return (g - soft).abs().mean(dim=(1, 2, 3))        # [N]
+    if _LAP_KERNEL is None or _LAP_KERNEL.device != g.device:
+        _LAP_KERNEL = g.new_tensor([[0.0, 1.0, 0.0],
+                                    [1.0, -4.0, 1.0],
+                                    [0.0, 1.0, 0.0]]).view(1, 1, 3, 3)
+    # replicate pad（不能用 conv2d 自带的 zero pad：常数帧边界会吃出假响应，
+    # 小分辨率合成测试里边界占比过半，整个度量直接反转）
+    gp = torch.nn.functional.pad(g, (1, 1, 1, 1), mode="replicate")
+    resp = torch.nn.functional.conv2d(gp, _LAP_KERNEL)
+    return resp.pow(2).mean(dim=(1, 2, 3))             # [N]
 
 
 def _frame_diffs(images: torch.Tensor) -> torch.Tensor:
@@ -625,7 +668,7 @@ def find_head_jump(images: torch.Tensor, scan: int = 40) -> Tuple[int, float, fl
     j, jump, baseline = scan_head_jump(images, scan)
     if j < 0:
         return -1, jump, baseline
-    if jump > JUMP_RATIO * max(baseline, BASELINE_FLOOR):
+    if jump > JUMP_RATIO * max(baseline, _baseline_floor(images)):
         return j, jump, baseline
     return -1, jump, baseline
 
@@ -639,23 +682,29 @@ def detect_settle(
     """在**未裁剪**的段首附近量出真实切换点，返回建议的沉降帧数。
 
     ``images`` 是完整 decode 结果（长度 N，前 ``pin`` 帧是钉住区的复现）。
-    返回 ``(settle, jump_mae, baseline_mae)``：
+    返回 ``(settle, signal, reference)``——signal/reference 的量纲随判定路径不同：
+    硬跳路 = 帧差，锐度路 = Laplacian 均方；两者都是**纯比值判定**，无量纲常数。
 
-      - 扫描边界下标 ``i ∈ [pin-1, pin+max_settle]``；``i`` 处突变 ⇒ 应裁到 ``i+1`` 帧
-        ⇒ ``settle = i + 1 - pin``。
-      - **窄窗**：窗口刻意贴着 ``pin``，而不是全局 argmax。段内第 25 帧的真实切镜
-        根本不在窗内，不会误判成接缝（老实现扫前 40 帧全局 argmax，会建议把新内容裁掉）。
-      - **上限**：``settle ≤ max_settle``；超出即回退 0。
-      - **失败安全**：测不准 ⇒ 0 ⇒ 与"只裁钉住区"的旧行为逐位一致，最坏不会更差。
-      - **模糊型沉降（v0.3.1）**：帧差法只认「硬跳」。切换若走「重绘发虚」——钉住区之后
-        模型先把上一段尾部画糊再收进本段内容——帧差全程不抬头（模糊＝低频变化），
-        帧差法恒盲（L1 剧本A 实测：缝后 f2-f7 清晰度塌到正常值的 15%，检测返回 0）。
-        补第二信号：**高频能量塌陷-恢复**。以钉住区锐度（≈源画面锐度）为基准，
-        窗内出现「深塌陷（<0.35×基准）且窗内可见恢复（>0.5×基准）」时，
-        沉降 = 最后一个塌陷帧 − pin + 1；窗内看不到恢复宁少勿多，仍回 0。
+    v0.3.3 三层判定（GG 要求的多维度/自参考方案）：
 
-    基线取自**钉住区内部**（那里是上一段尾部的复现，帧差天然小），
-    所以"本段新内容动得厉害"不会把基线抬起来。
+      0. **结构性护栏**（不变）：窄窗贴 ``pin`` 不做全局 argmax；``settle ≤ max_settle``；
+         测不准 ⇒ 0 ⇒ 与"只裁钉住区"的旧行为逐位一致，最坏不会更差。
+      1. **硬跳路（帧差 · 双门槛 + 验身）**：窗内最大帧差须同时过
+         「体 z 分数 > Z_JUMP」（对段体帧差的 median+MAD 标准化——运动剧烈的段
+         体差大，同样的跳不值钱）和「比值 > JUMP_RATIO×体中位」两道门；
+         再**验身**：跳后 2-5 帧锐度须回到体分布（无一帧深塌陷）——跳完还是糊的
+         = 假跳/闪烁，否决，交给锐度路。
+      2. **锐度路（塌陷-恢复 · 深度证据闸）**：基准 = max(复现区中位, 窗外体区中位)
+         （v0.3.2 双基准：复现区自身可能已发软）；窗内须**同时**出现
+         「塌陷帧（<0.55×基准）」和「深塌陷证据（最深处 <0.35×基准）」——
+         只有 z 异常而深度不够 = 段体天生比头锐的正常渐变，不动刀——
+         沉降 = 最后一个塌陷帧 − pin + 1；窗内看不到恢复（>0.5×基准）宁少勿多，仍回 0。
+      3. **参考分布全部来自段体**（v0.3.3）：分辨率/步数/LoRA/内容整体移动锐度量级时，
+         基准同步移动——4 步低清、928p 高清、CombatV2、平坦场景共用同一套比值。
+
+    维度扩展缝（刻意留白）：色偏型/鬼影型沉降（锐度不变）不在本检测器——色偏归
+    组装层外观拉齐（低频残差传输），鬼影归 0.4.0 拷贝+锥形桥（钉住区不重绘，
+    这一类伪影从机制上消失）。
     """
     pin, max_settle = int(pin), max(0, int(max_settle))
     if pin <= 0 or max_settle <= 0:
@@ -665,6 +714,10 @@ def detect_settle(
         return 0, 0.0, 0.0
     # ★ 只算用得到的那一小段，别对整段做差（120 帧 448x768 实测 39 ms vs 187 ms）
     win = images[: min(n, pin + max_settle + 2)]
+    far_lo = pin + max_settle + 2
+    body = images[far_lo: min(n, far_lo + 40)]
+    if body.shape[0] < 8:
+        body = win                      # 短段：体参考退化到窗内（仍优于任何全局常数）
     diff = _frame_diffs(win)
     inner = diff[2:max(3, pin - 1)]
     baseline = float(inner.median()) if inner.numel() else float(diff.median())
@@ -675,27 +728,42 @@ def detect_settle(
     seg = diff[lo:hi]
     j = lo + int(torch.argmax(seg).item())
     val = float(diff[j].item())
-    if val > ratio * max(baseline, BASELINE_FLOOR):
-        return max(0, min(max_settle, j + 1 - pin)), val, baseline
 
-    # —— 模糊型沉降：帧差法没触发，但高频能量可能已塌了再回来（重绘发虚）。——
+    # —— 路径 1：硬跳（体 z 分数 + 比值双门槛，过了再验身）——
+    b_med, b_mad = _robust_stats(_frame_diffs(body))
+    z_denom = max(b_mad, _baseline_floor(win))
+    z_jump = (val - b_med) / z_denom if z_denom > 0 else 0.0
+    if z_jump > Z_JUMP and val > ratio * max(b_med, _baseline_floor(win)):
+        sharp_all = _sharpness(images[: min(n, pin + max_settle + 8)])
+        ref_all = max(float(sharp_all[:pin].median()),
+                      _robust_stats(_sharpness(body))[0])
+        if ref_all <= 0.0:
+            return max(0, min(max_settle, j + 1 - pin)), val, baseline
+        after_jump = sharp_all[j + 1: min(j + 5, int(sharp_all.shape[0]))]
+        if after_jump.numel() == 0 or bool(
+                (after_jump < BLUR_COLLAPSE_RATIO * ref_all).any()):
+            pass                        # 跳后仍是糊的 → 假跳/闪烁，否决，落锐度路
+        else:
+            return max(0, min(max_settle, j + 1 - pin)), val, baseline
+
+    # —— 路径 2：锐度塌陷-恢复（双基准 + 深度证据闸）——
     sh = _sharpness(win)
     if sh.numel() < pin + 2:
         return 0, val, baseline
-    ref = float(sh[:pin].median())                     # 复现区锐度 ≈ 源画面锐度
+    far = _sharpness(images[far_lo: min(int(images.shape[0]), far_lo + 40)])
+    ref = max(float(sh[:pin].median()),
+              float(far.median()) if far.numel() else 0.0)
     if ref <= 0.0:
         return 0, val, baseline
     zone = sh[pin: pin + max_settle + 1]
     below = zone < BLUR_ZONE_RATIO * ref
-    if not bool(below.any()):
-        return 0, val, baseline
-    last = int(below.nonzero()[-1].item())
     dip = float(zone.min())
-    if dip > BLUR_COLLAPSE_RATIO * ref:
-        return 0, val, baseline                        # 只有变软、没有深塌陷 → 不动刀
+    if not bool(below.any()) or dip >= BLUR_COLLAPSE_RATIO * ref:
+        return 0, val, baseline         # 无塌陷，或深度不够 = 正常软渐变 → 不动刀
+    last = int(below.nonzero()[-1].item())
     after = zone[last + 1:]
     if after.numel() == 0 or float(after.max()) < BLUR_RECOVER_RATIO * ref:
-        return 0, val, baseline                        # 窗内看不到恢复 → 宁少勿多
+        return 0, val, baseline         # 窗内看不到恢复 → 宁少勿多
     return min(max_settle, last + 1), dip, ref
 
 
@@ -710,8 +778,9 @@ def describe_head_jump(images: torch.Tensor, scan: int = 40,
     if within is None:
         within = ADVISE_WITHIN
     j, jump, baseline = scan_head_jump(images, scan)
-    ratio = jump / max(baseline, BASELINE_FLOOR)
-    if j < 0 or jump <= JUMP_RATIO * max(baseline, BASELINE_FLOOR):
+    floor = max(baseline, _baseline_floor(images))
+    ratio = jump / floor if floor > 0 else 0.0
+    if j < 0 or jump <= JUMP_RATIO * floor:
         return ("[H3 Relay] 接缝自检：前 %d 帧无突变（最大帧差 %.2f，段内基线 %.2f）→ 起点干净。"
                 % (scan, jump, baseline))
     if j > int(within):
@@ -739,3 +808,129 @@ def describe_latent(latent: Any) -> str:
     if v.ndim >= 5:
         bits.append("%d 帧 @ %dx%d" % (pixel_frames(int(v.shape[2])), int(v.shape[4]) * 16, int(v.shape[3]) * 16))
     return " | ".join(bits)
+
+
+# ---------------------------------------------------------------- 0.4.0 拷贝桥
+# 机制出处（拆解吸收，均开放许可）：
+#   · AIMixer/ComfyUI_MiniMaxH3_Director（Apache-2.0）——latent 硬拷贝 + 噪声掩码 +
+#     音频尾拷贝 + NestedTensor 双流打包；
+#   · comfyui-minimax-h3-audio-T8（native_masked_context）——掩码走 **ComfyUI 原生
+#     H3 契约**（mask=0 保留 / 1 生成，MiniMaxH3.scale_latent_inpaint /
+#     mask_row_values，0.30+），与具体采样器无关 → 通用兼容；
+#     且 T8 用全 0 硬锁（钉住区零重绘）——与我们 0.3.x 实测「复现=漂移源」同向，
+#     设为默认；Director 的 1.0→seam_min 锥形作为实验档保留。
+#   · 消费端实测：SelfLiftH3Sampler 原生读 latent["noise_mask"]（[B,1,T,H,W]，
+#     post-CFG hook 把 0 区每步钉回 clean anchor）——无需改任何采样器。
+# 音频：尾随拷贝只作采样上下文（掩码只做视频流）；可见的声画拼接仍归 TrimAV/组装层。
+SEAM_TAPER_TOKENS: int = 4
+SEAM_MIN_MASK: float = 0.10
+SEAM_MIN_FLOOR: float = 0.0
+AUDIO_RELEASE_TICKS: int = 6
+MASK_MODES: Tuple[str, ...] = ("hard", "taper")
+
+
+def prefix_taper_weights(
+    steps: int,
+    taper: int = SEAM_TAPER_TOKENS,
+    seam_min: float = SEAM_MIN_MASK,
+) -> Tuple[float, ...]:
+    """拷贝前缀的掩码权重：头部 1.0（自由重绘，反正被裁），线性降到缝端 seam_min（近硬锁）。"""
+    n = int(steps)
+    if n < 1:
+        return ()
+    taper = max(1, min(int(taper), n))
+    head = n - taper
+    floor = max(SEAM_MIN_FLOOR, min(1.0, float(seam_min)))
+    weights = [1.0] * head
+    weights.extend(1.0 + (floor - 1.0) * (float(i + 1) / float(taper)) for i in range(taper))
+    return tuple(weights)
+
+
+def _nested_pair(video: torch.Tensor, audio: torch.Tensor, template: Any = None) -> Any:
+    """打包 AV 双流为 NestedTensor（ComfyUI 运行时），离线环境退化为 list。"""
+    try:
+        from comfy.nested_tensor import NestedTensor
+
+        return NestedTensor((video, audio))
+    except Exception:
+        cls = type(template) if template is not None else None
+        if cls is not None and cls is not torch.Tensor:
+            try:
+                return cls((video, audio))
+            except Exception:
+                pass
+    return [video, audio]
+
+
+def build_continue_latent(
+    target: Any,
+    prev: Any,
+    frames: int,
+    mask_mode: str = "hard",
+    taper: int = SEAM_TAPER_TOKENS,
+    seam_min: float = SEAM_MIN_MASK,
+    pin_audio: bool = True,
+) -> Tuple[Dict[str, Any], int, str]:
+    """0.4.0 拷贝桥：把上一段 AV 尾部**逐位拷贝**进本段初始 latent + 噪声掩码。
+
+    返回 ``(latent, covered, report)``；``covered`` = 应裁帧数（接 TrimAV 的 trim_frames）。
+
+    与 conditioning 钉帧（H3RelayMotionContext）的本质区别：钉住区**不重绘**——
+    mask=0 区每步被采样器钉回拷贝进来的上段尾部 latent，0.3.x 实测的
+    「复现发糊/漂移」这一类伪影从机制上消失。三条硬约束（违反即 raise）：
+      1. ``frames`` 落在 5+17k 网格且尾段起点 5-token 对齐（复用 video_tail_from_latent）；
+      2. 上段与本段分辨率一致；
+      3. 拷贝前缀必须给新内容留至少 1 个 token。
+    """
+    if mask_mode not in MASK_MODES:
+        raise ValueError(
+            "mask_mode 只认 %s，得到 %r" % (" / ".join(MASK_MODES), mask_mode)
+        )
+    tv = video_from_latent(target)
+    pv = video_from_latent(prev)
+    if (int(tv.shape[3]), int(tv.shape[4])) != (int(pv.shape[3]), int(pv.shape[4])):
+        raise ValueError(
+            "拷贝桥禁止跨分辨率：上段 %dx%d ≠ 本段 %dx%d"
+            % (int(pv.shape[4]) * 16, int(pv.shape[3]) * 16,
+               int(tv.shape[4]) * 16, int(tv.shape[3]) * 16)
+        )
+    blocks, _offsets, covered = video_tail_from_latent(prev, frames)
+    steps = len(blocks)
+    total_t = int(tv.shape[2])
+    if steps >= total_t:
+        raise ValueError(
+            "拷贝前缀 %d 步占满本段 %d 步 → 没有新内容可生成；缩短 context_frames 或加长本段"
+            % (steps, total_t)
+        )
+
+    video = tv.clone()
+    tail_v = torch.cat(blocks, dim=2).to(device=video.device, dtype=video.dtype)
+    video[:, :, :steps] = tail_v
+
+    audio = audio_from_latent(target).clone()
+    rt = 0
+    if pin_audio:
+        a_tail, rt, _overhang, _raw = audio_tail_from_latent(prev, int(frames), covered)
+        rt = max(0, min(int(rt), int(audio.shape[-1]) - 1))
+        if rt > 0:
+            audio[..., :rt] = a_tail[..., :rt].to(device=audio.device, dtype=audio.dtype)
+
+    vmask = torch.ones((1, 1, total_t, int(tv.shape[3]), int(tv.shape[4])),
+                       dtype=torch.float32)
+    if mask_mode == "hard":
+        vmask[:, :, :steps] = 0.0
+        mask_desc = "硬锁（全 0，钉住区零重绘）"
+    else:
+        w = prefix_taper_weights(steps, taper, seam_min)
+        vmask[:, :, :steps] = torch.tensor(w, dtype=torch.float32).view(1, 1, steps, 1, 1)
+        mask_desc = "锥形 %.2f→%.2f（taper=%d）" % (w[0], w[-1], taper)
+
+    out = dict(target) if isinstance(target, dict) else {}
+    out["samples"] = _nested_pair(video, audio, tv)
+    out["noise_mask"] = vmask
+    report = (
+        "[H3 Relay] 拷贝桥：写入 %d 步（%d 帧）视频尾 + %d 音频 tick（上下文用）；"
+        "掩码 %s；trim=%d"
+        % (steps, covered, rt, mask_desc, covered)
+    )
+    return out, int(covered), report

@@ -1,13 +1,18 @@
 # -*- coding: utf-8 -*-
 """H3 Relay Kit · 节点层
 
-五个节点，覆盖"用作者的续接方式"所需的全部接线：
+六个节点，覆盖"用作者的续接方式"所需的全部接线：
 
   🔗 H3 续接 Latent 存   —— 把本段的 AV latent 落盘，供下一段读
   🔗 H3 续接 Latent 读   —— 读回上一段的 AV latent
   🔗 H3 续接 Latent 桥   —— 把上一段尾段钉进本段 conditioning（latent 直取，零重编码）
+  🔗 H3 续接 拷贝桥      —— 上一段尾部**逐位拷贝**进本段初始 latent + 噪声掩码（钉住区不重绘）
   🔗 H3 续接裁重叠        —— 裁掉续接段头部的重叠帧（视频 + 音频同裁）
   🔗 H3 续接连跑 Chain    —— 同分组框内自动推进「桥 + 落盘」段号并排队连跑
+
+两条续接路线**二选一**，不可同图串联：
+  · Latent 桥（conditioning 钉帧）→ 模型重绘上一段（有复现漂移风险，检测兜底）；
+  · 拷贝桥（latent + 噪声掩码）→ 钉住区零重绘（0.4.0 起，通用兼容不绑采样器）。
 
 接线（替换像素续接时）：
     CSGlideCastCS[0] ─ conditioning ─┐
@@ -15,7 +20,7 @@
     H3 续接 Latent 读 ─ context ─────┤→ 🔗 续接 Latent 桥 [0] → 采样器 positive
     （上一段：采样器 latent → 🔗 续接 Latent 存）
 
-注意：走本桥时，上游的**像素续接字段（如 H3 Studio 的 cont）必须留空**，
+注意：走任一桥时，上游的**像素续接字段（如 H3 Studio 的 cont）必须留空**，
 否则两套续接都会往 minimax_keyframes 里塞锚，画面会打架。
 """
 
@@ -431,10 +436,86 @@ class H3RelayChain:
         return {}
 
 
+class H3RelayCopyBridge:
+    """0.4.0 拷贝桥：上一段尾部 AV latent **逐位拷贝**进本段初始 latent + 噪声掩码。
+
+    与 H3RelayMotionContext（conditioning 钉帧）二选一，不可同图串联：
+      · Latent 桥（钉帧）：模型重绘上一段尾段 → 有复现漂移/发糊风险（0.3.x 实测），
+        观测端沉降检测兜底；
+      · 拷贝桥（本节点）：钉住区不重绘（掩码 0 区每步被钉回拷贝 latent），复现伪影
+        这一类从机制上消失；掩码消费走 ComfyUI 原生 H3 契约与 SelfLift 的
+        noise_mask 支持——**不绑定任何特定采样器**。
+    输出 INT = 应裁帧数（=拷贝跨度），接 H3RelayTrimAV 的 trim_frames；
+    TrimAV 的 settle_frames 保持 -1，观测端继续守接管帧。
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "latent": ("LATENT", {
+                    "tooltip": "本段初始 AV latent（CSGlideCastCS / EmptyH3LatentAV 的 latent 输出）。\n"
+                               "上一段尾部会逐位写进它的开头，并附噪声掩码。",
+                }),
+                "context_latent": ("LATENT", {
+                    "tooltip": "上一段的完整 AV latent（🔗 H3 续接 Latent 读）。\n"
+                               "第 1 段（stage 0）不要接本节点——没有上一段可拷。",
+                }),
+                "context_frames": ("INT", {
+                    "default": 22, "min": 5, "max": 124, "step": 17,
+                    "tooltip": "拷贝窗口帧数，只认 5+17k 网格（5/22/39/56/73/90/107/124）。\n"
+                               "须小于本段帧数（前缀必须给新内容留位置）。",
+                }),
+            },
+            "optional": {
+                "mask_mode": (["hard", "taper"], {
+                    "default": "hard",
+                    "tooltip": "hard = 前缀全 0 硬锁（钉住区零重绘，默认，与「复现=漂移源」实测同向）；\n"
+                               "taper = 头部 1.0 线性降到缝端 seam_min（渐进接管实验档）。",
+                }),
+                "taper_tokens": ("INT", {
+                    "default": 4, "min": 1, "max": 12, "step": 1,
+                    "tooltip": "仅 taper 模式：缝端前多少个 token 参与线性过渡。",
+                }),
+                "seam_min": ("FLOAT", {
+                    "default": 0.10, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "仅 taper 模式：缝端掩码下限（0=完全硬锁）。",
+                }),
+                "pin_audio": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "把上一段音频尾也拷进本段音频 latent 开头（采样上下文用）。\n"
+                               "掩码只做视频流；可见的声画拼接仍归「裁重叠」与组装层。",
+                }),
+            },
+        }
+
+    RETURN_TYPES = ("LATENT", "STRING", "INT")
+    RETURN_NAMES = ("latent", "report", "trim_frames")
+    FUNCTION = "bridge"
+    CATEGORY = CATEGORY
+    DESCRIPTION = (
+        "把上一段尾部 AV latent 逐位拷进本段开头并附噪声掩码（钉住区不重绘），\n"
+        "消除「复现发糊/漂移」这一类接缝伪影。输出 trim_frames 接「裁重叠」。\n"
+        "⚠️ 与「Latent 桥」（conditioning 钉帧）二选一，不可同图串联。"
+    )
+
+    def bridge(self, latent, context_latent, context_frames,
+               mask_mode="hard", taper_tokens=4, seam_min=0.10, pin_audio=True):
+        CONTRACT.enforce()
+        out, covered, report = CORE.build_continue_latent(
+            latent, context_latent, int(context_frames),
+            mask_mode=mask_mode, taper=int(taper_tokens),
+            seam_min=float(seam_min), pin_audio=bool(pin_audio),
+        )
+        print(report, flush=True)
+        return (out, report, covered)
+
+
 NODE_CLASS_MAPPINGS = {
     "H3RelayLatentSave": H3RelayLatentSave,
     "H3RelayLatentLoad": H3RelayLatentLoad,
     "H3RelayMotionContext": H3RelayMotionContext,
+    "H3RelayCopyBridge": H3RelayCopyBridge,
     "H3RelayTrimAV": H3RelayTrimAV,
     "H3RelayChain": H3RelayChain,
 }
@@ -443,6 +524,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "H3RelayLatentSave": "🔗 H3 续接 Latent 存",
     "H3RelayLatentLoad": "🔗 H3 续接 Latent 读",
     "H3RelayMotionContext": "🔗 H3 续接 Latent 桥",
+    "H3RelayCopyBridge": "🔗 H3 续接 拷贝桥",
     "H3RelayTrimAV": "🔗 H3 续接裁重叠",
     "H3RelayChain": "🔗 H3 续接连跑 Chain",
 }
