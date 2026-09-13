@@ -574,6 +574,11 @@ ADVISE_WITHIN: int = MAX_SETTLE - 1
 BLUR_ZONE_RATIO: float = 0.55      # 锐度 < 基准×此比例 → 记为塌陷帧
 BLUR_COLLAPSE_RATIO: float = 0.35  # 塌陷最深要低于基准×此比例才算真模糊（防误伤天生偏软的段）
 BLUR_RECOVER_RATIO: float = 0.5    # 窗内必须看到恢复到基准×此比例，才敢裁（看不到恢复宁少勿多）
+# —— v0.4.1 色档收敛信号：注噪/taper 路的「收敛尾巴」是低频现象（重影+色档漂移），
+# 锐度法不可见（L1 taper 实测：可见头部 3 帧亮度 0.270→0.282 爬升 + 首帧重影——GG 目检确认）。
+# 旧像素注噪路裁 26=22+4 裁的就是它——本信号是它的观测端版本。
+GRADE_DEV_Z: float = 4.0        # 体区 MAD 的 z 门槛
+GRADE_DEV_FLOOR: float = 0.003  # 绝对下限（0-1 量纲；255 量纲测试由 z 项主导）
 # —— v0.3.3 稳健统计层：参考分布来自段体（窗外体区），z 分数定位，深度比值做证据闸 ——
 # 动机（GG 2026-09-13）：分辨率/步数/LoRA/场景内容都会整体移动锐度与帧差的绝对量级，
 # 任何"绝对常数"都会在某个参数组合下失效。因此：
@@ -683,9 +688,10 @@ def detect_settle(
 
     ``images`` 是完整 decode 结果（长度 N，前 ``pin`` 帧是钉住区的复现）。
     返回 ``(settle, signal, reference)``——signal/reference 的量纲随判定路径不同：
-    硬跳路 = 帧差，锐度路 = Laplacian 均方；两者都是**纯比值判定**，无量纲常数。
+    硬跳路 = 帧差，锐度路 = Laplacian 均方，色档路 = RGB 均值偏离；全**纯比值判定**。
+    三路独立出候选，**取 settle 最大者**（不同伪影类型互补，谁检测到得深听谁的）。
 
-    v0.3.3 三层判定（GG 要求的多维度/自参考方案）：
+    v0.4.1 四层判定（GG 要求的多维度/自参考方案）：
 
       0. **结构性护栏**（不变）：窄窗贴 ``pin`` 不做全局 argmax；``settle ≤ max_settle``；
          测不准 ⇒ 0 ⇒ 与"只裁钉住区"的旧行为逐位一致，最坏不会更差。
@@ -693,18 +699,19 @@ def detect_settle(
          「体 z 分数 > Z_JUMP」（对段体帧差的 median+MAD 标准化——运动剧烈的段
          体差大，同样的跳不值钱）和「比值 > JUMP_RATIO×体中位」两道门；
          再**验身**：跳后 2-5 帧锐度须回到体分布（无一帧深塌陷）——跳完还是糊的
-         = 假跳/闪烁，否决，交给锐度路。
+         = 假跳/闪烁，否决。
       2. **锐度路（塌陷-恢复 · 深度证据闸）**：基准 = max(复现区中位, 窗外体区中位)
          （v0.3.2 双基准：复现区自身可能已发软）；窗内须**同时**出现
-         「塌陷帧（<0.55×基准）」和「深塌陷证据（最深处 <0.35×基准）」——
-         只有 z 异常而深度不够 = 段体天生比头锐的正常渐变，不动刀——
-         沉降 = 最后一个塌陷帧 − pin + 1；窗内看不到恢复（>0.5×基准）宁少勿多，仍回 0。
-      3. **参考分布全部来自段体**（v0.3.3）：分辨率/步数/LoRA/内容整体移动锐度量级时，
-         基准同步移动——4 步低清、928p 高清、CombatV2、平坦场景共用同一套比值。
-
-    维度扩展缝（刻意留白）：色偏型/鬼影型沉降（锐度不变）不在本检测器——色偏归
-    组装层外观拉齐（低频残差传输），鬼影归 0.4.0 拷贝+锥形桥（钉住区不重绘，
-    这一类伪影从机制上消失）。
+         「塌陷帧（<0.55×基准）」和「深塌陷证据（最深处 <0.35×基准）」，
+         且窗内可见恢复（>0.5×基准，宁少勿多）——沉降 = 最后一个塌陷帧 − pin + 1。
+      3. **色档收敛路（v0.4.1，新增）**：注噪/taper 续接的「收敛尾巴」——可见头部
+         若干帧的亮度/色档仍在对齐去噪轨迹（重影+低频漂移），锐度法不可见。
+         基准 = 窗外体区 RGB 均值的**逐通道中位数**；阈值 = max(GRADE_DEV_Z×体MAD,
+         绝对下限)。**必须在窗内观察到收敛**（头部偏离 → 其后全部回归基准）才动刀：
+         没有收敛 = 头部本来就是另一档内容的正常延续（如窗外远处切镜），照裁会
+         把合法内容裁掉（12.9 类反例）。沉降 = 首个回归帧的下标。
+      4. **参考分布全部来自段体**：分辨率/步数/LoRA/内容整体移动量级时，基准同步
+         移动——4 步低清、928p 高清、CombatV2、平坦场景共用同一套比值。
     """
     pin, max_settle = int(pin), max(0, int(max_settle))
     if pin <= 0 or max_settle <= 0:
@@ -729,6 +736,8 @@ def detect_settle(
     j = lo + int(torch.argmax(seg).item())
     val = float(diff[j].item())
 
+    best = (0, 0.0, baseline)           # (settle, signal, reference)——取最大
+
     # —— 路径 1：硬跳（体 z 分数 + 比值双门槛，过了再验身）——
     b_med, b_mad = _robust_stats(_frame_diffs(body))
     z_denom = max(b_mad, _baseline_floor(win))
@@ -737,34 +746,52 @@ def detect_settle(
         sharp_all = _sharpness(images[: min(n, pin + max_settle + 8)])
         ref_all = max(float(sharp_all[:pin].median()),
                       _robust_stats(_sharpness(body))[0])
-        if ref_all <= 0.0:
-            return max(0, min(max_settle, j + 1 - pin)), val, baseline
-        after_jump = sharp_all[j + 1: min(j + 5, int(sharp_all.shape[0]))]
-        if after_jump.numel() == 0 or bool(
-                (after_jump < BLUR_COLLAPSE_RATIO * ref_all).any()):
-            pass                        # 跳后仍是糊的 → 假跳/闪烁，否决，落锐度路
-        else:
-            return max(0, min(max_settle, j + 1 - pin)), val, baseline
+        accept = ref_all <= 0.0         # 锐度基准退化 → 无法验身 → 采信跳点
+        if not accept:
+            after_jump = sharp_all[j + 1: min(j + 5, int(sharp_all.shape[0]))]
+            accept = after_jump.numel() == 0 or not bool(
+                (after_jump < BLUR_COLLAPSE_RATIO * ref_all).any())
+        if accept:
+            s = max(0, min(max_settle, j + 1 - pin))
+            if s > best[0]:
+                best = (s, val, baseline)
 
     # —— 路径 2：锐度塌陷-恢复（双基准 + 深度证据闸）——
     sh = _sharpness(win)
-    if sh.numel() < pin + 2:
-        return 0, val, baseline
-    far = _sharpness(images[far_lo: min(int(images.shape[0]), far_lo + 40)])
-    ref = max(float(sh[:pin].median()),
-              float(far.median()) if far.numel() else 0.0)
-    if ref <= 0.0:
-        return 0, val, baseline
-    zone = sh[pin: pin + max_settle + 1]
-    below = zone < BLUR_ZONE_RATIO * ref
-    dip = float(zone.min())
-    if not bool(below.any()) or dip >= BLUR_COLLAPSE_RATIO * ref:
-        return 0, val, baseline         # 无塌陷，或深度不够 = 正常软渐变 → 不动刀
-    last = int(below.nonzero()[-1].item())
-    after = zone[last + 1:]
-    if after.numel() == 0 or float(after.max()) < BLUR_RECOVER_RATIO * ref:
-        return 0, val, baseline         # 窗内看不到恢复 → 宁少勿多
-    return min(max_settle, last + 1), dip, ref
+    if sh.numel() >= pin + 2:
+        far = _sharpness(images[far_lo: min(int(images.shape[0]), far_lo + 40)])
+        ref = max(float(sh[:pin].median()),
+                  float(far.median()) if far.numel() else 0.0)
+        if ref > 0.0:
+            zone = sh[pin: pin + max_settle + 1]
+            below = zone < BLUR_ZONE_RATIO * ref
+            dip = float(zone.min())
+            if bool(below.any()) and dip < BLUR_COLLAPSE_RATIO * ref:
+                last = int(below.nonzero()[-1].item())
+                after = zone[last + 1:]
+                if after.numel() > 0 and float(after.max()) >= BLUR_RECOVER_RATIO * ref:
+                    s = min(max_settle, last + 1)
+                    if s > best[0]:
+                        best = (s, dip, ref)
+
+    # —— 路径 3：色档收敛（v0.4.1）——头部偏离体区色档、且窗内可见回归才动刀——
+    rgb_head = win.float().mean(dim=(1, 2))                       # [Nw,3]（量纲随输入）
+    rgb_body = body.float().mean(dim=(1, 2))                      # [Nb,3]
+    if rgb_head.shape[0] >= pin + 1 and rgb_body.shape[0] >= 4:
+        ref_rgb = rgb_body.median(dim=0).values
+        devs_head = (rgb_head[pin: pin + max_settle + 1] - ref_rgb).abs().mean(-1)
+        devs_body = (rgb_body - ref_rgb).abs().mean(-1)
+        _, b_mad_g = _robust_stats(devs_body)
+        thr = max(GRADE_DEV_Z * b_mad_g, GRADE_DEV_FLOOR * float(images.abs().max() or 1.0))
+        ok = devs_head <= thr
+        if bool(ok.any()):
+            c = int(ok.nonzero()[0].item())            # 首个回归基准的帧（窗内偏移）
+            if bool(ok[c:].all()):                     # 其后全部回归 = 观察到收敛
+                s = min(max_settle, c)
+                if s > best[0]:
+                    best = (s, float(devs_head[c - 1]) if c > 0 else 0.0, float(thr))
+
+    return best
 
 
 def describe_head_jump(images: torch.Tensor, scan: int = 40,

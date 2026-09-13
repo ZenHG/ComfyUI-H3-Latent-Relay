@@ -727,6 +727,45 @@ check("14.14 节点注册 + required 键序 + optional 末位（追加铁律）"
       and list(_it["optional"])[-1] == "pin_audio",
       "required=%s optional=%s" % (list(_it["required"]), list(_it["optional"])))
 
+# ============ 组15：色档收敛信号（v0.4.1）——注噪/taper 收敛尾巴的观测端 ============
+
+def grade_seg(n=40, pin=22, dark=(22, 25), factor=0.88, seed=13):
+    """色档收敛合成：f22-24 整体压暗 12%（收敛中），f25 起回归体档。纹理均匀无模糊。"""
+    g = torch.Generator().manual_seed(seed)
+    texA = 100.0 + torch.rand(8, 8, 3, generator=g) * 20.0
+    im = torch.zeros(n, 8, 8, 3)
+    for i in range(n):
+        f = factor if dark[0] <= i < dark[1] else 1.0
+        im[i] = texA * f + (i % 3) * 3.0
+    return im
+
+
+sG, vG, bG = CORE.detect_settle(grade_seg(), 22)
+check("15.1 色档收敛（暗 3 帧后回归体档）→ 锐度路不触发、色档路 settle=3",
+      sG == 3, "settle=%d val=%.1f thr=%.1f" % (sG, vG, bG))
+
+def wobble_seg(n=40, pin=22, seed=17):
+    """自然亮度波动：体区各帧亮度随机 ±5%，头体同分布 → 不误裁。"""
+    g = torch.Generator().manual_seed(seed)
+    texA = 100.0 + torch.rand(8, 8, 3, generator=g) * 20.0
+    im = torch.zeros(n, 8, 8, 3)
+    for i in range(n):
+        w = 1.0 + (torch.rand(1, generator=g).item() - 0.5) * 0.10
+        im[i] = texA * w + (i % 3) * 3.0
+    return im
+
+
+sW, _, _ = CORE.detect_settle(wobble_seg(), 22)
+check("15.2 自然亮度波动（头体同分布）→ 0（阈值随体 MAD 自适应）",
+      sW == 0, "settle=%d" % sW)
+
+sM2, _, _ = CORE.detect_settle(blur_seg_mild() * 0.85, 22)  # 模糊+整体压暗：锐度路与色档路同响
+check("15.3 三信号取最大：mild 模糊(4) 与压暗色档(≥4) → settle ≥ 4",
+      sM2 >= 4, "settle=%d" % sM2)
+check("15.4 量纲不变：0-1 输入同结论",
+      CORE.detect_settle(grade_seg() / 255.0, 22)[0] == 3,
+      "settle=%d" % CORE.detect_settle(grade_seg() / 255.0, 22)[0])
+
 print()
 print("=" * 78)
 print("结果：通过 %d / 失败 %d" % (len(PASS), len(FAIL)))

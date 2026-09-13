@@ -354,7 +354,7 @@ class H3RelayTrimAV:
         want = int(settle_frames)
         if want < 0:
             settle, jump, base = CORE.detect_settle(images, pin)
-            why = ("自动检测：切换信号 %.1f / 基准 %.1f（帧差突变或锐度塌陷）" % (jump, base)) if settle \
+            why = ("自动检测：切换信号 %.1f / 基准 %.1f（帧差突变/锐度塌陷/色档收敛）" % (jump, base)) if settle \
                 else ("自动检测：未检出切换点（帧差 %.1f / 基线 %.1f，无突变亦无锐度塌陷）" % (jump, base))
         else:
             settle, why = want, "手动指定"
