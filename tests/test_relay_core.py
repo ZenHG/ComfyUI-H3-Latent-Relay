@@ -530,6 +530,44 @@ check("12.22 settle_frames 追加在 optional 末位（旧工作流少这一格�
       list(_opt)[-1] == "settle_frames" and list(_req) == ["images", "trim_frames", "fps"],
       "required=%s optional=%s" % (list(_req), list(_opt)))
 
+# ============ 组13：模糊型沉降（v0.3.1）——帧差法盲区的高频能量补判 ============
+
+def blur_seg(n=40, pin=22, blur=(22, 28), amp=20.0, dev=15.0, seed=7):
+    """模糊型沉降合成。钉住区 = 纹理A（复现，帧差中等）；[blur0,blur1) = 重绘发虚
+    （常数帧：锐度≈0、帧差≈0）；其后 = 纹理B（新内容，均值同、振幅略小）。
+    边界帧差刻意 < 4×基线 → 帧差法必然盲，只有锐度法能救。"""
+    g = torch.Generator().manual_seed(seed)
+    texA = 100.0 + torch.rand(8, 8, 3, generator=g) * amp
+    texB = 100.0 + amp / 2 + (torch.rand(8, 8, 3, generator=g) - 0.5) * 2 * dev
+    base_mean = float(texA.mean())
+    im = torch.zeros(n, 8, 8, 3)
+    for i in range(n):
+        if i < pin:
+            im[i] = texA + (i % 3) * 3.0
+        elif blur[0] <= i < blur[1]:
+            im[i] = base_mean
+        else:
+            im[i] = texB + (i % 3) * 3.0
+    return im
+
+
+sE, jE, bE = CORE.detect_settle(blur_seg(), 22)
+check("13.1 模糊沉降（塌陷 f24-29、恢复 f30）→ 锐度法量出 settle≈8-9",
+      6 <= sE <= CORE.MAX_SETTLE, "settle=%d dip=%.1f ref=%.1f" % (sE, jE, bE))
+check("13.2 模糊路径的返回值语义：val=塌陷谷底（<0.35×基准）、base=复现区锐度基准",
+      jE < CORE.BLUR_COLLAPSE_RATIO * bE and bE > 0.0,
+      "dip=%.1f ref=%.1f" % (jE, bE))
+sF, _, _ = CORE.detect_settle(blur_seg(blur=(22, 40)), 22)   # 糊过窗：22+18 > 22+12
+check("13.3 塌陷越过检测窗且窗内无恢复 → 0（宁少勿多）", sF == 0, "settle=%d" % sF)
+sG, _, _ = CORE.detect_settle(blur_seg(blur=(22, 22)), 22)   # 无模糊区
+check("13.4 全程带纹理、无塌陷 → 0（不误伤）", sG == 0, "settle=%d" % sG)
+sH, _, _ = CORE.detect_settle(blur_seg(blur=(22, 34)), 22)   # 糊 22..33（12 帧贴满窗）、34 起新内容
+check("13.5 长塌陷(12帧)窗内可见恢复 → settle=12（贴满上限）",
+      sH == 12, "settle=%d" % sH)
+sI, _, _ = CORE.detect_settle(blur_seg(seed=11), 22)         # 换 seed 回归
+check("13.6 换随机种子结论稳定（6 ≤ settle ≤ 12）",
+      6 <= sI <= CORE.MAX_SETTLE, "settle=%d" % sI)
+
 print()
 print("=" * 78)
 print("结果：通过 %d / 失败 %d" % (len(PASS), len(FAIL)))

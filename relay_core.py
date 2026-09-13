@@ -564,6 +564,24 @@ MAX_SETTLE: int = 12          # 沉降帧上限（≈0.5 s）。自动检测不�
 # 裁后仍见突变时，只有位置在这么靠前才值得动刀：
 # 裁后下标 j 表示"还差 j+1 帧沉降"，所以上限是 MAX_SETTLE-1。
 ADVISE_WITHIN: int = MAX_SETTLE - 1
+# —— 模糊型沉降（v0.3.1）：切换不是硬跳而是「重绘发虚」——帧差法看不见，改看高频能量。——
+BLUR_ZONE_RATIO: float = 0.55      # 锐度 < 复现区基准×此比例 → 记为塌陷帧
+BLUR_COLLAPSE_RATIO: float = 0.35  # 塌陷最深要低于基准×此比例才算真模糊（防误伤天生偏软的段）
+BLUR_RECOVER_RATIO: float = 0.5    # 窗内必须看到恢复到基准×此比例，才敢裁（看不到恢复宁少勿多）
+
+
+def _sharpness(images: torch.Tensor) -> torch.Tensor:
+    """逐帧高频能量代理：``帧 − 3×3 均值模糊`` 的绝对差均值。纯 torch，不依赖 cv2/PIL。
+
+    带纹理的画面显著大于 0；重绘发虚（模糊）会把它压到接近 0。
+    """
+    f = images.to(torch.float32)
+    if f.dim() != 4:
+        return torch.zeros(0)
+    g = f.mean(dim=-1).unsqueeze(1)                    # [N,1,H,W]
+    soft = torch.nn.functional.avg_pool2d(g, kernel_size=3, stride=1, padding=1,
+                                          count_include_pad=False)
+    return (g - soft).abs().mean(dim=(1, 2, 3))        # [N]
 
 
 def _frame_diffs(images: torch.Tensor) -> torch.Tensor:
@@ -629,6 +647,12 @@ def detect_settle(
         根本不在窗内，不会误判成接缝（老实现扫前 40 帧全局 argmax，会建议把新内容裁掉）。
       - **上限**：``settle ≤ max_settle``；超出即回退 0。
       - **失败安全**：测不准 ⇒ 0 ⇒ 与"只裁钉住区"的旧行为逐位一致，最坏不会更差。
+      - **模糊型沉降（v0.3.1）**：帧差法只认「硬跳」。切换若走「重绘发虚」——钉住区之后
+        模型先把上一段尾部画糊再收进本段内容——帧差全程不抬头（模糊＝低频变化），
+        帧差法恒盲（L1 剧本A 实测：缝后 f2-f7 清晰度塌到正常值的 15%，检测返回 0）。
+        补第二信号：**高频能量塌陷-恢复**。以钉住区锐度（≈源画面锐度）为基准，
+        窗内出现「深塌陷（<0.35×基准）且窗内可见恢复（>0.5×基准）」时，
+        沉降 = 最后一个塌陷帧 − pin + 1；窗内看不到恢复宁少勿多，仍回 0。
 
     基线取自**钉住区内部**（那里是上一段尾部的复现，帧差天然小），
     所以"本段新内容动得厉害"不会把基线抬起来。
@@ -653,7 +677,26 @@ def detect_settle(
     val = float(diff[j].item())
     if val > ratio * max(baseline, BASELINE_FLOOR):
         return max(0, min(max_settle, j + 1 - pin)), val, baseline
-    return 0, val, baseline
+
+    # —— 模糊型沉降：帧差法没触发，但高频能量可能已塌了再回来（重绘发虚）。——
+    sh = _sharpness(win)
+    if sh.numel() < pin + 2:
+        return 0, val, baseline
+    ref = float(sh[:pin].median())                     # 复现区锐度 ≈ 源画面锐度
+    if ref <= 0.0:
+        return 0, val, baseline
+    zone = sh[pin: pin + max_settle + 1]
+    below = zone < BLUR_ZONE_RATIO * ref
+    if not bool(below.any()):
+        return 0, val, baseline
+    last = int(below.nonzero()[-1].item())
+    dip = float(zone.min())
+    if dip > BLUR_COLLAPSE_RATIO * ref:
+        return 0, val, baseline                        # 只有变软、没有深塌陷 → 不动刀
+    after = zone[last + 1:]
+    if after.numel() == 0 or float(after.max()) < BLUR_RECOVER_RATIO * ref:
+        return 0, val, baseline                        # 窗内看不到恢复 → 宁少勿多
+    return min(max_settle, last + 1), dip, ref
 
 
 def describe_head_jump(images: torch.Tensor, scan: int = 40,
