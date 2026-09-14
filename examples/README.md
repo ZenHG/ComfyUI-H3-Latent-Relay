@@ -21,6 +21,10 @@
 4. 段号 = 1 → 换 prompt → Queue（第 2 段）。
 5. 日志出现 `钉住 22 帧` + `裁首 N 帧 = 钉住 22 + 沉降 Y` + `起点干净` = 接通了。
 
+> 本示例走 **MotionContext 桥**（conditioning 路线）。0.4.0 起可选**拷贝桥**
+> `H3RelayCopyBridge`（输出接 KSampler 的 `latent_image`，钉住区不重绘），
+> 机制与取舍见主 README「接缝处的对话规避与音频处理」与 `CHANGES.md` 0.4.0。
+
 ## `make_minimal_workflow.py`
 
 生成上面那份 JSON 的脚本。
