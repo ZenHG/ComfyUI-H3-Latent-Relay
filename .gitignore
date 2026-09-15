@@ -40,3 +40,6 @@ node_modules/
 
 # ---- ZCode 会话本地计划（不入库）----
 .zcode/
+
+# ---- 本地调研笔记（不入库）----
+RESEARCH_*.md
