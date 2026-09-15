@@ -1,5 +1,36 @@
 # CHANGES
 
+## 0.4.3 — 2026-09-15
+
+### 拷贝桥新增 `mask_mode="ramp"`（噪声斜坡「软证据」接缝）
+
+前沿调研（Diffusion Forcing arXiv:2407.01392 / SDEdit arXiv:2108.01073 /
+RePaint arXiv:2201.09865）指出硬掩码接缝是噪声谱的两端奇异点（钉住区 σ=0、
+新内容 σ=σ_max），交界成为分布不连续面，色档/曝光在缝处"台阶化"。读宿主源码
+实证 **ComfyUI 原生 H3 契约本来就支持连续掩码值**：
+
+- `comfy/ldm/minimax/model.py` forward()：*"masked rows run at their own
+  strength: mask value m puts a row at sigma = m * sigma_stream"* —— 逐 token
+  的 timestep 标签 = 1 − m·σ；
+- `comfy/model_base.py` `MiniMaxH3.scale_latent_inpaint()` 的 x_blend_weight
+  按连续 m 混合，外层每步输出 blend `out·m + anchor·(1−m)`（RePaint 式逐步回锚）。
+
+因此 ramp 档无需任何采样器钩子：`noise_mask` 的连续值就是 Diffusion-Forcing 式
+的逐 token σ 标签。**语义与 taper 相反**：taper 头部 m=1.0 无锚全重绘；ramp 全程
+m≤ramp_top<1，每一步都被 (1−m) 权重锚回拷贝尾——"软证据"，不是"没证据"。
+
+- `relay_core`：新常量 `SEAM_RAMP_TOP=0.25`（+MIN/MAX），`MASK_MODES` 追加
+  `"ramp"`；新纯函数 `prefix_ramp_weights(steps, ramp_top, ramp_tokens)`——
+  整窗铺开时远端严格 0（硬钉）、缝端严格 ramp_top；`ramp_tokens>0` 只松缝端
+  k 个 token（"只松缝、锁运动"）；ramp_top 越界按 [0,1] 端点截断，0 退化为 hard。
+- `H3RelayCopyBridge`：`mask_mode` 追加 `"ramp"`，新 widget `ramp_top`（默认
+  0.25，max 0.95 防呆）与 `ramp_tokens`（默认 0 = 整窗铺开）**追加在 optional
+  末位**——旧工作流 widgets_values 按位置对应，行为逐位不变（测试 17.13 钉住）。
+- 测试组 17（13 项断言，共 167 项全绿）：权重对齐 / 首 token 硬钉且严格单调 /
+  全程 m<1（有锚）/ 拷贝不受掩码模式影响 / 非前缀区恒 1 / 窄斜坡 / 截断防呆 /
+  ramp_top=0 退化 hard / 设备 batch 一致 / widget 追加铁律。
+- 文档：README 拷贝桥导语与参数表补 ramp 行；CONTRIBUTING 计数 154/十六→167/十七。
+
 ## 0.4.2 — 2026-09-15
 
 ### 使用缺陷修复（全面审查 17 项：高危 2 / 中危 7 / 低危 8）

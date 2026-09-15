@@ -891,11 +891,29 @@ def describe_latent(latent: Any) -> str:
 #   · 消费端实测：SelfLiftH3Sampler 原生读 latent["noise_mask"]（[B,1,T,H,W]，
 #     post-CFG hook 把 0 区每步钉回 clean anchor）——无需改任何采样器。
 # 音频：尾随拷贝只作采样上下文（掩码只做视频流）；可见的声画拼接仍归 TrimAV/组装层。
+#
+# 0.4.3 新增 "ramp"（噪声斜坡，方向一：历史 = 带噪声等级的软证据）：
+#   原生契约本来就支持**连续**掩码值——宿主源码两处实证（2026-09-15 读码）：
+#     comfy/ldm/minimax/model.py  forward()：
+#       "masked rows run at their own strength: mask value m puts a row at
+#        sigma = m * sigma_stream" → 逐 token 的 timestep 标签 = 1 − m·σ；
+#     comfy/model_base.py  MiniMaxH3.scale_latent_inpaint()：
+#       x_blend_weight = (token_grid_mask − denoise_mask)/(1 − denoise_mask)
+#       ——m∈(0,1) 走连续混合，不是四舍五入到两态。
+#   外加外层每步输出 blend out = out·m + anchor·(1−m)（RePaint 式逐步回锚）。
+#   因此 ramp 档的 m∈(0,1) 语义 = Diffusion Forcing（arXiv:2407.01392）的
+#   逐 token 噪声等级 + SDEdit（arXiv:2108.01073）的按强度重绘：缝侧 token
+#   以 ramp_top 强度被模型轻度 harmonize（重上色/微调曝光），远端仍硬钉。
+#   与 taper 的区别：taper 头部 m=1.0 = 无锚全重绘；ramp 全程 m≤ramp_top<1，
+#   每一步都被 (1−m) 权重锚回拷贝尾——是"软证据"，不是"没证据"。
 SEAM_TAPER_TOKENS: int = 4
 SEAM_MIN_MASK: float = 0.10
 SEAM_MIN_FLOOR: float = 0.0
+SEAM_RAMP_TOP: float = 0.25
+SEAM_RAMP_TOP_MIN: float = 0.0     # 0 = 显式退化为 hard
+SEAM_RAMP_TOP_MAX: float = 1.0     # widget 侧再收紧；m=1 即无锚，归 taper 管
 AUDIO_RELEASE_TICKS: int = 6
-MASK_MODES: Tuple[str, ...] = ("hard", "taper")
+MASK_MODES: Tuple[str, ...] = ("hard", "taper", "ramp")
 
 
 def prefix_taper_weights(
@@ -923,6 +941,40 @@ def prefix_taper_weights(
     return tuple(weights)
 
 
+def prefix_ramp_weights(
+    steps: int,
+    ramp_top: float = SEAM_RAMP_TOP,
+    ramp_tokens: int = 0,
+) -> Tuple[float, ...]:
+    """0.4.3 噪声斜坡权重：窗远端 0.0（硬钉）线性升到缝端 ramp_top。
+
+    与 taper 的本质区别：taper 是"重绘自由度"刻度（头 1.0 = 无锚全重绘）；
+    ramp 是"重噪强度"刻度——每帧都留 (1−m) 的锚权重，每一步都被采样器按
+    (1−m) 拉回拷贝尾，m 只决定该 token 以多大 sigma 参与去噪。
+    ramp_top 必须落在 [0, 1]（越界即按端点截断）：m=0 退化成 hard——远端硬钉
+    且缝端也无重绘自由度；m→1 则锚权重 (1−m)→0，等于没有锚，那是 taper 干的事，
+    widget 侧把上限收到 0.95 防呆。
+
+    ramp_tokens>0 时只让最后这么多 token 参与斜坡，更早的钉住 token 恒 0（硬钉）——
+    用于"只松缝、锁运动"的窄斜坡；默认 0 = 整个窗口铺开。
+
+    端点约定：整窗铺开时 token i 取 top·i/(n−1)——远端严格 0（硬钉）、缝端严格 top
+    （n=1 时唯一 token 即缝端取 top）；窄斜坡时最后 k 个 token 取 top·(j+1)/k（渐进软化）。
+    """
+    n = int(steps)
+    if n < 1:
+        return ()
+    top = min(SEAM_RAMP_TOP_MAX, max(SEAM_RAMP_TOP_MIN, float(ramp_top)))
+    if int(ramp_tokens) <= 0:
+        if n == 1:
+            return (float(top),)
+        return tuple(top * float(i) / float(n - 1) for i in range(n))
+    span = max(1, min(int(ramp_tokens), n))
+    weights = [0.0] * (n - span)
+    weights.extend(top * float(j + 1) / float(span) for j in range(span))
+    return tuple(weights)
+
+
 def _nested_pair(video: torch.Tensor, audio: torch.Tensor, template: Any = None) -> Any:
     """打包 AV 双流为 NestedTensor（ComfyUI 运行时），离线环境退化为 list。"""
     try:
@@ -947,6 +999,8 @@ def build_continue_latent(
     taper: int = SEAM_TAPER_TOKENS,
     seam_min: float = SEAM_MIN_MASK,
     pin_audio: bool = True,
+    ramp_top: float = SEAM_RAMP_TOP,
+    ramp_tokens: int = 0,
 ) -> Tuple[Dict[str, Any], int, str]:
     """0.4.0 拷贝桥：把上一段 AV 尾部**逐位拷贝**进本段初始 latent + 噪声掩码。
 
@@ -958,6 +1012,11 @@ def build_continue_latent(
       1. ``frames`` 落在 5+17k 网格且尾段起点 5-token 对齐（复用 video_tail_from_latent）；
       2. 上段与本段分辨率一致；
       3. 拷贝前缀必须给新内容留至少 1 个 token。
+
+    ``mask_mode="ramp"``（0.4.3）把钉住区从"硬事实"改成"软证据"：掩码连续值按
+    原生契约就是逐 token 的 sigma 标签（详见上方机制注释），缝侧轻度 harmonize、
+    远端硬钉，全程有锚——治硬接缝处色档/曝光"台阶化"。语义与 taper 相反，见
+    ``prefix_ramp_weights``。
     """
     if mask_mode not in MASK_MODES:
         raise ValueError(
@@ -1009,6 +1068,12 @@ def build_continue_latent(
     if mask_mode == "hard":
         vmask[:, :, :steps] = 0.0
         mask_desc = "硬锁（全 0，钉住区零重绘）"
+    elif mask_mode == "ramp":
+        w = prefix_ramp_weights(steps, ramp_top, ramp_tokens)
+        # 权重直接建在掩码设备上，省一次跨设备拷贝（latent 在 GPU 时 vmask 也在 GPU）
+        vmask[:, :, :steps] = torch.tensor(w, dtype=torch.float32,
+                                           device=vmask.device).view(1, 1, steps, 1, 1)
+        mask_desc = "噪声斜坡 0.00→%.2f（每步锚回 (1−m)，软证据档）" % w[-1]
     else:
         w = prefix_taper_weights(steps, taper, seam_min)
         # 权重直接建在掩码设备上，省一次跨设备拷贝（latent 在 GPU 时 vmask 也在 GPU）

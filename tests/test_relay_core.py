@@ -29,6 +29,7 @@
  14. 拷贝桥（0.4.0）：位级拷贝 + 噪声掩码 + raise 防线
  15. 色档收敛信号（0.4.1）：注噪/taper 收敛尾巴的观测端
  16. 0.4.2 回归：导出音频分支 / 中文 note / 服务端校验 / 掩码设备 / 契约降级缓存
+ 17. 噪声斜坡 ramp（0.4.3）：软证据接缝——连续掩码 = 逐 token sigma 标签
 """
 
 import os
@@ -731,7 +732,8 @@ _it = NODES.H3RelayCopyBridge.INPUT_TYPES()
 check("14.14 节点注册 + required 键序 + optional 末位（追加铁律）",
       "H3RelayCopyBridge" in NODES.NODE_CLASS_MAPPINGS
       and list(_it["required"]) == ["latent", "context_latent", "context_frames"]
-      and list(_it["optional"])[-1] == "pin_audio",
+      and list(_it["optional"])[:4] == ["mask_mode", "taper_tokens", "seam_min", "pin_audio"]
+      and list(_it["optional"])[-1] == "ramp_tokens",
       "required=%s optional=%s" % (list(_it["required"]), list(_it["optional"])))
 
 # —— 14.15/14.16 掩码语义钉子（2026-09-15）——
@@ -890,6 +892,55 @@ b_multi = {"samples": torch.rand(2, 4, 12, 8, 8)}
 b_prev = {"samples": torch.rand(1, 4, 12, 8, 8)}
 out_b, _, _ = CORE.build_continue_latent(b_multi, b_prev, 22, pin_audio=False)
 check("16.17 batch=2 时掩码 batch 维随 target", int(out_b["noise_mask"].shape[0]) == 2)
+
+# ============ 组17：噪声斜坡 ramp（0.4.3，方向一「软证据」接缝） ============
+# 语义：连续掩码 m 按原生 H3 契约就是逐 token 的 sigma 标签（model.py forward:
+# "mask value m puts a row at sigma = m * sigma_stream"）——不是硬/软两态开关。
+# ramp 全程 m<1 ⇒ 每步都被 (1-m) 锚回拷贝尾；与 taper（头 m=1 无锚）方向相反。
+
+outR, trimR, repR = CORE.build_continue_latent(
+    av_latent(12, seed=11), av_latent(12, seed=12), 22, mask_mode="ramp")
+mR = outR["noise_mask"][:, :, :7, 0, 0].reshape(-1)   # 前缀 7 token 的掩码列
+wR = CORE.prefix_ramp_weights(7, 0.25, 0)
+check("17.1 ramp 权重 = prefix_ramp_weights（逐 token 对齐）",
+      torch.allclose(mR, torch.tensor(wR, dtype=torch.float32), atol=1e-6),
+      "weights=%s" % ([round(float(x), 3) for x in mR],))
+check("17.2 ramp 首 token 硬钉（m=0）且严格单调升", float(mR[0]) == 0.0
+      and all(float(mR[i + 1]) > float(mR[i]) for i in range(6)),
+      "首=%.2f 末=%.2f" % (float(mR[0]), float(mR[-1])))
+check("17.3 ramp 默认缝端 = 0.25（软证据，非重绘）", abs(float(mR[-1]) - 0.25) < 1e-6)
+check("17.4 ramp 全程 m<1 = 每一步都有锚（区别于 taper 头 1.0 无锚）",
+      bool((mR < 1.0).all()))
+check("17.5 ramp 前缀拷贝仍位级一致（掩码模式不改拷贝）",
+      torch.equal(CORE.video_from_latent(outR)[:, :, :7],
+                  CORE.video_from_latent(av_latent(12, seed=12))[:, :, 5:12]))
+check("17.6 ramp 非前缀区掩码恒 1（新内容照常生成）",
+      bool((outR["noise_mask"][:, :, 7:] == 1).all()))
+check("17.7 ramp report 含「噪声斜坡」与 trim", "噪声斜坡" in repR and trimR == 22, repR)
+# 窄斜坡：只松缝端 2 个 token，其余硬钉
+wR2 = CORE.prefix_ramp_weights(7, 0.4, 2)
+check("17.8 ramp_tokens=2：前 5 步硬钉 0，末 2 步 0.2/0.4",
+      wR2 == (0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 0.4), "w=%s" % (wR2,))
+# ramp_top 越界按端点截断（m∈[0,1]）
+check("17.9 ramp_top 截断：>1 截到 1.0，<0 截到 0.0（防呆）",
+      CORE.prefix_ramp_weights(4, 3.0, 0)[-1] == 1.0
+      and CORE.prefix_ramp_weights(4, -1.0, 0)[-1] == 0.0)
+# ramp_top=0 退化为 hard（全 0）
+outR0, _, _ = CORE.build_continue_latent(av_latent(12, seed=13), av_latent(12, seed=14),
+                                         22, mask_mode="ramp", ramp_top=0.0)
+check("17.10 ramp_top=0 退化为 hard（前缀全 0）",
+      bool((outR0["noise_mask"][:, :, :7] == 0).all()))
+# 设备/batch 一致（与 16.16/17 同纪律）
+check("17.11 ramp 掩码与 latent 同设备同 batch",
+      out_b is not None and "noise_mask" in outR
+      and outR["noise_mask"].device == CORE.video_from_latent(outR).device)
+# 旧工作流兼容：mask_mode 默认仍是 hard，optional 键尾追加 ramp_*
+_itR = NODES.H3RelayCopyBridge.INPUT_TYPES()
+check("17.12 mask_mode 选项追加 ramp（旧 hard/taper 原序保留）",
+      _itR["optional"]["mask_mode"][0] == ["hard", "taper", "ramp"])
+check("17.13 节点 ramp 默认参数（不接线时行为与 0.4.2 完全一致）",
+      _itR["optional"]["ramp_top"][1]["default"] == 0.25
+      and _itR["optional"]["ramp_tokens"][1]["default"] == 0)
 
 print()
 print("=" * 78)

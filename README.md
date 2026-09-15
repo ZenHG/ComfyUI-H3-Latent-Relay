@@ -58,11 +58,13 @@ H3 分段生成时，"续接"要回答一件事：**新的一段怎么知道上�
 > 示例走的是 **MotionContext 桥**（conditioning 路线，0.2.x 起即此接法）。0.4.0 起
 > 还有**拷贝桥** `H3RelayCopyBridge`：把上一段尾 AV latent 逐位拷贝进本段初始
 > latent + 噪声掩码，`mask_mode="hard"`（默认）时钉住区**不重绘**——复现发糊/漂移
-> 这一类伪影从机制上消失。
+> 这一类伪影从机制上消失。0.4.3 起新增 `mask_mode="ramp"`（噪声斜坡「软证据」档）：
+> 掩码连续值按原生 H3 契约就是逐 token 的 sigma 标签，远端硬钉、缝端以 `ramp_top`
+> 强度轻度 harmonize，全程每步仍被 (1-m) 锚回拷贝尾——治硬接缝处的色档/曝光台阶。
 > ⚠️ `mask_mode="taper"` **不钉住**（掩码从头部 1.0 线性降到 `seam_min`，每帧留
 > `seam_min`~100% 重绘自由度），是「渐进接管」对照实验档，别当默认用。
 > 接法不同：它的输出接 KSampler 的 `latent_image`（不占 positive），见「节点」表
-> 与 `CHANGES.md` 0.4.0。
+> 与 `CHANGES.md` 0.4.0 / 0.4.3。
 
 **关键参数两张表**
 
@@ -132,7 +134,7 @@ H3 VAE 的时序跨度为 `(1,4,4,4,4)`：每 5 个 latent token 覆盖 17 像�
 | 🔗 **H3 续接 Latent 存** | 本段采样后，把 AV latent 落盘到 `output/relay_kit/<run_id>/stage_NNNNN.safetensors` |
 | 🔗 **H3 续接 Latent 读** | 读回上一段（段号 - 1），断点续跑时可指定 `explicit_path` 换源 |
 | 🔗 **H3 续接 Latent 桥** | 上一段尾段钉进本段 conditioning；`context_latent` 不接则直通 |
-| 🔗 **H3 续接 拷贝桥** | 上一段尾 AV latent **逐位拷贝**进本段初始 latent + 噪声掩码；`mask_mode="hard"`（默认）时钉住区不重绘，`taper` 档不钉住（见参数表）；输出接采样器 `latent_image`（0.4.0 起，与 Latent 桥二选一） |
+| 🔗 **H3 续接 拷贝桥** | 上一段尾 AV latent **逐位拷贝**进本段初始 latent + 噪声掩码；`mask_mode="hard"`（默认）时钉住区不重绘，`ramp` 档缝端轻度 harmonize（软证据，0.4.3），`taper` 档不钉住（见参数表）；输出接采样器 `latent_image`（0.4.0 起，与 Latent 桥二选一） |
 | 🔗 **H3 续接裁重叠** | **裁掉本段头部的重生成帧 + 自动裁掉紧随其后的「复现帧」（视频音频同裁）** —— 不裁就会在拼接处重播/跳变 |
 | 🔗 **H3 续接连跑 Chain** | 自动连跑控制器：同分组框内自动推进「桥 + 落盘」段号并排队（详见下方「Chain 自动连跑」） |
 
@@ -339,10 +341,12 @@ stage 链（落盘/读回）按段号自续（本段段号 - 1 = 要读的段号
 | `latent` | — | 本段初始 AV latent（接采样器上游） |
 | `context_latent` | — | 上一段完整 AV latent（第 1 段不接本节点） |
 | `context_frames` | 22 | 拷贝窗口帧数，合法值 5/22/39/56/73/90/107/124，须小于本段帧数 |
-| `mask_mode` | `hard` | **掩码语义 = `模型生成 * m + 上段尾 * (1-m)`，m=0 才钉住、m=1 是重绘。**<br>`hard` = 全窗 m=0（钉住区零重绘，**真续接用这个**）；<br>`taper` = 头部 m=1.0（**完全重绘**）线性降到缝端 `seam_min` —— ⚠ **钉住区实际上没有被钉住**，只作「渐进接管」对照实验档 |
+| `mask_mode` | `hard` | **掩码语义 = `模型生成 * m + 上段尾 * (1-m)`，m=0 才钉住、m=1 是重绘。**<br>`hard` = 全窗 m=0（钉住区零重绘，**真续接用这个**）；<br>`ramp`（0.4.3）= 噪声斜坡「软证据」：远端 m=0 硬钉 → 缝端线性升到 `ramp_top`，全程有锚（每步被 (1-m) 锚回拷贝尾）。原生 H3 契约把连续 m 当逐 token 的 sigma 标签（sigma_row = m·sigma_video），缝侧轻度 harmonize——治硬接缝处的色档/曝光台阶；<br>`taper` = 头部 m=1.0（**完全重绘**）线性降到缝端 `seam_min` —— ⚠ **钉住区实际上没有被钉住**，只作「渐进接管」对照实验档 |
 | `taper_tokens` | 4 | 仅 taper：缝端前多少个 token 参与线性过渡 |
 | `seam_min` | 0.10 | 仅 taper：缝端掩码下限（m 值）。`0` = 缝端完全硬锁；`0.3` = 缝端仍留 30% 重绘。**注意它只管缝端，头部恒为 1.0 全重绘** |
 | `pin_audio` | `true` | 上一段音频尾拷进本段音频开头（采样上下文）。纯视频 latent 关掉它 |
+| `ramp_top` | 0.25 | 仅 ramp：缝端最大 m（= 该 token 参与去噪的 sigma 比例）。`0` = 退化为 hard；`>0.5` 锚定明显变弱、接近 taper，慎用 |
+| `ramp_tokens` | 0 | 仅 ramp：参与斜坡的缝端 token 数；`0` = 整个拷贝窗铺开；小值（2~3）=「只松缝、锁运动」的窄斜坡 |
 
 **续接裁重叠**
 
@@ -399,7 +403,7 @@ python tests/test_relay_core.py
 脚本会自动上溯定位 ComfyUI 根目录；装在别处时用
 `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。
 
-**154 项断言，零 GPU、不加载模型**，覆盖十六个方面：
+**167 项断言，零 GPU、不加载模型**，覆盖十七个方面：
 
 | 组 | 覆盖 |
 |---|---|
@@ -419,6 +423,7 @@ python tests/test_relay_core.py
 | 14 | 拷贝桥（0.4.0）：位级拷贝/掩码结构/音频尾/跨分辨率/前缀占满/相位失配/节点契约 |
 | 15 | 色档收敛信号（0.4.1）：注噪/taper 收敛尾巴的观测端检出 |
 | 16 | 0.4.2 回归：导出音频分支 / 中文 note / 服务端校验 / 掩码设备 / 契约降级缓存 |
+| 17 | 噪声斜坡 ramp（0.4.3）：软证据接缝——连续掩码 = 逐 token sigma 标签 |
 
 ## 排障
 

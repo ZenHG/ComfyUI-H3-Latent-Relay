@@ -469,6 +469,9 @@ class H3RelayCopyBridge:
         拷贝 latent），复现伪影这一类从机制上消失；掩码消费走 ComfyUI 原生 H3 契约与
         SelfLift 的 noise_mask 支持——**不绑定任何特定采样器**。
         ⚠️ ``mask_mode="taper"`` **不钉住**（每帧留 seam_min~100% 重绘自由度），只作对照实验档。
+        ``mask_mode="ramp"``（0.4.3）是"软证据"档：连续掩码按原生 H3 契约就是逐 token 的
+        sigma 标签（sigma_row = m·sigma_video），远端硬钉、缝端以 ramp_top 强度 harmonize，
+        每一步都被 (1−m) 锚回拷贝尾——治硬接缝的色档/曝光台阶，全程有锚（与 taper 相反）。
     输出 INT = 应裁帧数（=拷贝跨度），接 H3RelayTrimAV 的 trim_frames；
     TrimAV 的 settle_frames 保持 -1，观测端继续守接管帧。
     """
@@ -492,14 +495,19 @@ class H3RelayCopyBridge:
                 }),
             },
             "optional": {
-                "mask_mode": (["hard", "taper"], {
+                "mask_mode": (["hard", "taper", "ramp"], {
                     "default": "hard",
-                    "tooltip": "掩码语义：denoised = 模型生成 * m + 上段尾 * (1-m)。**m=0 才钉住，m=1 是重绘。**\n"
+                    "tooltip": "掩码语义：每步输出 = 模型生成 * m + 上段尾 * (1-m)。**m=0 才钉住，m=1 是重绘。**\n"
                                "hard = 全窗 m=0（钉住区零重绘，默认，真续接用这个）；\n"
                                "taper = 头部 m=1.0（**完全重绘**）线性降到缝端 seam_min\n"
                                "        —— ⚠ **钉住区实际上没有被钉住**，只是给模型一个软提示；\n"
                                "        seam_min=0.3 意味着连缝端都留 30% 重绘。\n"
-                               "        仅用于「渐进接管」对照实验；期望真续接请保持 hard。",
+                               "        仅用于「渐进接管」对照实验；期望真续接请保持 hard。\n"
+                               "ramp = 0.4.3 噪声斜坡（软证据）：远端 m=0 硬钉 → 缝端线性升到\n"
+                               "        ramp_top；原生契约把连续 m 当逐 token sigma 标签\n"
+                               "        （sigma_row = m * sigma_video），缝侧轻度 harmonize、\n"
+                               "        每一步仍被 (1-m) 锚回拷贝尾——治硬接缝的色档/曝光台阶。\n"
+                               "        与 taper 相反：ramp 全程有锚，taper 头部无锚。",
                 }),
                 "taper_tokens": ("INT", {
                     "default": 4, "min": 1, "max": 12, "step": 1,
@@ -516,6 +524,17 @@ class H3RelayCopyBridge:
                     "tooltip": "把上一段音频尾也拷进本段音频 latent 开头（采样上下文用）。\n"
                                "掩码只做视频流；可见的声画拼接仍归「裁重叠」与组装层。",
                 }),
+                "ramp_top": ("FLOAT", {
+                    "default": 0.25, "min": 0.0, "max": 0.95, "step": 0.05,
+                    "tooltip": "仅 ramp 模式：缝端最大 m（= 该 token 参与去噪的 sigma 比例）。\n"
+                               "0 = 退化为 hard；0.25 默认 = 缝端 25% 强度 harmonize；\n"
+                               ">0.5 起锚定明显变弱，接近 taper 的行为，慎用。",
+                }),
+                "ramp_tokens": ("INT", {
+                    "default": 0, "min": 0, "max": 12, "step": 1,
+                    "tooltip": "仅 ramp 模式：参与斜坡的缝端 token 数；0 = 整个拷贝窗铺开。\n"
+                               "小值（如 2~3）= 「只松缝、锁运动」的窄斜坡。",
+                }),
             },
         }
 
@@ -530,12 +549,14 @@ class H3RelayCopyBridge:
     )
 
     def bridge(self, latent, context_latent, context_frames,
-               mask_mode="hard", taper_tokens=4, seam_min=0.10, pin_audio=True):
+               mask_mode="hard", taper_tokens=4, seam_min=0.10, pin_audio=True,
+               ramp_top=0.25, ramp_tokens=0):
         CONTRACT.enforce()
         out, covered, report = CORE.build_continue_latent(
             latent, context_latent, int(context_frames),
             mask_mode=mask_mode, taper=int(taper_tokens),
             seam_min=float(seam_min), pin_audio=bool(pin_audio),
+            ramp_top=float(ramp_top), ramp_tokens=int(ramp_tokens),
         )
         print(report, flush=True)
         return (out, report, covered)
