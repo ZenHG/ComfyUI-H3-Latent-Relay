@@ -1,5 +1,50 @@
 # CHANGES
 
+## 0.4.2 — 2026-09-15
+
+### 使用缺陷修复（全面审查 17 项：高危 2 / 中危 7 / 低危 8）
+
+**高危（必崩路径）**
+- `audio_tail_from_latent` 导出音频尾段复用分支返回 3 元组，两个调用方按 4 值解包
+  → 只要 latent 带 `apt_h3_export_tail_audio_latent` 键（Apt 链快路径）必崩
+  `not enough values to unpack`。补齐第 5 路 `grid_off` 返回值，两个调用点同步。
+- `save_av_latent` 元数据用 `ord(c)` 逐字符塞 uint8：note 含任何非 ASCII（中文备注
+  是 tooltip 鼓励的用法）即 `value cannot be converted to type uint8` 崩溃。
+  改为 UTF-8 字节流（旧 ASCII 文件读回完全兼容）。
+
+**中危**
+- 「Latent 读」stage_index=0 的引导报错是死代码（`_stage_path` 先抢抛「不能为负」）
+  → 校验顺序前移，用户看到正确引导。
+- 音频栅格偏差告警被 `if overhang:`（0.0 假值）永久吞掉 → 新增 `grid_off` 标志，
+  上层 notes 出「⚠ 音频栅格与视频帧数偏差超出半整步」告警；偏差口径同时订正为
+  **源段总帧数**（原按尾窗量恒为巨值，属调用方误用）。
+- 拷贝桥 `pin_audio=False` 仍无条件要求 target 有音频流 → 关音频即可走纯视频 latent。
+- `_LAP_KERNEL` 进程级可变全局按 device 抖动重建 → 改 per-device dict 缓存。
+- 内存峰值：`scan_head_jump` 对整段物化全量帧差（与同文件自述的小窗优化矛盾）
+  → 先切窗再做差；色档路 `images.abs().max()` 全量拷贝 → 用已切小窗估计；
+  落盘 `.to(cpu).contiguous().clone()` 三重拷贝 → 去冗余 clone。
+- 拷贝桥 `noise_mask` 硬编码 CPU + batch=1 → 与 latent 同设备、batch 维随 target；
+  taper 权重张量同步建在掩码设备上（GPU latent 时原写法跨设备赋值报错）。
+- 布局契约「找不到上游 → 放行」的降级结论被永久缓存 → 降级不写缓存，下次重试。
+
+**低危**
+- `fps` 服务端校验（API 提交 0/NaN → 可读报错，不再除零）；
+- run_id 非法字符改**替换为 `_`**（消除 "my/film"≡"myfilm" 静默撞目录）+
+  Windows 保留名（NUL/CON…）避让；
+- 落盘改**同目录 .tmp + os.replace 原子写**（崩溃不留截断文件）；
+- Chain 前端多分组共存时 `executing(null)` 互相推进段号 → 按「本轮是否执行过
+  本组节点」过滤。
+
+**文档**
+- requirements/README 订正「import 期零第三方依赖」不实陈述（torch 是顶层 import，
+  缺失=整包注册失败）；README 节点表补拷贝桥行 + 参数表补全 5 参数；
+  `__init__` 节点清单 5→6；排障表补「节点没出现→查 torch」「宿主太旧→续接静默无效」
+  「上游网格已变」三条；补宿主 ComfyUI 版本要求说明；陈旧日志示例文案同步当前口径；
+  CONTRIBUTING 计数与「测试必须能 import ComfyUI」的实情订正。
+
+测试 134 → **152 全绿**（新增组 16：导出音频分支 / 中文 note / 服务端校验 /
+掩码设备 / 契约降级缓存 / run_id 清洗 / 纯视频拷贝桥）。
+
 ## 文档补全 — 2026-09-14（无代码变更，仍为 0.4.1）
 
 - README 新增「🎬 接缝处的对话规避与音频处理」一节：段首缓冲纪律（续接段开头
