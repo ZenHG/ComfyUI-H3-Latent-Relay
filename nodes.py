@@ -465,9 +465,10 @@ class H3RelayCopyBridge:
     与 H3RelayMotionContext（conditioning 钉帧）二选一，不可同图串联：
       · Latent 桥（钉帧）：模型重绘上一段尾段 → 有复现漂移/发糊风险（0.3.x 实测），
         观测端沉降检测兜底；
-      · 拷贝桥（本节点）：钉住区不重绘（掩码 0 区每步被钉回拷贝 latent），复现伪影
-        这一类从机制上消失；掩码消费走 ComfyUI 原生 H3 契约与 SelfLift 的
-        noise_mask 支持——**不绑定任何特定采样器**。
+      · 拷贝桥（本节点）：``mask_mode="hard"`` 时钉住区不重绘（掩码 0 区每步被钉回
+        拷贝 latent），复现伪影这一类从机制上消失；掩码消费走 ComfyUI 原生 H3 契约与
+        SelfLift 的 noise_mask 支持——**不绑定任何特定采样器**。
+        ⚠️ ``mask_mode="taper"`` **不钉住**（每帧留 seam_min~100% 重绘自由度），只作对照实验档。
     输出 INT = 应裁帧数（=拷贝跨度），接 H3RelayTrimAV 的 trim_frames；
     TrimAV 的 settle_frames 保持 -1，观测端继续守接管帧。
     """
@@ -493,8 +494,12 @@ class H3RelayCopyBridge:
             "optional": {
                 "mask_mode": (["hard", "taper"], {
                     "default": "hard",
-                    "tooltip": "hard = 前缀全 0 硬锁（钉住区零重绘，默认，与「复现=漂移源」实测同向）；\n"
-                               "taper = 头部 1.0 线性降到缝端 seam_min（渐进接管实验档）。",
+                    "tooltip": "掩码语义：denoised = 模型生成 * m + 上段尾 * (1-m)。**m=0 才钉住，m=1 是重绘。**\n"
+                               "hard = 全窗 m=0（钉住区零重绘，默认，真续接用这个）；\n"
+                               "taper = 头部 m=1.0（**完全重绘**）线性降到缝端 seam_min\n"
+                               "        —— ⚠ **钉住区实际上没有被钉住**，只是给模型一个软提示；\n"
+                               "        seam_min=0.3 意味着连缝端都留 30% 重绘。\n"
+                               "        仅用于「渐进接管」对照实验；期望真续接请保持 hard。",
                 }),
                 "taper_tokens": ("INT", {
                     "default": 4, "min": 1, "max": 12, "step": 1,
@@ -502,7 +507,9 @@ class H3RelayCopyBridge:
                 }),
                 "seam_min": ("FLOAT", {
                     "default": 0.10, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "仅 taper 模式：缝端掩码下限（0=完全硬锁）。",
+                    "tooltip": "仅 taper 模式：缝端掩码下限（m 值）。\n"
+                               "0 = 缝端完全硬锁；>0 表示缝端仍留同等比例的重绘自由度\n"
+                               "（0.3 即缝端 30% 重绘）。注意它只管缝端——头部恒为 1.0 全重绘。",
                 }),
                 "pin_audio": ("BOOLEAN", {
                     "default": True,

@@ -57,7 +57,10 @@ H3 分段生成时，"续接"要回答一件事：**新的一段怎么知道上�
 
 > 示例走的是 **MotionContext 桥**（conditioning 路线，0.2.x 起即此接法）。0.4.0 起
 > 还有**拷贝桥** `H3RelayCopyBridge`：把上一段尾 AV latent 逐位拷贝进本段初始
-> latent + 噪声掩码，钉住区**不重绘**——复现发糊/漂移这一类伪影从机制上消失。
+> latent + 噪声掩码，`mask_mode="hard"`（默认）时钉住区**不重绘**——复现发糊/漂移
+> 这一类伪影从机制上消失。
+> ⚠️ `mask_mode="taper"` **不钉住**（掩码从头部 1.0 线性降到 `seam_min`，每帧留
+> `seam_min`~100% 重绘自由度），是「渐进接管」对照实验档，别当默认用。
 > 接法不同：它的输出接 KSampler 的 `latent_image`（不占 positive），见「节点」表
 > 与 `CHANGES.md` 0.4.0。
 
@@ -129,7 +132,7 @@ H3 VAE 的时序跨度为 `(1,4,4,4,4)`：每 5 个 latent token 覆盖 17 像�
 | 🔗 **H3 续接 Latent 存** | 本段采样后，把 AV latent 落盘到 `output/relay_kit/<run_id>/stage_NNNNN.safetensors` |
 | 🔗 **H3 续接 Latent 读** | 读回上一段（段号 - 1），断点续跑时可指定 `explicit_path` 换源 |
 | 🔗 **H3 续接 Latent 桥** | 上一段尾段钉进本段 conditioning；`context_latent` 不接则直通 |
-| 🔗 **H3 续接 拷贝桥** | 上一段尾 AV latent **逐位拷贝**进本段初始 latent + 噪声掩码（钉住区不重绘）；输出接采样器 `latent_image`（0.4.0 起，与 Latent 桥二选一） |
+| 🔗 **H3 续接 拷贝桥** | 上一段尾 AV latent **逐位拷贝**进本段初始 latent + 噪声掩码；`mask_mode="hard"`（默认）时钉住区不重绘，`taper` 档不钉住（见参数表）；输出接采样器 `latent_image`（0.4.0 起，与 Latent 桥二选一） |
 | 🔗 **H3 续接裁重叠** | **裁掉本段头部的重生成帧 + 自动裁掉紧随其后的「复现帧」（视频音频同裁）** —— 不裁就会在拼接处重播/跳变 |
 | 🔗 **H3 续接连跑 Chain** | 自动连跑控制器：同分组框内自动推进「桥 + 落盘」段号并排队（详见下方「Chain 自动连跑」） |
 
@@ -336,9 +339,9 @@ stage 链（落盘/读回）按段号自续（本段段号 - 1 = 要读的段号
 | `latent` | — | 本段初始 AV latent（接采样器上游） |
 | `context_latent` | — | 上一段完整 AV latent（第 1 段不接本节点） |
 | `context_frames` | 22 | 拷贝窗口帧数，合法值 5/22/39/56/73/90/107/124，须小于本段帧数 |
-| `mask_mode` | `hard` | `hard` = 前缀全 0 硬锁（钉住区零重绘）；`taper` = 头部线性降到缝端 |
+| `mask_mode` | `hard` | **掩码语义 = `模型生成 * m + 上段尾 * (1-m)`，m=0 才钉住、m=1 是重绘。**<br>`hard` = 全窗 m=0（钉住区零重绘，**真续接用这个**）；<br>`taper` = 头部 m=1.0（**完全重绘**）线性降到缝端 `seam_min` —— ⚠ **钉住区实际上没有被钉住**，只作「渐进接管」对照实验档 |
 | `taper_tokens` | 4 | 仅 taper：缝端前多少个 token 参与线性过渡 |
-| `seam_min` | 0.10 | 仅 taper：缝端掩码下限（0 = 完全硬锁） |
+| `seam_min` | 0.10 | 仅 taper：缝端掩码下限（m 值）。`0` = 缝端完全硬锁；`0.3` = 缝端仍留 30% 重绘。**注意它只管缝端，头部恒为 1.0 全重绘** |
 | `pin_audio` | `true` | 上一段音频尾拷进本段音频开头（采样上下文）。纯视频 latent 关掉它 |
 
 **续接裁重叠**
@@ -396,7 +399,7 @@ python tests/test_relay_core.py
 脚本会自动上溯定位 ComfyUI 根目录；装在别处时用
 `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。
 
-**152 项断言，零 GPU、不加载模型**，覆盖十六个方面：
+**154 项断言，零 GPU、不加载模型**，覆盖十六个方面：
 
 | 组 | 覆盖 |
 |---|---|

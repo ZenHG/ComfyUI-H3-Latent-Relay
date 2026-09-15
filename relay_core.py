@@ -903,7 +903,15 @@ def prefix_taper_weights(
     taper: int = SEAM_TAPER_TOKENS,
     seam_min: float = SEAM_MIN_MASK,
 ) -> Tuple[float, ...]:
-    """拷贝前缀的掩码权重：头部 1.0（自由重绘，反正被裁），线性降到缝端 seam_min（近硬锁）。"""
+    """拷贝前缀的掩码权重：头部 1.0（**完全重绘**，反正被裁），线性降到缝端 seam_min。
+
+    ⚠️ **这不是「软一点的硬锁」——taper 档下钉住区没有被钉住。**
+    掩码语义是 ``denoised = 模型生成 * m + 上段尾 * (1-m)``：m=0 才钉住，m=1 是重绘。
+    所以 taper 档每一帧都留 ``seam_min``~100% 的重绘自由度（seam_min=0.3 即缝端仍 30% 重绘），
+    段首会被模型改写 ⇒ 观感「续不上」，而 TrimAV 仍按窗口帧数照裁 ⇒ 顺带裁掉真实剧情。
+    本档**只用于「渐进接管」对照实验**；真续接请用 ``mask_mode="hard"``。
+    （2026-09-15：产线曾误把 taper 当默认跑了 23 次，见 CHANGES 0.4.2 文档节。）
+    """
     n = int(steps)
     if n < 1:
         return ()

@@ -734,6 +734,19 @@ check("14.14 节点注册 + required 键序 + optional 末位（追加铁律）"
       and list(_it["optional"])[-1] == "pin_audio",
       "required=%s optional=%s" % (list(_it["required"]), list(_it["optional"])))
 
+# —— 14.15/14.16 掩码语义钉子（2026-09-15）——
+# 动机：taper 曾被下游误当「软一点的硬锁」当默认跑了 23 次，段首被重画导致「续不上」。
+# 这里把语义本身断言下来：hard 全 0 = 真钉住；taper 每一帧 m>0 = **没有被钉住**。
+# 谁要改 taper 的方向，先过这两条，再回头改 nodes/README/CHANGES 的措辞。
+check("14.15 hard 掩码 = 钉住区全 0（真钉住：d*0 + anchor*1）",
+      bool((outC["noise_mask"][:, :, :7] == 0).all()),
+      "min=%s max=%s" % (float(m[:, :, :7].min()), float(m[:, :, :7].max())))
+check("14.16 taper 掩码 = 钉住区**无一处为 0**（头 1.0 全重绘，缝端仍留 seam_min）",
+      bool((mT[:, :, :7] > 0).all()) and float(mT[:, :, 0, 0, 0]) == 1.0
+      and float(mT[:, :, 6, 0, 0]) > 0.0,
+      "头=%.2f 缝端=%.2f 最小=%.4f（taper 不钉住）"
+      % (float(mT[:, :, 0, 0, 0]), float(mT[:, :, 6, 0, 0]), float(mT[:, :, :7].min())))
+
 # ============ 组15：色档收敛信号（v0.4.1）——注噪/taper 收敛尾巴的观测端 ============
 
 def grade_seg(n=40, pin=22, dark=(22, 25), factor=0.88, seed=13):
