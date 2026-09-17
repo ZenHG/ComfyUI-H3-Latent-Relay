@@ -683,6 +683,216 @@ def trim_audio_head(audio: Any, frames: int, fps: float = FPS) -> Any:
     return {"waveform": wf[..., n:], "sample_rate": sr}
 
 
+# ---------------------------------------------------------------- 音频缝（节点内实现）
+# 为什么必须在节点里做：组装层（ffmpeg）那三件事——crossfade / 头部补丁 / 床环铺——
+# 都是「渲染之后的第二步」。效果要由节点在**渲染时**就落进段文件，组装才只剩拼接。
+#
+# 本组只实现**长度守恒**的两类（本段自己能改完的）：
+#   · patch：把本段头部 N 秒（含解码 priming 的近静默 + 生成瞬态）换成**上一段的同场景环境声**
+#   · tile ：补丁床用 W 秒瓦片自叠化环铺（干净窗短于 N 时的正解）
+#
+# ⚠️ 真 crossfade（三角窗叠化）**无法在单段内长度守恒地实现**：ffmpeg acrossfade 的语义是
+#    「上一段尾部裁掉 X 秒」——那要改**上一段的文件**，而单段节点只能改本段。
+#    所以 crossfade 只能留在组装层，或者改用 patch（等长、零 A/V 位移）。
+#    附带收益：patch 不消耗时间轴 ⇒ 组装层 acrossfade「每缝吃 0.25s、
+#    使后段音频相对画面整体提前」那个副作用在 patch 路线上不存在。
+AUDIO_SEAM_PATCH: float = 0.0    # 头部补丁秒数（0 = 关，逐位直通）
+AUDIO_SEAM_TILE: float = 0.0     # 补丁床瓦片秒数（0 = 整窗直取最静 N 秒）
+AUDIO_SEAM_FADE: float = 0.25    # 补丁边界交叉淡变宽度（秒）
+_AUDIO_META_KEY = "relay_kit_audio_meta"
+
+
+def _audio_parts(audio: Any) -> Tuple[torch.Tensor, int, Tuple[int, ...], torch.dtype]:
+    """把 AUDIO 拆成 ([C,T] float32 视图, sample_rate, 原前导维, 原 dtype)。
+
+    ComfyUI 的 AUDIO 约定 ``{"waveform": [B, C, T], "sample_rate": int}``；
+    但 [C,T] / [T] 也要能跑（手搓或第三方节点给的张量形状不一）。
+    """
+    if not isinstance(audio, dict) or "waveform" not in audio:
+        raise TypeError("AUDIO 必须是 {'waveform': 张量, 'sample_rate': int}，得到 %r" % (type(audio),))
+    wf = audio["waveform"]
+    if not isinstance(wf, torch.Tensor):
+        raise TypeError("AUDIO.waveform 必须是张量，得到 %r" % (type(wf),))
+    if wf.dim() == 0:
+        raise ValueError("AUDIO.waveform 不能是 0 维张量。")
+    lead = tuple(int(v) for v in wf.shape[:-2])
+    flat = wf.reshape(-1, int(wf.shape[-2]) if wf.dim() >= 2 else 1, int(wf.shape[-1]))
+    flat = flat[0] if flat.shape[0] else flat.reshape(1, -1)      # [C, T]
+    # 采样率取整；缺失时按 H3 的 32kHz 兜底（不静默按 1 处理，那会把秒数算成样本数）
+    sr = int(audio.get("sample_rate") or 32000)
+    if sr <= 0:
+        raise ValueError("AUDIO.sample_rate 必须是正数，得到 %r。" % (audio.get("sample_rate"),))
+    return flat.float(), sr, lead, wf.dtype
+
+
+def _match_channels(wf: torch.Tensor, channels: int) -> torch.Tensor:
+    """把床源声道数对齐到本段（单声道广播 / 多声道降混 / 取前 N 路）。"""
+    c = int(wf.shape[0])
+    if c == channels:
+        return wf
+    if c == 1:
+        return wf.expand(channels, -1)
+    if channels == 1:
+        return wf.mean(dim=0, keepdim=True)
+    return wf[:channels]
+
+
+def _resample_to(wf: torch.Tensor, src_sr: int, dst_sr: int) -> torch.Tensor:
+    """线性重采样（床源与本段采样率不一致时才走）。"""
+    if src_sr == dst_sr or src_sr <= 0 or dst_sr <= 0:
+        return wf
+    import torch.nn.functional as F
+
+    n = max(1, int(round(int(wf.shape[-1]) * float(dst_sr) / float(src_sr))))
+    return F.interpolate(wf.unsqueeze(0), size=n, mode="linear",
+                         align_corners=False).squeeze(0)
+
+
+def quietest_window(wf: torch.Tensor, n_samples: int) -> Tuple[int, float]:
+    """在 ``[C,T]`` 波形里找**能量最低**的连续 ``n_samples`` 窗。
+
+    返回 ``(起点样本, 窗内 RMS)``。用前缀和一次算完全部窗（O(T)，不是 O(T·n)）。
+    """
+    total = int(wf.shape[-1])
+    n = int(n_samples)
+    if n <= 0 or n > total:
+        return 0, float("nan")
+    p = (wf ** 2).sum(dim=0)                    # [T] 逐样本跨声道能量
+    c = torch.cat([p.new_zeros(1), torch.cumsum(p, dim=0)])
+    win = c[n:] - c[:-n]                        # [T-n+1] 每窗总能量
+    i = int(torch.argmin(win))
+    rms = float(torch.sqrt(win[i].clamp_min(0.0) / (n * max(1, int(wf.shape[0])))))
+    return i, rms
+
+
+def build_bed(wf: torch.Tensor, n_samples: int, tile_samples: int,
+              fade_samples: int) -> Tuple[torch.Tensor, int]:
+    """从床源波形取 ``n_samples`` 长的床声；``tile_samples>0`` 时按瓦片自叠化环铺。
+
+    返回 ``(床波形 [C,n], 起点样本)``。
+    """
+    total = int(wf.shape[-1])
+    n = int(n_samples)
+    if n <= 0:
+        raise ValueError("床声长度必须为正，得到 %d。" % n)
+    if tile_samples <= 0:
+        start, _ = quietest_window(wf, min(n, total))
+        bed = wf[..., start:start + n]
+    else:
+        W, X = int(tile_samples), int(fade_samples)
+        if X <= 0 or X >= W:
+            raise ValueError(
+                "瓦片环铺要求 0 < 边界淡变 %.3fs < 瓦片长 %.3fs。\n"
+                "    瓦片太短会退化成「同一段噪声原样重复」，反而听得出来。" % (X / 32000.0, W / 32000.0)
+            )
+        start, _ = quietest_window(wf, min(W, total))
+        tile = wf[..., start:start + W]
+        k = max(2, int(math.ceil((n - X) / float(W - X) - 1e-9)))
+        w = torch.linspace(0.0, 1.0, X, device=wf.device, dtype=torch.float32)
+        acc = tile
+        for _ in range(k - 1):
+            blend = acc[..., -X:] * (1.0 - w) + tile[..., :X] * w
+            acc = torch.cat([acc[..., :-X], blend, tile[..., X:]], dim=-1)
+        bed = acc[..., :n]
+    if int(bed.shape[-1]) < n:                  # 床源比 N 还短：循环凑够（防御，不炸）
+        reps = int(math.ceil(n / max(1, int(bed.shape[-1]))))
+        bed = bed.repeat(1, reps)[..., :n]
+    return bed, start
+
+
+def audio_seam_patch(audio: Any, bed_audio: Any, patch: float = AUDIO_SEAM_PATCH,
+                     tile: float = AUDIO_SEAM_TILE,
+                     fade: float = AUDIO_SEAM_FADE) -> Tuple[Any, str]:
+    """把本段头部 ``patch`` 秒换成 ``bed_audio``（上一段）里的最静窗；**长度守恒**。
+
+    替换区 ``[0, N-X)`` 纯床声，``[N-X, N)`` 是床声 → 本段自身音频的交叉淡变
+    （X = ``fade``），``N`` 之后**逐位不动**。返回 ``(audio, report)``。
+    """
+    if patch is None or float(patch) <= 0:
+        return audio, ""
+    if bed_audio is None:
+        return audio, ""
+    wf, sr, lead, dtype = _audio_parts(audio)
+    total = int(wf.shape[-1])
+    ch = int(wf.shape[0])
+    n = int(round(float(patch) * sr))
+    X = max(0, int(round(float(fade) * sr)))
+    warn = ""
+    if n >= total:                              # 补丁比整段还长：夹住并显著告警（不炸整条链）
+        n = max(1, total - 1)
+        X = min(X, n)
+        warn = "｜ ⚠ 补丁超出段长，已夹到 %.3fs" % (n / float(sr))
+    if X >= n:                                  # 边界淡变不能吃掉整个替换区
+        X = max(0, n - 1)
+    bed_wf, bed_sr, _, _ = _audio_parts(bed_audio)
+    bed_wf = _match_channels(_resample_to(bed_wf, bed_sr, sr), ch)
+    bed, start = build_bed(bed_wf, n, int(round(float(tile) * sr)), X)
+
+    out = wf.clone()
+    keep = n - X                                # [0, keep) 纯床声
+    if keep > 0:
+        out[..., :keep] = bed[..., :keep]
+    if n > keep:                                # [keep, n) 床声 → 本段自身
+        w = torch.linspace(0.0, 1.0, n - keep, device=wf.device, dtype=torch.float32)
+        out[..., keep:n] = bed[..., keep:n] * (1.0 - w) + wf[..., keep:n] * w
+
+    tile_note = "，%.2fs 瓦片自叠化环铺" % float(tile) if float(tile) > 0 else ""
+    rep = ("[H3 Relay] 音频缝：头部补丁 %.2fs ← 床源最静窗 @%.2fs%s，边界交叉淡变 %.2fs\n"
+           "           音频 %d → %d 采样点（长度守恒，零 A/V 位移）%s"
+           % (float(patch), start / float(sr), tile_note, X / float(sr),
+              total, int(out.shape[-1]), warn))
+    shaped = out.reshape(*lead, ch, total) if lead else out
+    return {"waveform": shaped.to(dtype), "sample_rate": sr}, rep
+
+
+def save_audio(audio: Any, path: str, note: str = "") -> str:
+    """把 AUDIO 落盘（safetensors，原子写），供后段当床源读回。
+
+    存**原始波形张量**（任意前导维，通常 [B,C,T]）而不是展平后的 [C,T]——
+    这样 load 回来与存之前逐位、逐形状都一致（单测 22.12 锁这个）。
+    """
+    from safetensors.torch import save_file
+
+    _, sr, _, _ = _audio_parts(audio)
+    wf = audio["waveform"]
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    meta = {"format": 1, "sample_rate": sr, "shape": [int(v) for v in wf.shape],
+            "note": str(note)}
+    meta_bytes = json.dumps(meta, ensure_ascii=False).encode("utf-8")
+    tensors = {"waveform": wf.detach().cpu().contiguous(),
+               _AUDIO_META_KEY: torch.frombuffer(bytearray(meta_bytes), dtype=torch.uint8)}
+    tmp = path + ".tmp"
+    try:
+        save_file(tensors, tmp)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            if os.path.isfile(tmp):
+                os.remove(tmp)
+        except OSError:
+            pass
+        raise
+    return path
+
+
+def load_audio(path: str) -> Dict[str, Any]:
+    """读回落盘的 AUDIO。"""
+    from safetensors.torch import load_file
+
+    if not os.path.isfile(path):
+        raise FileNotFoundError("读不到落盘音频：%s" % path)
+    raw = load_file(path)
+    meta_t = raw.pop(_AUDIO_META_KEY, None)
+    if meta_t is None:
+        raise ValueError("%s 不是本工具写的 AUDIO（缺少元数据）。" % path)
+    meta = json.loads(bytes(meta_t.tolist()).decode("utf-8"))
+    wf = raw["waveform"]
+    shape = meta.get("shape")
+    if shape and list(wf.shape) != list(shape):
+        wf = wf.reshape(*[int(v) for v in shape])
+    return {"waveform": wf, "sample_rate": int(meta["sample_rate"])}
+
+
 # ---------------------------------------------------------------- 接缝自检
 # 实测（2026-09-11）：续接段的「钉住区 → 新内容」切换**不总落在 trim 值上**。
 # 73 帧段实测切换点在原第 22→23 帧之间（MAE 6.5 → 102.3），

@@ -138,6 +138,73 @@ def default_value(defn, name):
     return extra.get("default", "")
 
 
+# ---------------------------------------------------------------- 本包节点的本地 schema
+def local_kit_defs():
+    """从**本仓库的 nodes.py** 现读本包节点 schema（不依赖服务端）。
+
+    为什么要这一步：示例图必须反映**代码里真实存在**的节点。若只信服务端 `/object_info`，
+    一个还没重启后端的服务端就会让生成器「静默**删掉**」刚加的节点（0.5.0 复查抓到过：
+    `H3RelayPost` 被删）。本包节点本来就跑在这份代码里 ⇒ **本地定义才是权威**，
+    服务端只用来取官方节点（CreateVideo / LoadImage …）的 schema。
+    """
+    import importlib.util
+    import types
+
+    kit = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # nodes.py 顶层 `import folder_paths` ⇒ 必须先把 ComfyUI 根目录放进 sys.path。
+    # 上溯找 folder_paths.py；再退到 COMFYUI_PATH；最后退到 Windows 常见安装位。
+    cands = []
+    d = kit
+    for _ in range(4):
+        d = os.path.dirname(d)
+        cands.append(d)
+    if os.environ.get("COMFYUI_PATH"):
+        cands.insert(0, os.environ["COMFYUI_PATH"])
+    cands.append(r"I:\ComfyUI")
+    for c in cands:
+        if c and os.path.isfile(os.path.join(c, "folder_paths.py")):
+            if c not in sys.path:
+                sys.path.insert(0, c)
+            break
+    else:
+        raise SystemExit("[FAIL] 找不到 ComfyUI 根目录（folder_paths.py）——用 COMFYUI_PATH 指定。")
+    pkg = types.ModuleType("h3relay_kit_local")
+    pkg.__path__ = [kit]
+    sys.modules["h3relay_kit_local"] = pkg
+    spec = importlib.util.spec_from_file_location("h3relay_kit_local.nodes",
+                                                  os.path.join(kit, "nodes.py"))
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["h3relay_kit_local.nodes"] = mod
+    spec.loader.exec_module(mod)
+    out = {}
+    for name, cls in mod.NODE_CLASS_MAPPINGS.items():
+        it = cls.INPUT_TYPES()
+        out[name] = {
+            "input": {"required": dict(it.get("required") or {}),
+                      "optional": dict(it.get("optional") or {})},
+            "output": list(cls.RETURN_TYPES),
+            "output_name": list(getattr(cls, "RETURN_NAMES", cls.RETURN_TYPES)),
+            "output_node": bool(getattr(cls, "OUTPUT_NODE", False)),
+            "display_name": mod.NODE_DISPLAY_NAME_MAPPINGS.get(name, name),
+        }
+    return out
+
+
+def merge_kit_defs(oi):
+    """用本地 schema 覆盖服务端的本包节点，并报出服务端是否过期。"""
+    local = local_kit_defs()
+    stale = []
+    for name, d in local.items():
+        srv = oi.get(name)
+        if srv is None:
+            stale.append("%s（服务端没有）" % name)
+        elif (list(srv.get("output") or []) != d["output"]
+              or set((srv.get("input") or {}).get("optional") or {}) != set(d["input"]["optional"])):
+            stale.append("%s（服务端定义过期）" % name)
+    oi.update(local)
+    return local, stale
+
+
 # ---------------------------------------------------------------- 图构造
 class Graph:
     def __init__(self, oi):
@@ -155,7 +222,7 @@ class Graph:
         d = self.oi.get(node_type)
         if d is None:
             raise SystemExit(
-                "[FAIL] 服务端没有节点 %r（本包的 7 个节点要装在 custom_nodes 下并重启）。\n"
+                "[FAIL] 服务端没有节点 %r（本包的 8 个节点要装在 custom_nodes 下并重启）。\n"
                 "       当前识别到本包节点：%s"
                 % (node_type, sorted(k for k in self.oi if k.startswith("H3Relay")))
             )
@@ -344,8 +411,15 @@ def build(oi, length=73, width=448, height=768):
                  values={},
                  title="🔗 后处理 Post（全默认关 = 直通；要治缝阶跃就把 match_prev 调到 0.5）")
 
+    # 0.5.0：音频域同样独立成节点（音频缝不再交给组装层 ffmpeg）。
+    # patch_seconds 默认 0 = 逐位直通；第 1 段也必须接（它顺手把第 1 段音频落盘当后段床源）。
+    asm = g.add("H3RelayAudioSeam", pos=[2260, 320],
+                links_in={"audio": (trim, "audio")},
+                values={},
+                title="🔗 音频缝（默认关=直通；要治缝处「抽一下」就把 patch_seconds 调 2.0）")
+
     mk = g.add("CreateVideo", pos=[2620, 40],
-               links_in={"images": (post, "images"), "audio": (trim, "audio")},
+               links_in={"images": (post, "images"), "audio": (asm, "audio")},
                values={"fps": 24.0})
     g.add("SaveVideo", pos=[2620, 300], links_in={"video": (mk, "VIDEO")})
 
@@ -365,6 +439,7 @@ def build(oi, length=73, width=448, height=768):
         "    [H3 Relay] latent 桥续接：钉住 22 帧 / 7 步 …\n"
         "    [H3 Relay] 裁首 22 帧 = 钉住 22 + 沉降 0 ｜ 手动指定\n"
         "    [H3 Relay] 后处理：全部关闭（直通）\n"
+        "    [H3 Relay] 音频缝：第 1 段无缝可补 → 直通｜本段音频已落盘 …\n"
         "    [H3 Relay] 接缝自检：前 40 帧无突变 … → 起点干净。\n"
         "\n"
         "只看这三件事就算跑通：\n"
@@ -375,6 +450,11 @@ def build(oi, length=73, width=448, height=768):
         "后处理 Post（0.5.0 新增，整节点可以删掉）：\n"
         "  15 个旋钮**全部默认关 = 逐位直通**，不接它行为与 0.4.x 一致。\n"
         "  最省的一档试法：match_prev = 0.5（段头色档/曝光对齐上段末帧，治缝上亮度阶跃）。\n"
+        "\n"
+        "音频缝（0.5.0 新增，整节点也可以删掉）：\n"
+        "  patch_seconds 默认 0 = 逐位直通。缝处音频「抽一下 / 静音一瞬」就调 2.0：\n"
+        "  把本段头 2 秒换成上一段最静窗环境声（长度守恒，不动时间轴）。\n"
+        "  ⚠ 第 1 段也要接（要它把第 1 段音频落盘，第 2 段的床源就是它）；段号顺序跑。\n"
         "\n"
         "没接对的两个典型症状：\n"
         "  · 日志写「静默直通」→ 段号填了 ≥1，但 run_id 与上一段不一致 / 文件不在\n"
@@ -406,14 +486,17 @@ def main():
     except Exception as e:
         raise SystemExit("[FAIL] 取不到 object_info：%r\n       请先启动 ComfyUI（python main.py）。" % (e,))
 
+    # 本包节点用**本地定义**覆盖服务端（服务端没重启也不影响生成正确性）
+    _local, _stale = merge_kit_defs(oi)
+    print("本包节点（本地定义，%d 个）：%s" % (len(_local), ", ".join(sorted(_local))))
+    if _stale:
+        print("  ⚠ 服务端定义与本地不一致：%s" % "；".join(_stale))
+        print("    示例图按**本地**定义生成（正确）；但要让 ComfyUI 真跑起来，必须重启后端加载新节点。")
+
     missing = [k for k in ("H3RelayMotionContext", "H3RelayLatentSave", "H3RelayTrimAV",
-                           "H3RelayPost") if k not in oi]
+                           "H3RelayPost", "H3RelayAudioSeam") if k not in _local]
     if missing:
-        raise SystemExit(
-            "[FAIL] ComfyUI 里没有这些节点：%s\n"
-            "       把 ComfyUI-H3-Relay-Kit 放进 custom_nodes/ 并**重启后端**（只刷浏览器不加载新节点）。"
-            % ", ".join(missing))
-    print("本包节点已就位：%s" % ", ".join(sorted(k for k in oi if k.startswith("H3Relay"))))
+        raise SystemExit("[FAIL] 本仓库 nodes.py 里缺这些节点：%s" % ", ".join(missing))
 
     g = build(oi, length=a.length, width=a.width, height=a.height)
     bad = validate(g, oi)

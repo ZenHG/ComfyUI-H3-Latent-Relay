@@ -550,6 +550,90 @@ ck("K7b H3RelayPost 新 widget match_prev_stats_frames 默认 1（修正后口�
    N.H3RelayPost.INPUT_TYPES()["optional"]["match_prev_stats_frames"][1]["default"] == 1)
 
 print("=" * 78)
+print("L. 音频缝节点（0.5.0 新增：音频域必须由**节点**实现，不靠组装层 ffmpeg）")
+print("=" * 78)
+import shutil as _sh                                                     # noqa: E402
+import tempfile as _tf                                                   # noqa: E402
+
+_it_l = N.H3RelayAudioSeam.INPUT_TYPES()
+_ol = _it_l["optional"]
+ck("L1 H3RelayAudioSeam 已注册（8 节点）+ 显示名以 🔗 开头",
+   N.NODE_CLASS_MAPPINGS.get("H3RelayAudioSeam") is N.H3RelayAudioSeam
+   and N.NODE_DISPLAY_NAME_MAPPINGS["H3RelayAudioSeam"].startswith("🔗")
+   and len(N.NODE_CLASS_MAPPINGS) == 8,
+   "%d 节点" % len(N.NODE_CLASS_MAPPINGS))
+ck("L2 默认全关（patch=0 / tile=0 / fade=0.25）+ OUTPUT_NODE（否则第 1 段床源永不落盘）",
+   _ol["patch_seconds"][1]["default"] == 0.0 and _ol["tile_seconds"][1]["default"] == 0.0
+   and abs(_ol["fade_seconds"][1]["default"] - 0.25) < 1e-9
+   and N.H3RelayAudioSeam.OUTPUT_NODE is True)
+
+_SR2 = 32000
+_T.manual_seed(11)
+_curw = _T.rand(1, 1, _SR2 * 3) * 0.30
+_curw[..., :int(0.032 * _SR2)] = 0.0                                  # 复刻解码 priming
+_ca = {"waveform": _curw, "sample_rate": _SR2}
+_bw = _T.cat([_T.rand(1, 1, _SR2 * 2) * 0.50, _T.rand(1, 1, _SR2 * 2) * 0.05], -1)
+_ba = {"waveform": _bw, "sample_rate": _SR2}
+
+_pass0, _ = CORE.audio_seam_patch(_ca, _ba, patch=0.0)
+ck("L3 patch=0 ⇒ 音频逐位直通（同一对象，零拷贝）", _pass0 is _ca)
+
+_N2, _X2 = int(2.0 * _SR2), int(0.25 * _SR2)
+_keep2 = _N2 - _X2
+_o, _rp = CORE.audio_seam_patch(_ca, _ba, patch=2.0, fade=0.25)
+_ow = _o["waveform"]
+_st2, _ = CORE.quietest_window(_bw[0], _N2)
+_bwin = _bw[..., _st2:_st2 + _N2]
+ck("L4 长度守恒 + N 之后逐位不动（零 A/V 位移的硬证据）",
+   int(_ow.shape[-1]) == int(_curw.shape[-1])
+   and _T.equal(_ow[..., _N2:], _curw[..., _N2:]))
+ck("L5 替换区就是床源最静窗（逐位相同）",
+   _T.equal(_ow[..., :_keep2], _bwin[..., :_keep2]),
+   "床窗起点 %.2fs" % (_st2 / _SR2))
+_wg = _T.linspace(0.0, 1.0, _X2)
+_expb = _bwin[..., _keep2:_N2] * (1.0 - _wg) + _curw[..., _keep2:_N2] * _wg
+ck("L6 边界窗是 blend（非硬切）",
+   _T.allclose(_ow[..., _keep2:_N2], _expb, atol=1e-7)
+   and not _T.equal(_ow[..., _keep2:_N2], _bwin[..., _keep2:_N2]))
+
+_td = _tf.mkdtemp(prefix="h3relay_review_")
+try:
+    _p = os.path.join(_td, "a.safetensors")
+    CORE.save_audio(_o, _p, note="review")
+    _bk = CORE.load_audio(_p)
+    _rid = "_unit_review_audio"
+    _obj = N.H3RelayAudioSeam()
+    _a0, _l0 = _obj.seam(_ba, _rid, 0)
+    _a1, _l1 = _obj.seam(_ca, _rid, 1, patch_seconds=2.0)
+    _want = CORE.load_audio(N._audio_stage_path(_rid, 0))["waveform"]
+    _s3, _ = CORE.quietest_window(_want[0], _N2)
+    ck("L7 音频落盘/读回逐位一致 + 节点 stage 0 直通但落盘 + stage 1 用上一段当床",
+       _T.equal(_bk["waveform"], _o["waveform"]) and _a0 is _ba and "第 1 段无缝可补" in _l0
+       and _T.equal(_a1["waveform"][..., :_keep2], _want[..., _s3:_s3 + _keep2])
+       and "长度守恒" in _l1,
+       "落盘目录挂到 output/relay_kit/ 下")
+    _errs = []
+    try:
+        _obj.seam(_ca, _rid, 1, patch_seconds=1.0, bed_stage=1)
+    except Exception as _e:
+        _errs.append("床源段号" in str(_e))
+    try:
+        _obj.seam(_ca, _rid, 3, patch_seconds=1.0, bed_stage=2)
+    except Exception as _e:
+        _errs.append("床源音频不存在" in str(_e))
+    ck("L8 两道守卫都 raise（床源段号 ≥ 本段 / 床源文件缺失）",
+       _errs == [True, True], "%s" % (_errs,))
+finally:
+    _sh.rmtree(os.path.join(os.path.dirname(N._audio_stage_path("_unit_review_audio", 0))),
+               ignore_errors=True)
+    _sh.rmtree(_td, ignore_errors=True)
+
+_rd = open(os.path.join(KIT, "README.md"), encoding="utf-8").read()
+ck("L9 README 的音频缝章节已改口径：节点实现（且不再写「要靠组装层补」）",
+   "要靠组装层补" not in _rd and "续接音频缝" in _rd
+   and "必须在节点里做" in _rd)
+
+print("=" * 78)
 print("结果：通过 %d / 失败 %d" % (len(OK), len(BAD)))
 if BAD:
     print("失败项：")

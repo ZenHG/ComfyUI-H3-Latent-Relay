@@ -1,7 +1,7 @@
 {
   "id": "h3-relay-minimal",
   "revision": 0,
-  "last_node_id": 17,
+  "last_node_id": 18,
   "last_link_id": 25,
   "nodes": [
     {
@@ -383,50 +383,53 @@
       "inputs": [
         {
           "name": "conditioning",
-          "type": "CONDITIONING",
+          "type": "*",
           "link": 4
         },
         {
           "name": "latent",
-          "type": "LATENT",
+          "type": "*",
           "link": 5
         },
         {
-          "name": "context_latent",
-          "type": "LATENT",
+          "name": "trim_frames",
+          "type": "*",
           "link": null
         },
         {
-          "name": "trim_frames",
-          "type": "INT",
-          "link": null,
-          "widget": {
-            "name": "trim_frames"
-          }
+          "name": "context_latent",
+          "type": "*",
+          "link": null
         },
         {
           "name": "audio_frames",
-          "type": "INT",
-          "link": null,
-          "widget": {
-            "name": "audio_frames"
-          }
+          "type": "*",
+          "link": null
         },
         {
           "name": "run_id",
-          "type": "STRING",
-          "link": null,
-          "widget": {
-            "name": "run_id"
-          }
+          "type": "*",
+          "link": null
         },
         {
           "name": "stage_index",
-          "type": "INT",
-          "link": 6,
-          "widget": {
-            "name": "stage_index"
-          }
+          "type": "*",
+          "link": 6
+        },
+        {
+          "name": "anchor_latent",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "anchor_stage",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "anchor_frames",
+          "type": "*",
+          "link": null
         }
       ],
       "outputs": [
@@ -446,7 +449,7 @@
           "name": "trim_frames",
           "type": "INT",
           "links": [
-            19
+            18
           ]
         }
       ],
@@ -454,12 +457,7 @@
         "Node name for S&R": "H3RelayMotionContext"
       },
       "title": "🔗 续接 Latent 桥（context_latent 不用接，自动读上一段）",
-      "widgets_values": [
-        22,
-        0,
-        "relay_demo",
-        0
-      ]
+      "widgets_values": null
     },
     {
       "id": 9,
@@ -592,32 +590,23 @@
       "inputs": [
         {
           "name": "latent",
-          "type": "LATENT",
+          "type": "*",
           "link": 11
         },
         {
           "name": "run_id",
-          "type": "STRING",
-          "link": null,
-          "widget": {
-            "name": "run_id"
-          }
+          "type": "*",
+          "link": null
         },
         {
           "name": "stage_index",
-          "type": "INT",
-          "link": 12,
-          "widget": {
-            "name": "stage_index"
-          }
+          "type": "*",
+          "link": 12
         },
         {
           "name": "note",
-          "type": "STRING",
-          "link": null,
-          "widget": {
-            "name": "note"
-          }
+          "type": "*",
+          "link": null
         }
       ],
       "outputs": [
@@ -636,11 +625,7 @@
         "Node name for S&R": "H3RelayLatentSave"
       },
       "title": "🔗 落盘本段 latent（下一段的接力棒）",
-      "widgets_values": [
-        "relay_demo",
-        0,
-        ""
-      ]
+      "widgets_values": null
     },
     {
       "id": 11,
@@ -713,7 +698,7 @@
           "name": "AUDIO",
           "type": "AUDIO",
           "links": [
-            18
+            19
           ]
         }
       ],
@@ -739,37 +724,113 @@
       "inputs": [
         {
           "name": "images",
-          "type": "IMAGE",
+          "type": "*",
           "link": 17
         },
         {
-          "name": "audio",
-          "type": "AUDIO",
+          "name": "trim_frames",
+          "type": "*",
           "link": 18
         },
         {
-          "name": "trim_frames",
-          "type": "INT",
-          "link": 19,
-          "widget": {
-            "name": "trim_frames"
-          }
+          "name": "fps",
+          "type": "*",
+          "link": null
         },
         {
-          "name": "fps",
-          "type": "FLOAT",
-          "link": null,
-          "widget": {
-            "name": "fps"
-          }
+          "name": "audio",
+          "type": "*",
+          "link": 19
         },
         {
           "name": "settle_frames",
-          "type": "INT",
-          "link": null,
-          "widget": {
-            "name": "settle_frames"
-          }
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "seam_ghost",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "seam_ghost_alpha",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "settle_sharpen",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "settle_sharpen_frames",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "lowfreq_pull",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "lowfreq_frames",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "lowfreq_blur",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "deconv_strength",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "deconv_radius",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "detail_borrow",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "detail_blur",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "hist_match",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "wb_match",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "match_prev",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "match_prev_frames",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "match_prev_gain_max",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "match_prev_offset_max",
+          "type": "*",
+          "link": null
         }
       ],
       "outputs": [
@@ -777,14 +838,14 @@
           "name": "images",
           "type": "IMAGE",
           "links": [
-            23
+            20
           ]
         },
         {
           "name": "audio",
           "type": "AUDIO",
           "links": [
-            21
+            22
           ]
         },
         {
@@ -796,23 +857,19 @@
           "name": "prev_tail",
           "type": "IMAGE",
           "links": [
-            24
+            21
           ]
         }
       ],
       "properties": {
         "Node name for S&R": "H3RelayTrimAV"
       },
-      "title": "🔗 裁重叠（自动：钉住区 + 沉降帧）",
-      "widgets_values": [
-        0,
-        24.0,
-        0
-      ]
+      "title": "🔗 裁重叠（settle_frames=0：只裁钉住区，缝处无跳）",
+      "widgets_values": null
     },
     {
       "id": 14,
-      "type": "CreateVideo",
+      "type": "H3RelayPost",
       "pos": [
         2260,
         40
@@ -827,13 +884,215 @@
       "inputs": [
         {
           "name": "images",
+          "type": "*",
+          "link": 20
+        },
+        {
+          "name": "guide",
+          "type": "*",
+          "link": 21
+        },
+        {
+          "name": "match_prev",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "match_prev_frames",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "match_prev_gain_max",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "match_prev_offset_max",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "lowfreq_pull",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "lowfreq_frames",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "lowfreq_blur",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "hist_match",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "wb_match",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "deconv_strength",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "deconv_radius",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "detail_borrow",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "detail_blur",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "settle_sharpen",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "settle_sharpen_frames",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "match_prev_stats_frames",
+          "type": "*",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
           "type": "IMAGE",
-          "link": 25
+          "links": [
+            23
+          ]
+        },
+        {
+          "name": "report",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "H3RelayPost"
+      },
+      "title": "🔗 后处理 Post（全默认关 = 直通；要治缝阶跃就把 match_prev 调到 0.5）",
+      "widgets_values": null
+    },
+    {
+      "id": 15,
+      "type": "H3RelayAudioSeam",
+      "pos": [
+        2260,
+        320
+      ],
+      "size": [
+        320,
+        100
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "audio",
+          "type": "*",
+          "link": 22
+        },
+        {
+          "name": "run_id",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "stage_index",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "patch_seconds",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "tile_seconds",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "fade_seconds",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "bed_stage",
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "note",
+          "type": "*",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "links": [
+            24
+          ]
+        },
+        {
+          "name": "report",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "H3RelayAudioSeam"
+      },
+      "title": "🔗 音频缝（默认关=直通；要治缝处「抽一下」就把 patch_seconds 调 2.0）",
+      "widgets_values": null
+    },
+    {
+      "id": 16,
+      "type": "CreateVideo",
+      "pos": [
+        2620,
+        40
+      ],
+      "size": [
+        320,
+        100
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 23
         },
         {
           "name": "audio",
           "type": "AUDIO",
-          "link": 21
+          "link": 24
         },
         {
           "name": "fps",
@@ -858,6 +1117,14 @@
           "widget": {
             "name": "color_space"
           }
+        },
+        {
+          "name": "codec",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "codec"
+          }
         }
       ],
       "outputs": [
@@ -865,7 +1132,7 @@
           "name": "VIDEO",
           "type": "VIDEO",
           "links": [
-            22
+            25
           ]
         }
       ],
@@ -875,14 +1142,15 @@
       "widgets_values": [
         24.0,
         "auto",
-        "sRGB"
+        "sRGB",
+        "none"
       ]
     },
     {
-      "id": 15,
+      "id": 17,
       "type": "SaveVideo",
       "pos": [
-        2260,
+        2620,
         300
       ],
       "size": [
@@ -890,13 +1158,13 @@
         100
       ],
       "flags": {},
-      "order": 14,
+      "order": 16,
       "mode": 0,
       "inputs": [
         {
           "name": "video",
           "type": "VIDEO",
-          "link": 22
+          "link": 25
         },
         {
           "name": "filename_prefix",
@@ -932,7 +1200,7 @@
       ]
     },
     {
-      "id": 16,
+      "id": 18,
       "type": "Note",
       "pos": [
         420,
@@ -943,7 +1211,7 @@
         100
       ],
       "flags": {},
-      "order": 15,
+      "order": 17,
       "mode": 0,
       "inputs": [
         {
@@ -961,187 +1229,8 @@
       },
       "title": "怎么用",
       "widgets_values": [
-        "【最小续接演示 · 官方节点 + ComfyUI-H3-Relay-Kit】\n\n第 1 段：\n  ① 段号 = 0，填好 prompt → 点 Queue。\n  日志会打印「无 context_latent → 直通（独立段，不续接）」，裁重叠不裁。\n\n第 2 段：\n  只改两处：\n  ① 段号 = 1（桥与落盘会自动跟着走，不用手改第二处）\n  ② prompt 换成第 2 段要拍的内容（开头直接接住上一段的动作/机位）\n  再点 Queue。\n  日志应出现：\n    [H3 Relay] latent 桥续接：钉住 22 帧 / 7 步 …\n    [H3 Relay] 裁首 23 帧 = 钉住 22 + 沉降 1 ｜ 自动检测：…\n    [H3 Relay] 接缝自检：前 40 帧无突变 … → 起点干净。\n\n只看这三件事就算跑通：\n  · 「钉住 22 帧」= 上一段尾部已接进来\n  · 「裁首 N 帧 = 钉住 22 + 沉降 Y」= 接缝处理已生效（Y 由本段画面量出来）\n  · 「起点干净」= 没有跳变，可以拼\n\n没接对的两个典型症状：\n  · 日志写「静默直通」→ 段号填了 ≥1，但 run_id 与上一段不一致 / 文件不在\n  · 画面从第 1 帧就开始重播上一段 → 裁重叠节点没接上，或 trim_frames 没接桥的第 3 路\n\n模型文件：把上面 4 个加载器的下拉改成你本机的文件即可。"
+        "【最小续接演示 · 官方节点 + ComfyUI-H3-Relay-Kit】\n\n第 1 段：\n  ① 段号 = 0，填好 prompt → 点 Queue。\n  日志会打印「无 context_latent → 直通（独立段，不续接）」，裁重叠不裁。\n\n第 2 段：\n  只改两处：\n  ① 段号 = 1（桥与落盘会自动跟着走，不用手改第二处）\n  ② prompt 换成第 2 段要拍的内容（开头直接接住上一段的动作/机位）\n  再点 Queue。\n  日志应出现：\n    [H3 Relay] latent 桥续接：钉住 22 帧 / 7 步 …\n    [H3 Relay] 裁首 22 帧 = 钉住 22 + 沉降 0 ｜ 手动指定\n    [H3 Relay] 后处理：全部关闭（直通）\n    [H3 Relay] 音频缝：第 1 段无缝可补 → 直通｜本段音频已落盘 …\n    [H3 Relay] 接缝自检：前 40 帧无突变 … → 起点干净。\n\n只看这三件事就算跑通：\n  · 「钉住 22 帧」= 上一段尾部已接进来\n  · 「裁首 N 帧 = 钉住 22 + 沉降 0」= 接缝处理已生效（0.5.0 起默认不裁沉降）\n  · 「起点干净」= 没有跳变，可以拼\n\n后处理 Post（0.5.0 新增，整节点可以删掉）：\n  15 个旋钮**全部默认关 = 逐位直通**，不接它行为与 0.4.x 一致。\n  最省的一档试法：match_prev = 0.5（段头色档/曝光对齐上段末帧，治缝上亮度阶跃）。\n\n音频缝（0.5.0 新增，整节点也可以删掉）：\n  patch_seconds 默认 0 = 逐位直通。缝处音频「抽一下 / 静音一瞬」就调 2.0：\n  把本段头 2 秒换成上一段最静窗环境声（长度守恒，不动时间轴）。\n  ⚠ 第 1 段也要接（要它把第 1 段音频落盘，第 2 段的床源就是它）；段号顺序跑。\n\n没接对的两个典型症状：\n  · 日志写「静默直通」→ 段号填了 ≥1，但 run_id 与上一段不一致 / 文件不在\n  · 画面从第 1 帧就开始重播上一段 → 裁重叠节点没接上，或 trim_frames 没接桥的第 3 路\n\n模型文件：把上面 4 个加载器的下拉改成你本机的文件即可。"
       ]
-    },
-    {
-      "id": 17,
-      "type": "H3RelayPost",
-      "pos": [
-        2240,
-        40
-      ],
-      "size": [
-        330,
-        320
-      ],
-      "flags": {},
-      "order": 0,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "images",
-          "type": "IMAGE",
-          "link": 23
-        },
-        {
-          "name": "guide",
-          "type": "IMAGE",
-          "link": 24
-        },
-        {
-          "name": "match_prev",
-          "type": "FLOAT",
-          "link": null,
-          "widget": {
-            "name": "match_prev"
-          }
-        },
-        {
-          "name": "match_prev_frames",
-          "type": "INT",
-          "link": null,
-          "widget": {
-            "name": "match_prev_frames"
-          }
-        },
-        {
-          "name": "match_prev_gain_max",
-          "type": "FLOAT",
-          "link": null,
-          "widget": {
-            "name": "match_prev_gain_max"
-          }
-        },
-        {
-          "name": "match_prev_offset_max",
-          "type": "FLOAT",
-          "link": null,
-          "widget": {
-            "name": "match_prev_offset_max"
-          }
-        },
-        {
-          "name": "lowfreq_pull",
-          "type": "FLOAT",
-          "link": null,
-          "widget": {
-            "name": "lowfreq_pull"
-          }
-        },
-        {
-          "name": "lowfreq_frames",
-          "type": "INT",
-          "link": null,
-          "widget": {
-            "name": "lowfreq_frames"
-          }
-        },
-        {
-          "name": "lowfreq_blur",
-          "type": "INT",
-          "link": null,
-          "widget": {
-            "name": "lowfreq_blur"
-          }
-        },
-        {
-          "name": "hist_match",
-          "type": "FLOAT",
-          "link": null,
-          "widget": {
-            "name": "hist_match"
-          }
-        },
-        {
-          "name": "wb_match",
-          "type": "FLOAT",
-          "link": null,
-          "widget": {
-            "name": "wb_match"
-          }
-        },
-        {
-          "name": "deconv_strength",
-          "type": "FLOAT",
-          "link": null,
-          "widget": {
-            "name": "deconv_strength"
-          }
-        },
-        {
-          "name": "deconv_radius",
-          "type": "FLOAT",
-          "link": null,
-          "widget": {
-            "name": "deconv_radius"
-          }
-        },
-        {
-          "name": "detail_borrow",
-          "type": "FLOAT",
-          "link": null,
-          "widget": {
-            "name": "detail_borrow"
-          }
-        },
-        {
-          "name": "detail_blur",
-          "type": "INT",
-          "link": null,
-          "widget": {
-            "name": "detail_blur"
-          }
-        },
-        {
-          "name": "settle_sharpen",
-          "type": "FLOAT",
-          "link": null,
-          "widget": {
-            "name": "settle_sharpen"
-          }
-        },
-        {
-          "name": "settle_sharpen_frames",
-          "type": "INT",
-          "link": null,
-          "widget": {
-            "name": "settle_sharpen_frames"
-          }
-        }
-      ],
-      "outputs": [
-        {
-          "name": "images",
-          "type": "IMAGE",
-          "links": [
-            25
-          ]
-        },
-        {
-          "name": "report",
-          "type": "STRING",
-          "links": []
-        }
-      ],
-      "widgets_values": [
-        0,
-        12,
-        1.15,
-        0.06,
-        0,
-        12,
-        64,
-        0,
-        0,
-        0,
-        1.5,
-        0,
-        9,
-        0,
-        24
-      ],
-      "title": "🔗 H3 续接后处理 Post（全部默认关）"
     }
   ],
   "links": [
@@ -1175,7 +1264,7 @@
       0,
       8,
       0,
-      "CONDITIONING"
+      "*"
     ],
     [
       5,
@@ -1183,7 +1272,7 @@
       1,
       8,
       1,
-      "LATENT"
+      "*"
     ],
     [
       6,
@@ -1191,7 +1280,7 @@
       0,
       8,
       6,
-      "INT"
+      "*"
     ],
     [
       7,
@@ -1231,7 +1320,7 @@
       0,
       10,
       0,
-      "LATENT"
+      "*"
     ],
     [
       12,
@@ -1239,7 +1328,7 @@
       0,
       10,
       2,
-      "INT"
+      "*"
     ],
     [
       13,
@@ -1279,63 +1368,71 @@
       0,
       13,
       0,
-      "IMAGE"
+      "*"
     ],
     [
       18,
-      12,
-      0,
-      13,
-      1,
-      "AUDIO"
-    ],
-    [
-      19,
       8,
       2,
       13,
-      2,
-      "INT"
+      1,
+      "*"
+    ],
+    [
+      19,
+      12,
+      0,
+      13,
+      3,
+      "*"
+    ],
+    [
+      20,
+      13,
+      0,
+      14,
+      0,
+      "*"
     ],
     [
       21,
       13,
-      1,
+      3,
       14,
       1,
-      "AUDIO"
+      "*"
     ],
     [
       22,
-      14,
-      0,
+      13,
+      1,
       15,
       0,
-      "VIDEO"
+      "*"
     ],
     [
       23,
-      13,
+      14,
       0,
-      17,
+      16,
       0,
       "IMAGE"
     ],
     [
       24,
-      13,
-      3,
-      17,
+      15,
+      0,
+      16,
       1,
-      "IMAGE"
+      "AUDIO"
     ],
     [
       25,
+      16,
+      0,
       17,
       0,
-      14,
-      0,
-      "IMAGE"
+      "VIDEO"
     ]
   ],
   "groups": [],

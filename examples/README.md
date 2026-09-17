@@ -2,13 +2,14 @@
 
 ## `minimal_relay_official.json`
 
-**全官方节点 + 本包**的最小续接工作流（17 个节点），只回答一个问题：
+**全官方节点 + 本包**的最小续接工作流（18 个节点），只回答一个问题：
 **「第 2 段要接对哪些线？」**
 
 ```
 4 个官方加载器 → 官方出词节点(MiniMaxH3ImageToVideo) → 🔗 续接 Latent 桥
               → KSampler → 🔗 续接 Latent 存
               → VAEDecode / VAEDecodeAudio → 🔗 续接裁重叠 → 🔗 续接后处理 Post
+                                                  ↘ 🔗 续接音频缝
               → CreateVideo → SaveVideo
 ```
 

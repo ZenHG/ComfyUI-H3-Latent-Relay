@@ -4,7 +4,7 @@
 # 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 """H3 Relay Kit · 节点层
 
-七个节点，覆盖"用作者的续接方式"所需的全部接线：
+八个节点，覆盖"用作者的续接方式"所需的全部接线：
 
   🔗 H3 续接 Latent 存   —— 把本段的 AV latent 落盘，供下一段读
   🔗 H3 续接 Latent 读   —— 读回上一段的 AV latent
@@ -12,11 +12,14 @@
   🔗 H3 续接 拷贝桥      —— 上一段尾部**逐位拷贝**进本段初始 latent + 噪声掩码（钉住区不重绘）
   🔗 H3 续接裁重叠        —— 裁掉续接段头部的重叠帧（视频 + 音频同裁）+ 交接 prev_tail
   🔗 H3 续接后处理 Post   —— 画质域后处理（0.5.0 拆出；不动时间轴/帧数/音频）
+  🔗 H3 续接音频缝        —— 音频域：上一段环境声补本段头（长度守恒，零 A/V 位移）
   🔗 H3 续接连跑 Chain    —— 同分组框内自动推进「桥 + 落盘」段号并排队连跑
 
-时间轴 / 画质域分工（0.5.0 起）：
-  · H3RelayTrimAV = 时间轴（裁重叠 / 沉降 / 重影），**冻结不再长 widget**；
-  · H3RelayPost  = 画质域（色档对齐 / 补高频 / 锐化），**以后新功能都加在这里**。
+时间轴 / 画质域 / 音频域分工（0.5.0 起）：
+  · H3RelayTrimAV    = 时间轴（裁重叠 / 沉降 / 重影），**冻结不再长 widget**；
+  · H3RelayPost      = 画质域（色档对齐 / 补高频 / 锐化）；
+  · H3RelayAudioSeam = 音频域（跨段环境声补头 / 床环铺）。
+  三条纪律同源：**新功能归到对应域，不往 TrimAV 上挂**。
 
 两条续接路线**二选一**，不可同图串联：
   · Latent 桥（conditioning 钉帧）→ 模型重绘上一段（有复现漂移风险，检测兜底）；
@@ -68,6 +71,12 @@ def _stage_path(run_id: str, stage_index: int) -> str:
     if idx < 0:
         raise RuntimeError("stage_index 不能为负（段号从 0 开始，第 1 段=0）。")
     return os.path.join(_RELAY_ROOT, rid, "stage_%05d.safetensors" % idx)
+
+
+def _audio_stage_path(run_id: str, stage_index: int) -> str:
+    """音频落盘路径：与 latent 同目录，文件名前缀 audio_（互不覆盖）。"""
+    p = _stage_path(run_id, stage_index)
+    return os.path.join(os.path.dirname(p), "audio_%05d.safetensors" % int(stage_index))
 
 
 class H3RelayLatentSave:
@@ -1110,6 +1119,116 @@ class H3RelayPost:
         return (out, line)
 
 
+class H3RelayAudioSeam:
+    """音频缝：把上一段的环境声补进本段头部（**长度守恒**，零 A/V 位移）。
+
+    治的现象：段首音频带 ~32ms 解码 priming 近静默 + 生成瞬态，裁重叠把这段放到
+    裁剪点上 ⇒ 成片缝处先"抽一下"再起乐（实测缝起 20ms 掉 12–13 dB，邻域最静 −72 dB）。
+
+    做法：把本段头部 ``patch_seconds`` 秒整段换成**上一段的最静窗环境声**
+    （stationary 噪声，拼接不可闻），到 ``patch_seconds`` 处交叉淡变回本段自身音频，
+    之后**逐位不动**。帧数/音频长度都不变 ⇒ 不消耗时间轴。
+
+    ⚠️ 真 crossfade（三角窗叠化）做不到"单段内长度守恒"——它要裁掉**上一段**的尾部，
+    而本节点只能改本段。所以 crossfade 仍归组装层；等长路线用本节点。
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "audio": ("AUDIO", {
+                    "tooltip": "【接法】从「续接裁重叠」的 audio 输出口拉线过来。\n"
+                               "（第 1 段没有裁重叠节点时，直接接音频解码 VAEDecodeAudio。）",
+                }),
+                "run_id": ("STRING", {
+                    "default": "relay",
+                    "tooltip": "【填什么】这部片子的名字。\n"
+                               "⚠ 必须和「续接 Latent 存/桥」上的 run_id 一字不差——\n"
+                               "本节点要靠它找到上一段落盘的音频当床源。",
+                }),
+                "stage_index": ("INT", {
+                    "default": 0, "min": 0, "max": 9999, "step": 1,
+                    "tooltip": "【填什么】本段是全片的第几段。第 1 段填 0，第 2 段填 1…\n"
+                               "第 1 段无缝可补，会直接直通（但仍会把音频落盘，供第 2 段当床源）。",
+                }),
+            },
+            "optional": {
+                "patch_seconds": ("FLOAT", {
+                    "default": 0.0, "min": 0.0, "max": 4.0, "step": 0.05,
+                    "tooltip": "【组 1 · 音频缝】**头部补丁长度（秒）**。0 = 关（默认，逐位直通）。\n"
+                               "建议 2.0：段首 2 秒的生成瞬态整段换成上一段的环境声。\n"
+                               "⚠ 前提是段首本来就不该有台词（前 1.2s 无词是产线纪律）——\n"
+                               "补丁会把这 N 秒的内容换成环境声。",
+                }),
+                "tile_seconds": ("FLOAT", {
+                    "default": 0.0, "min": 0.0, "max": 4.0, "step": 0.05,
+                    "tooltip": "【组 2 · 床环铺】床源改取这么长的瓦片，自叠化环铺满补丁长度。\n"
+                               "0 = 整窗直取最静 N 秒（默认）。\n"
+                               "上一段最长干净环境窗短于补丁长度时用它（建议 1.2）。",
+                }),
+                "fade_seconds": ("FLOAT", {
+                    "default": 0.25, "min": 0.0, "max": 0.5, "step": 0.01,
+                    "tooltip": "【组 3】补丁边界（第 N 秒处）的交叉淡变宽度。\n"
+                               "0 = 硬切（会有可闻的接点）；0.25 是产线实测值。",
+                }),
+                "bed_stage": ("INT", {
+                    "default": 0, "min": 0, "max": 9999, "step": 1,
+                    "tooltip": "【填什么】用第几段的音频当床源（默认 0 = 第 1 段）。\n"
+                               "同场景环境声是 stationary 的，取第 1 段最稳；\n"
+                               "⚠ 必须小于本段段号（床源得是已经渲染完的段）。",
+                }),
+                "note": ("STRING", {
+                    "default": "",
+                    "tooltip": "【可留空】备注，存进落盘文件的元数据里方便事后分辨版本。",
+                }),
+            },
+        }
+
+    RETURN_TYPES = ("AUDIO", "STRING")
+    RETURN_NAMES = ("audio", "report")
+    FUNCTION = "seam"
+    CATEGORY = CATEGORY
+    # 落盘本身就是产物：没有下游消费也要执行（否则第 1 段的床源文件永远不生成）
+    OUTPUT_NODE = True
+    DESCRIPTION = ("把上一段的环境声补进本段头部，去掉裁切点上的解码静默与生成瞬态。"
+                   "长度守恒、零 A/V 位移；默认关（0 = 逐位直通）。")
+
+    def seam(self, audio, run_id, stage_index, patch_seconds=0.0, tile_seconds=0.0,
+             fade_seconds=0.25, bed_stage=0, note=""):
+        me = _audio_stage_path(run_id, int(stage_index))
+        idx = int(stage_index)
+        patch = float(patch_seconds or 0.0)
+        if idx <= 0 or patch <= 0.0:
+            CORE.save_audio(audio, me, note=note)
+            why = "第 1 段无缝可补" if idx <= 0 else "补丁关（patch_seconds=0）"
+            line = ("[H3 Relay] 音频缝：%s → 直通｜本段音频已落盘（供后段当床源）：%s"
+                    % (why, me))
+            print(line)
+            return (audio, line)
+
+        b_idx = int(bed_stage)
+        if b_idx >= idx:
+            raise RuntimeError(
+                "床源段号（%d）必须小于本段段号（%d）——床源得是**已经渲染完**的那一段。\n"
+                "    想用上一段当床源就填 0（或用默认值）。" % (b_idx, idx)
+            )
+        bed_path = _audio_stage_path(run_id, b_idx)
+        if not os.path.isfile(bed_path):
+            raise FileNotFoundError(
+                "床源音频不存在：%s\n"
+                "    第 %d 段还没跑过（本节点会顺手把每段音频落盘）。\n"
+                "    先按段号顺序跑一次第 %d 段，再来跑本段。" % (bed_path, b_idx, b_idx)
+            )
+        out, rep = CORE.audio_seam_patch(audio, CORE.load_audio(bed_path),
+                                         patch, float(tile_seconds or 0.0),
+                                         float(fade_seconds))
+        CORE.save_audio(out, me, note=note)
+        line = rep + "｜已落盘（供后段当床源）：%s" % me
+        print(line)
+        return (out, line)
+
+
 NODE_CLASS_MAPPINGS = {
     "H3RelayLatentSave": H3RelayLatentSave,
     "H3RelayLatentLoad": H3RelayLatentLoad,
@@ -1117,6 +1236,7 @@ NODE_CLASS_MAPPINGS = {
     "H3RelayCopyBridge": H3RelayCopyBridge,
     "H3RelayTrimAV": H3RelayTrimAV,
     "H3RelayPost": H3RelayPost,
+    "H3RelayAudioSeam": H3RelayAudioSeam,
     "H3RelayChain": H3RelayChain,
 }
 
@@ -1127,5 +1247,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "H3RelayCopyBridge": "🔗 H3 续接 拷贝桥",
     "H3RelayTrimAV": "🔗 H3 续接裁重叠",
     "H3RelayPost": "🔗 H3 续接后处理 Post",
+    "H3RelayAudioSeam": "🔗 H3 续接音频缝",
     "H3RelayChain": "🔗 H3 续接连跑 Chain",
 }

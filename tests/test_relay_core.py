@@ -38,6 +38,7 @@
      **统计量取样窗**（0.5.0 修正）：取紧贴缝那帧 vs 旧口径全区聚合——后者会把首帧推过 guide
  20. 拆节点（0.5.0）：`H3RelayPost` 独立 + TrimAV 追加第 4 路输出 `prev_tail`
  21. 重叠区双向融合 blend（0.5.0 / 调研 §4）：窗形权重（smoothstep / hann），两端导数为 0
+ 22. 音频缝（0.5.0 / 节点内实现）：长度守恒、最静窗、边界 blend、床环铺、采样率/声道兜底、落盘往返、节点守卫
 """
 
 import os
@@ -1459,6 +1460,142 @@ check("21.8 节点 mask_mode 追加 blend（旧 hard/taper/ramp 原序保留）"
 check("21.9 节点 mask_mode 默认仍是 hard",
       _it21["optional"]["mask_mode"][1]["default"] == "hard",
       "%s" % (_it21["optional"]["mask_mode"][1]["default"],))
+
+# ---------------------------------------------------------------- 第 22 组：音频缝（0.5.0 · 节点内实现）
+# 依据：音频缝必须在**节点里**做，不能靠组装层 ffmpeg（效果要落进段文件，组装只剩拼接）。
+# 本组锁三件事：长度守恒（零 A/V 位移）/ 默认逐位直通 / 边界是 blend 而不是硬切。
+import math  # noqa: E402
+import shutil  # noqa: E402
+
+print()
+print("### 第 22 组：音频缝（节点内实现，长度守恒）")
+
+_SR = 32000
+_it22 = NODES.H3RelayAudioSeam.INPUT_TYPES()
+_opt22 = _it22["optional"]
+_REQ22 = _it22["required"]
+
+check("22.1 默认全关（patch/tile=0，fade=0.25，bed_stage=0，OUTPUT_NODE）",
+      _opt22["patch_seconds"][1]["default"] == 0.0
+      and _opt22["tile_seconds"][1]["default"] == 0.0
+      and abs(_opt22["fade_seconds"][1]["default"] - 0.25) < 1e-9
+      and _opt22["bed_stage"][1]["default"] == 0
+      and _REQ22["audio"][0] == "AUDIO"
+      and NODES.H3RelayAudioSeam.OUTPUT_NODE is True,
+      "RETURN=%s" % (NODES.H3RelayAudioSeam.RETURN_NAMES,))
+
+torch.manual_seed(7)
+# 本段：头部 32ms 解码 priming 近静默 + 段体 0.30 幅度噪声（复刻实测症状）
+_cur_wf = torch.rand(1, 1, _SR * 3) * 0.30
+_cur_wf[..., :int(0.032 * _SR)] = 0.0
+_cur_a = {"waveform": _cur_wf, "sample_rate": _SR}
+# 床源：前 2s 吵（0.5）、后 2s 静（0.05）——最静窗必须落在后半
+_bed_a = {"waveform": torch.cat([torch.rand(1, 1, _SR * 2) * 0.50,
+                                 torch.rand(1, 1, _SR * 2) * 0.05], -1),
+          "sample_rate": _SR}
+
+_out0, _rep0 = CORE.audio_seam_patch(_cur_a, _bed_a, patch=0.0)
+check("22.2 patch=0 ⇒ 逐位直通（返回原对象，不做拷贝）",
+      _out0 is _cur_a, "rep=%r" % (_rep0[:20],))
+
+_out1, _rep1 = CORE.audio_seam_patch(_cur_a, _bed_a, patch=2.0, fade=0.25)
+_w1 = _out1["waveform"]
+check("22.3 补丁后长度守恒（零 A/V 位移）",
+      int(_w1.shape[-1]) == int(_cur_wf.shape[-1]) and int(_out1["sample_rate"]) == _SR,
+      "%d → %d 点" % (int(_cur_wf.shape[-1]), int(_w1.shape[-1])))
+
+_n22 = int(2.0 * _SR)
+_X22 = int(0.25 * _SR)
+_keep22 = _n22 - _X22
+_start22, _rms22 = CORE.quietest_window(_bed_a["waveform"][0], _n22)
+_bed_win = _bed_a["waveform"][..., _start22:_start22 + _n22]
+check("22.4 替换区 [0,N−X) 就是床源最静窗（逐位相同）",
+      torch.equal(_w1[..., :_keep22], _bed_win[..., :_keep22]),
+      "床窗起点 %.2fs" % (_start22 / _SR))
+check("22.5 最静窗选择正确（取静半段、RMS 明显更低）",
+      _start22 >= 2 * _SR and _rms22 < 0.035,
+      "起点 %.2fs RMS=%.4f" % (_start22 / _SR, _rms22))
+
+_wgt = torch.linspace(0.0, 1.0, _X22)
+_exp_blend = (_bed_win[..., _keep22:_n22] * (1.0 - _wgt)
+              + _cur_wf[..., _keep22:_n22] * _wgt)
+check("22.6 边界窗 [N−X,N) 是 blend（非硬切、非纯床、非纯本段）",
+      torch.allclose(_w1[..., _keep22:_n22], _exp_blend, atol=1e-7)
+      and not torch.equal(_w1[..., _keep22:_n22], _bed_win[..., _keep22:_n22])
+      and not torch.equal(_w1[..., _keep22:_n22], _cur_wf[..., _keep22:_n22]))
+
+check("22.7 N 之后逐位不动（段体一个样本都不许改）",
+      torch.equal(_w1[..., _n22:], _cur_wf[..., _n22:]))
+
+# 瓦片环铺：用**平滑**床源，接缝若有台阶会立刻现形（噪声源看不出跳变）
+_ph = torch.arange(_SR * 3, dtype=torch.float32) / _SR
+_sine = (torch.sin(2 * math.pi * 5.0 * _ph) * 0.4).unsqueeze(0).unsqueeze(0)
+_bed_t, _ = CORE.build_bed(_sine[0], _n22, int(1.2 * _SR), _X22)
+_d_step = float((_bed_t[..., 1:] - _bed_t[..., :-1]).abs().max())
+_t_step = float((_sine[0][..., 1:] - _sine[0][..., :-1]).abs().max())
+check("22.8 瓦片自叠化环铺：长度=N 且接缝无台阶",
+      int(_bed_t.shape[-1]) == _n22 and _d_step < 5.0 * _t_step,
+      "最长相邻差 %.5f vs 瓦片内 %.5f" % (_d_step, _t_step))
+
+_bed16 = {"waveform": torch.rand(1, 1, _SR * 2) * 0.05, "sample_rate": _SR // 2}
+_o9, _ = CORE.audio_seam_patch(_cur_a, _bed16, patch=1.0)
+check("22.9 床源采样率不一致 ⇒ 自动重采样（长度守恒、不炸）",
+      int(_o9["waveform"].shape[-1]) == int(_cur_wf.shape[-1])
+      and int(_o9["sample_rate"]) == _SR)
+
+_bed_st = {"waveform": torch.rand(1, 2, _SR * 2) * 0.05, "sample_rate": _SR}
+_o10, _ = CORE.audio_seam_patch(_cur_a, _bed_st, patch=1.0)
+check("22.10 床源多声道 ⇒ 降混对齐（形状与本段一致）",
+      tuple(_o10["waveform"].shape) == tuple(_cur_wf.shape))
+
+_o11, _r11 = CORE.audio_seam_patch(_cur_a, _bed_a, patch=10.0)
+check("22.11 补丁超长 ⇒ 夹紧 + 报告告警（不炸整条链）",
+      int(_o11["waveform"].shape[-1]) == int(_cur_wf.shape[-1]) and "⚠" in _r11,
+      _r11.splitlines()[-1][:60])
+
+_tmp22 = tempfile.mkdtemp(prefix="h3relay_audio_")
+_p22 = os.path.join(_tmp22, "a.safetensors")
+CORE.save_audio(_out1, _p22, note="单测")
+_back = CORE.load_audio(_p22)
+check("22.12 音频落盘/读回逐位一致（含采样率元数据）",
+      torch.equal(_back["waveform"], _out1["waveform"])
+      and int(_back["sample_rate"]) == _SR)
+
+# —— 走节点（不只是 core）：落盘 + 床源读回 + 两道守卫
+_RID22 = "_unit_audio22"
+_p0 = NODES._audio_stage_path(_RID22, 0)
+_dir22 = os.path.dirname(_p0)
+try:
+    _n22obj = NODES.H3RelayAudioSeam()
+    _a0, _l0 = _n22obj.seam(_bed_a, _RID22, 0)
+    check("22.13 节点 stage 0 ⇒ 直通，但仍落盘（后段的床源靠它）",
+          _a0 is _bed_a and os.path.isfile(_p0) and "第 1 段无缝可补" in _l0,
+          _l0[:56])
+    _a1, _l1 = _n22obj.seam(_cur_a, _RID22, 1, patch_seconds=2.0)
+    _got = _a1["waveform"][..., :_keep22]
+    _want = CORE.load_audio(_p0)["waveform"]
+    _s1, _ = CORE.quietest_window(_want[0], _n22)
+    check("22.14 节点 stage 1 ⇒ 头部换成上一段落盘音频的最静窗 + 报长度守恒",
+          torch.equal(_got, _want[..., _s1:_s1 + _keep22]) and "长度守恒" in _l1,
+          _l1.splitlines()[0][:56])
+    expect_raise("22.15 节点：床源段号 ≥ 本段段号 ⇒ 明确 raise（不静默取自己）",
+                 lambda: _n22obj.seam(_cur_a, _RID22, 1, patch_seconds=1.0, bed_stage=1),
+                 "必须小于本段段号")
+    expect_raise("22.16 节点：床源文件不存在 ⇒ raise 并指出要先跑第几段",
+                 lambda: _n22obj.seam(_cur_a, _RID22, 3, patch_seconds=1.0, bed_stage=2),
+                 "床源音频不存在")
+finally:
+    shutil.rmtree(_dir22, ignore_errors=True)
+    shutil.rmtree(_tmp22, ignore_errors=True)
+
+check("22.17 节点已注册且显示名以 🔗 开头",
+      NODES.NODE_CLASS_MAPPINGS.get("H3RelayAudioSeam") is NODES.H3RelayAudioSeam
+      and NODES.NODE_DISPLAY_NAME_MAPPINGS["H3RelayAudioSeam"].startswith("🔗"),
+      "%s" % (NODES.NODE_DISPLAY_NAME_MAPPINGS.get("H3RelayAudioSeam"),))
+
+check("22.18 音频域归属写进节点描述（时间轴/画质域/音频域不混挂）",
+      "长度守恒" in (NODES.H3RelayAudioSeam.DESCRIPTION or ""),
+      (NODES.H3RelayAudioSeam.DESCRIPTION or "")[:44])
 
 print()
 print("=" * 78)
