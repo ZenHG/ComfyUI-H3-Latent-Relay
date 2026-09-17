@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 ComfyUI-H3-Relay-Kit contributors
+# 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 """ComfyUI-H3-Relay-Kit
 
 MiniMax-H3 多段续接的 **latent 桥**（零重编码）。
@@ -15,7 +18,8 @@ resolved_frame_index）由 ComfyUI 原生消费。
     🔗 H3 续接 Latent 读    H3RelayLatentLoad     手动连线时读上一段（桥自动取源时不用）
     🔗 H3 续接 Latent 桥    H3RelayMotionContext  核心：上一段尾段钉进本段 conditioning
     🔗 H3 续接 拷贝桥       H3RelayCopyBridge     上一段尾段逐位拷进本段 latent + 噪声掩码（钉住区不重绘）
-    🔗 H3 续接裁重叠        H3RelayTrimAV         裁掉钉住区重播帧（音画同裁+接缝自检）
+    🔗 H3 续接裁重叠        H3RelayTrimAV         裁掉钉住区重播帧（音画同裁+接缝自检），并交出 prev_tail
+    🔗 H3 续接后处理 Post   H3RelayPost           画质域后处理（跨段统计匹配/低频残差/直方图+白平衡/反卷积/高频迁移/糊区锐化）
     🔗 H3 续接连跑 Chain    H3RelayChain          UI 自动连跑（段号自动推进 + 自动排队）
 
 手把手（UI 三步跑一条链）：
@@ -33,4 +37,4 @@ WEB_DIRECTORY = "./web"
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
 
-__version__ = "0.4.3"
+__version__ = "0.5.0"

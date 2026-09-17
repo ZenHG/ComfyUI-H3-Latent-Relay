@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 ComfyUI-H3-Relay-Kit contributors
+# 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 """make_minimal_workflow.py — 生成「最小官方节点 + 本包」的续接演示工作流。
 
 【为什么要用脚本生成，而不是手写一份 JSON 交上去】
@@ -152,7 +155,7 @@ class Graph:
         d = self.oi.get(node_type)
         if d is None:
             raise SystemExit(
-                "[FAIL] 服务端没有节点 %r（本包的 5 个节点要装在 custom_nodes 下并重启）。\n"
+                "[FAIL] 服务端没有节点 %r（本包的 7 个节点要装在 custom_nodes 下并重启）。\n"
                 "       当前识别到本包节点：%s"
                 % (node_type, sorted(k for k in self.oi if k.startswith("H3Relay")))
             )
@@ -331,13 +334,20 @@ def build(oi, length=73, width=448, height=768):
     trim = g.add("H3RelayTrimAV", pos=[1900, 40],
                  links_in={"images": (dec_v, "IMAGE"), "audio": (dec_a, "AUDIO"),
                            "trim_frames": (bridge, "trim_frames")},
-                 values={"fps": 24.0},
-                 title="🔗 裁重叠（自动：钉住区 + 沉降帧）")
+                 values={"fps": 24.0, "settle_frames": 0},
+                 title="🔗 裁重叠（settle_frames=0：只裁钉住区，缝处无跳）")
 
-    mk = g.add("CreateVideo", pos=[2260, 40],
-               links_in={"images": (trim, "images"), "audio": (trim, "audio")},
+    # 0.5.0：画质域后处理独立成节点（TrimAV 只管时间轴）。全部作用项默认 0 = 逐位直通；
+    # guide 接 TrimAV 的第 4 路输出 prev_tail（= 上段末帧），跨段两项才有「缝的另一侧」。
+    post = g.add("H3RelayPost", pos=[2260, 40],
+                 links_in={"images": (trim, "images"), "guide": (trim, "prev_tail")},
+                 values={},
+                 title="🔗 后处理 Post（全默认关 = 直通；要治缝阶跃就把 match_prev 调到 0.5）")
+
+    mk = g.add("CreateVideo", pos=[2620, 40],
+               links_in={"images": (post, "images"), "audio": (trim, "audio")},
                values={"fps": 24.0})
-    g.add("SaveVideo", pos=[2260, 300], links_in={"video": (mk, "VIDEO")})
+    g.add("SaveVideo", pos=[2620, 300], links_in={"video": (mk, "VIDEO")})
 
     g.add("Note", pos=[420, 700], title="怎么用", values={"text":
         "【最小续接演示 · 官方节点 + ComfyUI-H3-Relay-Kit】\n"
@@ -353,13 +363,18 @@ def build(oi, length=73, width=448, height=768):
         "  再点 Queue。\n"
         "  日志应出现：\n"
         "    [H3 Relay] latent 桥续接：钉住 22 帧 / 7 步 …\n"
-        "    [H3 Relay] 裁首 23 帧 = 钉住 22 + 沉降 1 ｜ 自动检测：…\n"
+        "    [H3 Relay] 裁首 22 帧 = 钉住 22 + 沉降 0 ｜ 手动指定\n"
+        "    [H3 Relay] 后处理：全部关闭（直通）\n"
         "    [H3 Relay] 接缝自检：前 40 帧无突变 … → 起点干净。\n"
         "\n"
         "只看这三件事就算跑通：\n"
         "  · 「钉住 22 帧」= 上一段尾部已接进来\n"
-        "  · 「裁首 N 帧 = 钉住 22 + 沉降 Y」= 接缝处理已生效（Y 由本段画面量出来）\n"
+        "  · 「裁首 N 帧 = 钉住 22 + 沉降 0」= 接缝处理已生效（0.5.0 起默认不裁沉降）\n"
         "  · 「起点干净」= 没有跳变，可以拼\n"
+        "\n"
+        "后处理 Post（0.5.0 新增，整节点可以删掉）：\n"
+        "  15 个旋钮**全部默认关 = 逐位直通**，不接它行为与 0.4.x 一致。\n"
+        "  最省的一档试法：match_prev = 0.5（段头色档/曝光对齐上段末帧，治缝上亮度阶跃）。\n"
         "\n"
         "没接对的两个典型症状：\n"
         "  · 日志写「静默直通」→ 段号填了 ≥1，但 run_id 与上一段不一致 / 文件不在\n"
@@ -391,7 +406,8 @@ def main():
     except Exception as e:
         raise SystemExit("[FAIL] 取不到 object_info：%r\n       请先启动 ComfyUI（python main.py）。" % (e,))
 
-    missing = [k for k in ("H3RelayMotionContext", "H3RelayLatentSave", "H3RelayTrimAV") if k not in oi]
+    missing = [k for k in ("H3RelayMotionContext", "H3RelayLatentSave", "H3RelayTrimAV",
+                           "H3RelayPost") if k not in oi]
     if missing:
         raise SystemExit(
             "[FAIL] ComfyUI 里没有这些节点：%s\n"

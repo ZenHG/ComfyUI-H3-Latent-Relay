@@ -1,8 +1,8 @@
 {
   "id": "h3-relay-minimal",
   "revision": 0,
-  "last_node_id": 16,
-  "last_link_id": 22,
+  "last_node_id": 17,
+  "last_link_id": 25,
   "nodes": [
     {
       "id": 1,
@@ -777,7 +777,7 @@
           "name": "images",
           "type": "IMAGE",
           "links": [
-            20
+            23
           ]
         },
         {
@@ -791,6 +791,13 @@
           "name": "report",
           "type": "STRING",
           "links": []
+        },
+        {
+          "name": "prev_tail",
+          "type": "IMAGE",
+          "links": [
+            24
+          ]
         }
       ],
       "properties": {
@@ -800,7 +807,7 @@
       "widgets_values": [
         0,
         24.0,
-        -1
+        0
       ]
     },
     {
@@ -821,7 +828,7 @@
         {
           "name": "images",
           "type": "IMAGE",
-          "link": 20
+          "link": 25
         },
         {
           "name": "audio",
@@ -956,6 +963,185 @@
       "widgets_values": [
         "【最小续接演示 · 官方节点 + ComfyUI-H3-Relay-Kit】\n\n第 1 段：\n  ① 段号 = 0，填好 prompt → 点 Queue。\n  日志会打印「无 context_latent → 直通（独立段，不续接）」，裁重叠不裁。\n\n第 2 段：\n  只改两处：\n  ① 段号 = 1（桥与落盘会自动跟着走，不用手改第二处）\n  ② prompt 换成第 2 段要拍的内容（开头直接接住上一段的动作/机位）\n  再点 Queue。\n  日志应出现：\n    [H3 Relay] latent 桥续接：钉住 22 帧 / 7 步 …\n    [H3 Relay] 裁首 23 帧 = 钉住 22 + 沉降 1 ｜ 自动检测：…\n    [H3 Relay] 接缝自检：前 40 帧无突变 … → 起点干净。\n\n只看这三件事就算跑通：\n  · 「钉住 22 帧」= 上一段尾部已接进来\n  · 「裁首 N 帧 = 钉住 22 + 沉降 Y」= 接缝处理已生效（Y 由本段画面量出来）\n  · 「起点干净」= 没有跳变，可以拼\n\n没接对的两个典型症状：\n  · 日志写「静默直通」→ 段号填了 ≥1，但 run_id 与上一段不一致 / 文件不在\n  · 画面从第 1 帧就开始重播上一段 → 裁重叠节点没接上，或 trim_frames 没接桥的第 3 路\n\n模型文件：把上面 4 个加载器的下拉改成你本机的文件即可。"
       ]
+    },
+    {
+      "id": 17,
+      "type": "H3RelayPost",
+      "pos": [
+        2240,
+        40
+      ],
+      "size": [
+        330,
+        320
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 23
+        },
+        {
+          "name": "guide",
+          "type": "IMAGE",
+          "link": 24
+        },
+        {
+          "name": "match_prev",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "match_prev"
+          }
+        },
+        {
+          "name": "match_prev_frames",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "match_prev_frames"
+          }
+        },
+        {
+          "name": "match_prev_gain_max",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "match_prev_gain_max"
+          }
+        },
+        {
+          "name": "match_prev_offset_max",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "match_prev_offset_max"
+          }
+        },
+        {
+          "name": "lowfreq_pull",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "lowfreq_pull"
+          }
+        },
+        {
+          "name": "lowfreq_frames",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "lowfreq_frames"
+          }
+        },
+        {
+          "name": "lowfreq_blur",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "lowfreq_blur"
+          }
+        },
+        {
+          "name": "hist_match",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "hist_match"
+          }
+        },
+        {
+          "name": "wb_match",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "wb_match"
+          }
+        },
+        {
+          "name": "deconv_strength",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "deconv_strength"
+          }
+        },
+        {
+          "name": "deconv_radius",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "deconv_radius"
+          }
+        },
+        {
+          "name": "detail_borrow",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "detail_borrow"
+          }
+        },
+        {
+          "name": "detail_blur",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "detail_blur"
+          }
+        },
+        {
+          "name": "settle_sharpen",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "settle_sharpen"
+          }
+        },
+        {
+          "name": "settle_sharpen_frames",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "settle_sharpen_frames"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": [
+            25
+          ]
+        },
+        {
+          "name": "report",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "widgets_values": [
+        0,
+        12,
+        1.15,
+        0.06,
+        0,
+        12,
+        64,
+        0,
+        0,
+        0,
+        1.5,
+        0,
+        9,
+        0,
+        24
+      ],
+      "title": "🔗 H3 续接后处理 Post（全部默认关）"
     }
   ],
   "links": [
@@ -1112,14 +1298,6 @@
       "INT"
     ],
     [
-      20,
-      13,
-      0,
-      14,
-      0,
-      "IMAGE"
-    ],
-    [
       21,
       13,
       1,
@@ -1134,6 +1312,30 @@
       15,
       0,
       "VIDEO"
+    ],
+    [
+      23,
+      13,
+      0,
+      17,
+      0,
+      "IMAGE"
+    ],
+    [
+      24,
+      13,
+      3,
+      17,
+      1,
+      "IMAGE"
+    ],
+    [
+      25,
+      17,
+      0,
+      14,
+      0,
+      "IMAGE"
     ]
   ],
   "groups": [],

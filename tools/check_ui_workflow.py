@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 ComfyUI-H3-Relay-Kit contributors
+# 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 """check_ui_workflow.py — 校验 ComfyUI **UI 格式**工作流的 widget 槽位是否错位。
 
 【为什么需要它】

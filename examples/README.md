@@ -2,13 +2,14 @@
 
 ## `minimal_relay_official.json`
 
-**全官方节点 + 本包**的最小续接工作流（16 个节点），只回答一个问题：
+**全官方节点 + 本包**的最小续接工作流（17 个节点），只回答一个问题：
 **「第 2 段要接对哪些线？」**
 
 ```
 4 个官方加载器 → 官方出词节点(MiniMaxH3ImageToVideo) → 🔗 续接 Latent 桥
               → KSampler → 🔗 续接 Latent 存
-              → VAEDecode / VAEDecodeAudio → 🔗 续接裁重叠 → CreateVideo → SaveVideo
+              → VAEDecode / VAEDecodeAudio → 🔗 续接裁重叠 → 🔗 续接后处理 Post
+              → CreateVideo → SaveVideo
 ```
 
 图里有一个 `段号`（`PrimitiveInt`）同时喂给「桥」和「落盘」的 `stage_index`，
@@ -19,7 +20,12 @@
 2. 把 4 个加载器的下拉改成你本机的模型文件（UNET / CLIP / 视频 VAE / 音频 VAE）。
 3. 段号 = 0 → 填 prompt → Queue（第 1 段）。
 4. 段号 = 1 → 换 prompt → Queue（第 2 段）。
-5. 日志出现 `钉住 22 帧` + `裁首 N 帧 = 钉住 22 + 沉降 Y` + `起点干净` = 接通了。
+5. 日志出现 `钉住 22 帧` + `裁首 22 帧 = 钉住 22 + 沉降 0` + `起点干净` = 接通了。
+
+> **后处理 Post（`#17`）可整节点删掉**：15 个旋钮全部默认 0 = **逐位直通**，
+> 不接它行为与 0.4.x 一致。也**可以不接 `guide`**——只有 `match_prev` 与 `lowfreq_pull`
+> 两项需要 guide（不接时自动跳过，report 里会写「跳过（未接 guide）」）。
+> 最省的一次试法：把 `match_prev` 调到 `0.5`（段头色档/曝光对齐上段末帧，治缝上的亮度阶跃）。
 
 > 本示例走 **MotionContext 桥**（conditioning 路线）。0.4.0 起可选**拷贝桥**
 > `H3RelayCopyBridge`（输出接 KSampler 的 `latent_image`，钉住区不重绘），

@@ -2,11 +2,18 @@
 # 不声明 [build-system]：本包是 ComfyUI 自定义节点，不做 pip 打包安装。
 [project]
 name = "comfyui-h3-relay-kit"
-version = "0.4.3"
+version = "0.5.0"
 description = "MiniMax-H3 多段续接的 latent 桥：上一段 AV latent 直接切尾段钉进本段 conditioning，零重编码。"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
+# 第三方署名：THIRD-PARTY-NOTICES.md；随包分发的许可全文：LICENSE、licenses/Apache-2.0.txt
+keywords = ["comfyui", "minimax", "h3", "video", "continuation", "latent"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Multimedia :: Video",
+]
 dependencies = [
     "safetensors>=0.4",
 ]

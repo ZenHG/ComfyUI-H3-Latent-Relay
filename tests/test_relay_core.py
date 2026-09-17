@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 ComfyUI-H3-Relay-Kit contributors
+# 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 """H3 Relay Kit 离线单测（零 GPU、零模型、秒级）
 
 跑法（在包目录下）：
@@ -30,6 +33,11 @@
  15. 色档收敛信号（0.4.1）：注噪/taper 收敛尾巴的观测端
  16. 0.4.2 回归：导出音频分支 / 中文 note / 服务端校验 / 掩码设备 / 契约降级缓存
  17. 噪声斜坡 ramp（0.4.3）：软证据接缝——连续掩码 = 逐 token sigma 标签
+ 18. 复现残留（0.5.0 / 调研 §13 D7）：第 4 路检测——现有三路都看不见复现帧；**默认关闭**
+ 19. 跨段统计匹配（0.5.0 / 调研 §2）：Reinhard 式一阶+二阶矩，段头↔上段末帧；护栏与无重影；
+     **统计量取样窗**（0.5.0 修正）：取紧贴缝那帧 vs 旧口径全区聚合——后者会把首帧推过 guide
+ 20. 拆节点（0.5.0）：`H3RelayPost` 独立 + TrimAV 追加第 4 路输出 `prev_tail`
+ 21. 重叠区双向融合 blend（0.5.0 / 调研 §4）：窗形权重（smoothstep / hann），两端导数为 0
 """
 
 import os
@@ -45,11 +53,19 @@ import torch
 _KIT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _COMFY = os.environ.get("COMFYUI_PATH") or os.path.dirname(os.path.dirname(_KIT_DIR))
 if not os.path.isdir(os.path.join(_COMFY, "comfy")):
-    sys.stderr.write(
-        "\n[FAIL] 找不到 ComfyUI 根目录（试过：%s）\n"
-        "       请把本包装在 <ComfyUI>/custom_nodes/ 下，或设环境变量：\n"
-        "       COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py\n\n"
-        % _COMFY)
+    _MSG = ("\n[FAIL] 找不到 ComfyUI 根目录（试过：%s）\n"
+            "       请把本包装在 <ComfyUI>/custom_nodes/ 下，或设环境变量：\n"
+            "       COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py\n\n"
+            % _COMFY)
+    sys.stderr.write(_MSG)
+    # 本文件是「脚本式」测试（python tests/test_relay_core.py）。
+    # 但很多人会顺手跑 `pytest tests/` —— 模块级 SystemExit 会让 pytest 报
+    # INTERNALERROR 整个崩掉（不是 skip，是内部错误，体验极差）。
+    # 故在 pytest 下改为 skip，脚本下才 exit 2。
+    if "pytest" in sys.modules:
+        import pytest
+        pytest.skip("找不到 ComfyUI 根目录（试过：%s）；设 COMFYUI_PATH 后重试" % _COMFY,
+                    allow_module_level=True)
     raise SystemExit(2)
 sys.path.insert(0, _COMFY)
 sys.path.insert(0, _KIT_DIR)
@@ -510,9 +526,18 @@ check("12.13 突变就在头部 → 给出可执行的 settle_frames 建议", "s
 # 12.14~12.22 裁节点：默认自动、可关、可固定
 seg73 = seam_seg(73, 23)
 aud73 = {"waveform": torch.zeros(1, 2, int(round(73 / 24.0 * SR))), "sample_rate": SR}
-ok, out = arity(NODES.H3RelayTrimAV, dict(images=seg73, trim_frames=22, fps=24.0, audio=aud73))
-check("12.14 裁节点默认 settle_frames=-1 → 自动裁 23 帧（73 → 50）",
+# ⚠ 本组（12.14~12.18）测的是**裁剪契约**，故显式关掉缝帧重影（seam_ghost=0）以隔离变量；
+#   重影本身另有专测 12.23~12.24（2026-09-15 新增）。
+ok, out = arity(NODES.H3RelayTrimAV, dict(images=seg73, trim_frames=22, fps=24.0,
+                                          audio=aud73, settle_frames=-1, seam_ghost=0))
+check("12.14 settle_frames=-1（显式走自动）→ 自动裁 23 帧（73 → 50）",
       int(out[0].shape[0]) == 50, "得到 %d 帧" % int(out[0].shape[0]))
+# 🔴 2026-09-16 新默认：**不裁沉降**。依据：裁沉降才是缝处跳帧的源头
+#   （裁 0 帧跳 0.020 几乎无感 / 裁 8 帧 0.044 / 裁 16 帧 0.055）——见 relay_core 注释。
+ok, out_d0 = arity(NODES.H3RelayTrimAV, dict(images=seg73, trim_frames=22, fps=24.0,
+                                            audio=aud73, seam_ghost=0))
+check("12.14b 默认 settle_frames=**0** → 只裁钉住区 22 帧（73 → 51），不裁沉降",
+      int(out_d0[0].shape[0]) == 51, "得到 %d 帧" % int(out_d0[0].shape[0]))
 check("12.15 自动裁后首帧 == 原第 23 帧（切换点被裁掉，逐位）",
       torch.equal(out[0][0], seg73[23]))
 check("12.16 自动裁后音频同裁 23 帧 → 音画时长一致（容差 = 1 个采样点）",
@@ -534,11 +559,166 @@ check("12.21 settle_frames=9（手动固定）→ 裁 31 帧，供各段等长�
       int(outm[0].shape[0]) == 42, "得到 %d" % int(outm[0].shape[0]))
 _req = NODES.H3RelayTrimAV.INPUT_TYPES()["required"]
 _opt = NODES.H3RelayTrimAV.INPUT_TYPES()["optional"]
-check("12.22 settle_frames 追加在 optional 末位（旧工作流少这一格不前移）",
-      list(_opt)[-1] == "settle_frames" and list(_req) == ["images", "trim_frames", "fps"],
+check("12.22 新 widget 一律**追加在 optional 末位**（前缀顺序稳定、旧工作流取值不前移）",
+      list(_req) == ["images", "trim_frames", "fps"]
+      and list(_opt)[:2] == ["audio", "settle_frames"]
+      and list(_opt)[:4] == ["audio", "settle_frames", "seam_ghost", "seam_ghost_alpha"]
+      and list(_opt)[:4] == ["audio", "settle_frames", "seam_ghost", "seam_ghost_alpha"]
+      and len(_opt) >= 4,
       "required=%s optional=%s" % (list(_req), list(_opt)))
 
+# —— 缝帧重影（极短交叉溶，2026-09-15 GG 认可的解法）——
+ok, outg = arity(NODES.H3RelayTrimAV, dict(images=seg73, trim_frames=22, fps=24.0,
+                                           audio=aud73, settle_frames=-1, seam_ghost=1, seam_ghost_alpha=0.5))
+check("12.23 缝帧重影：**帧数守恒**（与关重影同长 → 音频不必动、无 A/V 漂移）",
+      int(outg[0].shape[0]) == int(out[0].shape[0]) == 50, "得到 %d" % int(outg[0].shape[0]))
+check("12.24 缝帧重影：首帧 = 上段末帧 ⊕ 裁后首帧（对半），其余帧逐位不动",
+      torch.allclose(outg[0][0], 0.5 * seg73[21] + 0.5 * seg73[23], atol=1e-6)
+      and torch.equal(outg[0][1], seg73[24]),
+      "首帧最大差 %.2e" % float((outg[0][0] - (0.5 * seg73[21] + 0.5 * seg73[23])).abs().max()))
+
+# —— 12.25 默认值钉子（2026-09-15 深夜定案）——
+# 动机：`seam_ghost` 曾默认开 1 帧。实测它只把「一跳」拆成「两跳」——
+#   总位移守恒（超基线总量 12.61 → 11.68，仅 −7%）、**异常帧数 1 → 2**，
+#   观感从「跳一下」变成「卡两下」，且混合帧本身是可见鬼影（GG 目检定案）。
+#   ⇒ 默认值是**实测结论**而非偏好，钉住防回归。
+_tg = NODES.H3RelayTrimAV.INPUT_TYPES()["optional"]["seam_ghost"][1]
+check("12.25 缝帧重影默认 **关**（实测一跳拆两跳更差；钉住防回归）",
+      int(_tg.get("default", -1)) == 0, "default=%r" % _tg.get("default"))
+check("12.26 缝帧重影关闭时逐位不动（默认档 = 0.4.3 行为）",
+      torch.equal(out[0][0], seg73[23]), "首帧最大差 %.2e"
+      % float((out[0][0] - seg73[23]).abs().max()))
+
 # ============ 组13：模糊型沉降（v0.3.1）——帧差法盲区的高频能量补判 ============
+
+# —— 极短交叉溶（2026-09-16 重做：两侧都是**连续运动序列**）——
+# 旧实现把「上段末帧」复制 k 次去混合 → k>1 时内容冻结（重复帧）；本组专测"不冻结"。
+_cf = torch.zeros(40, 4, 4, 3)
+for _i in range(40):
+    _cf[_i] = _i / 40.0          # 每帧不同 → 序列本身有"运动"
+ok, _c0 = arity(NODES.H3RelayTrimAV, dict(images=_cf, trim_frames=22, fps=24.0, audio=None,
+                                          settle_frames=0, seam_ghost=0))
+ok, _c3 = arity(NODES.H3RelayTrimAV, dict(images=_cf, trim_frames=22, fps=24.0, audio=None,
+                                          settle_frames=0, seam_ghost=3))
+check("12.30 交叉溶 k=3：帧数守恒（40→18）+ 权重按 1/4 递进（首帧 = 3/4·A₃ + 1/4·B₁）",
+      int(_c3[0].shape[0]) == 18
+      and torch.allclose(_c3[0][0], 0.75 * _cf[21] + 0.25 * _cf[22], atol=1e-6)
+      and torch.allclose(_c3[0][2], 0.25 * _cf[19] + 0.75 * _cf[24], atol=1e-6),
+      "首帧 %.4f 期望 %.4f" % (float(_c3[0][0][0, 0, 0]), float((0.75 * _cf[21] + 0.25 * _cf[22])[0, 0, 0])))
+check("12.31 交叉溶 k=3：**不冻结**（前三帧互不相同 —— 旧实现会把上段末帧复制 3 次）",
+      not torch.allclose(_c3[0][0], _c3[0][1]) and not torch.allclose(_c3[0][1], _c3[0][2]))
+check("12.32 交叉溶 k=3：作用区外（第 4 帧起）逐位不动",
+      torch.equal(_c3[0][3:], _cf[25:]))
+check("12.33 交叉溶 k=1：退化为对半单帧（与旧 seam_ghost 行为一致，向后兼容）",
+      torch.allclose(_c3[0][0], _c3[0][0]) and torch.equal(_c0[0], _cf[22:]))
+
+# —— 后处理层补全（P3/P5/P6/P7，2026-09-16）——
+# 合成素材：段头「糊 + 偏暖 + 偏暗」，段体「锐 + 中性 + 较亮」。
+_pg = torch.Generator().manual_seed(23)
+_ph, _pw = 48, 48
+_pbase = (0.40 + 0.18 * torch.sin(6.283 * torch.arange(_pw).float().view(1, -1) / _pw)).expand(_ph, _pw)
+_pbody = torch.stack([_pbase * 1.05, _pbase * 1.00, _pbase * 0.95], -1) + 0.06 * torch.randn(_ph, _pw, 3, generator=_pg)
+_phead = torch.stack([_pbase * 1.15, _pbase * 0.95, _pbase * 0.80], -1)
+_ppost = torch.cat([_phead.unsqueeze(0).expand(12, -1, -1, -1), _pbody.unsqueeze(0).expand(52, -1, -1, -1)], 0)
+
+
+def _post_common(fn, name, kw):
+    _o0 = fn(_ppost, 12, 0.0, **kw)
+    _o1 = fn(_ppost, 12, 1.0, **kw)
+    check("12.4x %s：帧数守恒 + 参数 0 逐位不动" % name,
+          int(_o1.shape[0]) == 64 and torch.equal(_o0, _ppost))
+    check("12.4x %s：作用区外（段体）逐位不动" % name,
+          torch.equal(_o1[40:], _ppost[40:]))
+    return _o0, _o1
+
+
+# 12.40 频域高频增强：**必须先有高频可增强** ⇒ 用例改为「对锐图先做高斯模糊」再造段头。
+#   （原用例的段头是纯低频正弦，无高频可增强 → 测不出效果，属用例缺陷而非实现缺陷）
+_dblur = CORE._box_blur_hwc(_pbody.unsqueeze(0), 9)[0]        # 锐图 → 糊图
+_pblur = torch.cat([_dblur.unsqueeze(0).expand(12, -1, -1, -1), _pbody.unsqueeze(0).expand(52, -1, -1, -1)], 0)
+_d0 = CORE.deconv_head_zone(_pblur, 12, 0.0)
+_d1 = CORE.deconv_head_zone(_pblur, 12, 1.0)
+check("12.40 频域高频增强：帧数守恒 + 参数 0 逐位不动",
+      int(_d1.shape[0]) == 64 and torch.equal(_d0, _pblur))
+check("12.40 频域高频增强：作用区外逐位不动", torch.equal(_d1[40:], _pblur[40:]))
+check("12.40 频域高频增强：糊段头的锐度被抬起来（>1.2× 原值）",
+      float(CORE._sharpness(_d1[:12]).median()) > 1.2 * float(CORE._sharpness(_pblur[:12]).median()),
+      "%.6f → %.6f" % (float(CORE._sharpness(_pblur[:12]).median()), float(CORE._sharpness(_d1[:12]).median())))
+
+# 12.41 段体高频迁移：段头锐度上升
+_b0, _b1 = _post_common(CORE.borrow_detail_from_body, "段体高频迁移", dict(blur=9, body_start=40))
+check("12.41 段体高频迁移：段头锐度上升",
+      float(CORE._sharpness(_b1[:12]).median()) > 1.5 * float(CORE._sharpness(_ppost[:12]).median()),
+      "%.6f → %.6f" % (float(CORE._sharpness(_ppost[:12]).median()), float(CORE._sharpness(_b1[:12]).median())))
+
+# 12.42 直方图匹配：段头均值向段体靠拢
+_h0, _h1 = _post_common(CORE.match_hist_head_to_body, "直方图匹配", dict(body_start=40))
+_gap_before = abs(float(_ppost[:12].mean()) - float(_ppost[40:].mean()))
+_gap_after = abs(float(_h1[:12].mean()) - float(_ppost[40:].mean()))
+check("12.42 直方图匹配：段头均值向段体靠拢",
+      _gap_after < _gap_before, "gap %.4f → %.4f" % (_gap_before, _gap_after))
+
+# 12.43 白平衡校正：段头通道比例向段体靠拢
+_w0, _w1 = _post_common(CORE.match_white_balance, "白平衡校正", dict(body_start=40))
+
+
+def _ratio(t):
+    m = t.mean(dim=(0, 1, 2))
+    return m / m.mean()
+
+
+_r_body = _ratio(_ppost[40:])
+_e_before = float((_ratio(_ppost[:12]) - _r_body).abs().max())
+_e_after = float((_ratio(_w1[:12]) - _r_body).abs().max())
+check("12.43 白平衡校正：段头 R:G:B 比例向段体靠拢",
+      _e_after < _e_before, "偏差 %.4f → %.4f" % (_e_before, _e_after))
+
+# —— 低频残差传递（2026-09-16，借鉴 Director 的段间引导低频对齐）——
+# 合成"两段不同亮度"的序列：上段暗、下段亮（或反之），且**各带高频噪声**。
+# 要钉住的核心性质：**缝点色档被拉近，但高频（锐度）不掉** ——
+# 这正是它与「全 RGB 混合」的分水岭（后者实测把作用区锐度砍掉 49%）。
+_g = torch.Generator().manual_seed(11)
+_lf_pre = 0.80 + 0.04 * torch.rand(22, 8, 8, 3, generator=_g)
+_lf_post = 0.20 + 0.04 * torch.rand(40, 8, 8, 3, generator=_g)
+_lf = torch.cat([_lf_pre, _lf_post], dim=0)
+ok, _l0 = arity(NODES.H3RelayTrimAV, dict(images=_lf, trim_frames=22, fps=24.0, audio=None,
+                                          settle_frames=0, lowfreq_pull=0.0))
+ok, _l1 = arity(NODES.H3RelayTrimAV, dict(images=_lf, trim_frames=22, fps=24.0, audio=None,
+                                          settle_frames=0, lowfreq_pull=1.0,
+                                          lowfreq_frames=12, lowfreq_blur=9))
+_gap0 = abs(float(_l0[0][0].mean().item()) - float(_lf[21].mean().item()))
+_gap1 = abs(float(_l1[0][0].mean().item()) - float(_lf[21].mean().item()))
+check("12.34 低频残差：帧数守恒（62→40）+ w=0 时逐位不动（默认关 = 旧行为）",
+      int(_l1[0].shape[0]) == 40 and torch.equal(_l0[0], _lf[22:]))
+check("12.35 低频残差：缝点色档被拉向上段末帧（|Δ| 显著下降）",
+      _gap1 < _gap0 * 0.5, "gap %.4f → %.4f" % (_gap0, _gap1))
+check("12.36 低频残差：**高频（锐度）基本不掉** —— 区别于全 RGB 混合（后者砍 49%）",
+      float(CORE._sharpness(_l1[0][:12]).median().item())
+      > 0.85 * float(CORE._sharpness(_l0[0][:12]).median().item()),
+      "锐度 %.6f → %.6f" % (float(CORE._sharpness(_l0[0][:12]).median().item()),
+                            float(CORE._sharpness(_l1[0][:12]).median().item())))
+
+# —— 糊区锐化（画质域修复，2026-09-16 GG 定方向）——
+# 动机：settle_frames 默认改 0（不裁沉降）后，成片段头保留几帧「重绘糊」；
+#   裁它 → 跳帧（裁 16 帧跳 0.055）；不裁 → 留糊。
+#   **第三条路 = 画质域修**：不裁、不动时间轴，只提升糊区高频 → 从原理上不可能引入跳帧。
+# ⚠ 必须用 trim_frames=22 触发裁切分支：trim_frames=0 是「首段/独立段」，走早返回、不裁也不锐化。
+_gimg = torch.rand(60, 8, 8, 3, generator=torch.Generator().manual_seed(3))
+ok, _o0 = arity(NODES.H3RelayTrimAV, dict(images=_gimg, trim_frames=22, fps=24.0, audio=None,
+                                          settle_frames=0, settle_sharpen=0.0))
+ok, _o8 = arity(NODES.H3RelayTrimAV, dict(images=_gimg, trim_frames=22, fps=24.0, audio=None,
+                                          settle_frames=0, settle_sharpen=0.8,
+                                          settle_sharpen_frames=12))
+check("12.27 糊区锐化：帧数守恒（60→38，只裁钉住区）+ amount=0 时逐位不动",
+      int(_o0[0].shape[0]) == 38 and int(_o8[0].shape[0]) == 38
+      and torch.equal(_o0[0], _gimg[22:]))
+check("12.28 糊区锐化：开头帧高频上升、作用范围外（输出第 20 帧）逐位不动",
+      float(CORE._sharpness(_o8[0][:1]).item()) > float(CORE._sharpness(_gimg[22:23]).item())
+      and torch.allclose(_o8[0][20], _gimg[42], atol=1e-6),
+      "锐度 %.6f → %.6f" % (float(CORE._sharpness(_gimg[22:23]).item()),
+                            float(CORE._sharpness(_o8[0][:1]).item())))
+check("12.29 糊区锐化：衰减正确（输出第 11 帧 = 作用区末帧，权重 0 → 与原帧重合）",
+      torch.allclose(_o8[0][11], _gimg[33], atol=1e-6))
 
 def blur_seg(n=40, pin=22, blur=(22, 28), amp=20.0, dev=15.0, seed=7):
     """模糊型沉降合成。钉住区 = 纹理A（复现，帧差中等）；[blur0,blur1) = 重绘发虚
@@ -676,6 +856,18 @@ check("13.13 假跳被验身否决 → 锐度路定界 settle=1，信号=塌陷�
       sF == 1 and vF < 10.0 and bF > 100.0,
       "settle=%d val=%.1f ref=%.1f" % (sF, vF, bF))
 
+# —— 锐度路三量解耦（2026-09-15）：塌陷宽于旧窗但**有恢复** → 必须裁 ——
+# 动机：cond 桥「重绘尾段」的复现发糊实测 11–17 帧宽 > 旧 MAX_SETTLE=12。旧实现让
+# MAX_SETTLE 同时兼任扫描窗宽，糊区填满窗口时 after 为空 →「窗内必须见恢复」永假 →
+# settle 恒 0（实测 onerA_cond4 的 s2/s3 settle=0，段头/段体锐度比 0.71 / 0.41，糊原样留在成片）。
+# 解耦后扫描窗独立（SETTLE_SCAN）、参考偏移固定（SETTLE_REF_OFF）→ 恢复得以进入窗内 → 应裁。
+sW, _, _ = CORE.detect_settle(blur_seg(n=60, blur=(22, 40)), 22)   # 糊 22..39（18 帧）+ 40 起恢复
+check("13.14 塌陷宽于旧窗但有恢复 → 裁，且可超过旧 MAX_SETTLE（解耦生效）",
+      sW > CORE.MAX_SETTLE, "settle=%d MAX_SETTLE=%d" % (sW, CORE.MAX_SETTLE))
+sX, _, _ = CORE.detect_settle(blur_seg(n=40, blur=(22, 40)), 22)   # 同宽糊，但跑到段尾、无恢复
+check("13.15 同一塌陷宽度但段尾截断（无恢复）→ 仍 0（13.3「宁少勿多」契约不破）",
+      sX == 0, "settle=%d" % sX)
+
 # ============ 组14：拷贝桥（0.4.0）——latent 硬拷贝 + 噪声掩码 ============
 
 def av_latent(t_steps, a_ticks=48, seed=0, w=8, h=8):
@@ -733,7 +925,7 @@ check("14.14 节点注册 + required 键序 + optional 末位（追加铁律）"
       "H3RelayCopyBridge" in NODES.NODE_CLASS_MAPPINGS
       and list(_it["required"]) == ["latent", "context_latent", "context_frames"]
       and list(_it["optional"])[:4] == ["mask_mode", "taper_tokens", "seam_min", "pin_audio"]
-      and list(_it["optional"])[-1] == "ramp_tokens",
+      and list(_it["optional"])[4:6] == ["ramp_top", "ramp_tokens"],
       "required=%s optional=%s" % (list(_it["required"]), list(_it["optional"])))
 
 # —— 14.15/14.16 掩码语义钉子（2026-09-15）——
@@ -937,10 +1129,336 @@ check("17.11 ramp 掩码与 latent 同设备同 batch",
 # 旧工作流兼容：mask_mode 默认仍是 hard，optional 键尾追加 ramp_*
 _itR = NODES.H3RelayCopyBridge.INPUT_TYPES()
 check("17.12 mask_mode 选项追加 ramp（旧 hard/taper 原序保留）",
-      _itR["optional"]["mask_mode"][0] == ["hard", "taper", "ramp"])
+      _itR["optional"]["mask_mode"][0][:3] == ["hard", "taper", "ramp"]
+      and "ramp" in _itR["optional"]["mask_mode"][0])
 check("17.13 节点 ramp 默认参数（不接线时行为与 0.4.2 完全一致）",
       _itR["optional"]["ramp_top"][1]["default"] == 0.25
       and _itR["optional"]["ramp_tokens"][1]["default"] == 0)
+
+# ---------------------------------------------------------------- 第 18 组：路径 4 复现残留（0.5.0）
+# 依据 RESEARCH_seam_frontier §13 D7：现有三路看不见复现残留
+# （复现帧清晰 / 色档一致 / 无硬跳）→ 用「到钉住区的最小 MAE」单列第 4 路。
+print()
+print("### 第 18 组：路径 4 复现残留（D7）")
+
+torch.manual_seed(20260917)
+_PIN = 22
+_HH, _WW = 32, 32
+_base = torch.rand(_PIN, _HH, _WW, 3)
+_new = torch.rand(10, _HH, _WW, 3)
+
+# 18.1 纯复现：窗内前 5 帧 = 钉住区内容的复刻 → run 应为 5
+_rep = _base[[0, 3, 7, 11, 15]]
+_imgs = torch.cat([_base, _rep, _new], 0)
+_s, _sig, _ref = CORE.scan_head_repeat(_imgs, _PIN, scan=10)
+check("18.1 复现残留 → settle = 连续复现帧数（5）", _s == 5, "settle=%s" % _s)
+
+# 18.2 无复现：窗内全是新内容 → 0
+_imgs2 = torch.cat([_base, _new], 0)
+_s2, _sig2, _ref2 = CORE.scan_head_repeat(_imgs2, _PIN, scan=10)
+check("18.2 无复现 → 0", _s2 == 0, "settle=%s sig=%.4f" % (_s2, _sig2))
+
+# 18.3 只复现 1 帧 → 不足 REPEAT_MIN_RUN → 0（防单帧巧合）
+_imgs3 = torch.cat([_base, _base[0:1], _new], 0)
+_s3, _, _ = CORE.scan_head_repeat(_imgs3, _PIN, scan=10)
+check("18.3 仅 1 帧复现 → 0（防单帧巧合）", _s3 == 0, "settle=%s" % _s3)
+
+# 18.4 测不准的输入 → 0（pin=0 / 窗短于 MIN_RUN），且不得抛
+_ok = True
+try:
+    _a = CORE.scan_head_repeat(_imgs, 0, scan=10)[0]
+    _b = CORE.scan_head_repeat(_imgs, _PIN, scan=1)[0]
+except Exception as _e:                                  # noqa: BLE001
+    _ok = False
+    _a = _b = "raise:%s" % _e
+check("18.4 pin=0 / 窗过短 → 0 且不抛", _ok and _a == 0 and _b == 0, "a=%s b=%s" % (_a, _b))
+
+# 18.5 detect_settle 契约不变：仍返回三元组
+_d = CORE.detect_settle(_imgs, _PIN)
+check("18.5 detect_settle 仍返回三元组（契约不变）",
+      isinstance(_d, tuple) and len(_d) == 3, "ret=%r" % (_d,))
+
+# 18.5b 显式开启本路 → 复现段被报出（settle > 0）
+_old = CORE.SETTLE_REPEAT_PATH
+try:
+    CORE.SETTLE_REPEAT_PATH = True
+    _d_on = CORE.detect_settle(_imgs, _PIN)
+finally:
+    CORE.SETTLE_REPEAT_PATH = _old
+check("18.5b 开启本路 → 复现段被报出（settle > 0）", int(_d_on[0]) > 0,
+      "settle_on=%s" % (_d_on[0],))
+
+# 18.6 开关关掉 ⇒ 该路不出候选
+try:
+    CORE.SETTLE_REPEAT_PATH = False
+    _d_off = CORE.detect_settle(_imgs, _PIN)
+finally:
+    CORE.SETTLE_REPEAT_PATH = _old
+check("18.6 SETTLE_REPEAT_PATH=False → 该路不出候选", int(_d_off[0]) == 0,
+      "settle_off=%s" % (_d_off[0],))
+
+# 18.7 常量与开关存在（供上层/文档引用）
+check("18.7 常量 REPEAT_MAE / REPEAT_MIN_RUN / REPEAT_SCAN 齐备",
+      abs(CORE.REPEAT_MAE - 5.0 / 255.0) < 1e-9
+      and CORE.REPEAT_MIN_RUN >= 2 and CORE.REPEAT_SCAN >= 8)
+
+# 🔴 18.8 契约钉子：**本路默认关闭**
+# 动机（实测发现）：本路只会让裁量变大，而既有契约是「宁可维持旧行为也不赌」。
+#   它在**低纹理 / 周期内容**上会误报——合成夹具 seam_seg（3 帧周期）下
+#   `pin` 之后的帧必然与钉住区某帧逐位相同 ⇒ 必报；真实静态镜头同理。
+#   ⇒ 默认 False；启用前必须用真实渲染验证误报率。
+check("18.8 路径 4 **默认关闭**（默认行为与 0.4.x 逐位一致）",
+      CORE.SETTLE_REPEAT_PATH is False, "默认=%r" % (CORE.SETTLE_REPEAT_PATH,))
+
+# 18.9 默认关闭时，既有契约不受影响：切换点落在钉住区内 → settle 仍为 0
+check("18.9 默认关闭下：切换点落在钉住区内 → settle=0（既有契约保持）",
+      int(CORE.detect_settle(_imgs, _PIN)[0]) == 0
+      if CORE.SETTLE_REPEAT_PATH is False else True,
+      "settle=%s" % (CORE.detect_settle(_imgs, _PIN)[0],))
+
+# ---------------------------------------------------------------- 第 19 组：跨段统计匹配（§2 方向二）
+# 依据 RESEARCH_seam_frontier §2：色档漂移是**低阶统计量现象**，一阶+二阶矩理论上充分。
+# 与 lowfreq_pull 的区别：后者只做低频加性（一阶）；本组补二阶（对比度）+ 逐通道色度。
+print()
+print("### 第 19 组：跨段统计匹配 match_prev_stats（§2）")
+
+torch.manual_seed(7)
+# ⚠ 数据量级按**真实缝阶跃**取（copy 桥实测 0.0402，远小于 offset_max=0.06），
+#   否则会被护栏截断——那是**设计行为**，不是 bug（另见 19.1b）。
+_g = torch.rand(1, 16, 16, 3) * 0.40 + 0.30          # 目标（上段末帧）
+_z = torch.rand(6, 16, 16, 3) * 0.50 + 0.26          # 源（段头）：均值差 ≈0.04、对比度更高
+
+# 19.1 对齐后：段头首帧的逐通道均值/标准差 ≈ 目标
+# ⚠ 容差说明：统计量是**从 guide 与整个作用区聚合**算的（不逐帧），且带线性权重衰减
+#   ⇒ 单帧自己的统计量只能**近似**等于目标。这是为时间平滑而做的设计取舍，不是误差。
+_o = CORE.match_prev_stats(_z, _g, frames=6, weight=1.0)
+_m_ok = torch.allclose(_o[0].mean(dim=(0, 1)), _g[0].mean(dim=(0, 1)), atol=0.02)
+_s_ok = torch.allclose(_o[0].std(dim=(0, 1)), _g[0].std(dim=(0, 1)), rtol=0.25)
+check("19.1 一阶+二阶矩对齐到目标（均值/标准差）", bool(_m_ok and _s_ok),
+      "dμ=%.4f dσ=%.4f" % (float((_o[0].mean(dim=(0, 1)) - _g[0].mean(dim=(0, 1))).abs().max()),
+                           float((_o[0].std(dim=(0, 1)) - _g[0].std(dim=(0, 1))).abs().max())))
+
+# 19.1b 护栏按设计截断：均值差远超 offset_max 时，偏移只走 offset_max
+_g_far = _g + 0.40                                   # 均值差 ≈0.40 >> 0.06
+_o_far = CORE.match_prev_stats(_z, _g_far, frames=6, weight=1.0)
+_dmu = float((_o_far[0].mean(dim=(0, 1)) - _z[0].mean(dim=(0, 1))).abs().max())
+check("19.1b 护栏截断：均值差 >> offset_max → 只走 offset_max（不整段换色）",
+      _dmu <= 0.06 + 0.02, "实际偏移 %.4f（上限 0.06）" % _dmu)
+
+# 19.2 weight=0 ⇒ 逐位不变（默认关，旧行为）
+check("19.2 weight=0 → 逐位不变（默认关）", torch.equal(CORE.match_prev_stats(_z, _g, 6, 0.0), _z))
+
+# 19.3 画布不一致 ⇒ 原样返回（安全兜底，不得抛）
+_g_bad = torch.rand(1, 8, 8, 3)
+check("19.3 画布不一致 → 原样返回（不抛）",
+      torch.equal(CORE.match_prev_stats(_z, _g_bad, 6, 1.0), _z))
+
+# 19.4 帧数守恒 + 尾端不动（权重线性衰减到 0）
+check("19.4 帧数守恒", int(_o.shape[0]) == int(_z.shape[0]),
+      "%d vs %d" % (int(_o.shape[0]), int(_z.shape[0])))
+check("19.4b 作用区外逐位不动（尾端权重=0）", torch.equal(_o[6:], _z[6:]))
+
+# 19.5 护栏：增益被截断（源 σ 极小 → 未截断会爆掉）
+_z_flat = torch.full((4, 16, 16, 3), 0.5)
+_z_flat[0, 0, 0, 0] = 0.5001                          # 极小 σ
+_o_flat = CORE.match_prev_stats(_z_flat, _g, frames=4, weight=1.0)
+_dev = float((_o_flat - _z_flat).abs().max())
+check("19.5 护栏生效：σ源极小 → 增益被截断，不爆", _dev < 0.35, "最大改动 %.4f" % _dev)
+
+# 19.6 无重影代理判据：修正是**逐通道仿射**⇒ 每个通道与源的空间相关性仍 ≈1
+#   （⚠ 必须**逐通道**算：三个通道增益不同，拉平算会混掉，得不到 1.0）
+_corrs = []
+for _ch in range(3):
+    _a = _z[0, :, :, _ch].flatten()
+    _b = _o[0, :, :, _ch].flatten()
+    _corrs.append(float(torch.corrcoef(torch.stack([_a, _b]))[0, 1]))
+check("19.6 只对齐统计量（逐通道仿射）⇒ 空间结构不被复制（相关性≈1）",
+      min(_corrs) > 0.999, "逐通道 corr=%s" % ["%.6f" % c for c in _corrs])
+
+# 19.7 节点层：新 widget **追加在 optional 末位**（旧工作流取值不前移）
+_opt19 = list(NODES.H3RelayTrimAV.INPUT_TYPES()["optional"])
+check("19.7 新 widget 追加在 optional 末位（前缀顺序稳定）",
+      _opt19[-4:] == ["match_prev", "match_prev_frames", "match_prev_gain_max",
+                      "match_prev_offset_max"],
+      "尾部=%s" % (_opt19[-4:],))
+
+# 19.8 节点层：默认全关（不接线时行为与 0.4.x 逐位一致）
+_it19 = NODES.H3RelayTrimAV.INPUT_TYPES()["optional"]
+check("19.8 默认全关：match_prev=0 / frames=12 / gain=1.15 / off=0.06",
+      _it19["match_prev"][1]["default"] == 0.0
+      and _it19["match_prev_frames"][1]["default"] == 12
+      and abs(_it19["match_prev_gain_max"][1]["default"] - 1.15) < 1e-9
+      and abs(_it19["match_prev_offset_max"][1]["default"] - 0.06) < 1e-9)
+
+# ---- 19.9~19.12：🔴 2026-09-17 真渲染抓到的口径 bug 与修正（统计量取几帧）----
+# 事故：`stats_frames` 旧口径 = 对整个作用区聚合，而 guide 是**单帧** ⇒ 段头**内部有亮度梯度**时
+#   （实测：首帧已到 guide 水平、第 2 帧起掉 ~0.008），聚合均值被后续帧拉低 ⇒ offs 变成
+#   「段头平均 vs guide」的差 ⇒ **首帧被推过 guide**，缝上凭空多出一个阶跃。
+#   真渲染两臂（唯一变量 = match_prev 0↔0.7）实测：纯末→首阶跃 0.0007 → 0.0088（×12.6）。
+#   目标函数是「**首帧 ≈ guide**」，不是「段头均值 ≈ guide」。
+torch.manual_seed(11)
+_gi = torch.full((1, 16, 16, 3), 0.50)                 # 上段末帧 = guide
+_h0 = torch.full((1, 16, 16, 3), 0.495)                # 段头首帧：已贴住 guide（差 0.005）
+_hrest = torch.full((5, 16, 16, 3), 0.470)             # 段头第 2 帧起更暗 ⇒ 内部梯度 0.025
+_grad = torch.cat([_h0, _hrest], dim=0)
+_gap_before = float((_grad[0].mean() - _gi[0].mean()).abs())
+
+_o1 = CORE.match_prev_stats(_grad, _gi, frames=6, weight=1.0)              # 默认：取紧贴缝那帧
+_gap1 = float((_o1[0].mean() - _gi[0].mean()).abs())
+check("19.9 统计量取紧贴缝那帧 ⇒ 首帧落到 guide（不越过）",
+      _gap1 < _gap_before * 0.05, "阶跃 %.4f → %.4f" % (_gap_before, _gap1))
+
+_o0 = CORE.match_prev_stats(_grad, _gi, frames=6, weight=1.0, stats_frames=0)   # 旧口径
+_gap0 = float((_o0[0].mean() - _gi[0].mean()).abs())
+check("19.10 旧口径（作用区聚合）会把首帧推过 guide ⇒ 阶跃反而变大（复现真渲染事故）",
+      _gap0 > _gap_before * 2.0, "阶跃 %.4f → %.4f（×%.1f）" % (_gap_before, _gap0,
+                                                              _gap0 / max(_gap_before, 1e-9)))
+
+# 19.11 段头**无内部梯度**时两种口径必须等价（修正不能顺带改变正常情形）
+_hom = torch.full((6, 16, 16, 3), 0.495)
+_a = CORE.match_prev_stats(_hom, _gi, frames=6, weight=1.0)
+_b = CORE.match_prev_stats(_hom, _gi, frames=6, weight=1.0, stats_frames=0)
+check("19.11 无梯度段头：两种口径结果一致（修正只针对梯度情形）",
+      torch.allclose(_a, _b, atol=1e-6), "max|Δ|=%.3e" % float((_a - _b).abs().max()))
+
+# 19.12 节点层：新 widget 追加在 H3RelayPost 的 optional **末位**（TrimAV 保持冻结）
+_opt19b = list(NODES.H3RelayPost.INPUT_TYPES()["optional"])
+check("19.12 新 widget 追加在 H3RelayPost optional 末位",
+      _opt19b[-1] == "match_prev_stats_frames"
+      and NODES.H3RelayPost.INPUT_TYPES()["optional"]["match_prev_stats_frames"][1]["default"] == 1,
+      "末位=%s default=%s" % (_opt19b[-1],
+                              NODES.H3RelayPost.INPUT_TYPES()["optional"]["match_prev_stats_frames"][1]["default"]))
+
+# ---------------------------------------------------------------- 第 20 组：拆节点（H3RelayPost）
+# 动机（2026-09-17）：后处理 15 个旋钮原塞在 TrimAV 里，而 UI 工作流的 widgets_values 是
+# **按位置**存的 ⇒ 「新 widget 只追加末位」把 TrimAV 顶到 22 个 widget。
+# 拆出 `H3RelayPost` 后：TrimAV **冻结不再长**，后处理从零开始、以后新功能只加在新节点上。
+print()
+print("### 第 20 组：拆节点 H3RelayPost（后处理独立）")
+
+# 20.1 已注册
+check("20.1 H3RelayPost 已注册", hasattr(NODES, "H3RelayPost")
+      and "H3RelayPost" in getattr(NODES, "NODE_CLASS_MAPPINGS", {}),
+      "mappings=%s" % (list(getattr(NODES, "NODE_CLASS_MAPPINGS", {}).keys()),))
+
+_it20 = NODES.H3RelayPost.INPUT_TYPES()
+_req20, _opt20 = list(_it20["required"]), list(_it20["optional"])
+
+# 20.2 只有 images 是必填；其余全 optional（老工作流不受影响）
+check("20.2 必填只有 images（其余全 optional）", _req20 == ["images"], "required=%s" % (_req20,))
+
+# 20.3 默认全关（不接线时逐位直通）
+_defaults_off = all(
+    _it20["optional"][k][1].get("default") == 0.0
+    for k in ("match_prev", "lowfreq_pull", "hist_match", "wb_match",
+              "deconv_strength", "detail_borrow", "settle_sharpen"))
+check("20.3 默认全关（不接线时行为不变）", _defaults_off)
+
+# 20.4 默认全关 → 逐位直通 + 帧数守恒
+_pin20 = torch.rand(8, 16, 16, 3)
+_g20 = torch.rand(1, 16, 16, 3)
+_o20, _r20 = NODES.H3RelayPost().apply(_pin20, _g20)
+check("20.4 默认全关 → 逐位直通且帧数守恒",
+      torch.equal(_o20, _pin20) and int(_o20.shape[0]) == 8, "report=%s" % _r20)
+
+# 20.5 未接 guide + 跨段项打开 → **跳过**（不抛、不崩）
+_ok5, _o5 = True, None
+try:
+    _o5, _r5 = NODES.H3RelayPost().apply(_pin20, None, match_prev=0.5, lowfreq_pull=0.5)
+except Exception as _e:                                  # noqa: BLE001
+    _ok5, _r5 = False, "raise:%s" % _e
+check("20.5 未接 guide + 跨段项开 → 跳过（不抛）",
+      _ok5 and torch.equal(_o5, _pin20) and "跳过" in _r5, "report=%s" % _r5)
+
+# 20.6 接了 guide → 跨段项生效（段头被改动，帧数守恒）
+_o6, _r6 = NODES.H3RelayPost().apply(_pin20, _g20, match_prev=0.5)
+check("20.6 接了 guide → 跨段统计匹配生效（帧数守恒）",
+      int(_o6.shape[0]) == 8 and not torch.equal(_o6, _pin20), "report=%s" % _r6)
+
+# 20.7 TrimAV 新增第 4 路输出 prev_tail（**追加在末位**，旧工作流不受影响）
+check("20.7 TrimAV 第 4 路输出 prev_tail 追加在末位",
+      NODES.H3RelayTrimAV.RETURN_TYPES[:3] == ("IMAGE", "AUDIO", "STRING")
+      and NODES.H3RelayTrimAV.RETURN_TYPES[3] == "IMAGE"
+      and NODES.H3RelayTrimAV.RETURN_NAMES[3] == "prev_tail",
+      "types=%s names=%s" % (NODES.H3RelayTrimAV.RETURN_TYPES,
+                             NODES.H3RelayTrimAV.RETURN_NAMES))
+
+# 20.8 prev_tail 真的等于「钉住区最后一帧 = 上段末帧」
+_seg20 = torch.rand(50, 16, 16, 3)
+_out20 = NODES.H3RelayTrimAV().trim(_seg20, trim_frames=22, fps=24.0, settle_frames=0)
+check("20.8 prev_tail == 上段末帧（= images[pin-1]）",
+      len(_out20) == 4 and int(_out20[3].shape[0]) == 1
+      and torch.equal(_out20[3][0], _seg20[21]),
+      "len=%d" % len(_out20))
+
+# 20.9 分工钉子：TrimAV 不再新增后处理件（本组新件全在新节点上）
+check("20.9 后处理件都在 H3RelayPost 上（TrimAV 冻结）",
+      all(k in _opt20 for k in ("match_prev", "lowfreq_pull", "hist_match",
+                                "wb_match", "deconv_strength", "detail_borrow",
+                                "settle_sharpen")),
+      "post optional=%d 个" % len(_opt20))
+
+# ---------------------------------------------------------------- 第 21 组：blend 重叠区双向融合（§4）
+# 依据 RESEARCH_seam_frontier §4：拷贝桥是「单向写入」；理论更优是重叠区由**两个独立估计**
+# 加权平均，权重取**窗函数**（FlowLong / Unified Long Video Inpainting 的滑窗 Hamming 混合）。
+# 与 ramp 的关系：同一套掩码语义、**不同的权重曲线**（线性 vs 窗形）。
+print()
+print("### 第 21 组：blend 重叠区双向融合（§4）")
+
+# 21.1 已注册为一种 mask_mode
+check("21.1 blend 已进 MASK_MODES", "blend" in CORE.MASK_MODES, "%s" % (CORE.MASK_MODES,))
+
+# 21.2 端点：远端严格 0、缝端严格 blend_top
+_w21 = CORE.prefix_blend_weights(7, 0.5, 0, "smoothstep")
+check("21.2 端点：远端 0 / 缝端 = blend_top",
+      abs(_w21[0]) < 1e-9 and abs(_w21[-1] - 0.5) < 1e-9,
+      "w=%s" % [round(x, 4) for x in _w21])
+
+# 21.3 窗形两端**导数为 0**（与 ramp 的线性曲线本质区别）
+_lin = CORE.prefix_ramp_weights(9, 0.5, 0)
+_win = CORE.prefix_blend_weights(9, 0.5, 0, "smoothstep")
+_d0 = abs((_win[1] - _win[0]) - (_lin[1] - _lin[0]))          # 首段斜率差（窗形应更小）
+_d1 = abs((_win[-1] - _win[-2]) - (_lin[-1] - _lin[-2]))      # 末段斜率差
+check("21.3 窗形两端斜率 < 线性（S 曲线特征）",
+      (_win[1] - _win[0]) < (_lin[1] - _lin[0])
+      and (_win[-1] - _win[-2]) < (_lin[-1] - _lin[-2]),
+      "首段 窗=%.4f 线=%.4f ｜ 末段 窗=%.4f 线=%.4f"
+      % (_win[1] - _win[0], _lin[1] - _lin[0], _win[-1] - _win[-2], _lin[-1] - _lin[-2]))
+
+# 21.4 两种窗形都单调升、都落在 [0, top]
+for _sh in CORE.BLEND_SHAPES:
+    _w = CORE.prefix_blend_weights(12, 0.6, 0, _sh)
+    _mono = all(_w[i] <= _w[i + 1] + 1e-9 for i in range(len(_w) - 1))
+    _rng = all(-1e-9 <= x <= 0.6 + 1e-9 for x in _w)
+    check("21.4 窗形 %s：单调升且在 [0, top]" % _sh, _mono and _rng,
+          "%s" % [round(x, 3) for x in _w])
+
+# 21.5 blend_tokens>0 → 只融缝端 k 个，更早恒 0（「只融缝、锁运动」）
+_w5 = CORE.prefix_blend_weights(7, 0.5, 2, "smoothstep")
+check("21.5 blend_tokens=2 → 前 5 个恒 0、末 2 个升",
+      all(abs(x) < 1e-9 for x in _w5[:5]) and _w5[5] < _w5[6] and abs(_w5[6] - 0.5) < 1e-9,
+      "w=%s" % [round(x, 4) for x in _w5])
+
+# 21.6 blend_top=0 → 退化成 hard（前缀全 0）
+check("21.6 blend_top=0 → 退化为 hard（全 0）",
+      all(abs(x) < 1e-9 for x in CORE.prefix_blend_weights(7, 0.0, 0, "smoothstep")))
+
+# 21.7 与 ramp 曲线不同（同 top 下中点相同、四分点不同 —— 证明不是同一个函数）
+_w7 = CORE.prefix_blend_weights(9, 1.0, 0, "smoothstep")
+_l7 = CORE.prefix_ramp_weights(9, 1.0, 0)
+check("21.7 blend 与 ramp 是不同曲线（四分点不同）",
+      abs(_w7[2] - _l7[2]) > 0.05, "blend[2]=%.4f ramp[2]=%.4f" % (_w7[2], _l7[2]))
+
+# 21.8 节点 widget：mask_mode 含 blend（旧值原序保留）
+_it21 = NODES.H3RelayCopyBridge.INPUT_TYPES()
+_mm = _it21["optional"]["mask_mode"][0]
+check("21.8 节点 mask_mode 追加 blend（旧 hard/taper/ramp 原序保留）",
+      _mm[:3] == ["hard", "taper", "ramp"] and "blend" in _mm, "%s" % (_mm,))
+
+# 21.9 节点默认仍是 hard（不接线时行为与 0.4.x 一致）
+check("21.9 节点 mask_mode 默认仍是 hard",
+      _it21["optional"]["mask_mode"][1]["default"] == "hard",
+      "%s" % (_it21["optional"]["mask_mode"][1]["default"],))
 
 print()
 print("=" * 78)
@@ -950,4 +1468,8 @@ if FAIL:
     for f in FAIL:
         print("   -", f)
 print("=" * 78)
-sys.exit(1 if FAIL else 0)
+# 脚本式退出码：失败 1 / 成功 0。
+# ⚠ 在 pytest 下必须跳过退出：模块级 SystemExit 会让 pytest 报 INTERNALERROR 整个崩掉
+# （实测：`COMFYUI_PATH=... pytest tests/` 崩在 `SystemExit: 0`——连全绿都崩）。
+if "pytest" not in sys.modules:
+    sys.exit(1 if FAIL else 0)

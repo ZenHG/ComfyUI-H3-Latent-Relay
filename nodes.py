@@ -1,14 +1,22 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 ComfyUI-H3-Relay-Kit contributors
+# 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 """H3 Relay Kit · 节点层
 
-六个节点，覆盖"用作者的续接方式"所需的全部接线：
+七个节点，覆盖"用作者的续接方式"所需的全部接线：
 
   🔗 H3 续接 Latent 存   —— 把本段的 AV latent 落盘，供下一段读
   🔗 H3 续接 Latent 读   —— 读回上一段的 AV latent
   🔗 H3 续接 Latent 桥   —— 把上一段尾段钉进本段 conditioning（latent 直取，零重编码）
   🔗 H3 续接 拷贝桥      —— 上一段尾部**逐位拷贝**进本段初始 latent + 噪声掩码（钉住区不重绘）
-  🔗 H3 续接裁重叠        —— 裁掉续接段头部的重叠帧（视频 + 音频同裁）
+  🔗 H3 续接裁重叠        —— 裁掉续接段头部的重叠帧（视频 + 音频同裁）+ 交接 prev_tail
+  🔗 H3 续接后处理 Post   —— 画质域后处理（0.5.0 拆出；不动时间轴/帧数/音频）
   🔗 H3 续接连跑 Chain    —— 同分组框内自动推进「桥 + 落盘」段号并排队连跑
+
+时间轴 / 画质域分工（0.5.0 起）：
+  · H3RelayTrimAV = 时间轴（裁重叠 / 沉降 / 重影），**冻结不再长 widget**；
+  · H3RelayPost  = 画质域（色档对齐 / 补高频 / 锐化），**以后新功能都加在这里**。
 
 两条续接路线**二选一**，不可同图串联：
   · Latent 桥（conditioning 钉帧）→ 模型重绘上一段（有复现漂移风险，检测兜底）；
@@ -216,6 +224,26 @@ class H3RelayMotionContext:
                                "  · 第 3 段 → 填 2……以此类推\n"
                                "⚠ 和「续接 Latent 存」上的数保持一样大；用 Chain 节点可自动推进，不用手改。",
                 }),
+                "anchor_latent": ("LATENT", {
+                    "tooltip": "【0.5.0 全局外观锚，可选】长期钉进本段条件的第一段/角色基准段 latent。\n"
+                               "与 context_latent 的分工：context 管『接戏』（上段尾 22 帧），\n"
+                               "anchor 管『身份』（色档/光照/角色长相的长程基准，永不退出）。\n"
+                               "refs 协议允许异分辨率参考块——第 0 段与后续段分辨率不同也能当锚。\n"
+                               "不接且 anchor_stage ≥ 0 时，自动从 run_id 目录读 anchor_stage 那段。",
+                }),
+                "anchor_stage": ("INT", {
+                    "default": -1, "min": -1, "max": 9999, "step": 1,
+                    "tooltip": "【0.5.0 自动锚段号】-1 = 关闭外观锚（默认，行为与 0.4.x 逐位一致）。\n"
+                               "≥ 0 = 没接 anchor_latent 时自动读 output/relay_kit/<run_id>/stage_<该值> 当锚。\n"
+                               "长片漂移明显时填 0（永远以第 1 段为身份基准）。",
+                }),
+                "anchor_frames": ("INT", {
+                    "default": 5, "min": 5, "max": 124, "step": 17,
+                    "tooltip": "【0.5.0 锚窗帧数】从锚段取尾部多少帧进 refs（5/22/39…同续接网格）。\n"
+                               "5 = 一个 token，token 成本最低，身份/色档信息基本够用（默认）。\n"
+                               "⚠ 取尾要过 latent 相位校验：锚段长度与锚窗不凑巧时会报错并提示改窗。\n"
+                               "锚块每步都随采样骑乘，越大越贵。",
+                }),
             },
         }
 
@@ -229,7 +257,8 @@ class H3RelayMotionContext:
     )
 
     def apply(self, conditioning, latent, trim_frames=22, context_latent=None,
-              audio_frames=0, run_id="", stage_index=0):
+              audio_frames=0, run_id="", stage_index=0,
+              anchor_latent=None, anchor_stage=-1, anchor_frames=5):
         bad = CORE.self_check()
         if bad:
             raise RuntimeError("H3 Relay 网格自检失败：\n    " + "\n    ".join(bad))
@@ -245,6 +274,29 @@ class H3RelayMotionContext:
                 print("[H3 Relay] " + auto_note)
             else:
                 auto_note = "stage_index=0（第 1 段）→ 直通不续接。"
+
+        # 0.5.0 外观锚：没接锚 latent 但填了锚段号 → 从 run_id 目录自动读
+        anchor_note = ""
+        a_idx = int(anchor_stage)
+        if anchor_latent is None and a_idx >= 0 and (run_id or "").strip():
+            if a_idx == idx:
+                raise RuntimeError(
+                    "anchor_stage=%d 与本段 stage_index 相同——外观锚必须是**更早**的"
+                    "已落盘段（通常是 0，即第 1 段）。" % a_idx)
+            try:
+                anchor_latent = CORE.load_av_latent(_stage_path(run_id, a_idx))
+                anchor_note = "自动读外观锚（第 %d 段）← %s" % (
+                    a_idx + 1, _stage_path(run_id, a_idx))
+                print("[H3 Relay] " + anchor_note)
+            except FileNotFoundError:
+                raise RuntimeError(
+                    "anchor_stage=%d 表示用第 %d 段做外观锚，但它的落盘文件不存在：\n"
+                    "    %s\n先把锚段跑完（并确认「续接 Latent 存」写过它），或把 "
+                    "anchor_stage 改回 -1。" % (a_idx, a_idx + 1, _stage_path(run_id, a_idx)))
+        elif anchor_latent is None and a_idx >= 0 and not (run_id or "").strip():
+            raise RuntimeError(
+                "anchor_stage=%d 需要 run_id 才能自动读锚段文件（与续接读段同规则）。"
+                "填上 run_id，或把 anchor_stage 改回 -1。" % a_idx)
 
         # 说清了是第 N 段（N≥2）却拿不到上一段 —— 绝不能悄悄降级成"独立段"：
         # 那样工作流会一路绿灯跑完，产出的却是没有续接的哑剧式接缝。
@@ -272,12 +324,18 @@ class H3RelayMotionContext:
             context_latent,
             trim_frames=int(trim_frames),
             audio_frames=int(audio_frames) or None,
+            anchor_latent=anchor_latent,
+            anchor_frames=int(anchor_frames),
         )
         out = CORE.apply_relay(conditioning, plan)
 
         lines = ["[H3 Relay] latent 桥续接：" + plan.summary()]
         if auto_note:
             lines.append("    " + auto_note)
+        if anchor_note:
+            lines.append("    " + anchor_note)
+        if anchor_latent is not None and context_latent is None:
+            lines.append("    ⚠ 外观锚接了但没有上一段可续——直通段忽略锚（锚随续接注入）。")
         lines.append("    本段 " + CORE.describe_latent(latent))
         lines.append("    上段 " + CORE.describe_latent(context_latent))
         for n in plan.notes:
@@ -299,8 +357,9 @@ class H3RelayTrimAV:
 
     为什么还要多裁几帧（沉降）：钉住区之后模型还会先**复现**上一段若干帧，
     然后才切到本段 prompt；切换点**逐段不同**，可能落在钉住区之外。
-    `settle_frames=-1`（默认）时本节点直接在这段已 decode 的画面上量出切换点，
-    把它一并裁掉 —— 用户不需要配置任何东西。
+    `settle_frames=0`（0.5.0 起默认）时**一帧沉降都不裁** —— 实测「裁沉降」才是缝处
+    跳帧的源头（裁 0 帧跳 0.020「几乎无感」／裁 8 帧 0.044／裁 16 帧 0.055），
+    留下的只是**清晰度的渐变**。想自动量出切换点并裁掉：填 `-1`。
     """
 
     @classmethod
@@ -331,28 +390,169 @@ class H3RelayTrimAV:
                 # ⚠ 新 widget 必须追加在**最后一个**：widgets_values 按位置对应，
                 #    插在中间会让旧工作流里它后面的取值整体错位（见 CHANGES 0.2.1）。
                 "settle_frames": ("INT", {
-                    "default": -1, "min": -1, "max": 34, "step": 1,
-                    "tooltip": "【不用动，保持 -1】钉住区后面，模型还会先「复现」上一段几帧才切到本段画面。\n"
-                               "这几帧不裁掉，拼接处会看到 1 帧硬跳、上一段的字幕/文字被带过来。\n"
-                               "  · -1（默认）= 自动：按本段实际画面量出该多裁几帧（推荐，不用管）\n"
-                               "  ·  0 = 关闭（与 0.2.x 旧版行为一致）\n"
+                    "default": 0, "min": -1, "max": 36, "step": 1,
+                    "tooltip": "【保持 0】裁不裁「沉降区」——钉住区之后，模型还会先「复现」上一段几帧\n"
+                               "才切到本段画面。这几帧略糊，但**裁它们才是缝处跳帧的源头**。\n"
+                               "🔴 实测（同一条段，只改裁量）：\n"
+                               "     裁 0 帧 → 跳帧 0.020（**几乎无感**）\n"
+                               "     裁 8 帧 → 0.044（能看到跳）\n"
+                               "     裁16 帧 → 0.055（明显跳）\n"
+                               "   留下的那几帧只是**清晰度的渐变**（先略糊、再恢复），\n"
+                               "   人眼对这种渐变的容忍度极高 → **拿渐变换突变不划算**，故默认不裁。\n"
+                               "  ·  0（默认）= 不裁沉降：只裁钉住区（上段尾的复现，免费）→ 缝处无跳\n"
+                               "  · -1 = 自动：按本段实际画面量出该裁几帧（治糊，但**会引入跳帧**，须目检）\n"
                                "  ·  N = 固定多裁 N 帧（想各段等长时用：全片填同一个数）\n"
-                               "自动模式量不出来时会退回成 0，不会比旧版更差。\n"
                                "日志里「裁首 X 帧 = 钉住 Y + 沉降 Z」就是它的结果。",
+                }),
+                # ⚠ 继续追加在**最后**（同上铁律）：缝帧重影，2026-09-15 新增。
+                #    🔴 默认 0（关）：数值上能压平最大单帧跳，但**观感实测更差**——
+                #    总位移守恒（只 −7%）、异常帧数 1→2（一跳变两跳 = 卡两下），
+                #    且重影帧本身是「鬼影」（内容不属于任何一段）。详见 relay_core 注释。
+                "seam_ghost": ("INT", {
+                    "default": 0, "min": 0, "max": 6, "step": 1,
+                    "tooltip": "【保持 0】缝帧重影（极短交叉溶）：把裁后首帧换成"
+                               "「上段末帧 ⊕ 本段首帧」的加权混合。\n"
+                               "⚠ **默认关**：实测它只把「一跳」拆成「两跳」，"
+                               "总位移没减（−7%）、异常帧数翻倍（1→2）→ 观感是「卡两下」，"
+                               "比单帧瞬跳更明显，且混合帧本身是个可见鬼影。\n"
+                               "  · 0（默认）= 关。**要消除跳帧，请减少 settle 裁切量**"
+                               "（裁切才是跳的源头），或在画质域修复糊区。\n"
+                               "  · >0 = 开启（仅在确知本段有收益时用，需目检确认）。",
+                }),
+                "seam_ghost_alpha": ("FLOAT", {
+                    "default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "仅重影档用：上段末帧的权重（0.5 = 对半）。默认档下无效。",
+                }),
+                # ⚠ 继续追加在**最后**（同上铁律）：画质域修复，2026-09-16 新增。
+                #    背景：settle_frames 默认改 0（不裁沉降）后，成片段头会保留几帧「重绘糊」。
+                #    裁它 → 引入跳帧；不裁 → 留糊。**第三条路 = 画质域修**（不裁、不动时间轴）。
+                "settle_sharpen": ("FLOAT", {
+                    "default": 0.0, "min": 0.0, "max": 1.5, "step": 0.05,
+                    "tooltip": "【先保持 0，按需开】糊区锐化（画质域修复）：对裁后**开头若干帧**\n"
+                               "做 unsharp mask，强度从缝端最强线性衰减到 0。\n"
+                               "  · 0（默认）= 关。\n"
+                               "  · 0.4–1.0 = 推荐区间（先试 0.6，再目检有没有 halo/噪点）。\n"
+                               "**帧数守恒、不动音频、零采样开销**——不改变时间轴，故不会引入跳帧。\n"
+                               "⚠ 诚实边界：锐化只能恢复**对比度**，不能恢复**已丢失的真实细节**。\n"
+                               "   对「结构还在、只是软」的重绘糊有效；细节彻底丢了就救不回来。",
+                }),
+                "settle_sharpen_frames": ("INT", {
+                    "default": 24, "min": 0, "max": 64, "step": 1,
+                    "tooltip": "糊区锐化作用帧数（从裁后首帧起，强度线性衰减到 0）。\n"
+                               "默认 24 帧 ≈ 1 秒；实测糊区约 16–20 帧内恢复到基准，故 24 有余量。",
+                }),
+                # ⚠ 继续追加在**最后**（同上铁律）：低频残差传递，2026-09-16 新增。
+                #    借鉴 ComfyUI_MiniMaxH3_Director 的 `match_export_opening_grade`
+                #    （`_lowfreq_appearance_pull`）：只吸收上段的低频色档/布光，保留本段细节。
+                "lowfreq_pull": ("FLOAT", {
+                    "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "【按需开，默认 0】低频残差传递：把裁后**开头若干帧**的低频\n"
+                               "（色档/亮度/布光）拉向**上段末帧**，但**保留本段自己的细节与姿态**。\n"
+                               "算法：out = src + w·(blur(guide) − blur(src))，纯加性。\n"
+                               "  · 0（默认）= 关\n"
+                               "  · 0.7 = 上游同款参数（实测缝点阶跃 0.0399→0.0110）\n"
+                               "  · 1.0 = 更强（实测 →0.0011，比后处理 seam_grade 还好 5×）\n"
+                               "**关键优势**：只动低频 ⇒ **不复制上段姿态轮廓 ⇒ 无重影**；\n"
+                               "   而「全 RGB 混合」（交叉溶/重影）实测会把锐度砍掉 49%（画面花）。\n"
+                               "帧数守恒、不动音频、零采样开销。",
+                }),
+                "lowfreq_frames": ("INT", {
+                    "default": 12, "min": 0, "max": 48, "step": 1,
+                    "tooltip": "低频对齐作用帧数（从裁后首帧起，权重线性衰减到 0）。\n"
+                               "上游同款用 12 帧；实测缝区影响就在前 12 帧内。",
+                }),
+                "lowfreq_blur": ("INT", {
+                    "default": 64, "min": 8, "max": 128, "step": 8,
+                    "tooltip": "低频尺度（盒式模糊核）。越大越只对齐大尺度色档/布光；\n"
+                               "上游用 64。实测 32/64 差异很小（阶跃 0.0011 vs 0.0024）。",
+                }),
+                # ⚠ 继续追加在**最后**（同上铁律）：后处理层补全，2026-09-16。
+                #    以下四个都是**画质域修复**：帧数守恒、不动音频、不动时间轴
+                #    ⇒ 结构上不可能引入跳帧。默认全 0（关），旧行为逐位不变。
+                "deconv_strength": ("FLOAT", {
+                    "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "【按需开，默认 0】段头**反卷积去模糊**（Wiener 逆滤波）。\n"
+                               "与「糊区锐化」的区别：锐化只是**放大高频**（噪声一起放大），\n"
+                               "反卷积是按假设的 PSF **逆推原始信号**，理论上能真正还原细节。\n"
+                               "0=关；0.5~1.0 = 混合比。糊得越重，radius 要越大。",
+                }),
+                "deconv_radius": ("FLOAT", {
+                    "default": 1.5, "min": 0.5, "max": 6.0, "step": 0.5,
+                    "tooltip": "反卷积假设的模糊半径（像素）。段头糊得越重越大；\n"
+                               "太大易出振铃（此时把 deconv_strength 降下来）。",
+                }),
+                "detail_borrow": ("FLOAT", {
+                    "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "【按需开，默认 0】**段体高频迁移**：段头保留自己的低频（内容/构图），\n"
+                               "高频换成段体的高频结构（同一场景/光照下 ⇒ 不会引入异质内容）。\n"
+                               "与「低频残差」互补：那个补低频，这个补高频。\n"
+                               "⚠ 若段头与段体内容差异大（人物位移大），会带出纹理错位。",
+                }),
+                "detail_blur": ("INT", {
+                    "default": 9, "min": 3, "max": 64, "step": 2,
+                    "tooltip": "高频迁移的分界尺度（盒式模糊核）：越大则被搬走的高频越粗。",
+                }),
+                "hist_match": ("FLOAT", {
+                    "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "【按需开，默认 0】**直方图匹配**：把段头的色阶分布对齐到段体。\n"
+                               "比「低频残差」更强 —— 那个只对齐**均值**，这个对齐**整条分布**\n"
+                               "（亮部/暗部的比例也一致）。0=关；1=完全对齐。",
+                }),
+                "wb_match": ("FLOAT", {
+                    "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "【按需开，默认 0】**灰世界白平衡校正**：把段头的 R:G:B 比例（色温/色调）\n"
+                               "对齐到段体。与「低频残差」正交 —— 那个管亮度总量，这个管色温。\n"
+                               "对症「色温滑档」型漂移。增益限幅 ±25% 防偏色。",
+                }),
+                # 🔴 2026-09-17 新增（RESEARCH_seam_frontier §2 方向二）：**跨段**统计匹配。
+                #   与上面三个的区别：hist_match / wb_match / deconv / detail_borrow 都是
+                #   「段头 ↔ **本段段体**」（段内）；本组是「段头 ↔ **上段末帧**」（**段间**），
+                #   治的正是成片缝上那个亮度阶跃（copy 桥实测 0.0402）。
+                #   ⚠ 铁律：新 widget 一律**追加在 optional 末位**（旧工作流取值不前移）。
+                "match_prev": ("FLOAT", {
+                    "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "【按需开，默认 0】**跨段统计匹配**：把段头的色档/曝光分布\n"
+                               "（逐通道均值 + 标准差）对齐到**上段末帧**——即缝的另一侧。\n"
+                               "与「低频残差」的区别：那个只做低频**加性**（一阶）；\n"
+                               "这个补上**二阶（对比度）+ 逐通道色度**（Reinhard 式）。\n"
+                               "**只对齐统计量，不复制姿态 ⇒ 无重影。**建议从 0.5 起试。",
+                }),
+                "match_prev_frames": ("INT", {
+                    "default": 12, "min": 1, "max": 96, "step": 1,
+                    "tooltip": "【配合 match_prev 用】作用帧数：从裁后首帧起算，\n"
+                               "权重从 match_prev 线性衰减到 0（缝端最强 → 尾端不动）。",
+                }),
+                "match_prev_gain_max": ("FLOAT", {
+                    "default": 1.15, "min": 1.0, "max": 2.0, "step": 0.05,
+                    "tooltip": "【护栏，一般不用动】逐通道对比度增益上限（σ目标/σ源 的截断）。\n"
+                               "调大 = 允许更猛的对比度对齐，但可能把已通过的内容改坏。",
+                }),
+                "match_prev_offset_max": ("FLOAT", {
+                    "default": 0.06, "min": 0.0, "max": 0.3, "step": 0.01,
+                    "tooltip": "【护栏，一般不用动】逐通道亮度/色度偏移上限（μ目标−μ源 的截断）。\n"
+                               "调大 = 允许更大的色档修正，但过大易见「整段换色」。",
                 }),
             },
         }
 
-    RETURN_TYPES = ("IMAGE", "AUDIO", "STRING")
-    RETURN_NAMES = ("images", "audio", "report")
+    RETURN_TYPES = ("IMAGE", "AUDIO", "STRING", "IMAGE")
+    RETURN_NAMES = ("images", "audio", "report", "prev_tail")
     FUNCTION = "trim"
     CATEGORY = CATEGORY
     DESCRIPTION = (
         "裁掉续接段头部的重叠帧，并自动把钉住区之后那段「复现帧」一并裁掉"
-        "（settle_frames=-1 自动，无需配置）；视频与音频同裁，避免重播与音画失步。"
+        "（默认 settle_frames=0，只裁钉住区）；视频与音频同裁，避免重播与音画失步。"
     )
 
-    def trim(self, images, trim_frames=0, fps=24.0, audio=None, settle_frames=-1):
+    def trim(self, images, trim_frames=0, fps=24.0, audio=None, settle_frames=0,
+             seam_ghost=0, seam_ghost_alpha=0.5,
+             settle_sharpen=0.0, settle_sharpen_frames=24,
+             lowfreq_pull=0.0, lowfreq_frames=12, lowfreq_blur=64,
+             deconv_strength=0.0, deconv_radius=1.5,
+             detail_borrow=0.0, detail_blur=9,
+             hist_match=0.0, wb_match=0.0,
+             match_prev=0.0, match_prev_frames=12,
+             match_prev_gain_max=1.15, match_prev_offset_max=0.06):
         CONTRACT.enforce()   # 裁帧算术同样依赖上游网格，先过契约
         # 服务端防线：widget 的 min=1.0 只挡 UI，API 提交 fps=0/NaN 会一路除到底
         try:
@@ -370,15 +570,53 @@ class H3RelayTrimAV:
         if pin <= 0:
             msg = "[H3 Relay] 裁 0 帧 → 不裁（独立段或纯首段）。"
             print(msg)
-            return (images, audio, msg)
+            return (images, audio, msg, images[:1])
 
         # 沉降帧：钉住区之后模型还会先复现上一段若干帧才切到本段 prompt。
         # 切换点是**逐段不同的量**，所以默认让它自己量（-1），而不是让用户猜。
         want = int(settle_frames)
+        bj_note = ""
         if want < 0:
             settle, jump, base = CORE.detect_settle(images, pin)
             why = ("自动检测：切换信号 %.1f / 基准 %.1f（帧差突变/锐度塌陷/色档收敛）" % (jump, base)) if settle \
                 else ("自动检测：未检出切换点（帧差 %.1f / 基线 %.1f，无突变亦无锐度塌陷）" % (jump, base))
+            # 🔴 2026-09-15 新增：**边界跳帧观测**。沉降公式在「跳变正好落在钉住区边界」
+            #   （j == pin-1）时返回 0 —— 语义没错，但**掩盖了「边界本身是断的」**。
+            #   故单独量出来报给用户：**裁切治不了跳变，但至少要看得见。**
+            bj, d_edge, d_base = CORE.boundary_jump_ratio(images, pin)
+            if bj > CORE.BOUNDARY_JUMP_WARN:
+                bj_note = ("\n           ⚠ **边界跳帧 %.1f×**（钉住区末帧→首帧新内容：帧差 %.4f / 段内基线 %.4f）"
+                           "—— 这是模型接续处的断点；**多裁只是把断点往后挪，治不了它**。"
+                           % (bj, d_edge, d_base))
+            # 多通道观测剖面：**节点实测的 raw decode 数据**，成片里看不到
+            # （H.264 编码会改变锐度/色阶基准 → 离线用成片反推必错）。
+            # GG 2026-09-15：「不只是锐度，色阶、明暗等都需要」——沉降检测本就三路，只报一路=只开三分之一窗。
+            prof = CORE.observation_profile(images, pin)
+            if prof["sharp"]:
+                n_sh = 18
+                bj_note += (
+                    "\n           观测剖面（钉住区后逐帧，节点实测 raw decode）\n"
+                    "             锐度÷基准 : %s%s\n"
+                    "             亮度      : %s%s\n"
+                    "             色阶 R/G/B: %s / %s / %s\n"
+                    "             帧差      : %s%s\n"
+                    "             基准：锐度 %.6f；体区色档 %.4f / %.4f / %.4f"
+                    % (" ".join("%.2f" % v for v in prof["sharp"][:n_sh]),
+                       " …" if len(prof["sharp"]) > n_sh else "",
+                       " ".join("%.4f" % v for v in prof["luma"][:12]),
+                       " …" if len(prof["luma"]) > 12 else "",
+                       " ".join("%.4f" % v for v in prof["rgb"][0][:10]),
+                       " ".join("%.4f" % v for v in prof["rgb"][1][:10]),
+                       " ".join("%.4f" % v for v in prof["rgb"][2][:10]),
+                       " ".join("%.4f" % v for v in prof["diff"][:18]),
+                       " …" if len(prof["diff"]) > n_sh else "",
+                       prof["ref_sharp"], prof["ref_rgb"][0], prof["ref_rgb"][1], prof["ref_rgb"][2]))
+            # 裁量→跳跃曲线：成片缝 = raw[pin-1] → raw[pin+settle]（相隔 settle+1 帧），
+            # **裁得越多、跳得越大**（GG：裁切=时间跳跃=跳切）。裁之前就把它算出来供权衡。
+            curve = CORE.trim_jump_curve(images, pin)
+            if curve:
+                bj_note += ("\n           裁量→跳跃曲线（settle : 归一跳跃）：%s"
+                            % "  ".join("%d:%.1f×" % (s, r) for s, r in curve[:13]))
         else:
             settle, why = want, "手动指定"
         if pin + settle >= before:
@@ -387,11 +625,85 @@ class H3RelayTrimAV:
 
         n = pin + settle
         out = CORE.trim_head_frames(images, n)
+        # 🔴 2026-09-15 新增：**缝帧重影**（极短交叉溶，GG 认可的解法）。
+        #   裁后首帧换成「上段末帧 ⊕ 本段首帧」的混合 → 把缝处一跳**拆成两个半跳跨两格**，
+        #   一闪而过 → 体感约等于一镜到底。**帧数守恒、不动音频、零采样开销。**
+        #   上段末帧 = `images[pin-1]`（钉住区最后一帧 = 上段尾的复现）——节点手里就有，无需额外输入。
+        # 🔴 2026-09-16 新增：后处理层补全（P3/P5/P6/P7）—— 画质域修复，不碰时间轴。
+        #   执行顺序：先对齐色调（直方图/白平衡），再补高频（反卷积/段体迁移），最后锐化收口。
+        post_note = ""
+        if float(hist_match) > 0.0:
+            out = CORE.match_hist_head_to_body(out, int(settle_sharpen_frames),
+                                               float(hist_match), body_start=40)
+            post_note += "\n           ✦ **直方图匹配**：段头色阶分布对齐段体（强度 %.2f）。" % float(hist_match)
+        if float(wb_match) > 0.0:
+            out = CORE.match_white_balance(out, int(settle_sharpen_frames),
+                                           float(wb_match), body_start=40)
+            post_note += "\n           ✦ **白平衡校正**：段头 R:G:B 比例对齐段体（强度 %.2f）。" % float(wb_match)
+        if float(deconv_strength) > 0.0:
+            out = CORE.deconv_head_zone(out, int(settle_sharpen_frames),
+                                        float(deconv_strength), float(deconv_radius))
+            post_note += ("\n           ✦ **反卷积去模糊**：段头 Wiener 逆滤波（强度 %.2f / 半径 %.1f）。"
+                          % (float(deconv_strength), float(deconv_radius)))
+        if float(detail_borrow) > 0.0:
+            out = CORE.borrow_detail_from_body(out, int(settle_sharpen_frames),
+                                               float(detail_borrow), int(detail_blur), body_start=40)
+            post_note += ("\n           ✦ **段体高频迁移**：段头高频换用段体结构（强度 %.2f / 尺度 %d）。"
+                          % (float(detail_borrow), int(detail_blur)))
+
+        # 🔴 2026-09-16 新增：**低频残差传递**（借鉴 Director 的段间引导低频对齐）。
+        #   只吸收上段末帧的低频色档/布光，**保留本段细节与姿态** ⇒ 无重影。
+        #   与「全 RGB 混合」有本质区别：后者实测把作用区锐度砍掉 49%（画面花）。
+        lowfreq_note = ""
+        # 🔴 2026-09-17 新增（RESEARCH_seam_frontier §2 方向二）：**跨段统计匹配**。
+        #   作用域 = 段头 ↔ **上段末帧**（缝的另一侧），治成片缝上的亮度阶跃。
+        #   与下面 lowfreq_pull 的区别：那个只做低频**加性**（一阶矩）；本组补**二阶矩 + 逐通道色度**。
+        #   ⚠ 两者**作用域重叠**（都是段头↔上段末帧）⇒ 建议二选一，同时开需自行确认不过修。
+        #   ⚠ 必须放在 lowfreq_pull **之前**：先对齐分布，再修低频残差。
+        if float(match_prev) > 0.0 and pin >= 1:
+            out = CORE.match_prev_stats(out, images[pin - 1], int(match_prev_frames),
+                                        float(match_prev), float(match_prev_gain_max),
+                                        float(match_prev_offset_max))
+            post_note += ("\n           ✦ **跨段统计匹配**：开头 %d 帧的色档/曝光分布对齐上段末帧"
+                          "（强度 %.2f / 增益上限 %.2f / 偏移上限 %.3f）——只对齐统计量，不复制姿态 ⇒ 无重影。"
+                          % (int(match_prev_frames), float(match_prev), float(match_prev_gain_max),
+                             float(match_prev_offset_max)))
+
+        if float(lowfreq_pull) > 0.0 and pin >= 1:
+            out = CORE.lowfreq_pull(out, images[pin - 1], int(lowfreq_frames),
+                                    float(lowfreq_pull), int(lowfreq_blur))
+            lowfreq_note = (
+                "\n           ✦ **低频残差传递**：开头 %d 帧对齐上段末帧的低频"
+                "（强度 %.2f / 尺度 %d）——只动低频，不复制姿态 ⇒ 无重影。"
+                % (int(lowfreq_frames), float(lowfreq_pull), int(lowfreq_blur)))
+
+        # 🔴 2026-09-16 新增：**画质域修复**——糊区锐化（GG 定方向：先试零 GPU 传统锐化）。
+        #   默认 settle_frames=0（不裁沉降）后，成片段头保留几帧「重绘糊」；
+        #   裁它 → 跳帧（裁 16 帧跳 0.055）；不裁 → 留糊。
+        #   **第三条路 = 画质域修**：不裁、不动时间轴，只提升糊区高频（故不可能引入跳帧）。
+        sharpen_note = ""
+        if float(settle_sharpen) > 0.0 and int(out.shape[0]) > 0:
+            out = CORE.sharpen_head_zone(out, int(settle_sharpen_frames), float(settle_sharpen))
+            sharpen_note = (
+                "\n           ✦ **糊区锐化**：开头 %d 帧 unsharp（强度 %.2f，缝端最强 → 尾端 0）"
+                "——不裁、不动时间轴，故不引入跳帧。"
+                % (int(settle_sharpen_frames), float(settle_sharpen)))
+        # 🔴 2026-09-16 重做：改用 `seam_crossfade`（两侧都是**连续运动序列**）。
+        #   旧实现把「上段末帧」**复制 N 次**去混合 → k>1 时内容冻结（重复帧）、
+        #   k=1 时只是"一跳拆两跳"（异常帧数 1→2）——**素材用错了**，故观感更差。
+        #   正解：上段**末尾 k 帧** 对 本段**开头 k 帧** 逐帧渐变（t 从 1/(k+1) 递进到 k/(k+1)）。
+        #   `seam_crossfade` 自带裁切（cut = pin + settle），故它直接产出裁后序列。
+        ghost_note = ""
+        if int(seam_ghost) > 0 and pin >= 1:
+            out = CORE.seam_crossfade(images, n, pin, int(seam_ghost))
+            ghost_note = ("\n           ✦ **极短交叉溶 %d 帧**（上段末尾 %d 帧 ⊕ 本段开头 %d 帧，"
+                          "权重按 1/%d 逐帧递进）——两侧都是连续运动序列，帧数守恒、不动音频。"
+                          % (int(seam_ghost), int(seam_ghost), int(seam_ghost), int(seam_ghost) + 1))
         audio_out = CORE.trim_audio_head(audio, n, float(fps)) if audio is not None else None
         after = int(out.shape[0])
         line = ("[H3 Relay] 裁首 %d 帧 = 钉住 %d + 沉降 %d ｜ %s\n"
                 "           画面 %d → %d 帧（%.3fs → %.3fs）"
-                % (n, pin, settle, why, before, after, before / float(fps), after / float(fps)))
+                % (n, pin, settle, why, before, after, before / float(fps), after / float(fps))) + bj_note + lowfreq_note + post_note + sharpen_note + ghost_note
         if audio is not None:
             line += "；音频 %d → %d 采样点" % (
                 int(audio["waveform"].shape[-1]), int(audio_out["waveform"].shape[-1]))
@@ -401,7 +713,11 @@ class H3RelayTrimAV:
         # 接缝自检：裁后起点若仍有突变，说明沉降量不够
         check = CORE.describe_head_jump(out)
         print(check)
-        return (out, audio_out, line + "\n" + check)
+        # 🔴 2026-09-17 新增第 4 路输出 `prev_tail`（**追加在末位**，旧工作流不受影响）：
+        #   = 钉住区最后一帧 = **上一段的末帧**（节点手里本来就有，无需额外输入）。
+        #   用途：喂给 `H3RelayPost` 的 `guide`，让跨段统计匹配 / 低频残差传递有"缝的另一侧"可对齐。
+        tail = images[pin - 1: pin] if pin >= 1 else images[:1]
+        return (out, audio_out, line + "\n" + check, tail)
 
 
 class H3RelayChain:
@@ -473,7 +789,7 @@ class H3RelayCopyBridge:
         sigma 标签（sigma_row = m·sigma_video），远端硬钉、缝端以 ramp_top 强度 harmonize，
         每一步都被 (1−m) 锚回拷贝尾——治硬接缝的色档/曝光台阶，全程有锚（与 taper 相反）。
     输出 INT = 应裁帧数（=拷贝跨度），接 H3RelayTrimAV 的 trim_frames；
-    TrimAV 的 settle_frames 保持 -1，观测端继续守接管帧。
+    TrimAV 的 settle_frames 保持 0（0.5.0 起默认不裁沉降），观测端继续守接管帧。
     """
 
     @classmethod
@@ -495,7 +811,7 @@ class H3RelayCopyBridge:
                 }),
             },
             "optional": {
-                "mask_mode": (["hard", "taper", "ramp"], {
+                "mask_mode": (["hard", "taper", "ramp", "blend"], {
                     "default": "hard",
                     "tooltip": "掩码语义：每步输出 = 模型生成 * m + 上段尾 * (1-m)。**m=0 才钉住，m=1 是重绘。**\n"
                                "hard = 全窗 m=0（钉住区零重绘，默认，真续接用这个）；\n"
@@ -535,6 +851,42 @@ class H3RelayCopyBridge:
                     "tooltip": "仅 ramp 模式：参与斜坡的缝端 token 数；0 = 整个拷贝窗铺开。\n"
                                "小值（如 2~3）= 「只松缝、锁运动」的窄斜坡。",
                 }),
+                "anchor_latent": ("LATENT", {
+                    "tooltip": "【0.5.0 统计纠偏基准，可选】全局锚段（通常第 1 段）的 AV latent。\n"
+                               "接上后：拷贝前缀的逐通道均值/方差被拉向锚段（Reinhard 矩匹配）。\n"
+                               "纠偏只作用于被裁掉的钉住前缀——不碰上一段成片；但采样时每步钉回的\n"
+                               "就是这份已复位色档的上下文 → 本段新内容跟着回到全局色档。\n"
+                               "治的是「色档/曝光随接力次数漂移」。用「续接 Latent 读」+ 指定\n"
+                               "explicit_path 读第 1 段的 stage 文件即可。",
+                }),
+                "anchor_blend": ("FLOAT", {
+                    "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "【0.5.0 纠偏强度】0~1：拷贝前缀被拉向锚段统计量的比例。\n"
+                               "1 = 全量对齐（默认，锚段就是审美基准时用）；0.5 = 一半。\n"
+                               "锚段与本段允许有意的风格差异时调低。不接 anchor_latent 时无效。",
+                }),
+                # 🔴 2026-09-17 新增（RESEARCH_seam_frontier §4 方向四）：**重叠区双向融合**。
+                #   与 ramp 同语义、不同曲线：ramp 线性升，blend 用**窗形**升（两端导数 0）。
+                #   依据 FlowLong / Unified Long Video Inpainting 的滑窗 Hamming 混合
+                #   （arXiv:2511.03272）：重叠区由两个独立估计加权平均，权重取窗函数。
+                #   ⚠ 本节点**无存量 UI 工作流**引用（已核），故新 widget 可紧邻同族项放。
+                "blend_top": ("FLOAT", {
+                    "default": 0.50, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "【仅 blend 模式】缝端**模型占比**上限（对应 ramp 的 ramp_top）。\n"
+                               "0 = 退化成 hard；越大越信任本段自己的预测。建议 0.5 起试。",
+                }),
+                "blend_tokens": ("INT", {
+                    "default": 0, "min": 0, "max": 12, "step": 1,
+                    "tooltip": "【仅 blend 模式】参与融合的缝端 token 数；0 = 整个拷贝窗铺开。\n"
+                               "小值（2~3）= 「只融缝、锁运动」。",
+                }),
+                "blend_shape": (list(CORE.BLEND_SHAPES), {
+                    "default": CORE.BLEND_SHAPE_DEFAULT,
+                    "tooltip": "【仅 blend 模式】窗形：\n"
+                               " · smoothstep = x²(3−2x)，多项式 S 曲线（默认）\n"
+                               " · hann = (1−cos πx)/2，余弦 S 曲线\n"
+                               "两者都是**两端导数为 0**的单调升 ⇒ 与窗外衔接无折角、过渡更柔。",
+                }),
             },
         }
 
@@ -550,16 +902,212 @@ class H3RelayCopyBridge:
 
     def bridge(self, latent, context_latent, context_frames,
                mask_mode="hard", taper_tokens=4, seam_min=0.10, pin_audio=True,
-               ramp_top=0.25, ramp_tokens=0):
+               ramp_top=0.25, ramp_tokens=0,
+               blend_top=CORE.SEAM_BLEND_TOP, blend_tokens=0,
+               blend_shape=CORE.BLEND_SHAPE_DEFAULT,
+               anchor_latent=None, anchor_blend=1.0):
         CONTRACT.enforce()
         out, covered, report = CORE.build_continue_latent(
             latent, context_latent, int(context_frames),
             mask_mode=mask_mode, taper=int(taper_tokens),
             seam_min=float(seam_min), pin_audio=bool(pin_audio),
             ramp_top=float(ramp_top), ramp_tokens=int(ramp_tokens),
+            blend_top=float(blend_top), blend_tokens=int(blend_tokens),
+            blend_shape=str(blend_shape),
+            anchor_latent=anchor_latent, anchor_blend=float(anchor_blend),
         )
         print(report, flush=True)
         return (out, report, covered)
+
+
+class H3RelayPost:
+    """🔗 H3 续接后处理（Post）—— 画质域修复，**不碰时间轴**。
+
+    为什么单独一个节点（2026-09-17 拆出）：
+      原来这 15 个旋钮全塞在 `H3RelayTrimAV` 里，而 ComfyUI 的 UI 工作流把
+      ``widgets_values`` **按位置**存 ⇒ 「新 widget 只追加末位」成了硬约束 ⇒
+      TrimAV 被顶到 22 个 widget、UI 不可读、且**每加一个后处理件都要往末尾塞**。
+      拆出来之后：**TrimAV 冻结不再长**，本节点从零开始、widget 可逻辑分组，
+      **以后的画质域功能一律加在这里**。
+
+    分工：
+      · ``H3RelayTrimAV`` = 时间轴（裁重叠 / 沉降 / 重影）+ 交接 ``prev_tail``
+      · ``H3RelayPost``  = 画质域（色档对齐 / 高频补 / 锐化）——**不动帧数、不动音频**
+
+    ``guide`` 接 ``H3RelayTrimAV`` 的第 4 路输出 ``prev_tail``（= 上段末帧）：
+    只有 ``match_prev`` 与 ``lowfreq_pull`` 需要它；不接时这两项自动失效（其余照常）。
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "images": ("IMAGE", {
+                    "tooltip": "【接法】接 `🔗 H3 续接裁重叠` 的 images 输出（**裁后**的画面）。\n"
+                               "本节点只改画质、**不改帧数、不动音频**。",
+                }),
+            },
+            "optional": {
+                "guide": ("IMAGE", {
+                    "tooltip": "【接法】接 `🔗 H3 续接裁重叠` 的第 4 路输出 `prev_tail`\n"
+                               "（= **上一段的末帧**，即缝的另一侧）。\n"
+                               "只有「跨段统计匹配」与「低频残差传递」需要它；不接时这两项自动跳过。",
+                }),
+                # —— 组 1：跨段色档/曝光对齐（缝的另一侧 = guide）——
+                "match_prev": ("FLOAT", {
+                    "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "【组 1 · 跨段】**跨段统计匹配**：把段头的色档/曝光分布\n"
+                               "（逐通道均值 + 标准差）对齐到 guide。\n"
+                               "Reinhard 式一阶+二阶矩；**只对齐统计量，不复制姿态 ⇒ 无重影**。\n"
+                               "目标：压「成片缝上的亮度阶跃」。需要 guide。\n"
+                               "🔴 **2026-09-17 真渲染实测：在 Latent 桥（cond）路线上请保持 0**——\n"
+                               "该路线缝本身已到 0.0007（可感阈值以下），而 guide（= 裁重叠的\n"
+                               "`prev_tail`）在 cond 下只是**近似**参照（本段自己重画的第 pin-1 帧，\n"
+                               "实测代理误差 0.006 > 要修的阶跃 0.0007）⇒ 对齐它反而把首帧推离真参照\n"
+                               "（阶跃 0.0007 → 0.0039，旧口径更差 → 0.0088）。真正的用武之地是\n"
+                               "**拷贝桥**（那里 prev_tail 才是真·上段末帧）。详见 CHANGES 0.5.0。",
+                }),
+                "match_prev_frames": ("INT", {
+                    "default": 12, "min": 1, "max": 96, "step": 1,
+                    "tooltip": "【配合 match_prev】作用帧数：从首帧起算，权重线性衰减到 0。",
+                }),
+                "match_prev_gain_max": ("FLOAT", {
+                    "default": 1.15, "min": 1.0, "max": 2.0, "step": 0.05,
+                    "tooltip": "【护栏】逐通道对比度增益上限（防把已通过的内容改坏）。",
+                }),
+                "match_prev_offset_max": ("FLOAT", {
+                    "default": 0.06, "min": 0.0, "max": 0.3, "step": 0.01,
+                    "tooltip": "【护栏】逐通道亮度/色度偏移上限（防「整段换色」）。",
+                }),
+                "lowfreq_pull": ("FLOAT", {
+                    "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "【组 1 · 跨段】**低频残差传递**：只把段头**低频**色档对齐上段末帧，\n"
+                               "不动细节与姿态 ⇒ 无重影。与 match_prev 的区别：\n"
+                               "本项只做低频**加性**（一阶）；match_prev 补二阶+逐通道色度。\n"
+                               "⚠ 两者**作用域重叠**，建议二选一。需要 guide。",
+                }),
+                "lowfreq_frames": ("INT", {"default": 12, "min": 1, "max": 96, "step": 1,
+                                           "tooltip": "【配合 lowfreq_pull】作用帧数（权重线性衰减到 0）。"}),
+                "lowfreq_blur": ("INT", {"default": 64, "min": 4, "max": 256, "step": 4,
+                                         "tooltip": "【配合 lowfreq_pull】低频尺度（盒式模糊核，上游用 64）。"}),
+                # —— 组 2：段内色档对齐（基准 = 本段段体）——
+                "hist_match": ("FLOAT", {
+                    "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "【组 2 · 段内】**直方图匹配**：把段头的色阶**分布**对齐到本段段体。\n"
+                               "治「段头↔段体」的色阶漂移（段**内**，不需要 guide）。",
+                }),
+                "wb_match": ("FLOAT", {
+                    "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "【组 2 · 段内】**灰世界白平衡**：把段头 R:G:B 比例对齐段体。\n"
+                               "与直方图匹配正交 —— 那个管亮度总量，这个管色温。",
+                }),
+                # —— 组 3：高频补（治糊）——
+                "deconv_strength": ("FLOAT", {
+                    "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "【组 3 · 补高频】**反卷积去模糊**（Wiener）：提升段头高频。\n"
+                               "太大易出振铃（此时把强度降下来）。",
+                }),
+                "deconv_radius": ("FLOAT", {"default": 1.5, "min": 0.5, "max": 4.0, "step": 0.1,
+                                            "tooltip": "【配合 deconv_strength】模糊核半径。"}),
+                "detail_borrow": ("FLOAT", {
+                    "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "【组 3 · 补高频】**段体高频迁移**：把段头的高频换成段体的结构。\n"
+                               "比反卷积更「像真的」，但可能与段头内容不符。",
+                }),
+                "detail_blur": ("INT", {"default": 9, "min": 3, "max": 64, "step": 2,
+                                        "tooltip": "【配合 detail_borrow】高频分离尺度。"}),
+                # —— 组 4：收口 ——
+                "settle_sharpen": ("FLOAT", {
+                    "default": 0.0, "min": 0.0, "max": 1.5, "step": 0.05,
+                    "tooltip": "【组 4 · 收口】**糊区锐化**（unsharp）：对开头 N 帧做**渐变**锐化。\n"
+                               "不裁、不动时间轴 ⇒ 从原理上不可能引入跳帧。建议 0.4–1.0。",
+                }),
+                "settle_sharpen_frames": ("INT", {"default": 24, "min": 1, "max": 96, "step": 1,
+                                                  "tooltip": "【配合 settle_sharpen】作用帧数（渐变衰减到 0）。"}),
+                # ⚠ 继续追加在**最后**（同上铁律）。
+                "match_prev_stats_frames": ("INT", {
+                    "default": 1, "min": 0, "max": 24, "step": 1,
+                    "tooltip": "【配合 match_prev】**统计量取几帧**——本条最容易写错：\n"
+                               "  · 1（默认）= 只取**紧贴缝的那一帧** ⇔ 与 guide（单帧）同口径 ⇒\n"
+                               "    修正量恰是「缝上的阶跃」，首帧被拉向 guide 而**不会越过它**；\n"
+                               "  · 0 = 旧口径（对整个作用区聚合）⇒ 段头**内部有亮度梯度**时，\n"
+                               "    聚合均值被后续帧拉低，修正量变成「段头平均 vs guide」的差，\n"
+                               "    首帧被**推过 guide**、缝上凭空多出一个阶跃（实测 ×12.6）。仅对照用。\n"
+                               "  · >1 = 用前 N 帧聚合（介于两者之间）。",
+                }),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE", "STRING")
+    RETURN_NAMES = ("images", "report")
+    FUNCTION = "apply"
+    CATEGORY = CATEGORY
+    DESCRIPTION = (
+        "续接段的画质域后处理（不碰时间轴、不动帧数、不动音频）："
+        "跨段统计匹配 / 低频残差 / 段内直方图与白平衡 / 反卷积与段体高频迁移 / 糊区锐化。"
+        "全部默认关闭；guide 接裁重叠节点的 prev_tail 才有「缝的另一侧」可对齐。"
+    )
+
+    def apply(self, images, guide=None,
+              match_prev=0.0, match_prev_frames=12,
+              match_prev_gain_max=1.15, match_prev_offset_max=0.06,
+              lowfreq_pull=0.0, lowfreq_frames=12, lowfreq_blur=64,
+              hist_match=0.0, wb_match=0.0,
+              deconv_strength=0.0, deconv_radius=1.5,
+              detail_borrow=0.0, detail_blur=9,
+              settle_sharpen=0.0, settle_sharpen_frames=24,
+              match_prev_stats_frames=CORE.MATCH_PREV_STATS_FRAMES):
+        n0 = int(images.shape[0])
+        out = images
+        notes = []
+
+        # 执行顺序：先对齐色调（跨段 → 段内），再补高频，最后锐化收口。
+        if float(match_prev) > 0.0:
+            if guide is None:
+                notes.append("跨段统计匹配：**跳过**（未接 guide）")
+            else:
+                out = CORE.match_prev_stats(out, guide, int(match_prev_frames),
+                                            float(match_prev), float(match_prev_gain_max),
+                                            float(match_prev_offset_max),
+                                            int(match_prev_stats_frames))
+                notes.append("跨段统计匹配 %.2f（%d 帧，对齐上段末帧；统计量取 %s）"
+                             % (float(match_prev), int(match_prev_frames),
+                                "紧贴缝那帧" if int(match_prev_stats_frames) == 1
+                                else "整个作用区聚合（旧口径，仅对照）"
+                                if int(match_prev_stats_frames) <= 0
+                                else "前 %d 帧" % int(match_prev_stats_frames)))
+        if float(lowfreq_pull) > 0.0:
+            if guide is None:
+                notes.append("低频残差传递：**跳过**（未接 guide）")
+            else:
+                out = CORE.lowfreq_pull(out, guide, int(lowfreq_frames),
+                                        float(lowfreq_pull), int(lowfreq_blur))
+                notes.append("低频残差传递 %.2f（%d 帧 / 尺度 %d）"
+                             % (float(lowfreq_pull), int(lowfreq_frames), int(lowfreq_blur)))
+        if float(hist_match) > 0.0:
+            out = CORE.match_hist_head_to_body(out, int(settle_sharpen_frames),
+                                               float(hist_match), body_start=40)
+            notes.append("直方图匹配 %.2f（段头↔段体）" % float(hist_match))
+        if float(wb_match) > 0.0:
+            out = CORE.match_white_balance(out, int(settle_sharpen_frames),
+                                           float(wb_match), body_start=40)
+            notes.append("白平衡校正 %.2f（段头↔段体）" % float(wb_match))
+        if float(deconv_strength) > 0.0:
+            out = CORE.deconv_head_zone(out, int(settle_sharpen_frames),
+                                        float(deconv_strength), float(deconv_radius))
+            notes.append("反卷积去模糊 %.2f / 半径 %.1f" % (float(deconv_strength), float(deconv_radius)))
+        if float(detail_borrow) > 0.0:
+            out = CORE.borrow_detail_from_body(out, int(settle_sharpen_frames),
+                                               float(detail_borrow), int(detail_blur), body_start=40)
+            notes.append("段体高频迁移 %.2f / 尺度 %d" % (float(detail_borrow), int(detail_blur)))
+        if float(settle_sharpen) > 0.0:
+            out = CORE.sharpen_head_zone(out, int(settle_sharpen_frames), float(settle_sharpen))
+            notes.append("糊区锐化 %.2f（%d 帧）" % (float(settle_sharpen), int(settle_sharpen_frames)))
+
+        assert int(out.shape[0]) == n0, "后处理必须帧数守恒"
+        line = "[H3 Relay] 后处理：%s" % ("；".join(notes) if notes else "全部关闭（直通）")
+        print(line)
+        return (out, line)
 
 
 NODE_CLASS_MAPPINGS = {
@@ -568,6 +1116,7 @@ NODE_CLASS_MAPPINGS = {
     "H3RelayMotionContext": H3RelayMotionContext,
     "H3RelayCopyBridge": H3RelayCopyBridge,
     "H3RelayTrimAV": H3RelayTrimAV,
+    "H3RelayPost": H3RelayPost,
     "H3RelayChain": H3RelayChain,
 }
 
@@ -577,5 +1126,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "H3RelayMotionContext": "🔗 H3 续接 Latent 桥",
     "H3RelayCopyBridge": "🔗 H3 续接 拷贝桥",
     "H3RelayTrimAV": "🔗 H3 续接裁重叠",
+    "H3RelayPost": "🔗 H3 续接后处理 Post",
     "H3RelayChain": "🔗 H3 续接连跑 Chain",
 }
