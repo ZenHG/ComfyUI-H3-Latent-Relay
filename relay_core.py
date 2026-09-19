@@ -2414,7 +2414,7 @@ def build_continue_latent(
 
     返回 ``(latent, covered, report)``；``covered`` = 应裁帧数（接 TrimAV 的 trim_frames）。
 
-    与 conditioning 钉帧（H3RelayMotionContext）的本质区别：钉住区**不重绘**——
+    与复合桥的 conditioning 钉帧路线（原 H3RelayMotionContext）的本质区别：钉住区**不重绘**——
     mask=0 区每步被采样器钉回拷贝进来的上段尾部 latent，0.3.x 实测的
     「复现发糊/漂移」这一类伪影从机制上消失。三条硬约束（违反即 raise）：
       1. ``frames`` 落在 5+17k 网格且尾段起点 5-token 对齐（复用 video_tail_from_latent）；

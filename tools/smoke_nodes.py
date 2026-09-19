@@ -205,7 +205,6 @@ def main() -> int:
 
     print("\n── 2. 两个桥 ──")
     run_node("H3RelayCopyBridge", ctx)
-    run_node("H3RelayMotionContext", ctx)
 
     print("\n── 3. 裁重叠 / 后处理 / 音频缝 ──")
     run_node("H3RelayTrimAV", ctx)

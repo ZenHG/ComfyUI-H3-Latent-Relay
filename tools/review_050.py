@@ -7,7 +7,7 @@ r"""审查脚本：确认 0.5.0 改造全部生效、无遗漏、无回归。
 逐项核（对照历史错误）：
   A. 节点清单三处一致（NODE_CLASS_MAPPINGS / __init__.py 头注释 / README 节点表）
   B. 返回契约：每个节点的 RETURN_TYPES 长度 == 所有 return 语句的路数
-  C. widget 追加位置：受存量 UI 工作流约束的节点（TrimAV / MotionContext）新 widget 必须在末位
+  C. widget 追加位置：受存量 UI 工作流约束的节点（TrimAV）新 widget 必须在末位
   D. 默认全关：所有新件默认值必须为 0/False/off
   E. mask_mode 三处一致（relay_core.MASK_MODES / 节点选项 / 权重函数存在）
   F. 新函数可调用（import 不报、签名匹配）
@@ -111,11 +111,7 @@ ck("C3 TrimAV：新增第 4 路输出 prev_tail 在末位",
    and N.H3RelayTrimAV.RETURN_NAMES[3] == "prev_tail",
    "%s" % (N.H3RelayTrimAV.RETURN_NAMES,))
 
-_mc = list(N.H3RelayMotionContext.INPUT_TYPES()["optional"])
-# ⚠ 第一版写成 `... or True` ⇒ **恒真**，等于没查（假绿）。现按真实判据：anchor_* 必须**追加在末位**。
-ck("C4 MotionContext：anchor_* 在末位", _mc[-3:] == ["anchor_latent", "anchor_stage",
-                                                    "anchor_frames"],
-   "末 3=%s" % _mc[-3:])
+# 0.6.0：C4（MotionContext anchor_* 末位）随节点删除而移除——复合桥的 anchor_* 已在 C5b 断言覆盖（conditioning/run_id/stage_index/ref_anchor_* 连续追加）。
 
 _cb = list(N.H3RelayCopyBridge.INPUT_TYPES()["optional"])
 # 2026-09-19 更新：新增了 window_* 与复合桥族，旧的「blend_* 在末位」不再成立。
@@ -646,9 +642,9 @@ ck("K12b 逐层审计：报告含「↳ …后：段头亮度 … 高频 …」"
 
 # K13~K14 —— 2026-09-19：拼接**复合在第 8 节点内**（不新增轮子；GG 指令）
 _SeamNode = N.H3RelayAudioSeam
-ck("K13 AudioSeam 第 3 路输出 joined + 拼接旋钮折叠（复合而非新节点；仍 8 节点）",
+ck("K13 AudioSeam 第 3 路输出 joined + 拼接旋钮折叠（复合而非新节点；仍 7 节点）",
    _SeamNode.RETURN_NAMES == ("audio", "report", "joined")
-   and len(N.NODE_CLASS_MAPPINGS) == 8
+   and len(N.NODE_CLASS_MAPPINGS) == 7
    and all(_SeamNode.INPUT_TYPES()["optional"][k][1].get("advanced")
            for k in ("join_curve", "join_prime_ms", "join_cross_ms")))
 _srq = 32000
@@ -774,10 +770,10 @@ import tempfile as _tf                                                   # noqa:
 
 _it_l = N.H3RelayAudioSeam.INPUT_TYPES()
 _ol = _it_l["optional"]
-ck("L1 H3RelayAudioSeam 已注册（8 节点）+ 显示名以 🔗 开头",
+ck("L1 H3RelayAudioSeam 已注册（7 节点）+ 显示名以 🔗 开头",
    N.NODE_CLASS_MAPPINGS.get("H3RelayAudioSeam") is N.H3RelayAudioSeam
    and N.NODE_DISPLAY_NAME_MAPPINGS["H3RelayAudioSeam"].startswith("🔗")
-   and len(N.NODE_CLASS_MAPPINGS) == 8,
+   and len(N.NODE_CLASS_MAPPINGS) == 7,
    "%d 节点" % len(N.NODE_CLASS_MAPPINGS))
 ck("L2 默认全关（patch=0 / tile=0 / fade=0.25）+ OUTPUT_NODE（否则第 1 段床源永不落盘）",
    _ol["patch_seconds"][1]["default"] == 0.0 and _ol["tile_seconds"][1]["default"] == 0.0

@@ -4,12 +4,12 @@
 # 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 """H3 Relay Kit · 节点层
 
-八个节点，覆盖"用作者的续接方式"所需的全部接线：
+七个节点，覆盖"用作者的续接方式"所需的全部接线：
 
   🔗 H3 续接 Latent 存   —— 把本段的 AV latent 落盘，供下一段读
   🔗 H3 续接 Latent 读   —— 读回上一段的 AV latent
-  🔗 H3 续接 Latent 桥   —— 把上一段尾段钉进本段 conditioning（latent 直取，零重编码）
-  🔗 H3 续接 拷贝桥      —— 上一段尾部**逐位拷贝**进本段初始 latent + 噪声掩码（钉住区不重绘）
+  🔗 H3 续接 拷贝桥      —— 上一段尾部**逐位拷贝**进本段初始 latent + 噪声掩码（钉住区不重绘）；
+                             0.6.0 起复合桥：接其第 4 路（conditioning）即原「Latent 桥」钉帧路线，二路可并联
   🔗 H3 续接裁重叠        —— 裁掉续接段头部的重叠帧（视频 + 音频同裁）+ 交接 prev_tail
   🔗 H3 续接后处理 Post   —— 画质域后处理（0.5.0 拆出；不动时间轴/帧数/音频）
   🔗 H3 续接音频缝        —— 音频域：上一段环境声补本段头（长度守恒，零 A/V 位移）
@@ -21,14 +21,15 @@
   · H3RelayAudioSeam = 音频域（跨段环境声补头 / 床环铺）。
   三条纪律同源：**新功能归到对应域，不往 TrimAV 上挂**。
 
-两条续接路线**二选一**，不可同图串联：
-  · Latent 桥（conditioning 钉帧）→ 模型重绘上一段（有复现漂移风险，检测兜底）；
-  · 拷贝桥（latent + 噪声掩码）→ 钉住区零重绘（0.4.0 起，通用兼容不绑采样器）。
+0.6.0 起只有**一个桥**（复合 CopyBridge），钉法按接法由同一节点提供，不可同图串两个桥实例：
+  · 接第 4 路（conditioning）→ 上一段尾段钉进本段 conditioning（管取景/构图，原「Latent 桥」路线）；
+  · 接第 0 路（latent）→ 上一段尾部逐位拷贝 + 噪声掩码（管运动，钉住区零重绘）；
+  · 两路并联（复合桥）→ conditioning 钉帧 + latent 拷贝**同时**生效，是最稳的续接方式。
 
 接线（替换像素续接时）：
     CSGlideCastCS[0] ─ conditioning ─┐
     CSGlideCastCS[1] ─ latent ───────┤
-    H3 续接 Latent 读 ─ context ─────┤→ 🔗 续接 Latent 桥 [0] → 采样器 positive
+    H3 续接 Latent 读 ─ context ─────┤→ 🔗 续接 拷贝桥 [3]（conditioning）→ 采样器 positive
     （上一段：采样器 latent → 🔗 续接 Latent 存）
 
 注意：走任一桥时，上游的**像素续接字段（如 H3 Studio 的 cont）必须留空**，
@@ -93,14 +94,14 @@ class H3RelayLatentSave:
                 "run_id": ("STRING", {
                     "default": "relay",
                     "tooltip": "【填什么】这部片子的名字，比如 myfilm、ep01。\n"
-                               "⚠ 必须和「续接 Latent 桥」上的 run_id 一字不差，否则桥找不到文件。\n"
+                               "⚠ 必须和「续接 拷贝桥」上的 run_id 一字不差，否则桥找不到文件。\n"
                                "换新片子必须换新名字：同一个名字重跑同段号会覆盖旧文件！\n"
                                "文件存到：ComfyUI/output/relay_kit/<run_id>/",
                 }),
                 "stage_index": ("INT", {
                     "default": 0, "min": 0, "max": 9999, "step": 1,
                     "tooltip": "【填什么】本段是全片的第几段。第 1 段填 0，第 2 段填 1，第 3 段填 2…\n"
-                               "⚠ 必须和「续接 Latent 桥」上的 stage_index 一样大。\n"
+                               "⚠ 必须和「续接 拷贝桥」上的 stage_index 一样大。\n"
                                "改段号时两个节点都要改（用 Chain 节点可以自动改）。",
                 }),
                 "note": ("STRING", {
@@ -170,188 +171,13 @@ class H3RelayLatentLoad:
         if idx < 0 and not explicit:
             raise RuntimeError(
                 "stage_index=0 是第 1 段，没有上一段可续。\n"
-                "    第 1 段请走独立路径（不接本节点，或把续接 Latent 桥的 context_latent 留空）。"
+                "    第 1 段请走独立路径（不接本节点，或把续接 拷贝桥的 context_latent 留空）。"
             )
         path = explicit or _stage_path(run_id, idx)
         latent = CORE.load_av_latent(path)
         info = CORE.describe_latent(latent)
         print("[H3 Relay] 已读 stage %d ← %s\n            %s" % (idx, path, info))
         return (latent, info)
-
-
-class H3RelayMotionContext:
-    """latent 桥：把上一段尾段钉进本段 conditioning。
-
-    与像素续接（mp4 → VAE 重编码）走同一个原生协议（minimax_keyframes），
-    区别是本节点**不重编码** —— 直接用上一段采样时的 latent。
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "conditioning": ("CONDITIONING", {
-                    "tooltip": "【接法】从本段的出词/参考条件节点（如官方 MiniMaxH3ReferenceToVideo 的 positive 口）拉线过来。\n"
-                               "作用：告诉模型本段要拍什么。桥会在它里面悄悄塞进「上一段的结尾」。",
-                }),
-                "latent": ("LATENT", {
-                    "tooltip": "【接法】同一个条件节点的 latent 输出口拉线过来。\n"
-                               "作用：提供本段的规格（分辨率/帧数）。⚠ 必须和上一段分辨率一样，不一样直接报错。",
-                }),
-                "trim_frames": ("INT", {
-                    "default": 22, "min": 5, "max": 124, "step": 17,
-                    "tooltip": "【填什么】让模型看着上一段结尾多少帧来接戏。\n"
-                               "  · 22（默认）= 标准，0.9 秒衔接上下文，最稳\n"
-                               "  · 5 = 最小，成片新内容多 1 秒，但静态场景衔接变弱\n"
-                               "  · 只能填 5/22/39/56/73/90/107/124，别的数直接报错\n"
-                               "【不用管的部分】钉住的帧成片里会被自动裁掉（第 3 路输出同步给裁节点）。",
-                }),
-            },
-            "optional": {
-                "context_latent": ("LATENT", {
-                    "tooltip": "【不用接线，留空！】只要 run_id 填了、stage_index ≥ 1，\n"
-                               "桥就会自己去 output/relay_kit/<run_id>/ 读上一段的 latent 文件。\n"
-                               "这个口是给高级用法手动连「续接 Latent 读」节点用的。",
-                }),
-                "audio_frames": ("INT", {"advanced": True, 
-                    "default": 0, "min": 0, "max": 362, "step": 1,
-                    "tooltip": "【不用动，保持 0】音频跟着视频窗走（钉住同样长的声音，让音乐/环境声接着往下走而不是重新起头）。\n"
-                               "想单独加长音频上下文才填别的数（0 = 跟随视频窗）。",
-                }),
-                "run_id": ("STRING", {
-                    "default": "relay",
-                    "tooltip": "【填什么】这部片子的名字（和「续接 Latent 存」上一致）。\n"
-                               "  · 第 2 段起，桥自动去 ComfyUI/output/relay_kit/<run_id>/ 读上一段的 latent 文件\n"
-                               "  · ⚠ 两个节点上名字不一致 = 找不到文件\n"
-                               "  · 换新片子必须换名字，重跑会覆盖同段号旧文件",
-                }),
-                "stage_index": ("INT", {
-                    "default": 0, "min": 0, "max": 9999, "step": 1,
-                    "tooltip": "【填什么】本段是第几段。\n"
-                               "  · 第 1 段 → 填 0（直通：不续接，只把 latent 交给落盘节点存档）\n"
-                               "  · 第 2 段 → 填 1（自动读第 1 段的文件来续接）\n"
-                               "  · 第 3 段 → 填 2……以此类推\n"
-                               "⚠ 和「续接 Latent 存」上的数保持一样大；用 Chain 节点可自动推进，不用手改。",
-                }),
-                "anchor_latent": ("LATENT", {
-                    "tooltip": "【0.5.0 全局外观锚，可选】长期钉进本段条件的第一段/角色基准段 latent。\n"
-                               "与 context_latent 的分工：context 管『接戏』（上段尾 22 帧），\n"
-                               "anchor 管『身份』（色档/光照/角色长相的长程基准，永不退出）。\n"
-                               "refs 协议允许异分辨率参考块——第 0 段与后续段分辨率不同也能当锚。\n"
-                               "不接且 anchor_stage ≥ 0 时，自动从 run_id 目录读 anchor_stage 那段。",
-                }),
-                "anchor_stage": ("INT", {"advanced": True, 
-                    "default": -1, "min": -1, "max": 9999, "step": 1,
-                    "tooltip": "【0.5.0 自动锚段号】-1 = 关闭外观锚（默认，行为与 0.4.x 逐位一致）。\n"
-                               "≥ 0 = 没接 anchor_latent 时自动读 output/relay_kit/<run_id>/stage_<该值> 当锚。\n"
-                               "长片漂移明显时填 0（永远以第 1 段为身份基准）。",
-                }),
-                "anchor_frames": ("INT", {"advanced": True, 
-                    "default": 5, "min": 5, "max": 124, "step": 17,
-                    "tooltip": "【0.5.0 锚窗帧数】从锚段取尾部多少帧进 refs（5/22/39…同续接网格）。\n"
-                               "5 = 一个 token，token 成本最低，身份/色档信息基本够用（默认）。\n"
-                               "⚠ 取尾要过 latent 相位校验：锚段长度与锚窗不凑巧时会报错并提示改窗。\n"
-                               "锚块每步都随采样骑乘，越大越贵。",
-                }),
-            },
-        }
-
-    RETURN_TYPES = ("CONDITIONING", "STRING", "INT")
-    RETURN_NAMES = ("conditioning", "report", "trim_frames")
-    FUNCTION = "apply"
-    CATEGORY = CATEGORY
-    DESCRIPTION = (
-        "latent 桥续接（零重编码）：上一段尾段按原样钉进本段，画面声音都接着走。\n"
-        "手把手：第 1 段 stage_index=0 跑一遍 → 第 2 段把桥和落盘的 stage_index 都改成 1 → 换 prompt 再跑。"
-    )
-
-    def apply(self, conditioning, latent, trim_frames=22, context_latent=None,
-              audio_frames=0, run_id="", stage_index=0,
-              anchor_latent=None, anchor_stage=-1, anchor_frames=5):
-        bad = CORE.self_check()
-        if bad:
-            raise RuntimeError("H3 Relay 网格自检失败：\n    " + "\n    ".join(bad))
-        CONTRACT.enforce()   # 上游 ComfyUI 改了 H3 网格 → 在这里拒绝，而不是产出坏片子
-
-        idx = int(stage_index)
-        auto_note = ""
-        if context_latent is None and (run_id or "").strip():
-            if idx >= 1:
-                path = _stage_path(run_id, idx - 1)
-                context_latent = CORE.load_av_latent(path)
-                auto_note = "自动读上一段 ← %s" % path
-                print("[H3 Relay] " + auto_note)
-            else:
-                auto_note = "stage_index=0（第 1 段）→ 直通不续接。"
-
-        # 0.5.0 外观锚：没接锚 latent 但填了锚段号 → 从 run_id 目录自动读
-        anchor_note = ""
-        a_idx = int(anchor_stage)
-        if anchor_latent is None and a_idx >= 0 and (run_id or "").strip():
-            if a_idx == idx:
-                raise RuntimeError(
-                    "anchor_stage=%d 与本段 stage_index 相同——外观锚必须是**更早**的"
-                    "已落盘段（通常是 0，即第 1 段）。" % a_idx)
-            try:
-                anchor_latent = CORE.load_av_latent(_stage_path(run_id, a_idx))
-                anchor_note = "自动读外观锚（第 %d 段）← %s" % (
-                    a_idx + 1, _stage_path(run_id, a_idx))
-                print("[H3 Relay] " + anchor_note)
-            except FileNotFoundError:
-                raise RuntimeError(
-                    "anchor_stage=%d 表示用第 %d 段做外观锚，但它的落盘文件不存在：\n"
-                    "    %s\n先把锚段跑完（并确认「续接 Latent 存」写过它），或把 "
-                    "anchor_stage 改回 -1。" % (a_idx, a_idx + 1, _stage_path(run_id, a_idx)))
-        elif anchor_latent is None and a_idx >= 0 and not (run_id or "").strip():
-            raise RuntimeError(
-                "anchor_stage=%d 需要 run_id 才能自动读锚段文件（与续接读段同规则）。"
-                "填上 run_id，或把 anchor_stage 改回 -1。" % a_idx)
-
-        # 说清了是第 N 段（N≥2）却拿不到上一段 —— 绝不能悄悄降级成"独立段"：
-        # 那样工作流会一路绿灯跑完，产出的却是没有续接的哑剧式接缝。
-        # 这是本包唯一一处"用户忘填"会导致静默坏片的路径，故硬拦。
-        if context_latent is None and idx >= 1:
-            raise RuntimeError(
-                "stage_index=%d 表示本段是第 %d 段，但没有可续接的上一段 latent：\n"
-                "    · context_latent 没接线，且\n"
-                "    · run_id 是空的（或只有空白）\n"
-                "再跑下去会「静默直通」—— 产出的是独立段而不是续接段，"
-                "但界面与日志都显示成功。\n"
-                "    第 2 段起请把 run_id 填成与「续接 Latent 存」完全一致的名字；\n"
-                "    若这确实是独立段，把 stage_index 改回 0。"
-                % (idx, idx + 1)
-            )
-
-        if context_latent is None:
-            msg = "[H3 Relay] 无 context_latent → 直通（独立段，不续接）。" + (
-                (" " + auto_note) if auto_note else "")
-            print(msg)
-            return (conditioning, msg, 0)   # 第 3 路 = 裁帧数；直通不裁
-
-        plan = CORE.plan_relay(
-            latent,
-            context_latent,
-            trim_frames=int(trim_frames),
-            audio_frames=int(audio_frames) or None,
-            anchor_latent=anchor_latent,
-            anchor_frames=int(anchor_frames),
-        )
-        out = CORE.apply_relay(conditioning, plan)
-
-        lines = ["[H3 Relay] latent 桥续接：" + plan.summary()]
-        if auto_note:
-            lines.append("    " + auto_note)
-        if anchor_note:
-            lines.append("    " + anchor_note)
-        if anchor_latent is not None and context_latent is None:
-            lines.append("    ⚠ 外观锚接了但没有上一段可续——直通段忽略锚（锚随续接注入）。")
-        lines.append("    本段 " + CORE.describe_latent(latent))
-        lines.append("    上段 " + CORE.describe_latent(context_latent))
-        for n in plan.notes:
-            lines.append("    注记：" + n)
-        report = "\n".join(lines)
-        print(report)
-        return (out, report, int(plan.trim))
 
 
 class H3RelayTrimAV:
@@ -381,7 +207,7 @@ class H3RelayTrimAV:
                 }),
                 "trim_frames": ("INT", {
                     "default": 0, "min": 0, "max": 362, "step": 1,
-                    "tooltip": "【不用填！】从「续接 Latent 桥」的第 3 路输出（trim_frames）拉线过来，全自动：\n"
+                    "tooltip": "【不用填！】从「续接 拷贝桥」的第 3 路输出（trim_frames）拉线过来，全自动：\n"
                                "  · 第 1 段桥直通 → 自动 0（不裁）\n"
                                "  · 第 2 段起 → 自动 = 钉住帧数（如 22）\n"
                                "自己手填反而容易和桥对不上。",
@@ -726,8 +552,8 @@ class H3RelayTrimAV:
         #   = 钉住区最后一帧 = `images[pin-1]`（节点手里本来就有，无需额外输入）。
         #   ⚠ **口径（2026-09-19 补正）**：它是否等于"上一段的末帧"取决于走哪条桥——
         #     拷贝桥下前 pin 帧是逐位拷贝的上段尾 ⇒ 就是上段末帧；
-        #     Latent 桥（cond）下前 pin 帧是本段重画的 ⇒ 只是近似（代理误差 0.006，
-        #     比要修的缝阶跃 0.0007 还大 8 倍）。故 cond 路线上别拿它当参照去对齐。
+        #     复合桥的 conditioning 钉帧路线（原 Latent 桥 cond 路线）下前 pin 帧是本段重画的 ⇒ 只是近似（代理误差 0.006，
+        #     比要修的缝阶跃 0.0007 还大 8 倍）。故这条路线（仅接第 4 路不接第 0 路）上别拿它当参照去对齐。
         #   用途：喂给 `H3RelayPost` 的 `guide`，让跨段统计匹配 / 低频残差传递有"缝的另一侧"可对齐。
         tail = images[pin - 1: pin] if pin >= 1 else images[:1]
         return (out, audio_out, line + "\n" + check, tail)
@@ -737,7 +563,7 @@ class H3RelayChain:
     """🔗 续接连跑（Chain）—— 纯控制节点，不在执行路径上。
 
     前端按钮（web/relay_kit_chain.js）会找到同一张图里的
-    「续接 Latent 桥 + 续接 Latent 存」，自动推进它们的 stage_index 并排队：
+    「续接 拷贝桥 + 续接 Latent 存」，自动推进它们的 stage_index 并排队：
 
         ▶ Run      按当前段号跑一次（不满意可重跑，覆盖同段号文件）
         ✔ Approve  段号 +1（桥和落盘同步改），排队跑下一段
@@ -791,7 +617,7 @@ class H3RelayChain:
 class H3RelayCopyBridge:
     """0.4.0 拷贝桥：上一段尾部 AV latent **逐位拷贝**进本段初始 latent + 噪声掩码。
 
-    与 H3RelayMotionContext（conditioning 钉帧）二选一，不可同图串联：
+    0.6.0 起本节点是**唯一桥**：conditioning 钉帧路径已折叠进第 4 路（复合桥，见下），不再另设节点。
       · Latent 桥（钉帧）：模型重绘上一段尾段 → 有复现漂移/发糊风险（0.3.x 实测），
         观测端沉降检测兜底；
       · 拷贝桥（本节点）：``mask_mode="hard"`` 时钉住区不重绘（掩码 0 区每步被钉回
@@ -970,7 +796,7 @@ class H3RelayCopyBridge:
     DESCRIPTION = (
         "把上一段尾部 AV latent 逐位拷进本段开头并附噪声掩码（钉住区不重绘），\n"
         "消除「复现发糊/漂移」这一类接缝伪影。输出 trim_frames 接「裁重叠」。\n"
-        "⚠️ 与「Latent 桥」（conditioning 钉帧）二选一，不可同图串联。"
+        "⚠️ 与「Latent 桥」（conditioning 钉帧经第 4 路折叠进复合桥，不另设节点）。"
     )
 
     def bridge(self, latent, context_latent, context_frames,
@@ -984,6 +810,25 @@ class H3RelayCopyBridge:
                conditioning=None, run_id="relay", stage_index=0,
                ref_anchor_latent=None, ref_anchor_stage=-1, ref_anchor_frames=5):
         CONTRACT.enforce()
+        # 0.6.0：Latent 桥（H3RelayMotionContext）已删除，本节点成为**唯一桥**。
+        # 原 Latent 桥「段号>=1 却无来源 -> 必须 raise（不得静默直通）」是反坏片关键守卫，
+        # 路由收敛后必须保留在此：
+        _idx = int(stage_index)
+        if context_latent is None and _idx >= 1:
+            raise RuntimeError(
+                "stage_index=%d 表示本段是第 %d 段，但没有可续接的上一段 latent：\n"
+                "    · context_latent 没接线，且\n"
+                "    · run_id 是空的（或只有空白）\n"
+                "再跑下去会「静默直通」—— 产出的是独立段而不是续接段，\n"
+                "但界面与日志都显示成功。\n"
+                "    第 2 段起请把 run_id 填成与「续接 Latent 存」完全一致的名字；\n"
+                "    若这确实是独立段，把 stage_index 改回 0。"
+                % (_idx, _idx + 1))
+        if context_latent is None:
+            # 直通（独立段，不续接）：latent 原样返回，conditioning 不钉帧原样返回。
+            _msg = "[H3 Relay] 复合桥：无 context_latent -> 直通（独立段，不续接）。"
+            print(_msg, flush=True)
+            return (latent, _msg, 0, conditioning)
         out, covered, report = CORE.build_continue_latent(
             latent, context_latent, int(context_frames),
             mask_mode=mask_mode, taper=int(taper_tokens),
@@ -1615,7 +1460,6 @@ class H3RelayAudioSeam:
 NODE_CLASS_MAPPINGS = {
     "H3RelayLatentSave": H3RelayLatentSave,
     "H3RelayLatentLoad": H3RelayLatentLoad,
-    "H3RelayMotionContext": H3RelayMotionContext,
     "H3RelayCopyBridge": H3RelayCopyBridge,
     "H3RelayTrimAV": H3RelayTrimAV,
     "H3RelayPost": H3RelayPost,
@@ -1626,7 +1470,6 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "H3RelayLatentSave": "🔗 H3 续接 Latent 存",
     "H3RelayLatentLoad": "🔗 H3 续接 Latent 读",
-    "H3RelayMotionContext": "🔗 H3 续接 Latent 桥",
     "H3RelayCopyBridge": "🔗 H3 续接 拷贝桥",
     "H3RelayTrimAV": "🔗 H3 续接裁重叠",
     "H3RelayPost": "🔗 H3 续接后处理 Post",

@@ -289,15 +289,16 @@ def arity(cls, kw):
     return len(out) == len(cls.RETURN_TYPES), out
 
 
-ok, out = arity(NODES.H3RelayMotionContext,
-                dict(conditioning=cond, latent=cur, trim_frames=22, context_latent=None))
-check("MotionContext 直通分支返回 3 路（曾漏第 3 路 → list index out of range）", ok, "实得 %d" % len(out))
-check("直通分支 trim_frames 输出 = 0（首段不裁）", int(out[2]) == 0, "得到 %r" % (out[2],))
+ok, out = arity(NODES.H3RelayCopyBridge,
+            dict(latent=cur, context_latent=prev, context_frames=22, conditioning=cond))
+check("CopyBridge（复合桥）续接分支返回 4 路（含第 4 路 conditioning）", ok, "实得 %d" % len(out))
+check("续接分支 trim_frames 输出 > 0（供裁剪节点）", int(out[2]) > 0, "得到 %r" % (out[2],))
+check("复合桥第 4 路 conditioning 已注入（非 None）", out[3] is not None, "得到 %r" % (out[3],))
 
-ok, out = arity(NODES.H3RelayMotionContext,
-                dict(conditioning=cond, latent=cur, trim_frames=22, context_latent=prev))
-check("MotionContext 续接分支返回 3 路", ok, "实得 %d" % len(out))
-check("续接分支 trim_frames 输出 = 22（供裁剪节点）", int(out[2]) == 22, "得到 %r" % (out[2],))
+ok, out = arity(NODES.H3RelayCopyBridge,
+            dict(latent=cur, context_latent=None, context_frames=22, stage_index=0, conditioning=cond))
+check("CopyBridge 直通分支（stage 0 无来源）返回 4 路", ok, "实得 %d" % len(out))
+check("直通分支 trim_frames 输出 = 0（首段不裁）", int(out[2]) == 0, "得到 %r" % (out[2],))
 
 img73 = torch.zeros(73, 2, 2, 3)
 ok, out = arity(NODES.H3RelayTrimAV, dict(images=img73, trim_frames=0, fps=24.0, audio=None))
@@ -360,49 +361,42 @@ check("8.5 帧数过少返回 (-1,0,0) 不抛异常", j == -1, "j=%d" % j)
 print()
 print("[9] stage_index 声明了第 N 段却拿不到上一段 → 必须 raise（不得静默直通）")
 
-ctx = NODES.H3RelayMotionContext()
+ctx = NODES.H3RelayCopyBridge()
 
-# 9.1 stage_index>=1 + run_id 空 + 无 context_latent → 旧行为是静默直通（坏片），必须 raise
+# 9.1 stage_index>=1 + 无 context_latent → 必须 raise（不得静默直通，否则产出无续接的哑片）
 try:
-    ctx.apply(cond, cur, trim_frames=22, context_latent=None, audio_frames=0,
-              run_id="", stage_index=1)
+    ctx.bridge(cur, None, context_frames=22, run_id="", stage_index=1)
     check("9.1 段号≥1 且无来源 → raise", False, "竟然没报错（会产出无续接的哑剧）")
 except RuntimeError as e:
     check("9.1 段号≥1 且无来源 → raise", "静默直通" in str(e), str(e).split("\n")[0])
-except Exception as e:  # noqa: BLE001
-    check("9.1 段号≥1 且无来源 → raise", False, "抛的是 %s：%s" % (type(e).__name__, e))
 
-# 9.2 run_id 只有空白也算空
+# 9.2 run_id 即便有值，只要没 context_latent 仍 raise（本节点不按 run_id 自动取源，取源归 LatentLoad）
 try:
-    ctx.apply(cond, cur, trim_frames=22, context_latent=None, audio_frames=0,
-              run_id="   ", stage_index=3)
-    check("9.2 run_id 全空白同样 raise", False, "竟然没报错")
+    ctx.bridge(cur, None, context_frames=22, run_id="   ", stage_index=3)
+    check("9.2 段号≥1 且无来源（即便 run_id 有值）仍 raise", False, "竟然没报错")
 except RuntimeError as e:
-    check("9.2 run_id 全空白同样 raise", "静默直通" in str(e), str(e).split("\n")[0])
+    check("9.2 段号≥1 且无来源（即便 run_id 有值）仍 raise", "静默直通" in str(e), str(e).split("\n")[0])
 
 # 9.3 stage_index=0 仍应正常直通（独立段，合法）
 try:
-    out0 = ctx.apply(cond, cur, trim_frames=22, context_latent=None, audio_frames=0,
-                     run_id="", stage_index=0)
+    out0 = ctx.bridge(cur, None, context_frames=22, run_id="", stage_index=0)
     check("9.3 stage_index=0 仍直通不报错（独立段合法）", int(out0[2]) == 0, "trim=%r" % (out0[2],))
 except Exception as e:  # noqa: BLE001
     check("9.3 stage_index=0 仍直通不报错（独立段合法）", False, "抛了 %s" % type(e).__name__)
 
 # 9.4 手动接了 context_latent 时，段号≥1 不应被拦（高级用法）
 try:
-    out1 = ctx.apply(cond, cur, trim_frames=22, context_latent=prev, audio_frames=0,
-                     run_id="", stage_index=1)
+    out1 = ctx.bridge(cur, prev, context_frames=22, run_id="", stage_index=1)
     check("9.4 手动接 context_latent → 段号≥1 不拦", int(out1[2]) == 22, "trim=%r" % (out1[2],))
 except Exception as e:  # noqa: BLE001
     check("9.4 手动接 context_latent → 段号≥1 不拦", False, "抛了 %s：%s" % (type(e).__name__, e))
 
-# 9.5 run_id 有值但文件不存在 → FileNotFoundError（不是静默直通）
+# 9.5 段号≥1 无 context（run_id 有值但没接 LatentLoad 来源）→ 仍 raise，不静默直通
 try:
-    ctx.apply(cond, cur, trim_frames=22, context_latent=None, audio_frames=0,
-              run_id="unittest_no_such_run", stage_index=1)
-    check("9.5 run_id 有值但无文件 → FileNotFoundError", False, "竟然没报错")
-except FileNotFoundError:
-    check("9.5 run_id 有值但无文件 → FileNotFoundError", True)
+    ctx.bridge(cur, None, context_frames=22, run_id="unittest_no_such_run", stage_index=1)
+    check("9.5 段号≥1 无来源（即便 run_id 有值）→ 仍 raise", False, "竟然没报错")
+except RuntimeError as e:
+    check("9.5 段号≥1 无来源（即便 run_id 有值）→ 仍 raise", "静默直通" in str(e), str(e).split("\n")[0])
 except Exception as e:  # noqa: BLE001
     check("9.5 run_id 有值但无文件 → FileNotFoundError", False, "抛的是 %s" % type(e).__name__)
 

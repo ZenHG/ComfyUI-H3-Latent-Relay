@@ -16,7 +16,6 @@ resolved_frame_index）由 ComfyUI 原生消费。
 节点：
     🔗 H3 续接 Latent 存    H3RelayLatentSave     本段 latent 落盘（下一段的接力棒）
     🔗 H3 续接 Latent 读    H3RelayLatentLoad     手动连线时读上一段（桥自动取源时不用）
-    🔗 H3 续接 Latent 桥    H3RelayMotionContext  核心：上一段尾段钉进本段 conditioning
     🔗 H3 续接 拷贝桥       H3RelayCopyBridge     上一段尾段逐位拷进本段 latent + 噪声掩码（钉住区不重绘）
                                                   **0.6.0 起 = 复合桥**：接上 conditioning 时同时追加钉帧（管取景），
                                                   与 latent 钉住窗（管运动）并联；不接则行为与旧版完全一致

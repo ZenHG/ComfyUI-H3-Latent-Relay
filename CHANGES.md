@@ -3,7 +3,8 @@
 ## 0.6.0 — 2026-09-19
 
 > 本版两项：**复合桥**（把「取景约束」折叠进拷贝桥）+ **`window` 掩码档**（对称窗，依据两篇论文）。
-> **节点数不变（仍 8 个）**——按本仓约定「加能力到既有节点，不新增节点」。
+> 续接后**删除 `H3RelayMotionContext`**（路线收敛，8 → 7 节点）：复合桥已吸收其 conditioning 钉帧路径，
+> 且原反静默直通守卫（段号≥1 无来源 → 必须 raise）已迁移进 `H3RelayCopyBridge.bridge` 保留。
 
 ### 🔗 复合桥：`H3RelayCopyBridge` 接上 `conditioning` 即同时做两件事
 
@@ -28,6 +29,14 @@ latent 路径钉住窗 + 掩码（管运动）；采样器这两个入口是分�
 缝处亮度阶跃 **0.0009 vs 0.0097（10.8×）**｜构图相关 0.963 vs 0.961｜缝对相关 0.980 vs 0.976｜
 低频比 0.998 vs 1.030｜运动尖峰 3.48 vs 2.37（**唯一弱项**）。
 对照第三方 `ComfyUI-H3-Motion-Context` 的同条件实测：**4/5 项胜出**。
+
+### 🗑 删除 `H3RelayMotionContext`（路线收敛，8 → 7 节点）
+
+- **能力未丢**：`H3RelayCopyBridge` 接上 `conditioning`（第 4 路）即原「取景钉帧」路线，两路并联；
+- **守卫保留**：原「`stage_index ≥ 1` 却无上一段来源 → 必须 `raise`（不得静默直通出坏片）」已迁进 `H3RelayCopyBridge.bridge`；
+- **迁移影响**：`examples/minimal_relay_official.json` 与 `web/relay_kit_chain.js` 的桥节点名改为 `H3RelayCopyBridge`；
+  产线（`l1_api.py`，不在本包）cond 路线改用复合桥（latent 拷贝 + conditioning 钉帧 + `ref_anchor` 全局外观锚）。
+- ⚠️ 旧工作流里直接引用 `H3RelayMotionContext` 的图需要改接 `H3RelayCopyBridge`（并改用第 0 路 `latent` + 第 4 路 `conditioning`）。
 
 ### 🟡 `window` 掩码档：对称窗（两端低、中心高）
 

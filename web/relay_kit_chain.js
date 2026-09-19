@@ -1,6 +1,6 @@
 // H3 Relay Kit · Chain 前端
 // 在 H3RelayChain 节点上提供按钮：Run / Approve / 连跑 / Stop / Reset。
-// 作用：自动推进同一张图里「latent 桥 + 落盘」两个节点的 stage_index，
+// 作用：自动推进同一张图里「拷贝桥（复合 CopyBridge）+ 落盘」两个节点的 stage_index，
 // 免去每段手动改两个数字。
 //
 // 找节点规则：优先取与本 Chain 节点**同一个分组框**里的桥+落盘；
@@ -59,7 +59,7 @@ function setStage(n, v) {
 }
 
 function findPair(chainNode) {
-    const bridges = findMemberNodes(chainNode, "H3RelayMotionContext");
+    const bridges = findMemberNodes(chainNode, "H3RelayCopyBridge");
     const saves = findMemberNodes(chainNode, "H3RelayLatentSave");
     if (bridges.length !== 1 || saves.length !== 1) {
         setStatus(

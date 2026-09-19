@@ -94,16 +94,16 @@ git clone https://github.com/ZenHG/ComfyUI-H3-Relay-Kit.git
 | `裁首 N 帧 = 钉住 22 + 沉降 Y` | 接缝处理**已生效**（Y 由本段画面量出，逐段不同） |
 | `起点干净` | 没有跳变，可以拼 |
 
-> 示例走的是 **MotionContext 桥**（conditioning 路线，0.2.x 起即此接法）。0.4.0 起
-> 还有**拷贝桥** `H3RelayCopyBridge`：把上一段尾 AV latent 逐位拷贝进本段初始
-> latent + 噪声掩码，`mask_mode="hard"`（默认）时钉住区**不重绘**——复现发糊/漂移
-> 这一类伪影从机制上消失。0.4.3 起新增 `mask_mode="ramp"`（噪声斜坡「软证据」档）：
+> 示例走的是 **复合桥** `H3RelayCopyBridge`（0.6.0 起**唯一桥**）：把上一段尾 AV latent
+> 逐位拷贝进本段初始 latent + 噪声掩码（`mask_mode="hard"` 默认时钉住区**不重绘**），
+> 同时接其第 4 路（conditioning）即原 `MotionContext` 的钉帧路线——两条路径**并联**生效。
+> 复现发糊/漂移这一类伪影从机制上消失。0.4.3 起新增 `mask_mode="ramp"`（噪声斜坡「软证据」档）：
 > 掩码连续值按原生 H3 契约就是逐 token 的 sigma 标签，远端硬钉、缝端以 `ramp_top`
 > 强度轻度 harmonize，全程每步仍被 (1-m) 锚回拷贝尾——治硬接缝处的色档/曝光台阶。
 > ⚠️ `mask_mode="taper"` **不钉住**（掩码从头部 1.0 线性降到 `seam_min`，每帧留
 > `seam_min`~100% 重绘自由度），是「渐进接管」对照实验档，别当默认用。
-> 接法不同：它的输出接 KSampler 的 `latent_image`（不占 positive），见「节点」表
-> 与 `CHANGES.md` 0.4.0 / 0.4.3。
+> 接法：复合桥第 0 路 `latent` → 采样器 `latent_image`、第 4 路 `conditioning` → `positive`，
+> 见「节点」表与 `CHANGES.md` 0.4.0 / 0.4.3 / 0.6.0。
 
 **关键参数两张表**
 
@@ -206,10 +206,9 @@ git clone https://github.com/ZenHG/ComfyUI-H3-Relay-Kit.git
 
 | 层 | 节点 | 说明 |
 |---|---|---|
-| **必备 3** | Latent 存 · Latent 桥（或拷贝桥，二选一）· 裁重叠 | 少一个就不叫续接。示例图里也只有这 3 个是"必须接对"的 |
+| **必备 3** | Latent 存 · 拷贝桥（复合桥）· 裁重叠 | 少一个就不叫续接。示例图里也只有这 3 个是"必须接对"的 |
 | **可选 3** | 后处理 Post · 音频缝 · 连跑 Chain | 各自独立、**默认全关 = 逐位直通**；不接它们行为与 0.4.x 一致。删掉不影响跑通 |
 | **手动接线才用 1** | Latent 读 | 桥自己会从磁盘取源；只有要**显式换源**（`explicit_path`）时才手动接 |
-| **另一种桥** | 拷贝桥 | 与 Latent 桥**二选一**，不是"多一个节点"，是"换一种接法" |
 
 > 为什么不再合并？0.5.0 刚把 15 个后处理旋钮**从 `H3RelayTrimAV` 里拆出去**，理由就是
 > "22 个 widget 的节点没法用"。再把不同域的旋钮合回一个节点（Post 19 个 + 音频缝 5 个 = 24 个）
@@ -219,8 +218,7 @@ git clone https://github.com/ZenHG/ComfyUI-H3-Relay-Kit.git
 |---|---|
 | 🔗 **H3 续接 Latent 存** | 本段采样后，把 AV latent 落盘到 `output/relay_kit/<run_id>/stage_NNNNN.safetensors` |
 | 🔗 **H3 续接 Latent 读** | 读回上一段（段号 - 1），断点续跑时可指定 `explicit_path` 换源 |
-| 🔗 **H3 续接 Latent 桥** | 上一段尾段钉进本段 conditioning；`context_latent` 不接则直通 |
-| 🔗 **H3 续接 拷贝桥** | 上一段尾 AV latent **逐位拷贝**进本段初始 latent + 噪声掩码；`mask_mode="hard"`（默认）时钉住区不重绘，`ramp` 档缝端轻度 harmonize（软证据，0.4.3），`taper` 档不钉住（见参数表）；输出接采样器 `latent_image`（0.4.0 起，与 Latent 桥二选一） |
+| 🔗 **H3 续接 拷贝桥（复合桥）** | 上一段尾 AV latent **逐位拷贝**进本段初始 latent + 噪声掩码（钉住区不重绘）；0.6.0 起**唯一桥**：接其第 4 路 `conditioning` 即原 `MotionContext` 钉帧路线（管取景），与第 0 路 `latent` 拷贝（管运动）**并联**生效。`mask_mode="hard"`（默认）时钉住区不重绘，`ramp` 档缝端轻度 harmonize（软证据，0.4.3），`taper` 档不钉住（见参数表）；第 0 路接采样器 `latent_image`、第 4 路接 `positive` |
 | 🔗 **H3 续接裁重叠** | **裁掉本段头部的重生成帧 + 自动裁掉紧随其后的「复现帧」（视频音频同裁）** —— 不裁就会在拼接处重播/跳变。第 4 路输出 `prev_tail` = **上一段末帧**，喂给下面的后处理节点 |
 | 🔗 **H3 续接后处理 Post** | **画质域**后处理（不碰时间轴、不动帧数、不动音频）：跨段统计匹配 / 低频残差 / 段内直方图+白平衡 / 反卷积 / 段体高频迁移 / 糊区锐化。**全部默认关**；`guide` 接裁重叠的 `prev_tail` 才有"缝的另一侧"可对齐。**以后画质域新功能都加在这个节点上** |
 | 🔗 **H3 续接音频缝** | **音频域**：把**上一段的环境声**补进本段头部，去掉裁切点上的解码静默（~32ms priming）与生成瞬态。**长度守恒**（音频采样点一个不增不减 ⇒ 零 A/V 位移），默认关。**以后音频域新功能都加在这个节点上** |
@@ -243,8 +241,8 @@ MiniMaxH3ImageToVideo ─┤                      │
   (= 官方出词节点，输出   │                      │
    positive + LATENT)   │                      │
    │                    │                      │
-   ├─ positive ─────────┴→ 🔗 续接 Latent 桥 [0] conditioning ─┐
-   ├─ LATENT ─────────────→ 🔗 续接 Latent 桥 [1] latent ─────┤
+   ├─ positive ─────────┴→ 🔗 续接 拷贝桥 [3] conditioning ─┐
+   ├─ LATENT ─────────────→ 🔗 续接 拷贝桥 [0] latent ─────┤
    │                       （[2] context_latent 留空，自动读）  │
    │                                                            │
    ├─ positive → ConditioningZeroOut ──────────────→ KSampler negative
@@ -307,8 +305,7 @@ MiniMaxH3ImageToVideo ─┤                      │
 |---|---|---|
 | 续接裁重叠 | `trim_frames` / `fps` / `settle_frames` | 15 个画质域旋钮 + `seam_ghost` / `seam_ghost_alpha` |
 | 续接后处理 Post | 9 个主旋钮（8 个**主强度**含 `head_zone_frames` + `cross_seg_ack`） | 10 项细分与护栏（`*_frames` / `*_gain_max` / `*_offset_max` / `*_blur` / `radius` / `stats_frames` / `baseline`） |
-| 拷贝桥 | `context_frames` / `mask_mode` / `pin_audio` / `anchor_blend` | 7 项模式专属参数（taper / ramp / blend 三族） |
-| Latent 桥 | `trim_frames` / `run_id` / `stage_index` | `audio_frames` / `anchor_stage` / `anchor_frames` |
+| 拷贝桥（复合桥） | `context_frames` / `mask_mode` / `pin_audio` / `anchor_blend` / `ref_anchor_stage` | 7 项模式专属参数（taper / ramp / blend 三族）+ 复合折叠槽（conditioning / run_id / stage_index / ref_anchor_*） |
 | 音频缝 | `patch_seconds` / `fade_seconds` | `tile_seconds` / `bed_stage` / `note` |
 
 > 连线口（`images` / `audio` / `guide` / `latent` / `conditioning` …）不受影响，一直画在节点上。
@@ -355,7 +352,7 @@ MiniMaxH3ImageToVideo ─ positive ───────────────
                     桥 [2] trim_frames ─→ 🔗 续接裁重叠 [2]   ★和第 3 路一样必需
 ```
 
-- 拷贝桥输出接 KSampler 的 `latent_image`（**不占 positive**）——这是它和 Latent 桥唯一的接线区别；
+- 复合桥第 0 路 `latent` 接 KSampler 的 `latent_image`、第 4 路 `conditioning` 接 `positive`——两条并联、无接线冲突；只接第 0 路（不接第 4 路）时行为与旧拷贝桥一致（不占 positive）；
 - 它同样有第 3 路 `trim_frames` 输出：**第 2 段起也要接到裁重叠**，否则钉住前缀原样留在成片里；
 - 裁重叠 `settle_frames` 保持 `0`：拷贝桥不产生复现发糊，没有沉降可裁。
 
@@ -365,7 +362,7 @@ MiniMaxH3ImageToVideo ─ positive ───────────────
 想在图上把来源画出来（或断点续跑换源），就接 `🔗 H3 续接 Latent 读`：
 
 ```
-🔗 续接 Latent 读 ── context_latent ──→ 🔗 续接 Latent 桥 [2]
+🔗 续接 Latent 读 ── context_latent ──→ 🔗 续接 拷贝桥（context_latent 输入）
    run_id 同桥；stage_index = 本段段号 - 1（第 2 段填 1）
    可选 explicit_path：直接指定某个 safetensors
 ```
@@ -392,17 +389,7 @@ MiniMaxH3ImageToVideo ─ positive ───────────────
 
 ## 参数
 
-**续接 Latent 桥**
-
-| 参数 | 默认 | 说明 |
-|---|---|---|
-| `trim_frames` | 22 | 钉住的像素帧数。合法值 5/22/39/56/73/90/107/124。22 是设计中心 |
-| `audio_frames` | 0 | 音频钉住窗口（像素帧口径）。0 = 与视频同窗 |
-| `context_latent` | — | 上一段 AV latent。不接 = 直通 |
-| `anchor_latent` / `anchor_stage` | — / `-1` | **全局外观锚**（0.5.0）：长期钉进本段条件的身份基准段（通常是第 1 段）的 latent。`context` 管「接戏」，`anchor` 管「身份」（色档/光照/角色长相，永不退出）。不接锚 latent 但 `anchor_stage ≥ 0` 时自动读 `stage_<该值>` 落盘文件；`-1` = 关（行为与 0.4.x 一致）。治长片色档漂移（见「长片」一节） |
-| `anchor_frames` | 5 | 锚窗帧数（同样只认 5+17k 网格）。5 = 一个 token，token 成本最低，身份/色档信息基本够用；锚块每步随采样骑乘，越大越贵 |
-
-**续接 拷贝桥**（0.4.0，与 Latent 桥二选一）
+**续接 拷贝桥（复合桥）**（0.6.0 起**唯一桥**；0.4.0 起即提供拷贝路线，0.6.0 折叠进 conditioning 钉帧路线）
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
@@ -434,17 +421,17 @@ MiniMaxH3ImageToVideo ─ positive ───────────────
 
 **第 4 路输出 `prev_tail`**（0.5.0 新增，追加在末位）：= 钉住区最后一帧 = **`images[pin-1]`**。
 喂给 `🔗 续接后处理 Post` 的 `guide`，跨段项才有"缝的另一侧"可对齐。
-⚠️ **它是否等于"上一段的末帧"，取决于走哪条桥**：**拷贝桥**下前 `pin` 帧是**逐位拷贝**的上段尾
-⇒ `prev_tail` **就是**上段末帧；**Latent 桥**下前 `pin` 帧是**本段模型重画**的 ⇒ 只是个**近似**
+⚠️ **它是否等于"上一段的末帧"，取决于走哪条桥**：**拷贝桥（复合桥第 0 路）**下前 `pin` 帧是**逐位拷贝**的上段尾
+⇒ `prev_tail` **就是**上段末帧；**复合桥的 conditioning 钉帧路线（原 Latent 桥）**下前 `pin` 帧是**本段模型重画**的 ⇒ 只是个**近似**
 （实测代理误差可达 0.006，比它要修的缝阶跃还大）。所以把 `guide` 当"精确参照"用之前，
-先确认你在哪条桥上。
+先确认你走的是哪条钉法（只接第 4 路不接第 0 路时是近似）。
 
 ### 🔗 续接后处理 Post（0.5.0 新增）
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
 | `images` | — | **唯一必填**。接裁重叠的 `images`（裁后画面） |
-| `guide` | — | 接裁重叠的 `prev_tail`（= 钉住区最后一帧 = 缝的另一侧）。**只有跨段两项需要它**；不接时那两项自动跳过。⚠️ **它是不是"上段末帧"取决于走哪条桥**：拷贝桥下**是**，Latent 桥（cond）下只是近似（见上节 `prev_tail` 的警告） |
+| `guide` | — | 接裁重叠的 `prev_tail`（= 钉住区最后一帧 = 缝的另一侧）。**只有跨段两项需要它**；不接时那两项自动跳过。⚠️ **它是不是"上段末帧"取决于走哪条钉法**：拷贝桥（复合桥第 0 路）下**是**，复合桥的 conditioning 钉帧路线（仅接第 4 路不接第 0 路）下只是近似（见上节 `prev_tail` 的警告） |
 | `match_prev` | 0 | **跨段统计匹配**：段头逐通道均值+标准差对齐 `guide`（Reinhard 式一阶+二阶矩）。**只对齐统计量、不复制姿态 ⇒ 无重影**。治成片缝上的亮度阶跃。⚠️ **实测建议：在 Latent 桥（cond）路线上保持 0**——该路线的缝本身已到 0.0007（可感阈值以下），而 `guide` 只是近似参照（见上节 `prev_tail` 的警告），对齐它会**把首帧推离真参照**（实测阶跃 0.0007 → 0.0039）；它真正的用武之地是**拷贝桥**（`prev_tail` 才是真参照） |
 | `match_prev_frames` / `_gain_max` / `_offset_max` | 12 / 1.15 / 0.06 | 作用帧数（权重线性衰减到 0）／对比度增益护栏／偏移护栏 |
 | `match_prev_stats_frames` | 1 | **统计量取几帧**——本条最容易写错。`1`（默认）= 只取**紧贴缝的那一帧**（与单帧 `guide` 同口径 ⇒ 修正量恰是"缝上的阶跃"，首帧被拉向 guide 而**不会越过**）；`0` = 旧口径（对整个作用区聚合）——段头**内部有亮度梯度**时会把首帧**推过** guide、缝上凭空多出一个阶跃（真渲染实测阶跃 ×12.6，**仅对照用**）；`>1` = 前 N 帧聚合 |
@@ -455,7 +442,7 @@ MiniMaxH3ImageToVideo ─ positive ───────────────
 | `detail_borrow` / `_blur` | 0 / 9 | 段体高频迁移（把段头高频换成段体的结构）（作用帧数见 `head_zone_frames`） |
 | `settle_sharpen` / `_frames` | 0 / 24 | 糊区锐化（unsharp，渐变）。**不裁、不动时间轴 ⇒ 不可能引入跳帧**。⚠ `_frames` 只管这一项 |
 | `settle_auto` | 0 | **自适应糊区补偿（推荐替代上面的固定锐化）**：节点**当场量**每帧清晰度对段体基线的亏空（缝后第 2 帧最深、~15 帧爬回的爬升区），按亏空比例锐化——亏空越深补得越多；已达标的帧（含清晰的帧 0–1）与段体**逐位不动**。真实数据实测：SelfLift 快测档糊区最低 61% → 86%（strength=1.0）/ 99%（1.5）、锐度比 0.945 → 1.007/1.038、爬升 15 帧 → ~8 帧；官方链几乎无亏空 ⇒ 本项**正确地几乎不动**（无误伤）。⚠ 只能恢复对比度，救不回彻底丢失的细节 |
-| `cross_seg_ack` | **False** | 🔴 **跨段两项的总闸**。不打勾（默认）⇒ `match_prev` / `lowfreq_pull` **不作用**（报告里说明原因）。**为什么默认关**：Latent 桥（cond）下 `prev_tail` 只是**近似**（代理误差 0.006 > 要修的缝阶跃 0.0007），实测对齐它反而把缝阶跃**放大 ×12.6** ⇒ 默认不让用户踩这个坑。确认 `guide` 是真参照（**拷贝桥**）才打勾 |
+| `cross_seg_ack` | **False** | 🔴 **跨段两项的总闸**。不打勾（默认）⇒ `match_prev` / `lowfreq_pull` **不作用**（报告里说明原因）。**为什么默认关**：复合桥的 conditioning 钉帧路线（仅接第 4 路不接第 0 路）下 `prev_tail` 只是**近似**（代理误差 0.006 > 要修的缝阶跃 0.0007），实测对齐它反而把缝阶跃**放大 ×12.6** ⇒ 默认不让用户踩这个坑。确认 `guide` 是真参照（**接了第 0 路拷贝路线的复合桥**）才打勾 |
 | `baseline` | `robust` | **组 2/组 3 的段体参考怎么取**。`robust`（默认）= 取段体**逐帧亮度中央 50%** 的帧做统计，并报**离散度** `(p75−p25)/中位`；离散度 > 0.08 ⇒ 组 2/组 3 **自动弃权**（宁可不动，也不用不可靠基准改画面）。`legacy` = 0.5.0 旧口径（整段均值，不筛不弃权），**仅作对照复现** |
 
 **全部默认 0 ⇒ 逐位直通**（不接线时行为与 0.4.x 一致）。执行顺序：跨段色调对齐 → 段内色调对齐 → 补高频 → 锐化收口。
@@ -468,7 +455,7 @@ MiniMaxH3ImageToVideo ─ positive ───────────────
 > `deconv_*` / `detail_*` / `settle_sharpen*` 在「裁重叠」节点上**还留着同名 widget**
 > （0.5.0 为兼容旧工作流把 TrimAV 冻结在 22 个 widget，一个没删；TrimAV 那份没有
 > `guide` 输入，跨段两项只能内部取 `images[pin-1]`——拷贝桥下它恰好还是真参照，
-> Latent 桥下只是近似，且拿不到 `match_prev_stats_frames` 修正）。**新图一律用 Post 这份**；
+> 仅接第 4 路 conditioning 钉帧路线下只是近似，且拿不到 `match_prev_stats_frames` 修正）。**新图一律用 Post 这份**；
 > 两边同时开 = 同一个操作做两遍（双重锐化 / 双重色档对齐）。
 
 ### 🔗 续接音频缝（0.5.0 新增）
@@ -586,7 +573,7 @@ python tests/test_relay_core.py
 
 也支持 `pytest tests/`（找不到 ComfyUI 根目录时自动 skip，不会崩）。
 
-**280 项断言，零 GPU、不加载模型**，覆盖二十二个方面：
+**281 项断言，零 GPU、不加载模型**，覆盖二十二个方面：
 
 | 组 | 覆盖 |
 |---|---|
@@ -621,9 +608,10 @@ python tests/test_relay_core.py
 
 ## 🧭 两条续接路线：怎么选（实测对比）
 
-本包有**两个桥，二选一、不可同图串联**。它们**各有一个硬伤，没有一条白送**——按场景选：
+本包 0.6.0 起只有**一个复合桥** `H3RelayCopyBridge`，它把两条钉法**并联**生效（第 0 路 latent 逐位拷贝 + 第 4 路 conditioning 钉帧）。
+下表里两条路线在 0.5.x 之前曾是「二选一的两种桥」，现在同图并联、各取所长——既**不发糊**又**亮度不硬跳**：
 
-| | **拷贝桥 `H3RelayCopyBridge`（`mask_mode="hard"`）** | **Latent 桥 `H3RelayMotionContext`** |
+| | **复合桥 · 第 0 路 latent 拷贝（管运动）** | **复合桥 · 第 4 路 conditioning 钉帧（管取景）** |
 |---|---|---|
 | 机制 | 上段尾 latent **逐位拷贝**，钉住区**零重绘** | 上段尾钉进 conditioning，模型**重画** |
 | 发糊（复现沉降） | **无** | **有**（靠观测端沉降检测兜底） |
@@ -632,7 +620,7 @@ python tests/test_relay_core.py
 | **内容 / 剧情风险** | **零** | **有**（段首有新内容时） |
 | 适合 | **内容优先**：段首有台词/关键动作、一点内容都不想丢 | **平滑优先**：能接受段首一点糊，且能留出无台词缓冲 |
 
-**一句话**：copy 换掉「发糊」，但买来「亮度硬跳」；cond 换掉「亮度硬跳」，但买来「发糊」。
+**一句话**：复合桥并联两路 ⇒ 既吃「拷贝路线零发糊」又吃「钉帧路线低亮度跳」；单独走某一路（只接第 0 路或只接第 4 路）则回到上表各自的取舍。
 
 > **想要第三条路**：`mask_mode="ramp"`（0.4.3 新增）——「软证据接缝」：每步仍锚回 `(1−m)`，
 > `m` 从 0 缓升到 `ramp_top`（默认 0.25）。设计上可能同时缓解发糊与硬跳。
@@ -883,8 +871,8 @@ H3 每段独立生成音频，续接段头部有两件事叠在一起：
 stage 链（落盘/读回）按段号自续（本段段号 - 1 = 要读的段号），节点上限 9999 段；
 每段 192 帧（8s）即可任意延长成片。**漂移累积**——色档/角色/锐度随接力次数衰减
 （2 段实测缝亮度阶跃 0.0004，目检"几乎完美"；≥3 段未系统实测）——0.5.0 起有**外观锚**治理：
-Latent 桥填 `anchor_stage=0`（或接 `anchor_latent`）、拷贝桥接 `anchor_latent`，
-让每段都以第 1 段为身份基准，锚不随接力退出（见「参数」两张表）。≥3 段仍建议逐缝机检：
+复合桥（0.6.0 唯一桥）填 `ref_anchor_stage=0`（或接 `ref_anchor_latent`）即可让每段以第 1 段为身份基准，
+锚不随接力退出（见「参数」两张表）。≥3 段仍建议逐缝机检：
 
 - 视频缝亮度阶跃 ≤0.008（0-1 口径；>0.03 即硬切级——无缝口径专用，
   分镜剧的正常切镜本来就在这一档）；

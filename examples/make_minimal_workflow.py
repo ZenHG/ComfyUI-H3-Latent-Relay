@@ -27,7 +27,7 @@ UI 格式工作流的 ``widgets_values`` 是**按位置**对应前端 widget 槽
 
 【生成的是什么】
     4 个官方加载器 → 官方条件节点（出词 + AV latent）
-                  → 🔗 续接 Latent 桥 → KSampler → 🔗 续接 Latent 存
+                  → 🔗 续接 拷贝桥（复合桥）→ KSampler → 🔗 续接 Latent 存
                   → VAEDecode / VAEDecodeAudio → 🔗 续接裁重叠 → CreateVideo → SaveVideo
 
     图里有一个 `段号`（PrimitiveInt）同时喂给「桥」和「落盘」的 stage_index，
@@ -84,7 +84,7 @@ def _ty(spec):
     把类型退化成 ``"*"``，且 ``t in WIDGET_TYPES`` 恒假 ⇒ **widget 全部被当成普通插槽**：
       · 生成的 ``inputs`` 缺 ``{"widget": {"name": …}}`` 标记 ⇒ 前端
         ``nonWidgetedInputs()`` 把每个 widget 都渲染成**空的输入圆点**
-        （Post 16 个 / TrimAV 22 个 / MotionContext 10 个），示例图一眼就是坏的；
+        （Post 16 个 / TrimAV 22 个 / 拷贝桥 N 个），示例图一眼就是坏的；
       · ``widgets_values`` 算出来是空列表 ⇒ 写成 ``null``。
     核心节点走服务端来源所以显示正常 —— 这正是「只有本包自己的节点坏」的原因。
     """
@@ -491,15 +491,16 @@ def build(oi, length=73, width=448, height=768):
     neg = g.add("ConditioningZeroOut", pos=[420, 380],
                 links_in={"conditioning": (cond, 0)})
 
-    bridge = g.add("H3RelayMotionContext", pos=[800, 40],
+    bridge = g.add("H3RelayCopyBridge", pos=[800, 40],
                    links_in={"conditioning": (cond, 0), "latent": (cond, "LATENT"),
                              "stage_index": (stage, "INT")},
-                   values={"trim_frames": 22, "audio_frames": 0, "run_id": "relay_demo"},
-                   title="🔗 续接 Latent 桥（context_latent 不用接，自动读上一段）")
+                   values={"context_frames": 22, "mask_mode": "hard", "pin_audio": True,
+                           "run_id": "relay_demo"},
+                   title="🔗 续接 拷贝桥（复合桥：第 0 路 latent → 采样器 latent_image，第 4 路 conditioning → positive）")
 
     sampler = g.add("KSampler", pos=[1180, 40],
-                    links_in={"model": (unet, "MODEL"), "positive": (bridge, 0),
-                              "negative": (neg, 0), "latent_image": (cond, "LATENT")},
+                    links_in={"model": (unet, "MODEL"), "positive": (bridge, 3),
+                              "negative": (neg, 0), "latent_image": (bridge, 0)},
                     values={"seed": 88300001, "steps": 6, "cfg": 1.0,
                             "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0},
                     title="② 采样：seed / steps 在这里")
@@ -615,7 +616,7 @@ def main():
         print("  ⚠ 服务端定义与本地不一致：%s" % "；".join(_stale))
         print("    示例图按**本地**定义生成（正确）；但要让 ComfyUI 真跑起来，必须重启后端加载新节点。")
 
-    missing = [k for k in ("H3RelayMotionContext", "H3RelayLatentSave", "H3RelayTrimAV",
+    missing = [k for k in ("H3RelayCopyBridge", "H3RelayLatentSave", "H3RelayTrimAV",
                            "H3RelayPost", "H3RelayAudioSeam") if k not in _local]
     if missing:
         raise SystemExit("[FAIL] 本仓库 nodes.py 里缺这些节点：%s" % ", ".join(missing))
