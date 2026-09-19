@@ -136,7 +136,7 @@ git clone https://github.com/ZenHG/ComfyUI-H3-Relay-Kit.git
 | **另一种桥** | 拷贝桥 | 与 Latent 桥**二选一**，不是"多一个节点"，是"换一种接法" |
 
 > 为什么不再合并？0.5.0 刚把 15 个后处理旋钮**从 `H3RelayTrimAV` 里拆出去**，理由就是
-> "22 个 widget 的节点没法用"。再把不同域的旋钮合回一个节点（Post 17 个 + 音频缝 5 个 = 22 个）
+> "22 个 widget 的节点没法用"。再把不同域的旋钮合回一个节点（Post 19 个 + 音频缝 5 个 = 24 个）
 > 等于把同一个教训重犯一次。**节点数不是复杂度，widget 数和"哪些线必须接对"才是。**
 
 | 节点 | 作用 |
@@ -194,7 +194,8 @@ MiniMaxH3ImageToVideo ─┤                      │
                                         │
         🔗 续接后处理 Post [0] images ←─ 裁重叠 [0] images
                            [1] guide  ←─ 裁重叠 [3] prev_tail
-                           （17 个旋钮**全部默认关**；不开则逐位直通）
+                           （19 个旋钮**全部默认关**；不开则逐位直通；
+                            跨段两项还需显式打勾 `cross_seg_ack`，见下）
                            [0] images ──→ CreateVideo（替代上面直连）
 
         🔗 续接音频缝 [0] audio ←─ 裁重叠 [1] audio
@@ -229,7 +230,7 @@ MiniMaxH3ImageToVideo ─┤                      │
 | 节点 | 画布上保留（主旋钮） | 折进 advanced |
 |---|---|---|
 | 续接裁重叠 | `trim_frames` / `fps` / `settle_frames` | 15 个画质域旋钮 + `seam_ghost` / `seam_ghost_alpha` |
-| 续接后处理 Post | 8 个**主强度**旋钮（含 `head_zone_frames`） | 9 项细分与护栏（`*_frames` / `*_gain_max` / `*_offset_max` / `*_blur` / `radius` / `stats_frames`） |
+| 续接后处理 Post | 9 个主旋钮（8 个**主强度**含 `head_zone_frames` + `cross_seg_ack`） | 10 项细分与护栏（`*_frames` / `*_gain_max` / `*_offset_max` / `*_blur` / `radius` / `stats_frames` / `baseline`） |
 | 拷贝桥 | `context_frames` / `mask_mode` / `pin_audio` / `anchor_blend` | 7 项模式专属参数（taper / ramp / blend 三族） |
 | Latent 桥 | `trim_frames` / `run_id` / `stage_index` | `audio_frames` / `anchor_stage` / `anchor_frames` |
 | 音频缝 | `patch_seconds` / `fade_seconds` | `tile_seconds` / `bed_stage` / `note` |
@@ -471,7 +472,7 @@ python tests/test_relay_core.py
 
 也支持 `pytest tests/`（找不到 ComfyUI 根目录时自动 skip，不会崩）。
 
-**261 项断言，零 GPU、不加载模型**，覆盖二十二个方面：
+**269 项断言，零 GPU、不加载模型**，覆盖二十二个方面：
 
 | 组 | 覆盖 |
 |---|---|

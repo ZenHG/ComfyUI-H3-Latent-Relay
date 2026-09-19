@@ -1322,13 +1322,18 @@ _b = CORE.match_prev_stats(_hom, _gi, frames=6, weight=1.0, stats_frames=0)
 check("19.11 无梯度段头：两种口径结果一致（修正只针对梯度情形）",
       torch.allclose(_a, _b, atol=1e-6), "max|Δ|=%.3e" % float((_a - _b).abs().max()))
 
-# 19.12 节点层：新 widget 追加在 H3RelayPost 的 optional **末位**（TrimAV 保持冻结）
+# 19.12 节点层：新 widget 一律**追加在 H3RelayPost 的 optional 末位**（TrimAV 保持冻结）
+#   2026-09-19 末两位换成 baseline / cross_seg_ack（追加 ⇒ 旧图 widgets_values 取值位置不变）
 _opt19b = list(NODES.H3RelayPost.INPUT_TYPES()["optional"])
-check("19.12 新 widget 追加在 H3RelayPost optional 末位",
-      _opt19b[-1] == "match_prev_stats_frames"
-      and NODES.H3RelayPost.INPUT_TYPES()["optional"]["match_prev_stats_frames"][1]["default"] == 1,
-      "末位=%s default=%s" % (_opt19b[-1],
-                              NODES.H3RelayPost.INPUT_TYPES()["optional"]["match_prev_stats_frames"][1]["default"]))
+_it19b = NODES.H3RelayPost.INPUT_TYPES()["optional"]
+check("19.12 新 widget 追加在 H3RelayPost optional 末位（baseline / cross_seg_ack）",
+      _opt19b[-2:] == ["baseline", "cross_seg_ack"]
+      and _it19b["baseline"][0] == ["robust", "legacy"]
+      and _it19b["baseline"][1]["default"] == "robust"
+      and _it19b["cross_seg_ack"][1]["default"] is False
+      and _it19b["match_prev_stats_frames"][1]["default"] == 1,
+      "末两位=%s baseline=%s ack=%s" % (_opt19b[-2:], _it19b["baseline"][1]["default"],
+                                        _it19b["cross_seg_ack"][1]["default"]))
 
 # ---------------------------------------------------------------- 第 20 组：拆节点（H3RelayPost）
 # 动机（2026-09-17）：后处理 15 个旋钮原塞在 TrimAV 里，而 UI 工作流的 widgets_values 是
@@ -1362,19 +1367,70 @@ _o20, _r20 = NODES.H3RelayPost().apply(_pin20, _g20)
 check("20.4 默认全关 → 逐位直通且帧数守恒",
       torch.equal(_o20, _pin20) and int(_o20.shape[0]) == 8, "report=%s" % _r20)
 
-# 20.5 未接 guide + 跨段项打开 → **跳过**（不抛、不崩）
+# 20.5 🔴 2026-09-19 R4 落地：**跨段项默认弃权**（guide 未确认是真参照时不作用）
+#   依据：cond 桥下 prev_tail 只是近似（代理误差 0.006 > 要修的缝阶跃 0.0007），
+#        实测对齐它把缝阶跃放大 ×12.6 ⇒ 默认关，要显式打勾才作用。
 _ok5, _o5 = True, None
 try:
     _o5, _r5 = NODES.H3RelayPost().apply(_pin20, None, match_prev=0.5, lowfreq_pull=0.5)
 except Exception as _e:                                  # noqa: BLE001
     _ok5, _r5 = False, "raise:%s" % _e
-check("20.5 未接 guide + 跨段项开 → 跳过（不抛）",
-      _ok5 and torch.equal(_o5, _pin20) and "跳过" in _r5, "report=%s" % _r5)
+check("20.5 跨段项未确认参照 → 自动弃权（不抛、逐位直通）",
+      _ok5 and torch.equal(_o5, _pin20) and "自动弃权" in _r5, "report=%s" % _r5)
 
-# 20.6 接了 guide → 跨段项生效（段头被改动，帧数守恒）
-_o6, _r6 = NODES.H3RelayPost().apply(_pin20, _g20, match_prev=0.5)
-check("20.6 接了 guide → 跨段统计匹配生效（帧数守恒）",
+# 20.5b 打了勾但未接 guide → 走「跳过」分支（不抛）
+_o5b, _r5b = NODES.H3RelayPost().apply(_pin20, None, match_prev=0.5, cross_seg_ack=True)
+check("20.5b 已打勾 + 未接 guide → 跳过（不抛）",
+      torch.equal(_o5b, _pin20) and "跳过" in _r5b, "report=%s" % _r5b)
+
+# 20.6 打勾 + 接了 guide → 跨段项生效（段头被改动，帧数守恒）
+_o6, _r6 = NODES.H3RelayPost().apply(_pin20, _g20, match_prev=0.5, cross_seg_ack=True)
+check("20.6 打勾 + 接了 guide → 跨段统计匹配生效（帧数守恒）",
       int(_o6.shape[0]) == 8 and not torch.equal(_o6, _pin20), "report=%s" % _r6)
+
+# 20.6b 关键负向：**不打勾时即使接了 guide 也必须逐位直通**（防重演 ×12.6 事故）
+_o6b, _r6b = NODES.H3RelayPost().apply(_pin20, _g20, match_prev=0.5)
+check("20.6b 未打勾（默认）⇒ 接了 guide 也逐位直通（×12.6 事故回归钉）",
+      torch.equal(_o6b, _pin20) and "自动弃权" in _r6b, "report=%s" % _r6b)
+
+# —— 20.6c~20.6g：2026-09-19 视频侧三项改造（稳健基准 / 互斥组 / 逐层审计）——
+# 用 **90 帧** 段（>body_start=40，段体非空）；段体离散度低（不触发弃权）。
+torch.manual_seed(23)
+_pin90 = torch.cat([torch.rand(24, 8, 8, 3) * 0.10 + 0.20,
+                    torch.rand(66, 8, 8, 3) * 0.20 + 0.60], 0)
+_o6c, _r6c = NODES.H3RelayPost().apply(_pin90, None, hist_match=1.0, wb_match=1.0,
+                                       deconv_strength=1.0, detail_borrow=1.0)
+check("20.6c 互斥组：组 2 只作用直方图、组 3 只作用反卷积（报告点名）",
+      "组 2 互斥" in _r6c and "组 3 互斥" in _r6c
+      and "白平衡校正" not in _r6c and "尺度" not in _r6c
+      and int(_o6c.shape[0]) == 90,
+      "report=%s" % _r6c[:130])
+check("20.6d 逐层审计：报告含「↳ 直方图匹配 后：段头亮度 … 高频 …」",
+      "↳ 直方图匹配 后：段头亮度" in _r6c and "高频" in _r6c, "report=%s" % _r6c[:130])
+
+# 20.6e 段体基准离散度超阈 ⇒ 组 2/3 弃权（稳健基准的弃权合同）
+# 段体（第 40 帧之后）= 17 帧亮 + 33 帧暗 ⇒ p25=0.2 / p75=0.8 / 中位 0.2 ⇒ 离散度 3.0 ≫ 0.08
+_disp90 = torch.cat([torch.full((24, 4, 4, 3), 0.30),
+                     torch.full((33, 4, 4, 3), 0.80),
+                     torch.full((33, 4, 4, 3), 0.20)], 0)
+_od, _rd = NODES.H3RelayPost().apply(_disp90, None, hist_match=1.0)
+check("20.6e 段体离散度超阈（baseline=robust 默认）⇒ 弃权 + 报告说明",
+      torch.equal(_od, _disp90) and "弃权" in _rd, "report=%s" % _rd[:130])
+_ol, _rl = NODES.H3RelayPost().apply(_disp90, None, hist_match=1.0, baseline="legacy")
+check("20.6f baseline=legacy ⇒ 不弃权（旧口径可复现对照）",
+      not torch.equal(_ol, _disp90) and "弃权" not in _rl, "report=%s" % _rl[:130])
+
+# 20.6g 段长 ≤ body_start ⇒ 段内对齐类跳过（段体为空，不许硬改）
+_o6g, _r6g = NODES.H3RelayPost().apply(_pin20, None, hist_match=1.0)
+check("20.6g 段长 ≤ 40 ⇒ 段内对齐类跳过（逐位直通）",
+      torch.equal(_o6g, _pin20) and "跳过" in _r6g, "report=%s" % _r6g)
+
+# 20.6h 正常段（离散度低）⇒ robust 与 legacy **都生效、都不弃权**（稳健化不误伤好段）
+_ohr, _rhr = NODES.H3RelayPost().apply(_pin90, None, hist_match=1.0)
+_ohl, _rhl = NODES.H3RelayPost().apply(_pin90, None, hist_match=1.0, baseline="legacy")
+check("20.6h 正常段：robust 与 legacy 都生效且都不弃权（稳健化不误伤）",
+      (not torch.equal(_ohr, _pin90)) and (not torch.equal(_ohl, _pin90))
+      and "弃权" not in _rhr and "弃权" not in _rhl, "robust报告=%s" % _rhr[:90])
 
 # 20.7 TrimAV 新增第 4 路输出 prev_tail（**追加在末位**，旧工作流不受影响）
 check("20.7 TrimAV 第 4 路输出 prev_tail 追加在末位",

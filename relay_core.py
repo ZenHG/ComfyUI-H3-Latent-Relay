@@ -1511,9 +1511,53 @@ def deconv_head_zone(images: torch.Tensor, frames: int = 12,
     return torch.cat([blended.clamp(0.0, 1.0).to(images.dtype), images[k:]], dim=0)
 
 
+# —— 后处理层的「段体参考」稳健化（2026-09-19）——
+# 治的病：段内三层（直方图 / 白平衡 / 高频迁移）的基准一律是「第 40 帧之后整段均值」。
+#   段只有 90–192 帧 ⇒ 90 帧时段体只剩 50 帧；段体若有运动/推镜/曝光漂移，
+#   **基准本身就不是「这段的常态外观」却照样拿去改段头** ——
+#   与音频缝「取到近静默窗当床声」是同一类错（选窗准则反了）。
+POST_BODY_DISP_MAX: float = 0.08   # 段体逐帧亮度 (p75−p25)/中位 超此值 ⇒ 基准不可信 ⇒ 弃权
+
+
+def robust_body(body: torch.Tensor, enabled: bool = True):
+    """段体参考帧的**稳健选取** + **离散度报数**。返回 ``(subset, dispersion)``。
+
+    - ``dispersion`` = 段体逐帧 mean luma 的 ``(p75−p25)/中位数``（无量纲）；
+    - ``subset`` = 亮度落在 ``[p25, p75]`` 的帧（中央 50%）—— 段体有运动/曝光漂移时，
+      整段均值会被两端拉偏，**中央段的统计才代表这段的常态外观**；
+    - ``enabled=False`` ⇒ 不筛（原样返回），供 ``baseline=legacy`` 复现旧口径做对照。
+
+    ⚠️ 这是**零帧数代价**的统计（只读），不产生额外 pass。
+    """
+    n = int(body.shape[0])
+    if n <= 0:
+        return body, 0.0
+    lum = body.float().mean(dim=(1, 2, 3))
+    med = float(lum.median())
+    if not enabled or n < 4 or med <= 1e-6:
+        return body, 0.0
+    q = torch.quantile(lum, torch.tensor([0.25, 0.75], device=lum.device, dtype=lum.dtype))
+    disp = float((q[1] - q[0]) / med)
+    sel = body[(lum >= q[0]) & (lum <= q[1])]
+    if int(sel.shape[0]) < 2:
+        return body, disp
+    return sel, disp
+
+
+def head_metrics(images: torch.Tensor, frames: int):
+    """段头的两个**可审计标量**：``(平均亮度, 高频能量)``。
+
+    用途：把「黑箱叠 N 层」变成「**每层可归因**」——每层作用后各报一次，谁把段头改了多少一目了然。
+    高频 = 与 3×3 盒式模糊之差的绝对值均值（尺度无关，够用）。
+    """
+    k = max(1, min(int(frames), int(images.shape[0])))
+    h = images[:k].float()
+    return float(h.mean()), float((h - _box_blur_hwc(h, 3)).abs().mean())
+
+
 def borrow_detail_from_body(images: torch.Tensor, frames: int = 12,
                             strength: float = 0.0, blur: int = 9,
-                            body_start: int = 40) -> torch.Tensor:
+                            body_start: int = 40, robust: bool = True) -> torch.Tensor:
     """把**段体**的高频结构迁移到段头：段头留自己的低频，高频换成段体的。
 
     做法：``head + s·(highpass(body_ref) 的能量匹配到 head 的高频)``。
@@ -1532,7 +1576,7 @@ def borrow_detail_from_body(images: torch.Tensor, frames: int = 12,
         return images
     x = images.float()
     head = x[:k]
-    body = x[int(body_start):]
+    body, _ = robust_body(x[int(body_start):], robust)       # 稳健参考（见 robust_body）
     ref = body.median(dim=0).values.unsqueeze(0)             # [1,H,W,C] 段体代表帧
     lo_head = _box_blur_hwc(head, blur)
     lo_ref = _box_blur_hwc(ref, blur)
@@ -1551,7 +1595,7 @@ def borrow_detail_from_body(images: torch.Tensor, frames: int = 12,
 # —— P6 直方图匹配（段头 → 段体）—— 2026-09-16 补齐后处理层方案
 def match_hist_head_to_body(images: torch.Tensor, frames: int = 12,
                             strength: float = 0.0, body_start: int = 40,
-                            bins: int = 256) -> torch.Tensor:
+                            bins: int = 256, robust: bool = True) -> torch.Tensor:
     """把段头的**色阶分布**（直方图）对齐到段体 —— 比 P2 低频残差更强。
 
     P2（``lowfreq_pull``）只对齐**低频均值**；本函数对齐**整条分布曲线**
@@ -1567,7 +1611,7 @@ def match_hist_head_to_body(images: torch.Tensor, frames: int = 12,
     if k <= 0:
         return images
     x = images.float()
-    body = x[int(body_start):]
+    body, _ = robust_body(x[int(body_start):], robust)       # 稳健参考（见 robust_body）
     out = x[:k].clone()
     for c in range(int(x.shape[3])):
         src = x[:k, :, :, c].flatten()
@@ -1590,7 +1634,8 @@ def match_hist_head_to_body(images: torch.Tensor, frames: int = 12,
 
 # —— P7 灰世界白平衡校正（段头 → 段体）—— 2026-09-16 补齐后处理层方案
 def match_white_balance(images: torch.Tensor, frames: int = 12,
-                        strength: float = 0.0, body_start: int = 40) -> torch.Tensor:
+                        strength: float = 0.0, body_start: int = 40,
+                        robust: bool = True) -> torch.Tensor:
     """把段头的**通道比例（色温）**对齐到段体 —— 对症"色温滑档"。
 
     与 P2 正交：P2 管**亮度/低频总量**，本函数管**R:G:B 的相对比例**（色温/色调）。
@@ -1606,7 +1651,7 @@ def match_white_balance(images: torch.Tensor, frames: int = 12,
         return images
     x = images.float()
     head = x[:k]
-    body = x[int(body_start):]
+    body, _ = robust_body(x[int(body_start):], robust)       # 稳健参考（见 robust_body）
     hm = head.mean(dim=(0, 1, 2)).clamp_min(1e-6)       # [C]
     bm = body.mean(dim=(0, 1, 2)).clamp_min(1e-6)
     # 只取通道比例，不改变整体亮度

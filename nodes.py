@@ -1082,6 +1082,27 @@ class H3RelayPost:
                                "    首帧被**推过 guide**、缝上凭空多出一个阶跃（实测 ×12.6）。仅对照用。\n"
                                "  · >1 = 用前 N 帧聚合（介于两者之间）。",
                 }),
+                # ⚠ 继续追加在**最后**（同上铁律）。2026-09-19 新增两项：
+                "baseline": (["robust", "legacy"], {
+                    "advanced": True,
+                    "default": "robust",
+                    "tooltip": "【组 2+3 的分母】**段体参考怎么取**：\n"
+                               "  · robust（默认）= 逐帧亮度取**中央 50%** 的帧再算统计，\n"
+                               "    并报出**离散度** `(p75−p25)/中位`；离散度 > 0.08 ⇒ 判「基准不可信」，\n"
+                               "    组 2/组 3 **自动弃权**（宁可不动，也不用不可靠的基准改画面）。\n"
+                               "  · legacy = 0.5.0 旧口径（**整段均值**，不筛不弃权），**仅作对照复现**。\n"
+                               "段只有 90 帧时，`body_start=40` 之后只剩 50 帧——旧口径下基准很容易被\n"
+                               "推镜/闪白带偏，这就是本档存在的原因。",
+                }),
+                "cross_seg_ack": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "【跨段两项的总闸】**确认 guide 是真参照**才打勾。\n"
+                               "· 不打勾（默认）⇒ `match_prev` 与 `lowfreq_pull` **自动弃权**（不作用、报告里说明）。\n"
+                               "· 为什么默认关：cond 桥（latent 桥）下 `prev_tail` 只是**近似**\n"
+                               "  （实测代理误差 0.006 > 要修的缝阶跃 0.0007）⇒ 对齐它反而**把首帧推离真参照**\n"
+                               "  （实测 `match_prev=0.7` 把阶跃放大 ×12.6）。**真参照只在拷贝桥下成立。**\n"
+                               "· 依据：接缝归因边界规范 §三 R4「代理量打标、近似参照自动弃权」。",
+                }),
             },
         }
 
@@ -1104,57 +1125,112 @@ class H3RelayPost:
               deconv_strength=0.0, deconv_radius=1.5,
               detail_borrow=0.0, detail_blur=9,
               settle_sharpen=0.0, settle_sharpen_frames=24,
-              match_prev_stats_frames=CORE.MATCH_PREV_STATS_FRAMES):
+              match_prev_stats_frames=CORE.MATCH_PREV_STATS_FRAMES,
+              baseline="robust", cross_seg_ack=False):
         n0 = int(images.shape[0])
         out = images
         notes = []
+        robust = (baseline != "legacy")
+        hz = int(head_zone_frames)
+
+        # 段体基准的**离散度**（一次算完，组 2/组 3 共用；只读统计，零帧数代价）
+        disp = 0.0
+        if n0 > 40:
+            _, disp = CORE.robust_body(images[40:].float(), robust)
+        abstain = bool(robust and disp > CORE.POST_BODY_DISP_MAX)
+
+        def _snap():
+            return CORE.head_metrics(out, hz)
+
+        def _audit(tag, before):
+            lum, hf = CORE.head_metrics(out, hz)
+            notes.append("　↳ %s 后：段头亮度 %.5f→%.5f（%+.5f）｜高频 %.6f→%.6f（%+.1f%%）"
+                         % (tag, before[0], lum, lum - before[0], before[1], hf,
+                            (hf / before[1] - 1.0) * 100.0 if before[1] > 0 else 0.0))
 
         # 执行顺序：先对齐色调（跨段 → 段内），再补高频，最后锐化收口。
-        if float(match_prev) > 0.0:
-            if guide is None:
-                notes.append("跨段统计匹配：**跳过**（未接 guide）")
+        # —— 跨段两项：**默认弃权**（R4 代理量打标，见 cross_seg_ack 的 tooltip）——
+        if float(match_prev) > 0.0 or float(lowfreq_pull) > 0.0:
+            if not cross_seg_ack:
+                notes.append("跨段两项（match_prev=%.2f / lowfreq_pull=%.2f）：**自动弃权** —— "
+                             "guide 未确认是真参照（cond 桥下只是近似，实测对齐它把缝阶跃放大 ×12.6）；"
+                             "确认真参照（拷贝桥）请把 `cross_seg_ack` 打勾"
+                             % (float(match_prev), float(lowfreq_pull)))
             else:
-                out = CORE.match_prev_stats(out, guide, int(match_prev_frames),
-                                            float(match_prev), float(match_prev_gain_max),
-                                            float(match_prev_offset_max),
-                                            int(match_prev_stats_frames))
-                notes.append("跨段统计匹配 %.2f（%d 帧，对齐上段末帧；统计量取 %s）"
-                             % (float(match_prev), int(match_prev_frames),
-                                "紧贴缝那帧" if int(match_prev_stats_frames) == 1
-                                else "整个作用区聚合（旧口径，仅对照）"
-                                if int(match_prev_stats_frames) <= 0
-                                else "前 %d 帧" % int(match_prev_stats_frames)))
-        if float(lowfreq_pull) > 0.0:
-            if guide is None:
-                notes.append("低频残差传递：**跳过**（未接 guide）")
-            else:
-                out = CORE.lowfreq_pull(out, guide, int(lowfreq_frames),
-                                        float(lowfreq_pull), int(lowfreq_blur))
-                notes.append("低频残差传递 %.2f（%d 帧 / 尺度 %d）"
-                             % (float(lowfreq_pull), int(lowfreq_frames), int(lowfreq_blur)))
-        if float(hist_match) > 0.0:
-            out = CORE.match_hist_head_to_body(out, int(head_zone_frames),
-                                               float(hist_match), body_start=40)
-            notes.append("直方图匹配 %.2f（段头↔段体，前 %d 帧）"
-                         % (float(hist_match), int(head_zone_frames)))
-        if float(wb_match) > 0.0:
-            out = CORE.match_white_balance(out, int(head_zone_frames),
-                                           float(wb_match), body_start=40)
-            notes.append("白平衡校正 %.2f（段头↔段体，前 %d 帧）"
-                         % (float(wb_match), int(head_zone_frames)))
-        if float(deconv_strength) > 0.0:
-            out = CORE.deconv_head_zone(out, int(head_zone_frames),
-                                        float(deconv_strength), float(deconv_radius))
-            notes.append("反卷积去模糊 %.2f / 半径 %.1f（前 %d 帧）"
-                         % (float(deconv_strength), float(deconv_radius), int(head_zone_frames)))
-        if float(detail_borrow) > 0.0:
-            out = CORE.borrow_detail_from_body(out, int(head_zone_frames),
-                                               float(detail_borrow), int(detail_blur), body_start=40)
-            notes.append("段体高频迁移 %.2f / 尺度 %d（前 %d 帧）"
-                         % (float(detail_borrow), int(detail_blur), int(head_zone_frames)))
+                if float(match_prev) > 0.0:
+                    if guide is None:
+                        notes.append("跨段统计匹配：**跳过**（未接 guide）")
+                    else:
+                        out = CORE.match_prev_stats(out, guide, int(match_prev_frames),
+                                                    float(match_prev), float(match_prev_gain_max),
+                                                    float(match_prev_offset_max),
+                                                    int(match_prev_stats_frames))
+                        notes.append("跨段统计匹配 %.2f（%d 帧，对齐上段末帧；统计量取 %s）"
+                                     % (float(match_prev), int(match_prev_frames),
+                                        "紧贴缝那帧" if int(match_prev_stats_frames) == 1
+                                        else "整个作用区聚合（旧口径，仅对照）"
+                                        if int(match_prev_stats_frames) <= 0
+                                        else "前 %d 帧" % int(match_prev_stats_frames)))
+                if float(lowfreq_pull) > 0.0:
+                    if guide is None:
+                        notes.append("低频残差传递：**跳过**（未接 guide）")
+                    else:
+                        out = CORE.lowfreq_pull(out, guide, int(lowfreq_frames),
+                                                float(lowfreq_pull), int(lowfreq_blur))
+                        notes.append("低频残差传递 %.2f（%d 帧 / 尺度 %d）"
+                                     % (float(lowfreq_pull), int(lowfreq_frames), int(lowfreq_blur)))
+
+        # —— 组 2 / 组 3：段内（基准 = 段体）——
+        hm, wb = float(hist_match), float(wb_match)
+        dc, db_ = float(deconv_strength), float(detail_borrow)
+        if abstain:
+            if hm > 0.0 or wb > 0.0 or dc > 0.0 or db_ > 0.0:
+                notes.append("组 2/组 3 **全部弃权**：段体基准离散度 %.3f > %.2f"
+                             "（基准不可信 ⇒ 宁可不动；要强制旧口径请把 baseline 设 legacy）"
+                             % (disp, CORE.POST_BODY_DISP_MAX))
+        else:
+            if (hm > 0.0 or wb > 0.0 or db_ > 0.0) and n0 <= 40:
+                notes.append("组 2/组 3（段内对齐类）**跳过**：段长 %d ≤ body_start=40，段体为空、无可对齐的基准"
+                             % n0)
+                hm = wb = db_ = 0.0
+            if hm > 0.0 and wb > 0.0:
+                notes.append("⚠ 组 2 互斥：直方图匹配与白平衡**同时开了** ⇒ 只作用**直方图匹配**"
+                             "，白平衡弃权（两者作用域重叠：一个管总量、一个管比例）")
+                wb = 0.0
+            if dc > 0.0 and db_ > 0.0:
+                notes.append("⚠ 组 3 互斥：反卷积与段体高频迁移**同时开了** ⇒ 只作用**反卷积**"
+                             "，高频迁移弃权（两者都是「把高频换成段体的」，叠加会让后一层"
+                             "的基准失真、不可归因）")
+                db_ = 0.0
+            if hm > 0.0:
+                b = _snap()
+                out = CORE.match_hist_head_to_body(out, hz, hm, body_start=40, robust=robust)
+                notes.append("直方图匹配 %.2f（段头↔段体，前 %d 帧，baseline=%s）"
+                             % (hm, hz, baseline))
+                _audit("直方图匹配", b)
+            if wb > 0.0:
+                b = _snap()
+                out = CORE.match_white_balance(out, hz, wb, body_start=40, robust=robust)
+                notes.append("白平衡校正 %.2f（段头↔段体，前 %d 帧，baseline=%s）" % (wb, hz, baseline))
+                _audit("白平衡校正", b)
+            if dc > 0.0:
+                b = _snap()
+                out = CORE.deconv_head_zone(out, hz, dc, float(deconv_radius))
+                notes.append("反卷积去模糊 %.2f / 半径 %.1f（前 %d 帧）"
+                             % (dc, float(deconv_radius), hz))
+                _audit("反卷积去模糊", b)
+            if db_ > 0.0:
+                b = _snap()
+                out = CORE.borrow_detail_from_body(out, hz, db_, int(detail_blur),
+                                                   body_start=40, robust=robust)
+                notes.append("段体高频迁移 %.2f / 尺度 %d（前 %d 帧，baseline=%s）"
+                             % (db_, int(detail_blur), hz, baseline))
+                _audit("段体高频迁移", b)
         if float(settle_sharpen) > 0.0:
+            b = _snap()
             out = CORE.sharpen_head_zone(out, int(settle_sharpen_frames), float(settle_sharpen))
             notes.append("糊区锐化 %.2f（%d 帧）" % (float(settle_sharpen), int(settle_sharpen_frames)))
+            _audit("糊区锐化", b)
 
         assert int(out.shape[0]) == n0, "后处理必须帧数守恒"
         line = "[H3 Relay] 后处理：%s" % ("；".join(notes) if notes else "全部关闭（直通）")

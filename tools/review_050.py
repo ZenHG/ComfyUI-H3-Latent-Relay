@@ -528,7 +528,8 @@ ck("K1 四种 mask_mode 的掩码值域与窗外行为都对（22 帧 = %d 步�
 # H3RelayPost：跨段统计匹配真的在动画面，且被护栏夹住、窗外逐位不动
 _img = _T.cat([_T.rand(12, 8, 8, 3) * 0.10 + 0.25, _T.rand(20, 8, 8, 3) * 0.20 + 0.50], 0)
 _guide = _T.rand(1, 8, 8, 3) * 0.20 + 0.50
-_y, _ = N.H3RelayPost().apply(_img, _guide, match_prev=1.0, match_prev_frames=12)
+_y, _ = N.H3RelayPost().apply(_img, _guide, match_prev=1.0, match_prev_frames=12,
+                              cross_seg_ack=True)
 _d_head = float(_y[:12].mean()) - float(_img[:12].mean())
 ck("K2 match_prev 生效且方向正确（段头均值向 guide 移动）", 0.0 < _d_head <= 0.06 + 1e-6,
    "Δmean=%.4f（护栏 off_max=0.06）" % _d_head)
@@ -536,10 +537,12 @@ ck("K3 match_prev 作用窗以外逐位不变", _T.equal(_y[12:], _img[12:]),
    "帧数 %d→%d" % (int(_img.shape[0]), int(_y.shape[0])))
 _flat = _T.full((12, 8, 8, 3), 0.2)
 _big, _ = N.H3RelayPost().apply(_flat, _T.full((1, 8, 8, 3), 0.8),
-                                match_prev=1.0, match_prev_frames=12)
+                                match_prev=1.0, match_prev_frames=12,
+                                cross_seg_ack=True)
 ck("K4 偏移护栏夹得住（Δ=0.6 只允许改 0.06）",
    abs(float(_big[:12].mean()) - 0.23) < 5e-3, "0.2 → %.4f" % float(_big[:12].mean()))
-_ng, _ = N.H3RelayPost().apply(_img, None, match_prev=1.0, lowfreq_pull=1.0)
+_ng, _ = N.H3RelayPost().apply(_img, None, match_prev=1.0, lowfreq_pull=1.0,
+                               cross_seg_ack=True)
 ck("K5 未接 guide ⇒ 跨段项跳过且逐位直通", _T.equal(_ng, _img))
 # 统计纠偏：拷贝前缀的均值应被拉向锚段
 _anc = {"samples": _T.rand(1, 4, 12, 2, 2) * 0.05 + 0.9}
@@ -558,10 +561,11 @@ ck("K6 anchor 统计纠偏生效（前缀均值向锚段靠）", abs(_pre - _av)
 _gi = _T.full((1, 8, 8, 3), 0.50)
 _grad = _T.cat([_T.full((1, 8, 8, 3), 0.495), _T.full((5, 8, 8, 3), 0.470)], 0)
 _gap0 = float((_grad[0].mean() - _gi[0].mean()).abs())
-_gs = float((N.H3RelayPost().apply(_grad, _gi, match_prev=1.0, match_prev_frames=6)[0][0]
+_gs = float((N.H3RelayPost().apply(_grad, _gi, match_prev=1.0, match_prev_frames=6,
+                                   cross_seg_ack=True)[0][0]
              .mean() - _gi[0].mean()).abs())
 _gl = float((N.H3RelayPost().apply(_grad, _gi, match_prev=1.0, match_prev_frames=6,
-                                   match_prev_stats_frames=0)[0][0].mean()
+                                   match_prev_stats_frames=0, cross_seg_ack=True)[0][0].mean()
              - _gi[0].mean()).abs())
 print("      段头内部梯度场景：原阶跃 %.4f ｜ 取紧贴缝那帧 → %.4f ｜ 旧口径 → %.4f"
       % (_gap0, _gs, _gl))
@@ -569,6 +573,40 @@ ck("K7 统计量取紧贴缝那帧 ⇒ 首帧落到 guide；旧口径会推过 g
    _gs < _gap0 * 0.05 and _gl > _gap0 * 2.0)
 ck("K7b H3RelayPost 新 widget match_prev_stats_frames 默认 1（修正后口径）",
    N.H3RelayPost.INPUT_TYPES()["optional"]["match_prev_stats_frames"][1]["default"] == 1)
+
+# K10~K12 —— 2026-09-19 视频侧三项改造（稳健基准 / 互斥组 / R4 跨段弃权）
+_img10 = _T.cat([_T.rand(12, 8, 8, 3) * 0.10 + 0.25,
+                 _T.rand(20, 8, 8, 3) * 0.20 + 0.50], 0)
+_g10 = _T.rand(1, 8, 8, 3) * 0.20 + 0.50
+_o10a, _rr10a = N.H3RelayPost().apply(_img10, _g10, match_prev=1.0)
+_o10b, _rr10b = N.H3RelayPost().apply(_img10, _g10, match_prev=1.0, cross_seg_ack=True)
+ck("K10 跨段项默认弃权（逐位直通），打勾后才作用",
+   _T.equal(_o10a, _img10) and "自动弃权" in _rr10a and not _T.equal(_o10b, _img10),
+   "默认报告=%s" % _rr10a[:60])
+ck("K10b cross_seg_ack 默认 False / baseline 默认 robust（末位追加）",
+   N.H3RelayPost.INPUT_TYPES()["optional"]["cross_seg_ack"][1]["default"] is False
+   and N.H3RelayPost.INPUT_TYPES()["optional"]["baseline"][1]["default"] == "robust")
+
+# K11 互斥组：组 2 只作用直方图、组 3 只作用反卷积
+_x11 = _T.cat([_T.rand(24, 8, 8, 3) * 0.10 + 0.20,
+               _T.rand(66, 8, 8, 3) * 0.20 + 0.60], 0)
+_o11, _r11 = N.H3RelayPost().apply(_x11, None, hist_match=1.0, wb_match=1.0,
+                                   deconv_strength=1.0, detail_borrow=1.0)
+ck("K11 组 2/组 3 互斥只作用主项并在报告点名",
+   "组 2 互斥" in _r11 and "组 3 互斥" in _r11
+   and "白平衡校正" not in _r11 and "尺度" not in _r11, "报告=%s" % _r11[:110])
+
+# K12 段体离散度超阈 ⇒ 弃权（稳健基准的合同）；legacy 不弃权（可复现旧口径）
+_x12 = _T.cat([_T.full((24, 4, 4, 3), 0.30), _T.full((33, 4, 4, 3), 0.80),
+               _T.full((33, 4, 4, 3), 0.20)], 0)
+_o12a, _r12a = N.H3RelayPost().apply(_x12, None, hist_match=1.0)
+_o12b, _r12b = N.H3RelayPost().apply(_x12, None, hist_match=1.0, baseline="legacy")
+ck("K12 段体基准离散度超阈 ⇒ 弃权；baseline=legacy ⇒ 不弃权",
+   _T.equal(_o12a, _x12) and "弃权" in _r12a
+   and not _T.equal(_o12b, _x12) and "弃权" not in _r12b,
+   "robust=%s" % _r12a[:70])
+ck("K12b 逐层审计：报告含「↳ …后：段头亮度 … 高频 …」",
+   "↳ 直方图匹配 后：段头亮度" in _r11 and "高频" in _r11)
 
 # K8 —— 2026-09-19 参数收口：组 2/3 的作用帧数归 `head_zone_frames`。
 #   事故背景：组 2（色档对齐）与组 3（高频补）的四个强度旋钮，作用区长度一直**偷偷借**
@@ -601,11 +639,13 @@ _adv_T = [k for k, v in _itT9["optional"].items() if v[1].get("advanced")]
 _adv_P = [k for k, v in _itP9.items() if v[1].get("advanced")]
 _keep_T = ["trim_frames", "fps", "audio", "settle_frames"]
 _keep_P = ["match_prev", "lowfreq_pull", "hist_match", "wb_match",
-           "deconv_strength", "detail_borrow", "settle_sharpen", "head_zone_frames"]
+           "deconv_strength", "detail_borrow", "settle_sharpen", "head_zone_frames",
+           "cross_seg_ack"]
 _must_T = ["hist_match", "wb_match", "deconv_strength", "detail_borrow",
            "lowfreq_pull", "match_prev", "seam_ghost"]
 _must_P = ["match_prev_frames", "lowfreq_frames", "deconv_radius",
-           "detail_blur", "settle_sharpen_frames", "match_prev_stats_frames"]
+           "detail_blur", "settle_sharpen_frames", "match_prev_stats_frames",
+           "baseline"]
 print("      裁重叠：画布留 %s ／ 折叠 %d 项；后处理：画布留 %d 项 ／ 折叠 %d 项"
       % (_keep_T, len(_adv_T), len(_keep_P), len(_adv_P)))
 ck("K9 advanced 标记方向正确（主旋钮留在画布上、细分与护栏项折叠）",
