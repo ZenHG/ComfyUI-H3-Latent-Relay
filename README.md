@@ -19,7 +19,7 @@ H3 分段生成时，"续接"要回答一件事：**新的一段怎么知道上�
 
 ## 🚀 5 分钟跑通（最小可用）
 
-> 懒人路线：直接打开 `examples/minimal_relay_official.json`（全官方节点 + 本包，**17** 个节点），
+> 懒人路线：直接打开 `examples/minimal_relay_official.json`（全官方节点 + 本包，**18** 个节点，含一个画布注释框），
 > 把 4 个加载器的下拉改成你本机的模型文件，然后按下面三步跑。
 > 图的画布上有一个**注释框**写着同样的步骤，不用回来翻 README。
 
@@ -715,6 +715,13 @@ python tools/check_ui_workflow.py /path/to/ComfyUI/user/default/workflows/xxx.js
 
 需要 ComfyUI 正在运行（用来取 schema）；ComfyUI 不在默认位置时用
 `--comfyui /path/to/ComfyUI` 或环境变量 `COMFYUI_PATH`。
+
+🔴 **动态 COMBO（如 `SaveVideo` 的 `format` / `codec`）也要查**：这类输入选中后会
+**派生子 widget**（如 `format=auto` → `format.codec`），前端实际槽位是
+`filename_prefix` / `format` / `format.codec` / `codec` 共 4 格。本包的生成器与体检器
+都按 schema 的 `options[key].inputs` 把子参数展开，**不会**把动态 COMBO 当普通连线漏掉
+——这是 2026-09-19 修过的自证式假绿重灾区（白名单漏一项、`want`/`got` 一起漏 ⇒ 错图也报 0）。
+示例图 `examples/minimal_relay_official.json` 用当前版重新生成即可与前端存档逐位对齐。
 
 ## 🔗 Chain 自动连跑（0.2.0 新增）
 

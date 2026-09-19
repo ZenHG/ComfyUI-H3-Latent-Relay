@@ -100,20 +100,6 @@ def spec_of(defn, name):
     return None
 
 
-def spec_type_strict(spec):
-    """独立取类型 —— **刻意不复用 `_ty()`**。
-
-    🔴 判据不能与被判对象共用同一个函数：`_ty()` 坏掉时两边同时变空，
-    比较结果永远「相等」⇒ 自证式假绿。这条钉子第一版就踩了这个坑
-    （把 `_ty()` 换回只认 list 的旧实现，`validate()` 依旧报 0 问题）。
-    本函数只做「取类型」，且拿到异常输入**直接吵**，不安静放过。
-    """
-    if not isinstance(spec, (list, tuple)) or not spec:
-        raise AssertionError("schema 项格式异常（应为非空 list/tuple）：%r" % (spec,))
-    t = spec[0]
-    return "COMBO" if isinstance(t, (list, tuple)) else t
-
-
 def all_inputs(defn):
     """(name, spec) 列表，required 在前 optional 在后 —— 与前端一致。"""
     out = []
@@ -123,20 +109,99 @@ def all_inputs(defn):
     return out
 
 
-def widget_slots(defn):
-    """前端实际 widget 槽位顺序（含 control_after_generate 注入）。
+# ---------------------------------------------------------------- 动态 COMBO（COMFY_DYNAMICCOMBO_V3）
+def combo_default_key(spec, preferred=None):
+    """取一个 COMBO / 动态 COMBO 的默认候选项 key。
 
-    这是本脚本存在的核心：槽位顺序**只**由 schema 推导，绝不靠人记。
+    两种声明都覆盖：旧式 ``options`` 是字符串数组、新式是 ``{"key":…,"inputs":…}``
+    字典数组；``COMBO`` 与 ``COMFY_DYNAMICCOMBO_V3`` 同款 options 结构。
+    优先 PREFERRED 覆盖（本机实测可用文件名）；否则取第一个选项。
     """
-    out = []
+    t0 = spec[0] if isinstance(spec, (list, tuple)) and spec else None
+    extra = spec[1] if isinstance(spec, (list, tuple)) and len(spec) > 1 and isinstance(spec[1], dict) else {}
+    if isinstance(t0, (list, tuple)):
+        opts = t0
+    elif t0 in ("COMBO", "COMFY_DYNAMICCOMBO_V3"):
+        opts = extra.get("options") or []
+    else:
+        return ""
+    if not opts:
+        return ""
+    keys = [o.get("key") if isinstance(o, dict) else o for o in opts]
+    if preferred is not None and preferred in keys:
+        return preferred
+    first = opts[0]
+    return first.get("key") if isinstance(first, dict) else first
+
+
+def dynamic_subwidgets(spec, key):
+    """动态 COMBO 选中 ``key`` 后**派生**的子 widget：[(子参数名, 子spec), ...]。
+
+    顺序与前端一致：``options[key].inputs`` 的 required 在前 optional 在后。
+    子 widget 名 = ``父名.子名``（前端 ``dynamicWidgets.ts`` L110/139：插在父项之后）。
+    选中项没有声明子参数时返回空列表（例：SaveVideo 顶层 ``codec=auto`` 无子参）。
+    """
+    t0 = spec[0] if isinstance(spec, (list, tuple)) and spec else None
+    extra = spec[1] if isinstance(spec, (list, tuple)) and len(spec) > 1 and isinstance(spec[1], dict) else {}
+    if t0 not in ("COMBO", "COMFY_DYNAMICCOMBO_V3"):
+        return []
+    opts = extra.get("options") or []
+    opt = next((o for o in opts if o.get("key") == key), None)
+    if not opt:
+        return []
+    subs = []
+    for sec in ("required", "optional"):
+        for sk, sv in ((opt.get("inputs") or {}).get(sec) or {}).items():
+            subs.append((sk, sv))
+    return subs
+
+
+def iter_widget_inputs(defn):
+    """按前端保存顺序迭代所有「占 widget 槽」的输入：(name, spec, is_pseudo)。
+
+    - 普通 widget（INT/FLOAT/STRING/BOOLEAN/COMBO）→ 占槽；
+    - 带 ``control_after_generate`` 的（典型 seed）→ 在其后插一格伪槽（只占
+      ``widgets_values``，不进 ``inputs`` 列表）；
+    - **``COMFY_DYNAMICCOMBO_V3``**（动态 COMBO，如 SaveVideo 的 ``format``/``codec``）
+      → 占槽，并展开选中项的子 widget（如 ``format.codec``）插在父项之后。
+    这是「槽位顺序只由 schema 推导」的唯一权威实现；生成器与体检器必须共用同一套。
+
+    🔴 2026-09-19 修复：原实现把 ``COMFY_DYNAMICCOMBO_V3`` 当普通连线 ⇒
+       SaveVideo 只生成 1 个 widget 槽（filename_prefix），实际应有 4 个
+       （filename_prefix / format / format.codec / codec），其后取值整体前移、
+       文件能开能提交不报错——典型的「测试是虚假的」。白名单必须含动态 COMBO。
+    """
     for name, spec in all_inputs(defn):
-        if _ty(spec) not in WIDGET_TYPES:
-            continue
-        out.append(name)
-        extra = spec[1] if len(spec) > 1 and isinstance(spec[1], dict) else {}
-        if extra.get("control_after_generate"):
-            out.append("control_after_generate")
-    return out
+        t = _ty(spec) or "*"
+        if t in WIDGET_TYPES:
+            yield name, spec, False
+            extra = spec[1] if len(spec) > 1 and isinstance(spec[1], dict) else {}
+            if extra.get("control_after_generate"):
+                yield "control_after_generate", None, True
+        elif t == "COMFY_DYNAMICCOMBO_V3":
+            yield name, spec, False
+            for sub, subspec in dynamic_subwidgets(spec, combo_default_key(spec)):
+                yield "%s.%s" % (name, sub), subspec, False
+
+
+def widget_slots(defn):
+    """前端实际 widget 槽位顺序（含 control_after_generate 伪槽与动态子参数）。"""
+    return [n for n, _, _ in iter_widget_inputs(defn)]
+
+
+def widget_input_names(defn):
+    """占 ``inputs`` 列表的 widget 名（不含 control_after_generate 伪槽）。"""
+    return [n for n, _, p in iter_widget_inputs(defn) if not p]
+
+
+def slot_default(defn, name, spec):
+    """widget 槽的默认值：动态 COMBO 用选中项的默认 key，普通走 default_value。"""
+    if name == "control_after_generate":
+        return "fixed"
+    t = _ty(spec) or "*"
+    if t == "COMFY_DYNAMICCOMBO_V3" or "." in name:
+        return combo_default_key(spec) or ""
+    return default_value(defn, name)
 
 
 def default_value(defn, name):
@@ -180,22 +245,27 @@ def local_kit_defs():
 
     kit = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     # nodes.py 顶层 `import folder_paths` ⇒ 必须先把 ComfyUI 根目录放进 sys.path。
-    # 上溯找 folder_paths.py；再退到 COMFYUI_PATH；最后退到 Windows 常见安装位。
+    # 定位顺序（不开源硬编码任何本机路径）：
+    #   1) 装在 <ComfyUI>/custom_nodes/<本包>/ 下时，往上两级即 ComfyUI 根（自动）；
+    #   2) 装在别处时，用 COMFYUI_PATH 环境变量显式指定（与 review_050.py / 单测同约定）。
+    # ⚠ 不写死作者本机路径（如 I:\ComfyUI）——那会让别的用户误以为必须装在那里。
     cands = []
+    if os.environ.get("COMFYUI_PATH"):
+        cands.append(os.environ["COMFYUI_PATH"])
     d = kit
     for _ in range(4):
         d = os.path.dirname(d)
         cands.append(d)
-    if os.environ.get("COMFYUI_PATH"):
-        cands.insert(0, os.environ["COMFYUI_PATH"])
-    cands.append(r"I:\ComfyUI")
     for c in cands:
         if c and os.path.isfile(os.path.join(c, "folder_paths.py")):
             if c not in sys.path:
                 sys.path.insert(0, c)
             break
     else:
-        raise SystemExit("[FAIL] 找不到 ComfyUI 根目录（folder_paths.py）——用 COMFYUI_PATH 指定。")
+        raise SystemExit(
+            "[FAIL] 找不到 ComfyUI 根目录（folder_paths.py）。\n"
+            "       本包装在 <ComfyUI>/custom_nodes/ 下可自动定位；否则请设\n"
+            "       COMFYUI_PATH=/path/to/ComfyUI 再跑。")
     pkg = types.ModuleType("h3relay_kit_local")
     pkg.__path__ = [kit]
     sys.modules["h3relay_kit_local"] = pkg
@@ -277,21 +347,16 @@ class Graph:
         ]
 
         # ⚠ 输入槽位顺序必须与 ComfyUI 前端**保存**出来的格式一致，否则 links 的
-        #   目标下标会错位。实测（对比真实工作流文件）约定是：
+        #   目标下标会错位。约定（对比真实工作流文件实测）：
         #     先列所有「可连线」输入（required 再 optional，按 schema 顺序），
-        #     再列所有「widget」输入（同样 required 再 optional）。
-        #   V3 的 COMFY_AUTOGROW_V3 / COMFY_DYNAMICCOMBO_V3 属后者，但不带 widget 键。
-        linkable, widgety = [], []
-        for name, spec in all_inputs(d):
-            t = _ty(spec) or "*"
-            if t in WIDGET_TYPES:
-                widgety.append((name, spec, True))
-            elif t.startswith("COMFY_"):
-                widgety.append((name, spec, False))
-            else:
-                linkable.append((name, spec, False))
+        #     再列所有「widget」输入（同序，含动态 COMBO 展开出的子参数如 format.codec）。
+        #   widget 名由 ``iter_widget_inputs`` 推导（权威），动态 COMBO 也占槽且带标记。
+        witems = [(n, s) for n, s, p in iter_widget_inputs(d) if not p]  # 真实 widget（去伪槽）
+        widget_names = {n for n, _ in witems}
+        linkable = [(name, spec) for name, spec in all_inputs(d) if name not in widget_names]
 
-        for name, spec, is_widget in linkable + widgety:
+        for name, spec in linkable + witems:
+            is_widget = name in widget_names
             entry = {"name": name, "type": _ty(spec) or "*", "link": None}
             if is_widget:
                 entry["widget"] = {"name": name}
@@ -308,8 +373,13 @@ class Graph:
             entry["link"] = link
             node["inputs"].append(entry)
 
-        slots = widget_slots(d)
-        node["widgets_values"] = [values.get(s, default_value(d, s)) for s in slots] or None
+        # widgets_values：逐槽取「用户覆盖值 → 槽默认值」，含 control_after_generate 伪槽
+        # 与动态子参数（format.codec 等）。⚠ 动态 COMBO 的子参数结构按 schema **默认选中项**
+        # 展开；本示例图不覆盖 format/codec，故默认项即实际项。若将来要覆盖动态 COMBO 取值，
+        # 子参数默认也须按该取值展开（SaveVideo 各选项的 codec 子参数结构一致，无此问题）。
+        node["widgets_values"] = [
+            values.get(n, slot_default(d, n, spec)) for n, spec, _ in iter_widget_inputs(d)
+        ] or None
         self.nodes.append(node)
         return node
 
@@ -382,10 +452,15 @@ def validate(g, oi):
         #   是 tuple ⇒ 本包节点全部丢标记。这条判据就是那次事故的回归钉子。
         # ⚠ 这里**必须用 `spec_type_strict` 而不是 `_ty`**：两边共用 `_ty` 会自证式假绿
         #   （`_ty` 坏掉 ⇒ 期望集与实收集同时变空 ⇒ 恒相等）。见 `spec_type_strict` 注释。
-        want_w = [name for name, spec in all_inputs(d)
-                  if spec_type_strict(spec) in WIDGET_TYPES]
+        # 🔴 widget 标记（2026-09-19 新增，2026-09-19 修动态 COMBO）：前端把**没有 `widget`
+        #   标记**的输入渲染成空插槽（`nonWidgetedInputs()`），而 `onGraphConfigured` 只删不补
+        #   ⇒ 缺标记 = 每个 widget 在画布上多一个空圆点，且**不报任何错**。
+        #   want_w 用 ``widget_input_names``（= iter_widget_inputs 去伪槽），含动态 COMBO 展开出的
+        #   子参数（format.codec）；与生成器共用同一套推导，避免「白名单漏一项、want/got 一起漏」
+        #   的自证式假绿。got_w 取自实际 inputs 的 widget 标记，精确相等才算过。
+        want_w = widget_input_names(d)
         got_w = [i.get("name") for i in (n.get("inputs") or []) if i.get("widget")]
-        if got_w[:len(want_w)] != want_w:
+        if got_w != want_w:
             bad.append("%s 的 widget 标记与 schema 对不上：生成的是 %s，schema 推导是 %s"
                        "（缺标记的会被前端渲染成空插槽）"
                        % (n["type"], got_w or "（一个都没有）", want_w))

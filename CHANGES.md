@@ -60,6 +60,35 @@ if not isinstance(spec, list) or not spec:   # ← 旧实现
 >    比较恒相等 ⇒ 旧实现下依旧报 0 问题。改为独立的 `spec_type_strict()` 后才能真正失败。
 >    **判据不能与被判对象共用同一个函数。**
 
+### 🔴 示例模板修复（续）：动态 COMBO 子参数漏槽（SaveVideo 的 `format` / `codec`）
+
+> 与上一节同一类「白名单漏一项、`want`/`got` 一起漏」的自证式假绿；这里单独列，
+> 因为根因是**另一种** widget 类型没进白名单。
+
+**症状**：用旧版 `make_minimal_workflow.py` 生成的示例图，SaveVideo 节点的 `widgets_values`
+只有 **1 项**（`filename_prefix`），而 ComfyUI 前端实际要 **4 项**
+（`filename_prefix` / `format` / `format.codec` / `codec`）。槽位整体前移、文件能开能提交
+不报错——典型的「测试是虚假的」。
+
+**根因**：SaveVideo 的 `format` / `codec` 是 `COMBO_DYNAMICCOMBO_V3`（**动态 COMBO**），
+选中后会**派生子 widget**（如 `format=auto` → `format.codec`，插在父项之后）。旧代码的
+白名单 `WIDGET_TYPES = {INT, FLOAT, STRING, BOOLEAN, COMBO}` **不认动态 COMBO**
+⇒ 这类输入被整格跳过，且 `format.codec` 这种子参数根本不在 `/object_info` 顶层 schema 里
+（只在 `options[key].inputs` 中）⇒ 槽位彻底错位。
+
+**修法**：
+
+- 新增 `combo_default_key()`（取默认候选项 key，旧式选项数组 / 新式 `{"key",…}` 字典两种
+  声明都覆盖）与 `dynamic_subwidgets()`（按 `options[key].inputs` 展开子参数，required 在前
+  optional 在后，顺序与前端 `dynamicWidgets.ts` 一致）。
+- 生成器 `iter_widget_inputs()` / 体检器 `frontend_slots()` **共用同一套展开**，不再各写各的。
+- `local_kit_defs()` 不再写死作者本机路径 `I:\ComfyUI`——改为靠装在 `custom_nodes` 下自动
+  上溯，或 `COMFYUI_PATH` 显式指定（与 `review_050.py` / 单测同一约定），**不绑本地配置**。
+
+**验证**：重新生成的 `examples/minimal_relay_official.json` 中 SaveVideo 的 `inputs` 与
+`widgets_values` 与 5/6 份前端真实存档逐位一致（`format.codec` 顺序 = 父项 `format` 之后、
+`codec` 之前）；`tools/check_ui_workflow.py` 与 `tools/review_050.py` **I 段**均 0 问题。
+
 ### 🔴 新增节点：`H3RelayAudioSeam`（音频域——把音频缝从组装层搬进节点）
 
 **为什么搬**：音频接缝此前靠**组装层**（外部 ffmpeg）的 crossfade / room tone 头部补丁 /

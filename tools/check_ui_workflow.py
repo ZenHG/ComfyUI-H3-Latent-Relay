@@ -74,6 +74,42 @@ def _ty(spec):
     return "COMBO" if isinstance(spec[0], (list, tuple)) else spec[0]
 
 
+def combo_default_key(spec, preferred=None):
+    """取 COMBO / 动态 COMBO 的默认候选项 key（两种 options 声明都覆盖）。"""
+    t0 = spec[0] if isinstance(spec, (list, tuple)) and spec else None
+    extra = spec[1] if isinstance(spec, (list, tuple)) and len(spec) > 1 and isinstance(spec[1], dict) else {}
+    if isinstance(t0, (list, tuple)):
+        opts = t0
+    elif t0 in ("COMBO", "COMFY_DYNAMICCOMBO_V3"):
+        opts = extra.get("options") or []
+    else:
+        return ""
+    if not opts:
+        return ""
+    keys = [o.get("key") if isinstance(o, dict) else o for o in opts]
+    if preferred is not None and preferred in keys:
+        return preferred
+    first = opts[0]
+    return first.get("key") if isinstance(first, dict) else first
+
+
+def dynamic_subwidgets(spec, key):
+    """动态 COMBO 选中 ``key`` 后派生的子 widget：(子参数名, 子spec) 列表（req→opt）。"""
+    t0 = spec[0] if isinstance(spec, (list, tuple)) and spec else None
+    extra = spec[1] if isinstance(spec, (list, tuple)) and len(spec) > 1 and isinstance(spec[1], dict) else {}
+    if t0 not in ("COMBO", "COMFY_DYNAMICCOMBO_V3"):
+        return []
+    opt = next((o for o in (extra.get("options") or []) if o.get("key") == key), None)
+    if not opt:
+        return []
+    subs = []
+    for sec in ("required", "optional"):
+        for sk, sv in ((opt.get("inputs") or {}).get(sec) or {}).items():
+            subs.append((sk, sv))
+    return subs
+
+
+
 def spec_of(defn, name):
     for sec in ("required", "optional"):
         if name in (defn.get("input", {}).get(sec) or {}):
@@ -82,16 +118,26 @@ def spec_of(defn, name):
 
 
 def frontend_slots(defn) -> list:
-    """推算前端实际槽位顺序（含 control_after_generate 注入）。"""
+    """推算前端实际槽位顺序（含 control_after_generate 注入与动态 COMBO 子参数）。
+
+    🔴 2026-09-19 修复：原实现只认 ``WIDGET_TYPES``，把 ``COMFY_DYNAMICCOMBO_V3``
+    （动态 COMBO，如 SaveVideo 的 ``format``/``codec``）当普通连线 ⇒ 漏掉
+    ``format``/``format.codec``/``codec`` 三格，把正确文件反判成「widgets_values 多 3 项」。
+    必须与 ``examples/make_minimal_workflow.py`` 的 ``iter_widget_inputs`` 用同一套展开算法。
+    """
     out = []
     for sec in ("required", "optional"):
         for name, spec in (defn.get("input", {}).get(sec) or {}).items():
-            if _ty(spec) not in WIDGET_TYPES:
-                continue
-            out.append(name)
-            extra = spec[1] if len(spec) > 1 and isinstance(spec[1], dict) else {}
-            if extra.get("control_after_generate"):
-                out.append("control_after_generate")
+            t = _ty(spec)
+            if t in WIDGET_TYPES:
+                out.append(name)
+                extra = spec[1] if len(spec) > 1 and isinstance(spec[1], dict) else {}
+                if extra.get("control_after_generate"):
+                    out.append("control_after_generate")
+            elif t == "COMFY_DYNAMICCOMBO_V3":
+                out.append(name)
+                for sub, _ in dynamic_subwidgets(spec, combo_default_key(spec)):
+                    out.append("%s.%s" % (name, sub))
     return out
 
 

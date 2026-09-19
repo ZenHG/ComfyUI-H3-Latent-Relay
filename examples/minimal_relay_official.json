@@ -232,7 +232,7 @@
       "title": "① 段号：第 1 段填 0，第 2 段填 1",
       "widgets_values": [
         0,
-        null
+        "fixed"
       ]
     },
     {
@@ -590,7 +590,7 @@
       "title": "② 采样：seed / steps 在这里",
       "widgets_values": [
         88300001,
-        null,
+        "fixed",
         6,
         1.0,
         "euler",
@@ -1390,12 +1390,26 @@
         {
           "name": "format",
           "type": "COMFY_DYNAMICCOMBO_V3",
-          "link": null
+          "link": null,
+          "widget": {
+            "name": "format"
+          }
+        },
+        {
+          "name": "format.codec",
+          "type": "COMFY_DYNAMICCOMBO_V3",
+          "link": null,
+          "widget": {
+            "name": "format.codec"
+          }
         },
         {
           "name": "codec",
           "type": "COMFY_DYNAMICCOMBO_V3",
-          "link": null
+          "link": null,
+          "widget": {
+            "name": "codec"
+          }
         }
       ],
       "outputs": [
@@ -1409,7 +1423,10 @@
         "Node name for S&R": "SaveVideo"
       },
       "widgets_values": [
-        "video/H3_relay_demo"
+        "video/H3_relay_demo",
+        "auto",
+        "auto",
+        "auto"
       ]
     },
     {
