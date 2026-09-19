@@ -653,6 +653,20 @@ ck("K14b 去 priming 抬升交叉窗最静点（编码器 33ms 静音被丢掉�
    "去priming %.5f vs 不去 %.5f" % (_rq, _rn))
 
 
+# K15 —— 2026-09-19 深夜：mask_mode 生产/对照/实验分型（防产线再误跑）
+_mm = N.H3RelayCopyBridge.INPUT_TYPES()["optional"]["mask_mode"]
+_tt = _mm[1]["tooltip"]
+ck("K15 mask_mode 分型写进 tooltip（生产/对照/实验三档 + ramp 等同实测结论）",
+   "生产档" in _tt and "对照档" in _tt and "实验档" in _tt
+   and "0.0407 vs 0.0402" in _tt
+   and _mm[0] == ["hard", "taper", "ramp", "blend"]          # 枚举顺序不变（保护 widgets_values）
+   and _mm[1]["default"] == "hard")
+_opt_cb = N.H3RelayCopyBridge.INPUT_TYPES()["optional"]
+ck("K15b 掩码族专属参数全部带档位标签",
+   all("taper 专属" in _opt_cb[k][1]["tooltip"] for k in ("taper_tokens", "seam_min"))
+   and all("ramp 专属" in _opt_cb[k][1]["tooltip"] for k in ("ramp_top", "ramp_tokens"))
+   and all("blend 专属" in _opt_cb[k][1]["tooltip"] for k in ("blend_top", "blend_tokens")))
+
 # K8 —— 2026-09-19 参数收口：组 2/3 的作用帧数归 `head_zone_frames`。
 #   事故背景：组 2（色档对齐）与组 3（高频补）的四个强度旋钮，作用区长度一直**偷偷借**
 #   组 4 的 `settle_sharpen_frames`（名字叫「糊区锐化帧数」）⇒ UI 上看不出谁管作用区。

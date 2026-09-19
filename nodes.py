@@ -826,25 +826,26 @@ class H3RelayCopyBridge:
             "optional": {
                 "mask_mode": (["hard", "taper", "ramp", "blend"], {
                     "default": "hard",
-                    "tooltip": "掩码语义：每步输出 = 模型生成 * m + 上段尾 * (1-m)。**m=0 才钉住，m=1 是重绘。**\n"
-                               "hard = 全窗 m=0（钉住区零重绘，默认，真续接用这个）；\n"
-                               "taper = 头部 m=1.0（**完全重绘**）线性降到缝端 seam_min\n"
-                               "        —— ⚠ **钉住区实际上没有被钉住**，只是给模型一个软提示；\n"
-                               "        seam_min=0.3 意味着连缝端都留 30% 重绘。\n"
-                               "        仅用于「渐进接管」对照实验；期望真续接请保持 hard。\n"
-                               "ramp = 0.4.3 噪声斜坡（软证据）：远端 m=0 硬钉 → 缝端线性升到\n"
-                               "        ramp_top；原生契约把连续 m 当逐 token sigma 标签\n"
-                               "        （sigma_row = m * sigma_video），缝侧轻度 harmonize、\n"
-                               "        每一步仍被 (1-m) 锚回拷贝尾——治硬接缝的色档/曝光台阶。\n"
-                               "        与 taper 相反：ramp 全程有锚，taper 头部无锚。",
+                    "tooltip": "【分型】🟢 生产档：hard（真续接唯一推荐，保持默认）｜🟡 对照档：ramp｜🔴 实验档：taper / blend\n"
+                               "掩码语义：每步输出 = 模型生成 * m + 上段尾 * (1-m)。**m=0 才钉住，m=1 是重绘。**\n"
+                               "🟢 hard = 全窗 m=0（钉住区零重绘）——真续接请保持它，下面的都不用看；\n"
+                               "🟡 ramp = 0.4.3 噪声斜坡（软证据）：远端 m=0 硬钉 → 缝端线性升到 ramp_top；\n"
+                               "        原生契约把连续 m 当逐 token sigma 标签（sigma_row = m * sigma_video），\n"
+                               "        缝侧轻度 harmonize、每步仍被 (1-m) 锚回拷贝尾。**对照档理由**：\n"
+                               "        copy 桥实测与 hard **三项完全等同**（缝阶跃 0.0407 vs 0.0402）⇒ 无增益；\n"
+                               "        cond 桥缝阶跃 0.0007 本就无可感靶。仅复现 0.4.3 行为时用。\n"
+                               "🔴 taper = 头部 m=1.0（**完全重绘**）线性降到缝端 seam_min ——\n"
+                               "        ⚠ **钉住区实际没有被钉住**，只是软提示；仅「渐进接管」对照实验。\n"
+                               "🔴 blend = 重叠区双向窗形融合（ramp 的窗形版，FlowLong 式 Hamming 混合）——\n"
+                               "        与 ramp 同语义不同曲线；同样仅对照实验。",
                 }),
                 "taper_tokens": ("INT", {"advanced": True, 
                     "default": 4, "min": 1, "max": 12, "step": 1,
-                    "tooltip": "仅 taper 模式：缝端前多少个 token 参与线性过渡。",
+                    "tooltip": "【🔴 实验档 taper 专属】缝端前多少个 token 参与线性过渡。",
                 }),
                 "seam_min": ("FLOAT", {"advanced": True, 
                     "default": 0.10, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "仅 taper 模式：缝端掩码下限（m 值）。\n"
+                    "tooltip": "【🔴 实验档 taper 专属】缝端掩码下限（m 值）。\n"
                                "0 = 缝端完全硬锁；>0 表示缝端仍留同等比例的重绘自由度\n"
                                "（0.3 即缝端 30% 重绘）。注意它只管缝端——头部恒为 1.0 全重绘。",
                 }),
@@ -855,13 +856,13 @@ class H3RelayCopyBridge:
                 }),
                 "ramp_top": ("FLOAT", {"advanced": True, 
                     "default": 0.25, "min": 0.0, "max": 0.95, "step": 0.05,
-                    "tooltip": "仅 ramp 模式：缝端最大 m（= 该 token 参与去噪的 sigma 比例）。\n"
+                    "tooltip": "【🟡 对照档 ramp 专属】缝端最大 m（= 该 token 参与去噪的 sigma 比例）。\n"
                                "0 = 退化为 hard；0.25 默认 = 缝端 25% 强度 harmonize；\n"
                                ">0.5 起锚定明显变弱，接近 taper 的行为，慎用。",
                 }),
                 "ramp_tokens": ("INT", {"advanced": True, 
                     "default": 0, "min": 0, "max": 12, "step": 1,
-                    "tooltip": "仅 ramp 模式：参与斜坡的缝端 token 数；0 = 整个拷贝窗铺开。\n"
+                    "tooltip": "【🟡 对照档 ramp 专属】参与斜坡的缝端 token 数；0 = 整个拷贝窗铺开。\n"
                                "小值（如 2~3）= 「只松缝、锁运动」的窄斜坡。",
                 }),
                 "anchor_latent": ("LATENT", {
@@ -885,12 +886,12 @@ class H3RelayCopyBridge:
                 #   ⚠ 本节点**无存量 UI 工作流**引用（已核），故新 widget 可紧邻同族项放。
                 "blend_top": ("FLOAT", {"advanced": True, 
                     "default": 0.50, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "【仅 blend 模式】缝端**模型占比**上限（对应 ramp 的 ramp_top）。\n"
+                    "tooltip": "【🔴 实验档 blend 专属】缝端**模型占比**上限（对应 ramp 的 ramp_top）。\n"
                                "0 = 退化成 hard；越大越信任本段自己的预测。建议 0.5 起试。",
                 }),
                 "blend_tokens": ("INT", {"advanced": True, 
                     "default": 0, "min": 0, "max": 12, "step": 1,
-                    "tooltip": "【仅 blend 模式】参与融合的缝端 token 数；0 = 整个拷贝窗铺开。\n"
+                    "tooltip": "【🔴 实验档 blend 专属】参与融合的缝端 token 数；0 = 整个拷贝窗铺开。\n"
                                "小值（2~3）= 「只融缝、锁运动」。",
                 }),
                 "blend_shape": (list(CORE.BLEND_SHAPES), {"advanced": True, 
