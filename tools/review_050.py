@@ -569,6 +569,48 @@ ck("K7 统计量取紧贴缝那帧 ⇒ 首帧落到 guide；旧口径会推过 g
 ck("K7b H3RelayPost 新 widget match_prev_stats_frames 默认 1（修正后口径）",
    N.H3RelayPost.INPUT_TYPES()["optional"]["match_prev_stats_frames"][1]["default"] == 1)
 
+# K8 —— 2026-09-19 参数收口：组 2/3 的作用帧数归 `head_zone_frames`。
+#   事故背景：组 2（色档对齐）与组 3（高频补）的四个强度旋钮，作用区长度一直**偷偷借**
+#   组 4 的 `settle_sharpen_frames`（名字叫「糊区锐化帧数」）⇒ UI 上看不出谁管作用区。
+#   本钉子锁两件事：① 作用区确实跟着 head_zone_frames 走；② 报告里把帧数显式写出来。
+_hi = _T.cat([_T.full((24, 8, 8, 3), 0.20), _T.full((40, 8, 8, 3), 0.70)], 0)
+_A8, _repA8 = N.H3RelayPost().apply(_hi, None, hist_match=1.0,
+                                    head_zone_frames=4, settle_sharpen_frames=20)
+_B8, _ = N.H3RelayPost().apply(_hi, None, hist_match=1.0,
+                               head_zone_frames=20, settle_sharpen_frames=4)
+print("      head_zone_frames=4 → 前 4 帧 %s，第 5 帧起逐位不动 %s｜=20 → 第 4–19 帧被改 %s"
+      % ("动了" if not _T.equal(_A8[:4], _hi[:4]) else "没动",
+         _T.equal(_A8[4:], _hi[4:]),
+         not _T.equal(_B8[4:20], _hi[4:20])))
+ck("K8 组 2/3 的作用帧数跟着 head_zone_frames（不再偷用 settle_sharpen_frames）+ 报告写明帧数",
+   not _T.equal(_A8[:4], _hi[:4]) and _T.equal(_A8[4:], _hi[4:])
+   and not _T.equal(_B8[4:20], _hi[4:20]) and "前 4 帧" in _repA8,
+   "窗口 = 4 时窗口外逐位不变")
+ck("K8b head_zone_frames 已注册且默认 24（与旧的 settle_sharpen_frames 默认同值 ⇒ 未设值的图行为不变）",
+   N.H3RelayPost.INPUT_TYPES()["optional"]["head_zone_frames"][1]["default"] == 24)
+
+# K9 —— 2026-09-19 节点 UI 收口：`advanced: True` 只收「细分/护栏」，**主强度旋钮必须留在画布上**。
+#   官方机制（`comfy_extras/nodes_model_advanced.py` 同款）：advanced widget 默认不渲染，
+#   收进节点底部展开区 / 右栏 “Advanced Inputs”。它**不改**取值位置与默认值。
+#   前后端依据：前端 `GraphView` 判 `widget.options.advanced`；节点 resize 宽有 225px 死下限、
+#   高不能小于内容行数 ⇒ 少渲染几行 = 节点能变小。
+_itT9 = N.H3RelayTrimAV.INPUT_TYPES()
+_itP9 = N.H3RelayPost.INPUT_TYPES()["optional"]
+_adv_T = [k for k, v in _itT9["optional"].items() if v[1].get("advanced")]
+_adv_P = [k for k, v in _itP9.items() if v[1].get("advanced")]
+_keep_T = ["trim_frames", "fps", "audio", "settle_frames"]
+_keep_P = ["match_prev", "lowfreq_pull", "hist_match", "wb_match",
+           "deconv_strength", "detail_borrow", "settle_sharpen", "head_zone_frames"]
+_must_T = ["hist_match", "wb_match", "deconv_strength", "detail_borrow",
+           "lowfreq_pull", "match_prev", "seam_ghost"]
+_must_P = ["match_prev_frames", "lowfreq_frames", "deconv_radius",
+           "detail_blur", "settle_sharpen_frames", "match_prev_stats_frames"]
+print("      裁重叠：画布留 %s ／ 折叠 %d 项；后处理：画布留 %d 项 ／ 折叠 %d 项"
+      % (_keep_T, len(_adv_T), len(_keep_P), len(_adv_P)))
+ck("K9 advanced 标记方向正确（主旋钮留在画布上、细分与护栏项折叠）",
+   all(k not in _adv_T for k in _keep_T) and all(k in _adv_T for k in _must_T)
+   and all(k not in _adv_P for k in _keep_P) and all(k in _adv_P for k in _must_P))
+
 print("=" * 78)
 print("L. 音频缝节点（0.5.0 新增：音频域必须由**节点**实现，不靠组装层 ffmpeg）")
 print("=" * 78)

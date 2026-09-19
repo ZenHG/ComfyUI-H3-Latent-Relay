@@ -5,6 +5,102 @@
 > 本版为**节点重构版**：拆出 `H3RelayPost`（画质域后处理独立成节点），新增
 > `H3RelayAudioSeam`（音频域），并补齐调研文档 §2/§4 两个方向。
 
+### 🔴 节点 UI 收口 + 参数收口 + 体检器补盲点（2026-09-19 夜）
+
+#### ① 画布 UI 收口：39 个旋钮标 `advanced: True`
+
+**症状**：节点在画布上「有点大」，**能放大、不能缩小**。
+
+**根因**（前端源码判据，非推测）：Vue 节点模式的 resize 是**硬夹取** ——
+`GraphView-*.js` 的 `useNodeResize` 回调里 `Math.max(node.size.width, 225)`（**宽有 225px 死下限**），
+高度则不能小于**内容高度**（由 widget 行数决定）。⇒ 节点下限 = 内容行数，
+**只有少渲染几行才降得下来**。
+
+**修法**（官方机制，不是自创）：在 `INPUT_TYPES` 的选项字典里加 `{"advanced": True}`。
+前端读 `widget.options.advanced`：为真则该 widget **默认不进画布渲染**，收进节点底部的
+「advanced inputs」展开区，并出现在右栏 “Advanced Inputs” 分组。官方
+`comfy_extras/nodes_model_advanced.py` 就是这么用（`"zsnr": ("BOOLEAN", {"default": False, "advanced": True})`）。
+
+**明确不改**：widget **顺序**、`widgets_values` 的**逐位取值**、默认值、API 提交
+（API 格式按输入名传参，与画布显示无关）。⇒ 存档图、产线 API 图**都不受影响**。
+
+| 节点 | 画布上保留 | 折进 advanced |
+|---|---|---|
+| `H3RelayTrimAV` | `trim_frames` / `fps` / `settle_frames` | 17 项（15 个画质域旋钮 + `seam_ghost` / `seam_ghost_alpha`） |
+| `H3RelayPost` | 8 个**主强度**旋钮（match_prev / lowfreq_pull / hist_match / wb_match / deconv_strength / detail_borrow / settle_sharpen / head_zone_frames） | 9 项细分与护栏（*_frames / *_gain_max / *_offset_max / stats_frames / *_blur / radius） |
+| `H3RelayCopyBridge` | `context_frames` / `mask_mode` / `pin_audio` | 7 项模式专属参数（taper/ramp/blend 三族） |
+| `H3RelayMotionContext` | `trim_frames` / `run_id` / `stage_index` | `audio_frames` / `anchor_stage` / `anchor_frames` |
+| `H3RelayAudioSeam` | `patch_seconds` / `fade_seconds` | `tile_seconds` / `bed_stage` / `note` |
+
+想看全部旋钮三种办法：节点底部「advanced inputs」展开；右栏 **Advanced Inputs** 分组；
+或全局设置 `Comfy.Node.AlwaysShowAdvancedWidgets`（默认关）。
+
+#### ② 参数收口：`H3RelayPost` 新增 `head_zone_frames`
+
+**问题**：`H3RelayPost` 组 2（段内色档对齐：直方图 / 白平衡）与组 3（补高频：反卷积 / 段体高频迁移）
+的**四个强度旋钮**，它们的作用区长度一直**借**的是组 4 的 `settle_sharpen_frames`
+—— 名字叫「糊区锐化帧数」，用户在 UI 上根本看不出这四个的「作用多少帧」受谁管。
+
+**修法**：新增 widget `head_zone_frames`（默认 **24**，与 `settle_sharpen_frames` 默认同值
+⇒ 没显式设过值的图**行为逐位不变**），组 2/组 3 四项改用它；`settle_sharpen_frames` 只管组 4
+（tooltip 已写明）；报告行逐项打印实际帧数（例：「直方图匹配 0.50（段头↔段体，前 24 帧）」）。
+
+**为什么这一次可以「就地插入」而不是追加末位**（本仓铁律是只追加）：
+先全扫 `I:\ComfyUI\user`（工作流 + 产线图）确认**零存量图含 `H3RelayPost`** —— 该节点 0.5.0 才出生、
+示例图由生成器一条命令重建 ⇒ 就地插入不会撞任何存档的取值位置。**这条例外只对本节点成立。**
+
+#### ③ 口径补正：`prev_tail` 在 cond 桥下**不是**上段末帧（nodes.py 漏补的那半）
+
+`prev_tail = images[pin-1]`。**拷贝桥**下前 `pin` 帧是逐位拷贝的上段尾 ⇒ 它**就是**上段末帧；
+**Latent 桥（cond）**下前 `pin` 帧是**本段重画**的 ⇒ 只是**近似**（2026-09-17 实测代理误差
+**0.006**，比它要修的缝阶跃 **0.0007** 还大 8 倍）⇒ **对错参照，越对齐越糟**。
+README §552–555 当时已补，但 `nodes.py` 的类 docstring / `guide` 槽 / `lowfreq_pull` 槽三处仍写死
+「= 上一段末帧」。本次补齐（**纯注释与 tooltip，零逻辑改动**）。
+
+#### ④ 体检器 `tools/check_ui_workflow.py`：本地定义优先 + 补一个真盲点
+
+**本地定义优先**（与生成器同一条教训）：本包 8 个节点改为**现读包内 `nodes.py` 的 `INPUT_TYPES()`**，
+服务端只用来取非本包节点（官方/第三方）的 schema。理由：只看服务端的话，
+**一个还没重启的后端会让体检器拿旧 schema 去判新文件** ⇒ 误报，甚至「自证式假绿」
+（0.5.0 复查抓到的两处假绿，根子都是校验器与被校验物共用同一份过期依据）。
+另外会把「服务端加载的定义 vs 代码里的定义」的差异**直接报出来**（提示该重启后端），
+服务端不可达时**不致命**：本包节点照查，非本包节点那部分明确标注「未查」。
+
+**补盲点（新发现的假绿）**：原实现只查「`widgets_values` **多了**」+「逐位取值类型/范围」，
+比槽位**短**时**一路静默放行** —— 而 0.5.0 那次事故（`SaveVideo` 只写 1 格、实际要 4 格）
+正是这一类的镜像。现在按 schema 扣掉「被连线转成输入口的 widget」（连线后值走 link、
+序列化里不再占槽）后比长度，缺项**记 warn 并点名**缺哪个：
+`node 14 H3RelayPost: widgets_values 只有 16 项、schema 推导要 17 项（缺 match_prev_stats_frames）`。
+判 **warn 不判硬错**是有意的：文件侧无法 100% 分辨「该有的少了」与「前端没序列化」，误杀比漏报更坏。
+
+#### ⑤ README 重排：安装 / 用法前置，原理后置
+
+原来是「先讲原理、`安装` 一节排在 628 行」——开源用户打开 README 第一屏看不到怎么装。
+现在结构：
+
+1. 定位 → **它解决什么问题**
+2. **用法区**（前六节）：`🚀 安装（2 分钟）` → `🚀 5 分钟跑通` → `节点` → `接线`（含 `advanced` 折叠说明、
+   第三方出词接法、拷贝桥接法、显式接「Latent 读」）→ `🔗 Chain 自动连跑` → `参数` → `排障` →
+   `工作流文件自检` → `离线自测`
+3. 分隔线 → **# 🧠 原理与机制（进阶 · 不看也能把片子跑出来）**：两条路线怎么选 / 协议出处 /
+   与像素续接的关系 / 时序网格 / 为什么必须裁头 / 裁多少帧 / 接缝处出词与音频纪律 /
+   运行时契约 / 音频窗口径 / 许可与出处
+
+顺带**去重与同步**：删掉「接线」里那个只剩指针的 `### 可选：Chain 自动连跑`（正文另有一节）；
+标题去掉 `（0.2.0 新增）` 这类版本噪声；`check_ui_workflow.py` 那节的「需要 ComfyUI 正在运行」
+改成新的两源口径（本包节点本地定义优先、服务端不可达不致命）；旋钮计数 16 → 17 同步。
+
+#### ⑥ 自检与钉子（都验过「能失败」）
+
+| 项 | 结果 |
+|---|---|
+| `tests/test_relay_core.py` | **257 / 0** |
+| `tools/review_050.py` | **65 / 0**（新增 K8 / K8b / K9） |
+| `tools/check_ui_workflow.py examples/minimal_relay_official.json` | 有问题 **0** 个 |
+| K8 反证 | 把 `head_zone_frames` 换回 `settle_sharpen_frames` → **64 / 1** |
+| K9 反证 | 摘掉 TrimAV 的 `seam_ghost` 标记 → **64 / 1** |
+| 体检器少写盲点 反证 | 把示例图 Post 的 `widgets_values` 砍掉末位 → 报出缺 `match_prev_stats_frames` |
+
 ### 🔴 示例模板修复：生成的节点长出一排空插槽（2026-09-19，面向普通用户）
 
 **症状**：打开 `examples/minimal_relay_official.json`，本包的节点会显示**一排空的输入圆点**

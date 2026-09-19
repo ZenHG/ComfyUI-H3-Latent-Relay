@@ -30,18 +30,27 @@ ComfyUI 前端的 widget 列表 ≠ 节点 ``INPUT_TYPES`` 里声明的 widget �
     python check_ui_workflow.py path/to/workflow.json [更多路径...]
     python check_ui_workflow.py --all --comfyui /path/to/ComfyUI
 
-需要一个**正在运行**的 ComfyUI（用来取 ``/object_info`` 的真实 schema）；
-用 ``--comfyui`` 或环境变量 ``COMFYUI_PATH`` 指定 ComfyUI 根目录，
-不指定时按本脚本位置自动上溯（本包装在 ``<ComfyUI>/custom_nodes/`` 下时可用）。
+【schema 从哪来（2026-09-19 改：**本包节点用本地定义**）】
+  * **本包的 8 个节点** → 现读包内 ``nodes.py`` 的 ``INPUT_TYPES()``（**本地定义优先**）；
+  * **其余节点**（官方 / 第三方）→ 服务端 ``/object_info``。
+
+🔴 为什么必须这样：只看服务端的话，**一个还没重启的后端会让本体检器拿旧 schema 去判新文件**
+——轻则误报，重则「自证式假绿」（0.5.0 复查就是栽在这类同源缺陷上：生成器与体检器
+双双用着同一份过期/有缺陷的白名单，两边一起错、对比永远"通过"）。
+本包节点本来就跑在这份代码里 ⇒ **代码才是权威**；服务端只用来取非本包节点的 schema。
+另外会把「服务端定义 vs 本地定义」的差异直接报出来（提示该重启后端了）。
+服务端连不上时**不致命**：本包节点照样用本地定义校验，非本包节点那部分会明确标注「未查」。
 """
 from __future__ import annotations
 
 import argparse
 import glob
+import importlib.util
 import io
 import json
 import os
 import sys
+import types
 import urllib.request
 
 DEFAULT_API = "http://127.0.0.1:8188"
@@ -65,6 +74,87 @@ def guess_comfyui_root() -> str:
 
 def load_object_info(api: str) -> dict:
     return json.loads(urllib.request.urlopen(f"{api}/object_info", timeout=180).read().decode("utf-8"))
+
+
+def try_object_info(api: str):
+    """取服务端 schema；取不到**不算致命**（还有本地定义可用）。返回 (oi or None, 错误文本)。"""
+    try:
+        return load_object_info(api), ""
+    except Exception as e:                                    # noqa: BLE001
+        return None, repr(e)
+
+
+def pack_root() -> str:
+    """本包根目录（本脚本在 <包>/tools/ 下）。"""
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def local_pack_defs(comfyui_root: str = "") -> dict:
+    """从**包内 nodes.py** 现读本包 8 个节点的 schema（不依赖服务端）。
+
+    🔴 为什么（2026-09-19，与生成器同一条教训）：只看服务端的话，**一个还没重启的后端
+    会让体检器拿旧 schema 去判新文件** —— 轻则误报，重则「自证式假绿」
+    （0.5.0 复查抓到的两处假绿，根子都是校验器与被校验物共用同一份过期依据）。
+    本包节点本来就跑在这份代码里 ⇒ **代码才是权威**；服务端只用来取非本包节点的 schema。
+
+    取不到就返回 ``{}``（服务端仍可独立工作），不抛异常——这是**体检**工具，不该因环境缺件而中断。
+    """
+    import importlib.util
+    import types
+
+    kit = pack_root()
+    cands = []
+    if comfyui_root:
+        cands.append(comfyui_root)
+    if os.environ.get("COMFYUI_PATH"):
+        cands.append(os.environ["COMFYUI_PATH"])
+    d = kit
+    for _ in range(4):                # 装在 <ComfyUI>/custom_nodes/<本包>/ 时往上找 folder_paths.py
+        d = os.path.dirname(d)
+        cands.append(d)
+    for c in cands:
+        if c and os.path.isfile(os.path.join(c, "folder_paths.py")):
+            if c not in sys.path:
+                sys.path.insert(0, c)
+            break
+    else:
+        return {}
+    try:
+        pkg = types.ModuleType("h3relay_kit_local_check")
+        pkg.__path__ = [kit]
+        sys.modules["h3relay_kit_local_check"] = pkg
+        spec = importlib.util.spec_from_file_location("h3relay_kit_local_check.nodes",
+                                                      os.path.join(kit, "nodes.py"))
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["h3relay_kit_local_check.nodes"] = mod
+        spec.loader.exec_module(mod)
+    except Exception as e:                                    # noqa: BLE001
+        print("  ⚠ 读不到本包本地定义（%r）⇒ 本包节点将退回服务端 schema。" % (e,))
+        return {}
+    out = {}
+    for name, cls in mod.NODE_CLASS_MAPPINGS.items():
+        it = cls.INPUT_TYPES()
+        out[name] = {
+            "input": {"required": dict(it.get("required") or {}),
+                      "optional": dict(it.get("optional") or {})},
+            "output": list(cls.RETURN_TYPES),
+            "output_name": list(getattr(cls, "RETURN_NAMES", cls.RETURN_TYPES)),
+        }
+    return out
+
+
+def merge_defs(oi: dict, local: dict) -> list:
+    """本包节点用**本地**定义覆盖服务端，并报出服务端是否过期（过期 = 该重启后端了）。"""
+    stale = []
+    for name, d in local.items():
+        srv = oi.get(name)
+        if srv is None:
+            stale.append("%s（服务端没有）" % name)
+        elif (list(srv.get("output") or []) != d["output"]
+              or set((srv.get("input") or {}).get("optional") or {}) != set(d["input"]["optional"])):
+            stale.append("%s（服务端定义过期）" % name)
+    oi.update(local)
+    return stale
 
 
 def _ty(spec):
@@ -223,7 +313,8 @@ def check_file(path: str, oi: dict, verbose: bool = True) -> int:
             continue
         defn = oi.get(n.get("type"))
         if defn is None:
-            warns.append("node %s 类型 %s 服务端没有（前端虚拟节点或未装该包）"
+            warns.append("node %s 类型 %s 本地与服务端都没有（本包只提供自己的 8 个节点；"
+                         "这类多半是前端虚拟节点或未装该包）"
                          % (n["id"], n.get("type")))
             continue
         # 🔴 标记检查必须在 widgets_values 的 null 判定**之前**做：
@@ -253,6 +344,26 @@ def check_file(path: str, oi: dict, verbose: bool = True) -> int:
                     "node %s %s: widgets_values 比前端槽位多 %d 项（尾部 %s）—— "
                     "若不是 upload/DOM 面板，就是多写了"
                     % (n["id"], n["type"], len(wv) - len(exp), tail or "未知"))
+
+        # 🔴 2026-09-19 补：**少写**方向的盲点。
+        #   原实现只查「多了」+「逐位取值」，`widgets_values` 比槽位**短**时一路静默放行
+        #   ——而 0.5.0 那次事故（SaveVideo 只写 1 格、实际要 4 格）正是这一类的镜像。
+        #   判据要先扣掉**被转成输入口的 widget**（连线后值走 link、序列化里不再占槽），
+        #   否则会把正常图误判成缺项。缺项一律记 **warn 而非硬错**：我们无法从文件侧
+        #   100% 分辨「该有的少了」与「前端没序列化」，误杀比漏报更坏（本仓纪律）。
+        _linked = set()
+        for _i in (n.get("inputs") or []):
+            if isinstance(_i, dict) and isinstance(_i.get("widget"), dict) \
+                    and _i.get("link") is not None:
+                _linked.add(_i["widget"].get("name"))
+        _exp2 = [k for k in exp if k not in _linked]
+        if len(wv) < len(_exp2):
+            warns.append(
+                "node %s %s: widgets_values 只有 %d 项、schema 推导要 %d 项"
+                "（缺 %s）——若这些 widget 被连线转成了输入口则正常；"
+                "否则末位旋钮会静默回落到默认值"
+                % (n["id"], n["type"], len(wv), len(_exp2),
+                   "、".join(_exp2[len(wv):]) or "?"))
 
     if verbose or problems or warns:
         print("")
@@ -285,18 +396,30 @@ def main():
     root = a.comfyui or guess_comfyui_root()
     wf_dir = os.path.join(root, "user", "default", "workflows") if root else ""
 
+    local = local_pack_defs(root)                 # 本包 8 个节点：代码才是权威
+    oi_srv, srv_err = try_object_info(a.api.rstrip("/"))
+
     print("=" * 100)
     print("ComfyUI UI 工作流 · widget 槽位校验")
-    print("  schema 来源：%s/object_info" % a.api.rstrip("/"))
+    print("  schema 来源：本包节点 = 本地 nodes.py（%d 个）；其余节点 = %s/object_info"
+          % (len(local), a.api.rstrip("/")))
     print("  工作流目录：%s" % (wf_dir or "(未定位，请用 --all 时指定 --comfyui)"))
     print("=" * 100)
 
-    try:
-        oi = load_object_info(a.api.rstrip("/"))
-    except Exception as e:
-        print("\n[FAIL] 取不到 object_info：%r" % (e,))
+    if oi_srv is None and not local:
+        print("\n[FAIL] 服务端取不到 object_info（%s），也读不到本包本地定义。" % srv_err)
         print("       请先启动 ComfyUI，或用 --api 指定地址。")
         return 2
+
+    oi = dict(oi_srv or {})
+    if oi_srv is None:
+        print("\n⚠ 服务端不可达（%s）——**非本包节点这一部分未查**；"
+              "本包节点仍按本地定义校验。" % srv_err)
+    if local:
+        _stale = merge_defs(oi, local)
+        if _stale:
+            print("⚠ 服务端加载的本包节点与代码不一致：%s" % "；".join(_stale))
+            print("   → 现在校验用的是**代码里的新定义**（正确）；要让 ComfyUI 真跑起来需重启后端。")
 
     if a.all:
         if not wf_dir or not os.path.isdir(wf_dir):
