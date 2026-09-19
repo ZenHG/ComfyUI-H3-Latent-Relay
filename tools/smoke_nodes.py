@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 ComfyUI-H3-Relay-Kit contributors
-"""节点层功能冒烟：**真调用** 8 个节点的方法，逐个断言。
+"""节点层功能冒烟：**真调用** 7 个节点的方法，逐个断言。
 
 【补的是哪一层】
 `tests/test_relay_core.py` 测的是 `relay_core`（纯张量算法层），

@@ -31,7 +31,7 @@ ComfyUI 前端的 widget 列表 ≠ 节点 ``INPUT_TYPES`` 里声明的 widget �
     python check_ui_workflow.py --all --comfyui /path/to/ComfyUI
 
 【schema 从哪来（2026-09-19 改：**本包节点用本地定义**）】
-  * **本包的 8 个节点** → 现读包内 ``nodes.py`` 的 ``INPUT_TYPES()``（**本地定义优先**）；
+  * **本包的 7 个节点** → 现读包内 ``nodes.py`` 的 ``INPUT_TYPES()``（**本地定义优先**）；
   * **其余节点**（官方 / 第三方）→ 服务端 ``/object_info``。
 
 🔴 为什么必须这样：只看服务端的话，**一个还没重启的后端会让本体检器拿旧 schema 去判新文件**
@@ -93,7 +93,7 @@ def pack_root() -> str:
 
 
 def local_pack_defs(comfyui_root: str = "") -> dict:
-    """从**包内 nodes.py** 现读本包 8 个节点的 schema（不依赖服务端）。
+    """从**包内 nodes.py** 现读本包 7 个节点的 schema（不依赖服务端）。
 
     🔴 为什么（2026-09-19，与生成器同一条教训）：只看服务端的话，**一个还没重启的后端
     会让体检器拿旧 schema 去判新文件** —— 轻则误报，重则「自证式假绿」
@@ -316,7 +316,7 @@ def check_file(path: str, oi: dict, verbose: bool = True) -> int:
             continue
         defn = oi.get(n.get("type"))
         if defn is None:
-            warns.append("node %s 类型 %s 本地与服务端都没有（本包只提供自己的 8 个节点；"
+            warns.append("node %s 类型 %s 本地与服务端都没有（本包只提供自己的 7 个节点；"
                          "这类多半是前端虚拟节点或未装该包）"
                          % (n["id"], n.get("type")))
             continue
@@ -417,7 +417,7 @@ def main():
     root = a.comfyui or guess_comfyui_root()
     wf_dir = os.path.join(root, "user", "default", "workflows") if root else ""
 
-    local = local_pack_defs(root)                 # 本包 8 个节点：代码才是权威
+    local = local_pack_defs(root)                 # 本包 7 个节点：代码才是权威
     oi_srv, srv_err = try_object_info(a.api.rstrip("/"))
 
     print("=" * 100)
