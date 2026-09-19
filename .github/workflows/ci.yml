@@ -28,11 +28,13 @@ jobs:
       - name: Fetch ComfyUI (host only)
         run: git clone --depth 1 https://github.com/comfyanonymous/ComfyUI.git "$RUNNER_TEMP/ComfyUI"
 
+      # ComfyUI 的 node_helpers 会 import PIL（Pillow），comfy.* 要 numpy；
+      # 这里不装 ComfyUI 的完整 requirements（那会拖来 CUDA 版的 torch），只补最小集。
       - name: Install runtime deps
         run: |
           python -m pip install --upgrade pip
           pip install --index-url https://download.pytorch.org/whl/cpu torch
-          pip install "safetensors>=0.4"
+          pip install "safetensors>=0.4" pillow numpy
 
       - name: Regression trio
         env:
