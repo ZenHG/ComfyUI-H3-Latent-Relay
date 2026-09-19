@@ -226,13 +226,15 @@ MiniMaxH3ImageToVideo ─┤                      │
 2. 右侧栏 → **Advanced Inputs** 分组（会列全所有节点的高级项）；
 3. 设置里打开 **`Comfy.Node.AlwaysShowAdvancedWidgets`**（默认关 ⇒ 打开后全画布都展开）。
 
-| 节点 | 画布上保留 | 折进 advanced |
+| 节点 | 画布上保留（主旋钮） | 折进 advanced |
 |---|---|---|
 | 续接裁重叠 | `trim_frames` / `fps` / `settle_frames` | 15 个画质域旋钮 + `seam_ghost` / `seam_ghost_alpha` |
 | 续接后处理 Post | 8 个**主强度**旋钮（含 `head_zone_frames`） | 9 项细分与护栏（`*_frames` / `*_gain_max` / `*_offset_max` / `*_blur` / `radius` / `stats_frames`） |
-| 拷贝桥 | `context_frames` / `mask_mode` / `pin_audio` | 7 项模式专属参数（taper / ramp / blend 三族） |
+| 拷贝桥 | `context_frames` / `mask_mode` / `pin_audio` / `anchor_blend` | 7 项模式专属参数（taper / ramp / blend 三族） |
 | Latent 桥 | `trim_frames` / `run_id` / `stage_index` | `audio_frames` / `anchor_stage` / `anchor_frames` |
 | 音频缝 | `patch_seconds` / `fade_seconds` | `tile_seconds` / `bed_stage` / `note` |
+
+> 连线口（`images` / `audio` / `guide` / `latent` / `conditioning` …）不受影响，一直画在节点上。
 
 > 🔴 **0.5.0 迁移注意：老图里的「裁重叠」看不见 `prev_tail`。**
 > ComfyUI 前端 `LGraphNode.configure()` 是**照单全收**序列化里的 `outputs` 数组
