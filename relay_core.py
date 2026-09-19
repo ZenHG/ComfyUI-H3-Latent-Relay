@@ -697,8 +697,16 @@ def trim_audio_head(audio: Any, frames: int, fps: float = FPS) -> Any:
 #    附带收益：patch 不消耗时间轴 ⇒ 组装层 acrossfade「每缝吃 0.25s、
 #    使后段音频相对画面整体提前」那个副作用在 patch 路线上不存在。
 AUDIO_SEAM_PATCH: float = 0.0    # 头部补丁秒数（0 = 关，逐位直通）
-AUDIO_SEAM_TILE: float = 0.0     # 补丁床瓦片秒数（0 = 整窗直取最静 N 秒）
+AUDIO_SEAM_TILE: float = 0.0     # 补丁床瓦片秒数（0 = 整窗直取 N 秒）
 AUDIO_SEAM_FADE: float = 0.25    # 补丁边界交叉淡变宽度（秒）
+# 🔴 2026-09-19 真渲染阴性结果后的修法（见 CHANGES「音频缝床声选择」）：
+#   旧行为「取床源全局最静窗」在「环境声 + 音乐」素材上会取到**近乎无内容**的窗
+#   （实测床声 −42 dBFS vs 缝前 −12.8 dBFS）⇒ 补丁本身就是一段更静的东西，
+#   缝上从「凹陷」变成「静音洞」，还把本该有的起拍压平。
+AUDIO_SEAM_BED_SELECT: str = "tail"      # tail（默认，新：取床源尾部同长窗，与缝天然连续）
+                                         # quiet（0.5.0 旧行为，仅作对照复现）
+AUDIO_SEAM_BED_FLOOR_DB: float = 12.0    # quiet 档的选窗下限：只取「≥ 目标 − 该值 dB」的窗（避免取到静默）
+AUDIO_SEAM_BED_GAIN_MAX_DB: float = 6.0  # 床声电平对齐上限（±dB）；超出则夹住并报 ⚠
 _AUDIO_META_KEY = "relay_kit_audio_meta"
 
 
@@ -748,10 +756,15 @@ def _resample_to(wf: torch.Tensor, src_sr: int, dst_sr: int) -> torch.Tensor:
                          align_corners=False).squeeze(0)
 
 
-def quietest_window(wf: torch.Tensor, n_samples: int) -> Tuple[int, float]:
+def quietest_window(wf: torch.Tensor, n_samples: int,
+                    floor: float = 0.0) -> Tuple[int, float]:
     """在 ``[C,T]`` 波形里找**能量最低**的连续 ``n_samples`` 窗。
 
     返回 ``(起点样本, 窗内 RMS)``。用前缀和一次算完全部窗（O(T)，不是 O(T·n)）。
+
+    ``floor``（可选）：只接受 RMS ≥ 该值的窗；**全部不达标才**退回全局最静窗。
+    动机（2026-09-19 实测）：全局最静窗在「环境声 + 音乐」素材上是**近乎静默**的一段
+    （实测 −42 dBFS，比缝前低 29 dB）⇒ 拿它当床声等于把缝上的洞换个位置。
     """
     total = int(wf.shape[-1])
     n = int(n_samples)
@@ -760,23 +773,65 @@ def quietest_window(wf: torch.Tensor, n_samples: int) -> Tuple[int, float]:
     p = (wf ** 2).sum(dim=0)                    # [T] 逐样本跨声道能量
     c = torch.cat([p.new_zeros(1), torch.cumsum(p, dim=0)])
     win = c[n:] - c[:-n]                        # [T-n+1] 每窗总能量
-    i = int(torch.argmin(win))
-    rms = float(torch.sqrt(win[i].clamp_min(0.0) / (n * max(1, int(wf.shape[0])))))
-    return i, rms
+    rms = torch.sqrt(win.clamp_min(0.0) / (n * max(1, int(wf.shape[0]))))
+    if float(floor) > 0.0:
+        ok = rms >= float(floor)
+        if bool(ok.any()):
+            idx = torch.nonzero(ok, as_tuple=False).flatten()
+            i = int(idx[int(torch.argmin(rms[idx]))])
+            return i, float(rms[i])
+    i = int(torch.argmin(rms))
+    return i, float(rms[i])
+
+
+def _rms_db(x: torch.Tensor) -> float:
+    return 20.0 * math.log10(max(float(x.pow(2).mean().sqrt()), 1e-9))
+
+
+def target_level(wf: torch.Tensor, probe_samples: int = 6400,
+                 hop_samples: int = 640) -> float:
+    """补丁要对齐的**目标电平**：尾部 ``probe_samples`` 窗内「20ms 子窗 RMS 的**中位数**」。
+
+    为什么不是单窗 RMS（2026-09-19，BGM 适配性反思）：
+      · 环境声（雨声/room tone）是 stationary ⇒ 单窗 RMS 稳定；
+      · **BGM/音乐是非 stationary**：一个 200ms 窗可能正好落在**弱拍/换气/衰减**上，
+        单窗 RMS 会比真实伴奏电平低 6–10 dB ⇒ 拿它当目标会把补丁整体压低，制造人为凹陷。
+      取「20ms 子窗 RMS 的中位数」对乐句内的强弱起伏稳健，两种素材都适用。
+
+    取尾部的理由：补丁区紧跟在「上一段末尾」之后，要延续的是**它**的电平。
+    节点优先把上一段音频传进来（``target_audio``），拿不到才退回床源自身尾部。
+    """
+    total = int(wf.shape[-1])
+    k = max(1, min(int(probe_samples), total))
+    seg = wf[..., total - k:]
+    hop = max(1, min(int(hop_samples), k))
+    n_sub = max(1, k // hop)
+    sub = seg[..., :n_sub * hop].reshape(*seg.shape[:-1], n_sub, hop)
+    rms = sub.pow(2).mean(dim=-1).clamp_min(0.0).sqrt()      # [..., n_sub]
+    return float(rms.reshape(-1).median())
 
 
 def build_bed(wf: torch.Tensor, n_samples: int, tile_samples: int,
-              fade_samples: int) -> Tuple[torch.Tensor, int]:
+              fade_samples: int, select: str = AUDIO_SEAM_BED_SELECT,
+              floor: float = 0.0) -> Tuple[torch.Tensor, int, float]:
     """从床源波形取 ``n_samples`` 长的床声；``tile_samples>0`` 时按瓦片自叠化环铺。
 
-    返回 ``(床波形 [C,n], 起点样本)``。
+    ``select``：
+      · ``tail``（**默认**）取**尾部同长窗**——紧邻缝，电平与音色与缝前天然连续；
+      · ``quiet`` 取（可带下限的）最静窗——0.5.0 旧行为，**仅作对照**。
+
+    返回 ``(床波形 [C,n], 起点样本, 原始床声 RMS)``。**不做电平处理**——
+    对齐与峰值护栏都在 ``audio_seam_patch`` 里一步做完（少一层处理 = 少一层累计误差）。
     """
     total = int(wf.shape[-1])
     n = int(n_samples)
     if n <= 0:
         raise ValueError("床声长度必须为正，得到 %d。" % n)
     if tile_samples <= 0:
-        start, _ = quietest_window(wf, min(n, total))
+        if select == "tail":
+            start = max(0, total - n)
+        else:
+            start, _ = quietest_window(wf, min(n, total), floor=floor)
         bed = wf[..., start:start + n]
     else:
         W, X = int(tile_samples), int(fade_samples)
@@ -785,7 +840,10 @@ def build_bed(wf: torch.Tensor, n_samples: int, tile_samples: int,
                 "瓦片环铺要求 0 < 边界淡变 %.3fs < 瓦片长 %.3fs。\n"
                 "    瓦片太短会退化成「同一段噪声原样重复」，反而听得出来。" % (X / 32000.0, W / 32000.0)
             )
-        start, _ = quietest_window(wf, min(W, total))
+        if select == "tail":
+            start = max(0, total - W)
+        else:
+            start, _ = quietest_window(wf, min(W, total), floor=floor)
         tile = wf[..., start:start + W]
         k = max(2, int(math.ceil((n - X) / float(W - X) - 1e-9)))
         w = torch.linspace(0.0, 1.0, X, device=wf.device, dtype=torch.float32)
@@ -797,16 +855,24 @@ def build_bed(wf: torch.Tensor, n_samples: int, tile_samples: int,
     if int(bed.shape[-1]) < n:                  # 床源比 N 还短：循环凑够（防御，不炸）
         reps = int(math.ceil(n / max(1, int(bed.shape[-1]))))
         bed = bed.repeat(1, reps)[..., :n]
-    return bed, start
+    return bed, start, float(bed.pow(2).mean().sqrt())
 
 
 def audio_seam_patch(audio: Any, bed_audio: Any, patch: float = AUDIO_SEAM_PATCH,
                      tile: float = AUDIO_SEAM_TILE,
-                     fade: float = AUDIO_SEAM_FADE) -> Tuple[Any, str]:
-    """把本段头部 ``patch`` 秒换成 ``bed_audio``（上一段）里的最静窗；**长度守恒**。
+                     fade: float = AUDIO_SEAM_FADE,
+                     select: str = AUDIO_SEAM_BED_SELECT,
+                     target_audio: Any = None,
+                     gain_max_db: float = AUDIO_SEAM_BED_GAIN_MAX_DB) -> Tuple[Any, str]:
+    """把本段头部 ``patch`` 秒换成 ``bed_audio``（上一段）里的床声窗；**长度守恒**。
 
     替换区 ``[0, N-X)`` 纯床声，``[N-X, N)`` 是床声 → 本段自身音频的交叉淡变
     （X = ``fade``），``N`` 之后**逐位不动**。返回 ``(audio, report)``。
+
+    🔴 2026-09-19 修正（真渲染阴性结果驱动）：床声窗**默认取尾部窗**（``select="tail"``），
+    并把床声**电平对齐**到「缝前电平」（``target_audio`` 的尾部；没给就用床源自身尾部），
+    增益限幅 ``±gain_max_db``。旧行为 ``select="quiet"``（全局最静窗）会取到近乎静默的一段
+    ⇒ 实测把缝上的凹陷换成静音洞，仅保留作对照。
     """
     if patch is None or float(patch) <= 0:
         return audio, ""
@@ -826,7 +892,29 @@ def audio_seam_patch(audio: Any, bed_audio: Any, patch: float = AUDIO_SEAM_PATCH
         X = max(0, n - 1)
     bed_wf, bed_sr, _, _ = _audio_parts(bed_audio)
     bed_wf = _match_channels(_resample_to(bed_wf, bed_sr, sr), ch)
-    bed, start = build_bed(bed_wf, n, int(round(float(tile) * sr)), X)
+    tgt_wf = bed_wf
+    if target_audio is not None:
+        _t, _tsr, _, _ = _audio_parts(target_audio)
+        tgt_wf = _match_channels(_resample_to(_t, _tsr, sr), ch)
+    tgt = target_level(tgt_wf, int(round(0.2 * sr)))
+    floor = tgt * (10.0 ** (-AUDIO_SEAM_BED_FLOOR_DB / 20.0))
+    bed, start, bed_rms = build_bed(bed_wf, n, int(round(float(tile) * sr)), X,
+                                    select=select, floor=floor)
+    bed_db = _rms_db(bed)
+    # 电平对齐 + 峰值护栏，**一步做完**（不额外加处理层：少一层 = 少一层累计误差）
+    g_db, clamped = 0.0, False
+    if bed_rms > 0.0 and tgt > 0.0:
+        _g = 20.0 * math.log10(tgt / bed_rms)
+        _used = max(-float(gain_max_db), min(float(gain_max_db), _g))
+        _peak = float(bed.abs().max()) if int(bed.numel()) else 0.0
+        if _peak > 0.0:                       # 尾部窗本来就响，+dB 会推过 1.0 ⇒ 削波
+            _head = 20.0 * math.log10(0.995 / _peak)
+            clamped = clamped or _head < _used
+            _used = min(_used, _head)
+        clamped = clamped or abs(_g) > float(gain_max_db)
+        if _used != 0.0:
+            bed = bed * (10.0 ** (_used / 20.0))
+        g_db = _used
 
     out = wf.clone()
     keep = n - X                                # [0, keep) 纯床声
@@ -837,9 +925,14 @@ def audio_seam_patch(audio: Any, bed_audio: Any, patch: float = AUDIO_SEAM_PATCH
         out[..., keep:n] = bed[..., keep:n] * (1.0 - w) + wf[..., keep:n] * w
 
     tile_note = "，%.2fs 瓦片自叠化环铺" % float(tile) if float(tile) > 0 else ""
-    rep = ("[H3 Relay] 音频缝：头部补丁 %.2fs ← 床源最静窗 @%.2fs%s，边界交叉淡变 %.2fs\n"
+    mode_note = "尾部窗（与缝天然连续）" if str(select) == "tail" else "最静窗（旧口径·仅对照）"
+    rep = ("[H3 Relay] 音频缝：头部补丁 %.2fs ← 床源%s @%.2fs%s，边界交叉淡变 %.2fs\n"
+           "           床声电平 %.1f dBFS → 对齐目标 %.1f dBFS（%s %+.1f dB%s）\n"
            "           音频 %d → %d 采样点（长度守恒，零 A/V 位移）%s"
-           % (float(patch), start / float(sr), tile_note, X / float(sr),
+           % (float(patch), mode_note, start / float(sr), tile_note, X / float(sr),
+              bed_db, 20.0 * math.log10(max(tgt, 1e-9)),
+              "增益" + ("已夹住" if clamped else ""), g_db,
+              "⚠ 超出限幅，建议换床源段" if clamped else "",
               total, int(out.shape[-1]), warn))
     shaped = out.reshape(*lead, ch, total) if lead else out
     return {"waveform": shaped.to(dtype), "sample_rate": sr}, rep

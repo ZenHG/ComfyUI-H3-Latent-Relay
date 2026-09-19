@@ -1261,6 +1261,14 @@
           "widget": {
             "name": "note"
           }
+        },
+        {
+          "name": "bed_select",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "bed_select"
+          }
         }
       ],
       "outputs": [
@@ -1288,7 +1296,8 @@
         0.0,
         0.25,
         0,
-        ""
+        "",
+        "tail"
       ]
     },
     {

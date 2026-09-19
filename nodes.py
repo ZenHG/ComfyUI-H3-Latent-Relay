@@ -1225,6 +1225,20 @@ class H3RelayAudioSeam:
                     "default": "",
                     "tooltip": "【可留空】备注，存进落盘文件的元数据里方便事后分辨版本。",
                 }),
+                # ⚠ 铁律：新 widget 一律**追加在 optional 末位**（旧工作流取值不前移）。
+                #   🔴 2026-09-19 真渲染阴性结果驱动（见 CHANGES「音频缝床声选择」）：
+                #   旧行为「取床源全局最静窗」会把补丁换成一段**更静**的东西
+                #   （实测床声 −42.0 dBFS vs 缝前 −12.8 dBFS）⇒ 缝上从「凹陷」变「静音洞」、
+                #   还把本该有的起拍压平。默认档改为**取尾部窗 + 电平对齐**（带峰值护栏）。
+                "bed_select": (["tail", "quiet"], {
+                    "default": CORE.AUDIO_SEAM_BED_SELECT,
+                    "tooltip": "【默认 tail，别改】床声从床源哪里取：\n"
+                               "  · tail（默认）= 取**床源尾部**与补丁等长的一段——紧邻缝，\n"
+                               "    电平与音色与缝前**天然连续**；再整体对齐到缝前电平（限幅 ±6 dB）。\n"
+                               "  · quiet = 0.5.0 旧行为：取全局**最静**窗。\n"
+                               "    🔴 实测它会把补丁换成一段更静的内容（−42 vs −12.8 dBFS）⇒\n"
+                               "    缝上从「凹陷」变成「静音洞」、起拍被压平。**仅作对照复现用。**",
+                }),
             },
         }
 
@@ -1238,7 +1252,8 @@ class H3RelayAudioSeam:
                    "长度守恒、零 A/V 位移；默认关（0 = 逐位直通）。")
 
     def seam(self, audio, run_id, stage_index, patch_seconds=0.0, tile_seconds=0.0,
-             fade_seconds=0.25, bed_stage=0, note=""):
+             fade_seconds=0.25, bed_stage=0, note="",
+             bed_select=CORE.AUDIO_SEAM_BED_SELECT):
         me = _audio_stage_path(run_id, int(stage_index))
         idx = int(stage_index)
         patch = float(patch_seconds or 0.0)
@@ -1263,11 +1278,25 @@ class H3RelayAudioSeam:
                 "    第 %d 段还没跑过（本节点会顺手把每段音频落盘）。\n"
                 "    先按段号顺序跑一次第 %d 段，再来跑本段。" % (bed_path, b_idx, b_idx)
             )
+        # 电平目标 = **缝前**那段音频的尾部（= 上一段，真值）；拿不到才退回床源自身尾部。
+        #   为什么单独取上一段：床源默认可选第 1 段（stationary 环境声更稳），
+        #   但「缝前电平」只由**上一段**决定——两者不是一回事（0.5.0 把水平目标错当床源了）。
+        target = None
+        prev_path = _audio_stage_path(run_id, idx - 1)
+        if os.path.isfile(prev_path):
+            try:
+                target = CORE.load_audio(prev_path)
+            except Exception as _e:                       # noqa: BLE001
+                print("[H3 Relay] 音频缝：读上一段音频失败（%r）→ 电平目标退回床源尾部" % (_e,))
         out, rep = CORE.audio_seam_patch(audio, CORE.load_audio(bed_path),
                                          patch, float(tile_seconds or 0.0),
-                                         float(fade_seconds))
+                                         float(fade_seconds),
+                                         select=str(bed_select or CORE.AUDIO_SEAM_BED_SELECT),
+                                         target_audio=target)
         CORE.save_audio(out, me, note=note)
-        line = rep + "｜已落盘（供后段当床源）：%s" % me
+        line = rep + ("｜已落盘（供后段当床源）：%s" % me)
+        if target is None:
+            line += "｜ ⚠ 上一段音频文件缺失 ⇒ 电平目标退回床源尾部（不够准）"
         print(line)
         return (out, line)
 

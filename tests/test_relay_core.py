@@ -1480,6 +1480,8 @@ check("22.1 默认全关（patch/tile=0，fade=0.25，bed_stage=0，OUTPUT_NODE�
       and _opt22["tile_seconds"][1]["default"] == 0.0
       and abs(_opt22["fade_seconds"][1]["default"] - 0.25) < 1e-9
       and _opt22["bed_stage"][1]["default"] == 0
+      and _opt22["bed_select"][1]["default"] == "tail"
+      and list(_opt22["bed_select"][0]) == ["tail", "quiet"]
       and _REQ22["audio"][0] == "AUDIO"
       and NODES.H3RelayAudioSeam.OUTPUT_NODE is True,
       "RETURN=%s" % (NODES.H3RelayAudioSeam.RETURN_NAMES,))
@@ -1507,35 +1509,67 @@ check("22.3 补丁后长度守恒（零 A/V 位移）",
 _n22 = int(2.0 * _SR)
 _X22 = int(0.25 * _SR)
 _keep22 = _n22 - _X22
-_start22, _rms22 = CORE.quietest_window(_bed_a["waveform"][0], _n22)
-_bed_win = _bed_a["waveform"][..., _start22:_start22 + _n22]
-check("22.4 替换区 [0,N−X) 就是床源最静窗（逐位相同）",
-      torch.equal(_w1[..., :_keep22], _bed_win[..., :_keep22]),
-      "床窗起点 %.2fs" % (_start22 / _SR))
-check("22.5 最静窗选择正确（取静半段、RMS 明显更低）",
-      _start22 >= 2 * _SR and _rms22 < 0.035,
-      "起点 %.2fs RMS=%.4f" % (_start22 / _SR, _rms22))
+# 🔴 2026-09-19 行为变更（真渲染阴性结果驱动）：默认档 = **尾部窗 + 电平对齐**
+#   旧「全局最静窗」降为 `select="quiet"`，仅作对照。
+_bsrc = _bed_a["waveform"].reshape(-1, _bed_a["waveform"].shape[-1])   # [C,T]
+_bed_tail = _bsrc[..., int(_bsrc.shape[-1]) - _n22:]
+_tgt22 = CORE.target_level(_bsrc)
+_g22 = _tgt22 / max(float(_bed_tail.pow(2).mean().sqrt()), 1e-12)
+check("22.4 默认档：补丁区 = 床源**尾部窗** × 单一增益（形状未变形、非最静窗）",
+      bool((_w1[..., :_keep22] - _bed_tail[..., :_keep22] * _g22).abs().max() < 1e-6)
+      and not torch.equal(_w1[..., :_keep22], _bed_tail[..., :_keep22]),
+      "增益 %+.2f dB" % (20 * math.log10(max(_g22, 1e-12))))
+_patch_rms = float(_w1[..., :_keep22].pow(2).mean().sqrt())
+check("22.5 电平对齐：补丁电平 = 缝前目标 ±1.5 dB（本轮「把凹陷换成静音洞」的回归钉子）",
+      abs(20 * math.log10(max(_patch_rms, 1e-9) / max(_tgt22, 1e-9))) < 1.5,
+      "补丁 %.1f vs 目标 %.1f dBFS" % (20 * math.log10(max(_patch_rms, 1e-9)),
+                                      20 * math.log10(max(_tgt22, 1e-9))))
+check("22.5b 电平对齐不削波（增益后峰值 ≤ 1.0）",
+      float(_w1[..., :_keep22].abs().max()) <= 1.0 + 1e-6,
+      "峰值 %.4f" % float(_w1[..., :_keep22].abs().max()))
 
 _wgt = torch.linspace(0.0, 1.0, _X22)
-_exp_blend = (_bed_win[..., _keep22:_n22] * (1.0 - _wgt)
+_exp_blend = ((_bed_tail * _g22)[..., _keep22:_n22] * (1.0 - _wgt)
               + _cur_wf[..., _keep22:_n22] * _wgt)
 check("22.6 边界窗 [N−X,N) 是 blend（非硬切、非纯床、非纯本段）",
-      torch.allclose(_w1[..., _keep22:_n22], _exp_blend, atol=1e-7)
-      and not torch.equal(_w1[..., _keep22:_n22], _bed_win[..., _keep22:_n22])
+      torch.allclose(_w1[..., _keep22:_n22], _exp_blend, atol=1e-6)
+      and not torch.equal(_w1[..., _keep22:_n22], (_bed_tail * _g22)[..., _keep22:_n22])
       and not torch.equal(_w1[..., _keep22:_n22], _cur_wf[..., _keep22:_n22]))
 
 check("22.7 N 之后逐位不动（段体一个样本都不许改）",
       torch.equal(_w1[..., _n22:], _cur_wf[..., _n22:]))
 
+# 选窗档位：tail（默认）取尾部；quiet（旧行为）取最静 —— 两档必须能取到且互不相同
+# （用「吵–静–吵」三段 fixture：尾部吵、最静窗在中间，两档才会分出差别）
+_bmix = torch.cat([torch.rand(1, _SR) * 0.50,
+                   torch.rand(1, _SR) * 0.02,
+                   torch.rand(1, _SR) * 0.50], -1)
+_nq = int(0.5 * _SR)
+_bt, _st, _rt = CORE.build_bed(_bmix, _nq, 0, int(0.1 * _SR))
+_bq, _sq, _rq = CORE.build_bed(_bmix, _nq, 0, int(0.1 * _SR), select="quiet")
+check("22.7b 选窗档位：tail=床源尾部 / quiet=最静窗（位置不同、quiet 明显更静）",
+      _st == int(_bmix.shape[-1]) - _nq and _sq != _st and _rq < _rt * 0.2,
+      "tail @%.2fs RMS %.4f ｜ quiet @%.2fs RMS %.4f"
+      % (_st / _SR, _rt, _sq / _SR, _rq))
+
 # 瓦片环铺：用**平滑**床源，接缝若有台阶会立刻现形（噪声源看不出跳变）
 _ph = torch.arange(_SR * 3, dtype=torch.float32) / _SR
 _sine = (torch.sin(2 * math.pi * 5.0 * _ph) * 0.4).unsqueeze(0).unsqueeze(0)
-_bed_t, _ = CORE.build_bed(_sine[0], _n22, int(1.2 * _SR), _X22)
+_bed_t, _stp, _rtp = CORE.build_bed(_sine[0], _n22, int(1.2 * _SR), _X22, select="quiet")
 _d_step = float((_bed_t[..., 1:] - _bed_t[..., :-1]).abs().max())
 _t_step = float((_sine[0][..., 1:] - _sine[0][..., :-1]).abs().max())
 check("22.8 瓦片自叠化环铺：长度=N 且接缝无台阶",
       int(_bed_t.shape[-1]) == _n22 and _d_step < 5.0 * _t_step,
       "最长相邻差 %.5f vs 瓦片内 %.5f" % (_d_step, _t_step))
+
+# 目标电平要**稳健**：尾部有 80ms 弱段（占 200ms 窗的 40%）时，中位数目标不应被它拖低
+_beat = _bsrc.clone()
+_beat[..., -int(0.08 * _SR):] *= 0.1
+_r_med = CORE.target_level(_beat)                                  # 20ms 子窗 RMS 的中位数
+_r_win = float(_beat[..., -int(0.2 * _SR):].pow(2).mean().sqrt())  # 单窗 RMS（旧口径）
+check("22.8b 目标电平取「20ms 子窗 RMS 中位数」⇒ 不被尾部弱段拖低（BGM 适配的产物）",
+      _r_med > _r_win * 1.2,
+      "中位数 %.4f vs 单窗 %.4f（比值 %.2f）" % (_r_med, _r_win, _r_med / max(_r_win, 1e-12)))
 
 _bed16 = {"waveform": torch.rand(1, 1, _SR * 2) * 0.05, "sample_rate": _SR // 2}
 _o9, _ = CORE.audio_seam_patch(_cur_a, _bed16, patch=1.0)
@@ -1574,9 +1608,12 @@ try:
     _a1, _l1 = _n22obj.seam(_cur_a, _RID22, 1, patch_seconds=2.0)
     _got = _a1["waveform"][..., :_keep22]
     _want = CORE.load_audio(_p0)["waveform"]
-    _s1, _ = CORE.quietest_window(_want[0], _n22)
-    check("22.14 节点 stage 1 ⇒ 头部换成上一段落盘音频的最静窗 + 报长度守恒",
-          torch.equal(_got, _want[..., _s1:_s1 + _keep22]) and "长度守恒" in _l1,
+    _w2 = _want.reshape(-1, _want.shape[-1])
+    _tail1 = _w2[..., int(_w2.shape[-1]) - _n22:]
+    _g1 = CORE.target_level(_w2) / max(float(_tail1.pow(2).mean().sqrt()), 1e-12)
+    check("22.14 节点 stage 1 ⇒ 头部换成上一段音频的**尾部窗**×增益（电平对齐）+ 报长度守恒",
+          torch.allclose(_got, _tail1[..., :_keep22] * _g1, atol=1e-6)
+          and "尾部窗" in _l1 and "增益" in _l1 and "长度守恒" in _l1,
           _l1.splitlines()[0][:56])
     expect_raise("22.15 节点：床源段号 ≥ 本段段号 ⇒ 明确 raise（不静默取自己）",
                  lambda: _n22obj.seam(_cur_a, _RID22, 1, patch_seconds=1.0, bed_stage=1),
@@ -1596,6 +1633,19 @@ check("22.17 节点已注册且显示名以 🔗 开头",
 check("22.18 音频域归属写进节点描述（时间轴/画质域/音频域不混挂）",
       "长度守恒" in (NODES.H3RelayAudioSeam.DESCRIPTION or ""),
       (NODES.H3RelayAudioSeam.DESCRIPTION or "")[:44])
+
+# 🔴 峰值护栏（BGM 适配反思的产物）：旧的「最静窗」永不需要增益；改成**尾部窗**后床声本来就响，
+#   再乘几 dB 会推过 1.0 ⇒ 下游编码削波。这里用「床声尾部很小但峰值很高 + 目标很大」逼出夹住路径。
+_bed_pk = {"waveform": torch.cat([torch.rand(1, 1, _SR) * 0.02,
+                                  torch.rand(1, 1, _SR) * 0.02], -1), "sample_rate": _SR}
+_bed_pk["waveform"][..., int(_SR * 1.5)] = 0.90          # 一个高尖峰（峰值护栏的触发点）
+_tgt_pk = {"waveform": torch.full((1, 1, _SR), 0.60), "sample_rate": _SR}
+_o19, _r19 = CORE.audio_seam_patch(_cur_a, _bed_pk, patch=0.5, target_audio=_tgt_pk,
+                                   gain_max_db=24.0)
+check("22.19 增益后峰值护栏：床声不会被推过 1.0（削波防护）+ 报告标注已夹住",
+      float(_o19["waveform"].abs().max()) <= 1.0 + 1e-6 and "夹住" in _r19,
+      "峰值 %.4f ｜ %s" % (float(_o19["waveform"].abs().max()),
+                          [ln for ln in _r19.splitlines() if "床声电平" in ln][:1]))
 
 print()
 print("=" * 78)

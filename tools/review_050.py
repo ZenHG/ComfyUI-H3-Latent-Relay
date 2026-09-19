@@ -17,6 +17,7 @@ r"""审查脚本：确认 0.5.0 改造全部生效、无遗漏、无回归。
 （装在 `<ComfyUI>/custom_nodes/<本包>/` 下时可省略 COMFYUI_PATH，自动上溯定位）
 """
 import json
+import math
 import os
 import re
 import sys
@@ -644,19 +645,25 @@ _N2, _X2 = int(2.0 * _SR2), int(0.25 * _SR2)
 _keep2 = _N2 - _X2
 _o, _rp = CORE.audio_seam_patch(_ca, _ba, patch=2.0, fade=0.25)
 _ow = _o["waveform"]
-_st2, _ = CORE.quietest_window(_bw[0], _N2)
-_bwin = _bw[..., _st2:_st2 + _N2]
+# 🔴 2026-09-19 行为变更：默认档 = 尾部窗 + 电平对齐（旧「最静窗」降为 select="quiet"）
+_b2 = _bw.reshape(-1, _bw.shape[-1])
+_bwin = _b2[..., int(_b2.shape[-1]) - _N2:]                       # 尾部窗
+_tg2 = CORE.target_level(_b2)
+_g2 = _tg2 / max(float(_bwin.pow(2).mean().sqrt()), 1e-12)
 ck("L4 长度守恒 + N 之后逐位不动（零 A/V 位移的硬证据）",
    int(_ow.shape[-1]) == int(_curw.shape[-1])
    and _T.equal(_ow[..., _N2:], _curw[..., _N2:]))
-ck("L5 替换区就是床源最静窗（逐位相同）",
-   _T.equal(_ow[..., :_keep2], _bwin[..., :_keep2]),
-   "床窗起点 %.2fs" % (_st2 / _SR2))
+ck("L5 替换区 = 床源尾部窗 × 单一增益（形状未变形；电平对齐到缝前目标 ±1.5 dB）",
+   bool((_ow[..., :_keep2] - _bwin[..., :_keep2] * _g2).abs().max() < 1e-6)
+   and abs(20 * math.log10(max(float(_ow[..., :_keep2].pow(2).mean().sqrt()), 1e-9)
+                           / max(_tg2, 1e-9))) < 1.5,
+   "增益 %+.2f dB ｜ %s" % (20 * math.log10(max(_g2, 1e-12)),
+                            [ln for ln in _rp.splitlines() if "床声电平" in ln][:1]))
 _wg = _T.linspace(0.0, 1.0, _X2)
-_expb = _bwin[..., _keep2:_N2] * (1.0 - _wg) + _curw[..., _keep2:_N2] * _wg
+_expb = (_bwin * _g2)[..., _keep2:_N2] * (1.0 - _wg) + _curw[..., _keep2:_N2] * _wg
 ck("L6 边界窗是 blend（非硬切）",
-   _T.allclose(_ow[..., _keep2:_N2], _expb, atol=1e-7)
-   and not _T.equal(_ow[..., _keep2:_N2], _bwin[..., _keep2:_N2]))
+   _T.allclose(_ow[..., _keep2:_N2], _expb, atol=1e-6)
+   and not _T.equal(_ow[..., _keep2:_N2], (_bwin * _g2)[..., _keep2:_N2]))
 
 _td = _tf.mkdtemp(prefix="h3relay_review_")
 try:
@@ -668,11 +675,13 @@ try:
     _a0, _l0 = _obj.seam(_ba, _rid, 0)
     _a1, _l1 = _obj.seam(_ca, _rid, 1, patch_seconds=2.0)
     _want = CORE.load_audio(N._audio_stage_path(_rid, 0))["waveform"]
-    _s3, _ = CORE.quietest_window(_want[0], _N2)
-    ck("L7 音频落盘/读回逐位一致 + 节点 stage 0 直通但落盘 + stage 1 用上一段当床",
+    _w2 = _want.reshape(-1, _want.shape[-1])
+    _tail3 = _w2[..., int(_w2.shape[-1]) - _N2:]
+    _g3 = CORE.target_level(_w2) / max(float(_tail3.pow(2).mean().sqrt()), 1e-12)
+    ck("L7 音频落盘/读回逐位一致 + 节点 stage 0 直通但落盘 + stage 1 用上一段**尾部窗**当床（电平对齐）",
        _T.equal(_bk["waveform"], _o["waveform"]) and _a0 is _ba and "第 1 段无缝可补" in _l0
-       and _T.equal(_a1["waveform"][..., :_keep2], _want[..., _s3:_s3 + _keep2])
-       and "长度守恒" in _l1,
+       and _T.allclose(_a1["waveform"][..., :_keep2], _tail3[..., :_keep2] * _g3, atol=1e-6)
+       and "长度守恒" in _l1 and "尾部窗" in _l1,
        "落盘目录挂到 output/relay_kit/ 下")
     _errs = []
     try:
