@@ -12,8 +12,8 @@
 
 | 第三方 | 许可 | 被参考的内容 | 我们的实现 | 性质 |
 |---|---|---|---|---|
-| **AIMixer / `ComfyUI_MiniMaxH3_Director`** | Apache-2.0（*待一手复核，见 §四*） | ① 拷贝桥：上一段 AV latent 硬拷贝 + 噪声掩码 + 音频尾拷贝 + NestedTensor 双流打包；② 段头低频残差对齐（`_lowfreq_appearance_pull` / `match_export_opening_grade`）；③ 批量化盒式模糊（把 guide 的模糊提到循环外、逐帧模糊合成一次 `avg_pool2d`） | `relay_core.build_continue_latent` / `lowfreq_pull` / `_box_blur_hwc`；节点 `H3RelayCopyBridge`、`H3RelayPost.lowfreq_pull` | **读源码后按机制重写**：公式层面对齐（差分式低频残差传递本身是**唯一写法**），但控制流、参数面、权重曲线、边界与降级处理均为本仓库独立设计（本包另加：逐帧线性权重斜坡、画布不一致即不动刀、掩码按上游原生契约走） |
-| **`comfyui-minimax-h3-audio-T8`** | **MIT** | 掩码语义：走 ComfyUI **原生 H3 契约**（`MiniMaxH3.scale_latent_inpaint` / `mask_row_values`），与具体采样器无关；全 0 硬锁 = 钉住区零重绘 | `relay_core.prefix_*_weights` + `build_continue_latent` 的 `noise_mask` 构造 | 该契约来自**上游 ComfyUI 宿主源码**（**GPL-3.0**，运行时 import，不复制）——见 **§一·C**；T8 作为用法佐证 |
+| **AIMixer / `ComfyUI_MiniMaxH3_Director`** | Apache-2.0（✅ **2026-09-20 已一手核对**，见 §四） | ① 拷贝桥：上一段 AV latent 硬拷贝 + 噪声掩码 + 音频尾拷贝 + NestedTensor 双流打包；② 段头低频残差对齐（`_lowfreq_appearance_pull` / `match_export_opening_grade`）；③ 批量化盒式模糊（把 guide 的模糊提到循环外、逐帧模糊合成一次 `avg_pool2d`） | `relay_core.build_continue_latent` / `lowfreq_pull` / `_box_blur_hwc`；节点 `H3RelayCopyBridge`、`H3RelayPost.lowfreq_pull` | **读源码后按机制重写**：公式层面对齐（差分式低频残差传递本身是**唯一写法**），但控制流、参数面、权重曲线、边界与降级处理均为本仓库独立设计（本包另加：逐帧线性权重斜坡、画布不一致即不动刀、掩码按上游原生契约走） |
+| **`comfyui-minimax-h3-audio-T8`**（`T8mars/…`） | ⚠️ **GPL-3.0-or-later**（2026-09-20 一手核对更正；**此前本文件误记为 MIT**） | 掩码语义：走 ComfyUI **原生 H3 契约**（`MiniMaxH3.scale_latent_inpaint` / `mask_row_values`），与具体采样器无关；全 0 硬锁 = 钉住区零重绘 | `relay_core.prefix_*_weights` + `build_continue_latent` 的 `noise_mask` 构造 | 该契约来自**上游 ComfyUI 宿主源码**（**GPL-3.0**，运行时 import，不复制）——见 **§一·C**；T8 **仅作为"用法佐证"**（证明这个掩码语义就是原生契约），**未复制其任何代码**。⚠️ 但它自身是 copyleft：后续若想照着它的实现改，先读 §一·B 的教训 |
 | **`ComfyUI-Apt_Preset`** | **许可未知**（包已于 2026-09-13 从开发机移除，无从复核；已移除 ⇒ 现无从取得其许可） | 仅**沿用其 latent 字典键名**做兼容读取：`apt_h3_export_tail_latent` / `apt_h3_export_tail_audio_latent` / `apt_h3_export_context_frames` | `relay_core.KEY_EXPORT_*`（常量名与取值） | **数据键名，非代码**：无 import、无调用、无复制；仅当上游 latent 里带了这些键才复用其值，否则走本包自己的切片路径 |
 
 > ⚠️ **「机制不受版权保护，表达受保护」**：上表两行均为**机制层**参考。
@@ -94,6 +94,7 @@
 |---|---|---|
 | **ComfyUI（运行时宿主）** | **GPL-3.0** | ⚠️ **运行时 import，非复制**。仓库内不含其代码；但是本包唯一一条 copyleft 关系，且宿主无插件例外条款。**详见 §一·C**（含我方立场与未决事项）。2026-09-19 之前误记为 Apache-2.0，已更正 |
 | `h3_drift.py`（改编自 **Contex-Loop**） | GPL-3.0（二次改编 ⇒ 传染性更强） | **❌ 未进入本包**。本包不含其任何代码、注释结构或派生表达；相关思路**未被采用** |
+| **`comfyui-minimax-h3-audio-T8`** | **GPL-3.0-or-later** | ⚠️ **仅作用法佐证，未复制其代码**（证明掩码语义就是 ComfyUI 原生契约）。但**它本身是 copyleft**：2026-09-20 一手核对更正了本文件此前"MIT"的误记。想照它的实现改之前，先读 §一·B |
 | **`ComfyUI-H3-Motion-Context`** | **GPL-3.0**（NikoDemon80） | ⚠️ **曾重合，已重写** —— `apply_relay` 锚位合成段在 v0.2.1–v0.5.0 公开历史中构成表达层重合，2026-09-19 整体重写。**详见 §一·B**（含范围核验、未决事项、历史未改写的原因） |
 
 ## 四、复核状态与待办（发布前必读）
@@ -103,9 +104,10 @@
 | 本包自身许可 | ✅ MIT（`LICENSE`） |
 | **宿主 ComfyUI 许可** | ✅ **已一手核对 = GPL-3.0**（本机 `ComfyUI/LICENSE` 首行；无插件例外条款）。2026-09-19 更正了本文件此前误记的 Apache-2.0，披露见 §一·C |
 | 依赖许可 | ✅ `torch`（BSD-3-Clause）/ `safetensors`（Apache-2.0）—— 均为宽松许可，与 MIT 兼容 |
-| T8 许可 | ✅ 已一手复核 = MIT（+ 内容层 CC BY 4.0，本包未使用其内容库） |
+| T8 许可 | ⚠️ **2026-09-20 一手核对更正 = GPL-3.0-or-later**（此前误记 MIT）。核对方式：仓库 `T8mars/comfyui-minimax-h3-audio-T8` 的 `LICENSE` 首行即 `SPDX-License-Identifier: GPL-3.0-or-later`（GitHub API 的 `license` 字段因含非标准头而只报 `NOASSERTION`，**要读 LICENSE 原文，不能只看 API 字段**）。处置：本包与其关系**仅为用法佐证、无代码复制**，机制不受版权保护 ⇒ 结论不变，但对外声明必须改正 |
 | **Motion-Context 重合** | ✅ **已核验范围并重写**（§一·B）：重合仅 `apply_relay` 一段，2026-09-19 整体重写，差分验证通过。<br>⚠️ **未决**：派生方向未定（可能经已消失的 Apt_Preset 中转）；**尚未取得对方作者书面确认**。<br>**待办**：联系 NikoDemon80 说明情况。**在此完成前，请勿对外主张"本包与 GPL 无关"** |
-| **Director 许可** | ⚠️ **尚未一手复核**：本包注释里记为 Apache-2.0，但**发布机上没有该包的安装可供核对**。<br>已按**保守口径**随包附上 [`licenses/Apache-2.0.txt`](licenses/Apache-2.0.txt) 与上表署名。<br>**发布前动作**：到其仓库确认 `LICENSE`。若确为 Apache-2.0 ⇒ 现状即可；若为宽松但不同 ⇒ 改上表许可字段；**若无可用的开源许可**（默认「保留所有权利」）⇒ **必须**把 §一 对应实现改为不依赖该参考的独立方案（低频残差那一行公式属机制，可保留；批量化模糊属常规范式）。 |
+| **Director 许可** | ✅ **2026-09-20 已一手核对 = Apache-2.0**（GitHub API `repos/AIMixer/ComfyUI_MiniMaxH3_Director/license` → `spdx_id = Apache-2.0`；旁证：第三方仓库的 NOTICE 亦记为 Apache-2.0）。<br>⇒ 随包附 [`licenses/Apache-2.0.txt`](licenses/Apache-2.0.txt) 与 §一 表署名**均正确**，`lowfreq_pull` / `_box_blur_hwc` **无需重写**。<br>（核对前本项曾标为"未复核、若为无许可则须重写"，现已解除。） |
+| **一手核对方法（记下来，别再靠记忆）** | `gh api repos/<owner>/<repo>/license --jq .license.spdx_id` —— 快，但**遇到非标准许可文本会返回 `NOASSERTION`**（T8 就是这样被漏掉的）。<br>所以**凡 `NOASSERTION` 或关键结论，必须再读一次 LICENSE 原文**：`gh api repos/<owner>/<repo>/contents/LICENSE --jq .content \| base64 -d \| head`。<br>本机已装的包也可直接 `head -1 <包目录>/LICENSE`。 |
 
 ---
 

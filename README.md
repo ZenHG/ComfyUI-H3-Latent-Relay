@@ -900,9 +900,10 @@ stage 链（落盘/读回）按段号自续（本段段号 - 1 = 要读的段号
   协议与网格常量来自 MiniMax-H3 的公开实现（`minimax_keyframes` / `minimax_refs` /
   `FRAME_PER_TOKEN` 等），**运行时 import 上游源码、不复制**。
 - **第三方出处与署名 → [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)**：
-  机制/契约层面参考了 `ComfyUI_MiniMaxH3_Director`（**标注为 Apache-2.0，⚠️ 尚未一手复核**，
-  已按保守口径随包附 [`licenses/Apache-2.0.txt`](licenses/Apache-2.0.txt)；复核结论出来前，
-  不要把它当作已确定的事实）与 `comfyui-minimax-h3-audio-T8`（**MIT**，已复核）；算法出处见论文表。
+  机制/契约层面参考了 `ComfyUI_MiniMaxH3_Director`（**Apache-2.0**，2026-09-20 已一手核对；
+  随包附 [`licenses/Apache-2.0.txt`](licenses/Apache-2.0.txt)）与 `comfyui-minimax-h3-audio-T8`
+  （⚠️ **GPL-3.0-or-later** —— 仅以其**用法**佐证 ComfyUI 原生掩码契约，**未复制其代码**；
+  2026-09-20 一手核对更正了此前"MIT"的误记）；算法出处见论文表。
 - **⚠️ 运行时宿主 ComfyUI 是 GPL-3.0**（本包在进程内 import 其模块，**但不复制其代码**；
   ComfyUI 的 LICENSE 内无自定义节点/插件例外条款）。这是引用本包前需要你自己评估的一条，
   完整事实、我方立场与未决事项见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) **§一·C**。
