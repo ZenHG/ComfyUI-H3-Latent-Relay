@@ -1287,6 +1287,30 @@
           "widget": {
             "name": "bed_select"
           }
+        },
+        {
+          "name": "join_curve",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "join_curve"
+          }
+        },
+        {
+          "name": "join_prime_ms",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "join_prime_ms"
+          }
+        },
+        {
+          "name": "join_cross_ms",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "join_cross_ms"
+          }
         }
       ],
       "outputs": [
@@ -1300,6 +1324,11 @@
         {
           "name": "report",
           "type": "STRING",
+          "links": []
+        },
+        {
+          "name": "joined",
+          "type": "AUDIO",
           "links": []
         }
       ],
@@ -1315,7 +1344,10 @@
         0.25,
         0,
         "",
-        "tail"
+        "tail",
+        "qsin",
+        33.0,
+        50.0
       ]
     },
     {

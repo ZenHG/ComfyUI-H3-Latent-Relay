@@ -608,6 +608,51 @@ ck("K12 段体基准离散度超阈 ⇒ 弃权；baseline=legacy ⇒ 不弃权",
 ck("K12b 逐层审计：报告含「↳ …后：段头亮度 … 高频 …」",
    "↳ 直方图匹配 后：段头亮度" in _r11 and "高频" in _r11)
 
+# K13~K14 —— 2026-09-19：拼接**复合在第 8 节点内**（不新增轮子；GG 指令）
+_SeamNode = N.H3RelayAudioSeam
+ck("K13 AudioSeam 第 3 路输出 joined + 拼接旋钮折叠（复合而非新节点；仍 8 节点）",
+   _SeamNode.RETURN_NAMES == ("audio", "report", "joined")
+   and len(N.NODE_CLASS_MAPPINGS) == 8
+   and all(_SeamNode.INPUT_TYPES()["optional"][k][1].get("advanced")
+           for k in ("join_curve", "join_prime_ms", "join_cross_ms")))
+_srq = 32000
+_pq = 1056
+_tq = _T.arange(_srq, dtype=_T.float32) / _srq
+_Aq = {"waveform": (0.3 * _T.sin(2 * 3.14159265 * 220.0 * _tq)).reshape(1, 1, -1),
+       "sample_rate": _srq}
+_Bq = {"waveform": (0.3 * _T.sin(2 * 3.14159265 * 330.0 * _tq)).reshape(1, 1, -1),
+       "sample_rate": _srq}
+_Aq["waveform"][..., :_pq] = 0.0
+_Bq["waveform"][..., :_pq] = 0.0
+_Xq = int(0.25 * _srq)
+_keepq = _srq - _pq
+
+
+def _minq(curve, prime):
+    """交叉窗内逐 10ms 的最小 RMS（= 中缝凹陷的直接取证）"""
+    _o, _ = CORE.join_audio_segments([_Aq, _Bq], prime_samples=prime,
+                                     cross_samples=_Xq, curve=curve)
+    _w = _o["waveform"].reshape(-1)
+    _end = (_srq - prime) if prime else _srq
+    _seg = _w[_end - _Xq: _end]
+    _h = 320
+    _n = int(_seg.shape[-1]) // _h
+    return float(_seg[:_n * _h].reshape(_n, _h).pow(2).mean(dim=1).sqrt().min()), _w
+
+
+_rq, _lq = _minq("qsin", _pq)
+_rt, _ = _minq("tri", _pq)
+_rn, _ = _minq("qsin", 0)
+import math as _m                                                   # noqa: E402
+ck("K14 等功率(qsin) 交叉窗最静点 > 线性(tri) ｜ 长度守恒",
+   _rq > _rt and 20 * _m.log10(_rq / max(_rt, 1e-12)) >= 1.5
+   and int(_lq.shape[-1]) == 2 * _keepq - _Xq,
+   "qsin %.5f / tri %.5f ｜ 长度 %d" % (_rq, _rt, int(_lq.shape[-1])))
+ck("K14b 去 priming 抬升交叉窗最静点（编码器 33ms 静音被丢掉）",
+   _rq > _rn and 20 * _m.log10(_rq / max(_rn, 1e-12)) >= 1.0,
+   "去priming %.5f vs 不去 %.5f" % (_rq, _rn))
+
+
 # K8 —— 2026-09-19 参数收口：组 2/3 的作用帧数归 `head_zone_frames`。
 #   事故背景：组 2（色档对齐）与组 3（高频补）的四个强度旋钮，作用区长度一直**偷偷借**
 #   组 4 的 `settle_sharpen_frames`（名字叫「糊区锐化帧数」）⇒ UI 上看不出谁管作用区。
@@ -712,8 +757,8 @@ try:
     _bk = CORE.load_audio(_p)
     _rid = "_unit_review_audio"
     _obj = N.H3RelayAudioSeam()
-    _a0, _l0 = _obj.seam(_ba, _rid, 0)
-    _a1, _l1 = _obj.seam(_ca, _rid, 1, patch_seconds=2.0)
+    _a0, _l0, _j0 = _obj.seam(_ba, _rid, 0)
+    _a1, _l1, _j1 = _obj.seam(_ca, _rid, 1, patch_seconds=2.0)
     _want = CORE.load_audio(N._audio_stage_path(_rid, 0))["waveform"]
     _w2 = _want.reshape(-1, _want.shape[-1])
     _tail3 = _w2[..., int(_w2.shape[-1]) - _N2:]

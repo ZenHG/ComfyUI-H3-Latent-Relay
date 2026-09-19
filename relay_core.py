@@ -2380,3 +2380,70 @@ def build_continue_latent(
            covered)
     )
     return out, int(covered), report
+
+
+# —— 音频拼接（0.5.0 第 9 节点用；2026-09-19 立）——
+# 为什么放进**节点层**（GG 2026-09-19 指令「功能完整地在节点层面实现」）：
+#   缝上的两个音频病**都不在单段节点的可达范围内** ——
+#     · 编码器 priming：每段 mp4 的 AAC 流头 ~33 ms 近静音（实测 @32k = 1056 样本；
+#       同位置节点落盘有内容 −22.9 dBFS、mp4 解码 −66.8 dBFS，差 44 dB）。它在**编码之后**产生。
+#     · 交叉曲线：两段内容不相关时，线性淡变（ffmpeg acrossfade 默认 tri）中缝掉 −4.7 dB。
+#   两件事都只能由「拼接方」做 ⇒ 那就让**包自己当拼接方**，用户不必碰任何 ffmpeg 命令。
+AUDIO_ENCODER_PRIME_MS: float = 33.0     # AAC 编码器 priming 实测值（@32k ≈ 1056 样本）
+
+
+def join_audio_segments(audios, prime_samples: int = 0, cross_samples: int = 0,
+                        curve: str = "qsin"):
+    """把多段音频按序接成**一条**，返回 ``(audio, report)``。三件事全在节点内完成：
+
+    1. **去编码器 priming**（``prime_samples``）：丢掉每段头 N 个样本。它不是内容
+       ⇒ 丢掉是**对齐修正**（留着 = 每缝白送 33 ms 静音，且交叉时再掉一层电平）。
+    2. **等功率交叉**（``curve="qsin"``）：不相关内容下，线性 ``tri`` 中缝掉 **−4.7 dB**
+       （听感「音量先小再恢复」），等功率只掉 −1.85 dB、配去 priming 掉 **−0.36 dB**（本次实测）。
+    3. **长度守恒**：输出 = Σ(段长 − prime) − (n−1)·cross，无残余重叠。
+
+    采样率与声道以**第一段**为准；``audios`` = ``[{"waveform":[C,T],"sample_rate":int}, ...]``。
+    """
+    if not audios:
+        raise ValueError("join_audio_segments：至少需要一段音频。")
+    ws = []
+    sr0 = ch0 = None
+    dt0 = None
+    for i, a in enumerate(audios):
+        wf, sr, _lead, dt = _audio_parts(a)
+        if sr0 is None:
+            sr0, ch0, dt0 = sr, int(wf.shape[0]), dt
+        wf = _match_channels(_resample_to(wf, sr, sr0), ch0).float()
+        k = int(prime_samples)
+        if k > 0:
+            if k >= int(wf.shape[-1]):
+                raise ValueError("去 priming %d 样本 ≥ 第 %d 段长度 %d 样本，段太短。"
+                                 % (k, i + 1, int(wf.shape[-1])))
+            wf = wf[..., k:]
+        ws.append(wf)
+    n = int(cross_samples)
+    out = ws[0]
+    for w in ws[1:]:
+        if n > 0:
+            m = min(n, int(out.shape[-1]), int(w.shape[-1]))
+            t = torch.linspace(0.0, 1.0, m, device=out.device, dtype=torch.float32)
+            if curve == "qsin":                       # 等功率（四分之一正弦）
+                f1, f2 = torch.sin(t * math.pi / 2.0), torch.cos(t * math.pi / 2.0)
+            elif curve == "tri":                      # 线性（旧口径，仅对照；不相关内容掉 −4.7 dB）
+                f1, f2 = 1.0 - t, t
+            else:
+                raise ValueError("未知交叉曲线 %r（只认 qsin / tri）。" % (curve,))
+            out = torch.cat([out[..., :-m],
+                             out[..., -m:] * f1 + w[..., :m] * f2,
+                             w[..., m:]], dim=-1)
+        else:
+            out = torch.cat([out, w], dim=-1)
+    lens = [int(w.shape[-1]) for w in ws]
+    total = int(out.shape[-1])
+    shaped = out.reshape(1, ch0, total).to(dt0) if dt0 is not None else out
+    rep = ("[H3 Relay] 音频拼接：%d 段 → %d 样本（%.3fs）｜ 去 priming %.1f ms/段 ｜ %s 交叉 %.1f ms/缝\n"
+           "           段长(样本) %s ｜ 采样率 %d ｜ 声道 %d ｜ 长度守恒 %s"
+           % (len(ws), total, total / float(sr0), int(prime_samples) / float(sr0) * 1000.0,
+              curve, n / float(sr0) * 1000.0, lens, sr0, ch0,
+              "OK" if total == sum(lens) - (len(ws) - 1) * n else "⚠ 不守恒"))
+    return {"waveform": shaped, "sample_rate": sr0}, rep

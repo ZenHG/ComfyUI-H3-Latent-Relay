@@ -1315,21 +1315,77 @@ class H3RelayAudioSeam:
                                "    🔴 实测它会把补丁换成一段更静的内容（−42 vs −12.8 dBFS）⇒\n"
                                "    缝上从「凹陷」变成「静音洞」、起拍被压平。**仅作对照复现用。**",
                 }),
+                # —— 第 3 路输出 joined（拼接）的三个细分参数：都折叠，别占画布 ——
+                "join_curve": (["qsin", "tri"], {
+                    "advanced": True,
+                    "default": "qsin",
+                    "tooltip": "【joined 用】缝处交叉曲线：\n"
+                               "  · qsin（默认，**等功率**）——两段内容不相关时不掉电平；\n"
+                               "  · tri（线性，ffmpeg acrossfade 的默认）——实测中缝 **−4.7 dB**，\n"
+                               "    听感「音量先小再恢复」，**仅作对照复现**。",
+                }),
+                "join_prime_ms": ("FLOAT", {
+                    "advanced": True,
+                    "default": CORE.AUDIO_ENCODER_PRIME_MS, "min": 0.0, "max": 200.0, "step": 1.0,
+                    "tooltip": "【joined 用】每段头要丢掉的**编码器 priming**（毫秒）。\n"
+                               "默认 33 ms（AAC 实测值 @32k = 1056 样本）。**它不是内容**，\n"
+                               "丢掉是**对齐修正**；0 = 不丢（对照用）。",
+                }),
+                "join_cross_ms": ("FLOAT", {
+                    "advanced": True,
+                    "default": 50.0, "min": 0.0, "max": 2000.0, "step": 5.0,
+                    "tooltip": "【joined 用】拼接缝的交叉淡变长度（毫秒）。\n"
+                               "默认 50 ms：只用来消掉拼点上的一次性瑕疵。\n"
+                               "（上游若已用本节点的等长替换补过缝，两侧本来就是同源环境声，不需要长淡变）",
+                }),
             },
         }
 
-    RETURN_TYPES = ("AUDIO", "STRING")
-    RETURN_NAMES = ("audio", "report")
+    RETURN_TYPES = ("AUDIO", "STRING", "AUDIO")
+    RETURN_NAMES = ("audio", "report", "joined")
     FUNCTION = "seam"
     CATEGORY = CATEGORY
     # 落盘本身就是产物：没有下游消费也要执行（否则第 1 段的床源文件永远不生成）
     OUTPUT_NODE = True
-    DESCRIPTION = ("把上一段的环境声补进本段头部，去掉裁切点上的解码静默与生成瞬态。"
-                   "长度守恒、零 A/V 位移；默认关（0 = 逐位直通）。")
+    DESCRIPTION = ("把上一段的环境声补进本段头部，去掉裁切点上的解码静默与生成瞬态；"
+                   "长度守恒、零 A/V 位移。**并顺手把 0..本段 的音频接成一条连续音轨"
+                   "（去编码器 priming + 等功率交叉），从第 3 路 `joined` 输出——"
+                   "拼接这件事本身也在节点内完成，用户不需要外部 ffmpeg。**")
+
+    def _joined(self, run_id, idx, curve="qsin",
+                prime_ms=CORE.AUDIO_ENCODER_PRIME_MS, cross_ms=50.0):
+        """把 0..本段 的落盘音频接成**一条**（复合进本节点，不新增轮子）。
+
+        为什么拼接必须由本包做（两个病都不在**单段**可达范围内）：
+          · **编码器 priming**：每段 mp4 的 AAC 流头 ~33 ms 近静音（实测 @32k = 1056 样本；
+            同位置本节点落盘的音频有内容 −22.9 dBFS、mp4 解码 −66.8 dBFS，差 44 dB）——
+            它在**编码之后**才产生，单段节点看不见、删不掉。
+          · **交叉曲线**：两段内容不相关时，ffmpeg `acrossfade` 默认 **tri（线性）中缝掉 −4.7 dB**
+            —— 就是听感「音量先小再恢复」；等功率 `qsin` 掉 −1.85 dB，配去 priming 只掉 **−0.36 dB**。
+
+        返回 ``(audio|None, note)``；段文件不全或读失败 ⇒ 返回 None 并说明（不抛，避免断链）。
+        """
+        paths = [_audio_stage_path(run_id, i) for i in range(0, int(idx) + 1)]
+        miss = [i for i, p in enumerate(paths) if not os.path.isfile(p)]
+        if miss:
+            return None, "（joined 跳过：缺第 %s 段落盘音频）" % miss
+        try:
+            segs = [CORE.load_audio(p) for p in paths]
+            sr = int(segs[0]["sample_rate"])
+            j, rep = CORE.join_audio_segments(
+                segs,
+                prime_samples=int(round(float(prime_ms) / 1000.0 * sr)),
+                cross_samples=int(round(float(cross_ms) / 1000.0 * sr)),
+                curve=str(curve or "qsin"))
+        except Exception as e:                                   # noqa: BLE001
+            return None, "（joined 失败：%r）" % (e,)
+        return j, rep
 
     def seam(self, audio, run_id, stage_index, patch_seconds=0.0, tile_seconds=0.0,
              fade_seconds=0.25, bed_stage=0, note="",
-             bed_select=CORE.AUDIO_SEAM_BED_SELECT):
+             bed_select=CORE.AUDIO_SEAM_BED_SELECT,
+             join_curve="qsin", join_prime_ms=CORE.AUDIO_ENCODER_PRIME_MS,
+             join_cross_ms=50.0):
         me = _audio_stage_path(run_id, int(stage_index))
         idx = int(stage_index)
         patch = float(patch_seconds or 0.0)
@@ -1338,8 +1394,13 @@ class H3RelayAudioSeam:
             why = "第 1 段无缝可补" if idx <= 0 else "补丁关（patch_seconds=0）"
             line = ("[H3 Relay] 音频缝：%s → 直通｜本段音频已落盘（供后段当床源）：%s"
                     % (why, me))
+            _j, _jn = self._joined(run_id, idx, join_curve, join_prime_ms, join_cross_ms)
+            if _jn.startswith("（joined"):
+                line += "｜ " + _jn
+            else:
+                line += "｜ " + _jn.splitlines()[0]
             print(line)
-            return (audio, line)
+            return (audio, line, _j if _j is not None else audio)
 
         b_idx = int(bed_stage)
         if b_idx >= idx:
@@ -1373,9 +1434,13 @@ class H3RelayAudioSeam:
         line = rep + ("｜已落盘（供后段当床源）：%s" % me)
         if target is None:
             line += "｜ ⚠ 上一段音频文件缺失 ⇒ 电平目标退回床源尾部（不够准）"
+        _j, _jn = self._joined(run_id, idx, join_curve, join_prime_ms, join_cross_ms)
+        if _jn.startswith("（joined"):
+            line += "｜ " + _jn
+        else:
+            line += "｜ " + _jn.splitlines()[0]
         print(line)
-        return (out, line)
-
+        return (out, line, _j if _j is not None else out)
 
 NODE_CLASS_MAPPINGS = {
     "H3RelayLatentSave": H3RelayLatentSave,

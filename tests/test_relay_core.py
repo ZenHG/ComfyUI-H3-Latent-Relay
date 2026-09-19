@@ -1657,11 +1657,11 @@ _p0 = NODES._audio_stage_path(_RID22, 0)
 _dir22 = os.path.dirname(_p0)
 try:
     _n22obj = NODES.H3RelayAudioSeam()
-    _a0, _l0 = _n22obj.seam(_bed_a, _RID22, 0)
+    _a0, _l0, _j0 = _n22obj.seam(_bed_a, _RID22, 0)   # 第 3 路 joined（复合，2026-09-19）
     check("22.13 节点 stage 0 ⇒ 直通，但仍落盘（后段的床源靠它）",
           _a0 is _bed_a and os.path.isfile(_p0) and "第 1 段无缝可补" in _l0,
           _l0[:56])
-    _a1, _l1 = _n22obj.seam(_cur_a, _RID22, 1, patch_seconds=2.0)
+    _a1, _l1, _j1 = _n22obj.seam(_cur_a, _RID22, 1, patch_seconds=2.0)
     _got = _a1["waveform"][..., :_keep22]
     _want = CORE.load_audio(_p0)["waveform"]
     _w2 = _want.reshape(-1, _want.shape[-1])
@@ -1702,6 +1702,70 @@ check("22.19 增益后峰值护栏：床声不会被推过 1.0（削波防护）
       float(_o19["waveform"].abs().max()) <= 1.0 + 1e-6 and "夹住" in _r19,
       "峰值 %.4f ｜ %s" % (float(_o19["waveform"].abs().max()),
                           [ln for ln in _r19.splitlines() if "床声电平" in ln][:1]))
+
+# —— 22.20~22.24：`joined`（**拼接复合在第 8 节点内**，不新增轮子；GG 2026-09-19 指令）——
+_it22j = NODES.H3RelayAudioSeam.INPUT_TYPES()
+check("22.20 AudioSeam 第 3 路输出 joined 追加末位 + 三个拼接旋钮全折叠",
+      NODES.H3RelayAudioSeam.RETURN_TYPES == ("AUDIO", "STRING", "AUDIO")
+      and NODES.H3RelayAudioSeam.RETURN_NAMES == ("audio", "report", "joined")
+      and list(_it22j["optional"])[-3:] == ["join_curve", "join_prime_ms", "join_cross_ms"]
+      and all(_it22j["optional"][k][1].get("advanced")
+              for k in ("join_curve", "join_prime_ms", "join_cross_ms")),
+      "输出=%s" % (NODES.H3RelayAudioSeam.RETURN_NAMES,))
+
+# 两段**不相关**正弦（220 / 330 Hz）+ 头部 1056 采样静音（模拟 AAC 编码器 priming）
+_SRJ = 32000
+_PRJ = 1056
+
+
+def _seg22(f, dur_s=1.0):
+    tt = torch.arange(int(dur_s * _SRJ), dtype=torch.float32) / _SRJ
+    x = (0.30 * torch.sin(2 * math.pi * f * tt)).unsqueeze(0)
+    x[..., :_PRJ] = 0.0                      # 编码器 priming
+    return {"waveform": x.unsqueeze(0), "sample_rate": _SRJ}
+
+
+_A22, _B22 = _seg22(220.0), _seg22(330.0)
+_X22J = int(0.25 * _SRJ)
+_keep22J = _SRJ - _PRJ
+
+
+def _seam_stats22(curve, prime):
+    """交叉窗（= out 末尾 X 个样本的落点）里逐 10ms 的**最小 RMS** —— 直接对「中缝凹陷」取证。"""
+    _o, _ = CORE.join_audio_segments([_A22, _B22], prime_samples=prime,
+                                     cross_samples=_X22J, curve=curve)
+    _w = _o["waveform"].reshape(-1)
+    _end = (_SRJ - prime) if prime else _SRJ      # 交叉窗结束 = 第二段开始重叠处
+    _seg = _w[_end - _X22J: _end]
+    _h = 320                                      # 10 ms
+    _n = int(_seg.shape[-1]) // _h
+    _mins = _seg[:_n * _h].reshape(_n, _h).pow(2).mean(dim=1).sqrt().min()
+    return float(_mins), _w
+
+
+_r_q, _w_q = _seam_stats22("qsin", _PRJ)
+_r_t, _w_t = _seam_stats22("tri", _PRJ)
+_d_db = 20 * math.log10(_r_q / max(_r_t, 1e-12))
+check("22.21 等功率(qsin) 交叉窗最静点比线性(tri) 高（不相关内容；这是「音量先小再恢复」的直接取证）",
+      _d_db >= 1.5, "qsin 最静 %.5f vs tri 最静 %.5f → %+.2f dB" % (_r_q, _r_t, _d_db))
+_r_np, _w_np = _seam_stats22("qsin", 0)
+_d2 = 20 * math.log10(_r_q / max(_r_np, 1e-12))
+check("22.22 去 priming 使交叉窗最静点抬升（B 头不再是 33ms 静音）",
+      _d2 >= 1.0, "去priming %.5f vs 不去 %.5f → %+.2f dB" % (_r_q, _r_np, _d2))
+check("22.23 长度守恒 = Σ(段长−prime) − (n−1)·cross",
+      int(_w_q.shape[-1]) == 2 * _keep22J - _X22J,
+      "%d vs %d" % (int(_w_q.shape[-1]), 2 * _keep22J - _X22J))
+_o24, _r24 = CORE.join_audio_segments([_A22], prime_samples=0, cross_samples=0)
+check("22.24 单段 → 直通（长度不变、无交叉）",
+      int(_o24["waveform"].shape[-1]) == _SRJ,
+      "%d" % int(_o24["waveform"].shape[-1]))
+check("22.25 负向对照：prime_ms=0 开关真的不删（**每段都删** ⇒ 总长差 = n×P）",
+      int(_w_np.shape[-1]) - int(_w_q.shape[-1]) == _PRJ * 2
+      and float(_B22["waveform"].reshape(-1)[:_PRJ].abs().max()) < 1e-6,
+      "不删 %d vs 删 %d（差 %d）｜ 输入 B 头峰值 %.1e"
+      % (int(_w_np.shape[-1]), int(_w_q.shape[-1]),
+         int(_w_np.shape[-1]) - int(_w_q.shape[-1]),
+         float(_B22["waveform"].reshape(-1)[:_PRJ].abs().max())))
 
 print()
 print("=" * 78)
