@@ -25,8 +25,8 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 | [5](#5-节点速览) | 节点速览（7 个） | 找节点时 |
 | [6](#6-参数主旋钮) | 参数（主旋钮） | 要调参时 |
 | [7](#7-音频缝) | 音频缝 | 出片有咔哒声 |
-| [8](#8-排障) | 排障 | 跑不通时 |
-| [9](#9-离线自测) | 离线自测 | 改完代码 / 提 PR |
+| [8](#8-离线自测) | 离线自测 | 改完代码 / 提 PR |
+| [9](#9-排障) | 排障 | 跑不通时 |
 | [10](#10-原理与机制) | 原理与机制（概述） | 想搞懂为什么 |
 | [11](#11-许可与出处) | 许可与出处 | 再发布前 |
 | [12](#12-文档索引) | 文档索引 | 找细节 |
@@ -60,10 +60,7 @@ git clone https://github.com/ZenHG/ComfyUI-H3-Relay-Kit.git
 装好后**重启 ComfyUI 后端**（ComfyUI-Manager 点 *Restart*；没装就重启 Python 进程）——
 仅刷新浏览器不会加载新节点。节点列表里搜 `🔗 H3 续接` 即可看到全部 7 个节点。
 
-| 依赖 | 说明 |
-|---|---|
-| `torch` | **模块顶层 import** —— 缺了整包注册失败、节点列表里一个都看不到 |
-| `safetensors` | 函数内延迟 import —— 缺了只在落盘那一步报错 |
+依赖只用 `torch`（**顶层 import**，缺了整包注册失败）与 `safetensors`（延迟 import，缺了只在落盘那步报错）。
 
 **宿主要求**：本包硬依赖带 MiniMax-H3 支持的 ComfyUI（需要 `comfy_extras/nodes_minimax_h3.py`
 与消费 `minimax_keyframes` / `minimax_refs` 的 `comfy/model_base.py`）。装到不含 H3 的旧版
@@ -200,10 +197,10 @@ ComfyUI 上，节点能注册但**续接静默无效**——用前先确认 Comf
 |---|---|
 | 🔗 **H3 续接 Latent 存** | 本段采样后把 AV latent 落盘到 `output/relay_kit/<run_id>/stage_NNNNN.safetensors` |
 | 🔗 **H3 续接 Latent 读** | 读回上一段（段号 −1），断点续跑可指定 `explicit_path` 换源 |
-| 🔗 **H3 续接 拷贝桥（复合桥）** | 上一段尾 AV latent **逐位拷贝**进本段初始 latent + 噪声掩码（钉住区不重绘）；接 `[16] conditioning` 时并联原钉帧路线（管取景），与 `[0] latent`（管运动）互不冲突。`mask_mode="hard"`（默认）钉住区零重绘；`ramp` 缝端轻度 harmonize；`taper` **不钉住**（仅对照实验） |
-| 🔗 **H3 续接裁重叠** | 裁掉本段头部的重生成帧（音画同裁）——不裁就会在拼接处重播/跳变。`[3]` 输出 `prev_tail` = 上一段末帧 |
-| 🔗 **H3 续接后处理 Post** | **画质域**：跨段统计匹配 / 低频残差 / 直方图+白平衡 / 反卷积 / 高频迁移 / 糊区锐化。全部默认关；`[1] guide` 接 `prev_tail` 才有"缝的另一侧"可对齐 |
-| 🔗 **H3 续接音频缝** | **音频域**：把上一段环境声补进本段头部，去掉裁切点的解码静默与生成瞬态。**长度守恒**（零 A/V 位移），默认关 |
+| 🔗 **H3 续接 拷贝桥（复合桥）** | 上一段尾 AV latent **逐位拷贝**进本段初始 latent + 噪声掩码（钉住区不重绘）。接 `[16] conditioning` 时并联钉帧（管取景）与 `[0] latent` 拷贝（管运动）；不接则只做拷贝。（`mask_mode` 各档见 [`docs/02`](docs/02-parameters.md)） |
+| 🔗 **H3 续接裁重叠** | 裁掉本段头部的重生成帧（音画同裁）——不裁就会在拼接处重播/跳变；`[3]` 输出 `prev_tail` = 上一段末帧 |
+| 🔗 **H3 续接后处理 Post** | **画质域**：跨段统计匹配 / 低频残差 / 色调 / 反卷积 / 高频迁移 / 糊区锐化，全部默认关 |
+| 🔗 **H3 续接音频缝** | **音频域**：把上一段环境声补进本段头部，**长度守恒**（零 A/V 位移），默认关 |
 | 🔗 **H3 续接连跑 Chain** | 自动连跑控制器：同分组框内自动推进「桥 + 落盘」段号并排队 |
 
 > **三个域，别混挂**：时间轴 = `H3RelayTrimAV`（冻结）／画质域 = `H3RelayPost`／音频域 = `H3RelayAudioSeam`。
@@ -213,18 +210,16 @@ ComfyUI 上，节点能注册但**续接静默无效**——用前先确认 Comf
 
 ## 6. 参数（主旋钮）
 
-**桥（复合桥）**
+默认值就是**实测过的推荐值**，不是"待你优化的起点"。
 
-| 参数 | 默认 | 说明 |
-|---|---|---|
-| `context_frames` | `22` | 钉住窗帧数，只认 `5+17k`（5/22/39/56/73/90/107/124），须小于本段帧数 |
-| `mask_mode` | `hard` | 🟢 生产档 `hard`｜🟡 对照 `ramp` / `window`｜🔴 实验 `taper` / `blend`。语义 = **每步输出 = 模型生成×m + 上段尾×(1−m)**，`m=0` 才钉住 |
-| `pin_audio` | `True` | 把上一段音频尾也拷进本段音频 latent 开头 |
-| `ref_anchor_stage` | `-1` | ≥0 时自动读该段作为**全局外观锚**（近零噪声全程骑乘，防长程漂移） |
-
-**裁重叠**：`settle_frames=0`（不裁沉降）· `seam_ghost=0`（默认关）。
-**后处理 Post**：19 个旋钮**全部默认 0 = 逐位直通**；跨段两项还需显式打勾 `cross_seg_ack`。
-**音频缝**：`patch_seconds=0`（逐位直通）· `fade_seconds=0.25`。
+| 节点 | 参数 | 默认 | 说明 |
+|---|---|---|---|
+| 桥 | `context_frames` | `22` | 钉住窗帧数，只认 `5+17k`（5/22/39/…/124），须小于本段帧数 |
+| 桥 | `mask_mode` | `hard` | 🟢 生产档 `hard`（钉住区零重绘）｜🟡 对照 `ramp`/`window`｜🔴 实验 `taper`/`blend`（`taper` **不钉住**） |
+| 桥 | `ref_anchor_stage` | `-1` | ≥0 时自动读该段作**全局外观锚**，防长程漂移 |
+| 裁重叠 | `settle_frames` | `0` | 不裁沉降；`seam_ghost` 同样默认 `0` |
+| 后处理 Post | 19 个旋钮 | `0` | 全关 = 逐位直通；跨段两项需另打勾 `cross_seg_ack` |
+| 音频缝 | `patch_seconds` | `0` | 逐位直通；`fade_seconds` 默认 `0.25` |
 
 > 全量参数（含每个 advanced 项、`Post` 的 20 项与 `AudioSeam` 的 13 项）见
 > [`docs/02-parameters.md`](docs/02-parameters.md)。
@@ -245,7 +240,28 @@ ComfyUI 上，节点能注册但**续接静默无效**——用前先确认 Comf
 
 ---
 
-## 8. 排障
+## 8. 离线自测
+
+```bash
+python tests/test_relay_core.py     # 期望 281/0
+python tools/review_050.py          # 期望 77/0（文档—代码一致性）
+python tools/smoke_nodes.py         # 期望 15/0（节点层冒烟）
+```
+
+脚本会自动上溯定位 ComfyUI 根目录；装在别处时用
+`COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。
+
+**281 项断言，零 GPU、不加载模型**，覆盖二十二个方面 —— 例如：
+
+| 组 | 覆盖 |
+|---|---|
+| 21 | 重叠区双向融合 blend：窗形权重（smoothstep / hann），两端导数为 0 |
+
+22 组明细与 `tools/` 清单见 [`docs/08-testing.md`](docs/08-testing.md)。
+
+---
+
+## 9. 排障
 
 | 症状 | 原因 | 处置 |
 |---|---|---|
@@ -256,46 +272,6 @@ ComfyUI 上，节点能注册但**续接静默无效**——用前先确认 Comf
 
 完整排障表、工作流文件自检工具、API 提交方式见
 [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md)。
-
----
-
-## 9. 离线自测
-
-```bash
-python tests/test_relay_core.py
-```
-
-脚本会自动上溯定位 ComfyUI 根目录；装在别处时用
-`COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。也支持 `pytest tests/`。
-
-**281 项断言，零 GPU、不加载模型**，覆盖二十二个方面：
-
-| 组 | 覆盖 |
-|---|---|
-| 1 | 时序网格自洽（22 帧=7 步 / 39 帧=12 步 / 192 帧=57 步） |
-| 2 | 尾段切片逐位正确 + 起始必须落在 5 步周期边界 |
-| 3 | 硬错误：分辨率不一致 / 非网格帧数 / 窗口 ≥ 段长 → 必须 raise |
-| 4 | conditioning 注入：keyframes 合并、钉住区旧锚丢弃、音频 ref 追加 |
-| 5 | AV latent 落盘往返逐位一致 |
-| 6 | 裁头重叠：画面音频同裁逐位正确、时长对齐、trim=0 直通、越界 raise |
-| 7 | 节点返回值契约：每个分支的返回路数 == `len(RETURN_TYPES)` |
-| 8 | 接缝自检 `find_head_jump` / `describe_head_jump` |
-| 9 | 段号声明与取源矛盾必须 raise（不得静默直通） |
-| 10 | `streams_from_latent` 不得把普通张量按 batch 维误拆成伪音频流 |
-| 11 | Chain 的 `status` 槽位与前端 JS 一致（旧工作流少一格不前移） |
-| 12 | 沉降帧：pin 与 crop 解耦、自动检测四个场景、裁节点三条分支 |
-| 13 | 模糊型沉降 + 锐度路三量解耦：塌陷宽于旧窗但**有恢复** → 应裁；无恢复仍 0 |
-| 14 | 拷贝桥：位级拷贝 / 掩码结构 / 音频尾 / 跨分辨率 / 前缀占满 / 相位失配 / 节点契约 |
-| 15 | 色档收敛信号：注噪 / taper 收敛尾巴的观测端检出 |
-| 16 | 0.4.2 回归：导出音频分支 / 中文 note / 服务端校验 / 掩码设备 / 契约降级缓存 |
-| 17 | 噪声斜坡 ramp：软证据接缝——连续掩码 = 逐 token sigma 标签 |
-| 18 | 复现残留：第 4 种检测手段（非槽位；现有三种量都看不见复现帧，**默认关闭**） |
-| 19 | 跨段统计匹配：Reinhard 式一阶+二阶矩，段头↔上段末帧；护栏与无重影 |
-| 20 | 拆节点：`H3RelayPost` 独立 + TrimAV 追加 `[3]` 输出 `prev_tail` |
-| 21 | 重叠区双向融合 blend：窗形权重（smoothstep / hann），两端导数为 0 |
-| 22 | 音频缝：长度守恒、床声选窗两档、电平对齐 + 峰值护栏、边界 blend、床环铺无台阶、落盘往返、节点两道守卫、`joined` 拼接复合 |
-
-另有 `tools/` 下的文档—代码一致性体检与节点层冒烟，见 [`tools/README.md`](tools/README.md)（期望 77/0 与 15/0）。
 
 ---
 
@@ -347,6 +323,7 @@ python tests/test_relay_core.py
 | [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md) | 完整排障表 · 工作流文件自检 · API 提交 |
 | [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md) | 出词纪律：段首缓冲 · 台词安全时刻 · 末帧锚链 · 音频缝配套 |
 | [`docs/07-chain.md`](docs/07-chain.md) | Chain 自动连跑 |
+| [`docs/08-testing.md`](docs/08-testing.md) | 离线自测：22 组断言明细 · `tools/` 清单 |
 | [`CHANGES.md`](CHANGES.md) | 版本史与每次实测证据 |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 开发环境 · 自测纪律 · 许可条款 |
 | [`SECURITY.md`](SECURITY.md) | 密钥 / 依赖 / 网络行为声明 |
