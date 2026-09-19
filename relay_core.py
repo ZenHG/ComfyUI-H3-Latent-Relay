@@ -72,11 +72,11 @@ def step_offsets(latent_t: int) -> List[int]:
     """每个 latent token 的**起始像素帧位置**（首位恒为 0）。
 
     与 ``pixel_frames`` 是同一张表的两种读法：``pixel_frames(n)`` 给总量，
-    本函数给每个 token 的入口。写成**排他前缀和**——第 i 个位置 = 它前面
-    所有 token 的跨度之和——而不是"边遍历边累加记一笔"。
+    本函数给每个 token 的入口。写成**排他前缀和** —— 第 i 个位置 = 它前面
+    所有 token 的跨度之和。``cycle`` 让周期由 ``FRAME_PER_TOKEN`` 自己决定。
     """
-    n = int(latent_t)
-    spans = [FRAME_PER_TOKEN[k % 5] for k in range(n)]
+    n = max(int(latent_t), 0)
+    spans = itertools.islice(itertools.cycle(FRAME_PER_TOKEN), n)
     return [0, *itertools.accumulate(spans)][:n]
 
 
@@ -86,15 +86,18 @@ def steps_for_frames(n: int) -> Optional[int]:
     跨度按 ``1,4,4,4,4`` 循环，所以**可达的帧数就是这些跨度的前缀和**：
     5 → 2 步、22 → 7 步、39 → 12 步、56 → 17 步。落在两格之间的值
     （4、6、7…）无解。0 帧视作 0 步。
+
+    ⚠️ 这里**不硬编码周期**（虽然 5 步和为 17，可写成闭式解、再快一个数量级）：
+    闭式解在上游改 ``FRAME_PER_TOKEN`` 时会**静默算错**，而 ``layout_contract``
+    只对照常量、查不出公式里的硬编码。``cycle`` 跟着常量走，网格变了自动跟着变。
     """
     n = int(n)
     for steps, total in enumerate(
-            itertools.accumulate(FRAME_PER_TOKEN[k % 5] for k in range(n)),
+            itertools.accumulate(itertools.islice(
+                itertools.cycle(FRAME_PER_TOKEN), max(n, 0))),
             start=1):
-        if total == n:
-            return steps
-        if total > n:
-            break
+        if total >= n:
+            return steps if total == n else None
     return 0 if n == 0 else None
 
 

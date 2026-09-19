@@ -254,10 +254,9 @@ def _grid_mutants(src):
     # ⚠ 别用「break 改 continue」当变异体 —— 那是**等价变异**：
     #   total 严格递增，越界后 continue 到循环尾，结果与 break 相同。
     #   （本工具第一版就选了它，然后误以为"检查器瞎"。）
-    b = src.replace("        if total == n:\n            return steps",
-                    "        if total == n:\n            return steps + 1")
+    b = src.replace("return steps if total == n else None", "return steps")
     if b != src:
-        out.append(("网格命中时步数多算 1", b))
+        out.append(("非网格值不返回 None（丢掉网格判据）", b))
     return out
 
 
