@@ -8,3 +8,5 @@
 *.toml text
 *.css text
 *.html text
+*.yml text
+*.yaml text
