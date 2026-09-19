@@ -667,7 +667,7 @@ class H3RelayCopyBridge:
                                "     用含「缝后单帧尖峰 + 缝对构图相关」的判据重测：**四个掩码档在缝处全都跳**，\n"
                                "     只是失败模式不同——hard 保取景但运动尖峰大；ramp/blend 运动平了但**取景被改写**。\n"
                                "     ⇒ 「钉住」与「释放」在单机制内对立，**单靠掩码调参治不好**。\n"
-                               "     详见 I:\\_handover\\copy方案彻底优化-2026-09-19.md。",
+                               "     详见 CHANGES.md 0.6.0「掩码档实测」一节（判据与口径同步记在那里）。",
                 }),
                 "taper_tokens": ("INT", {"advanced": True, 
                     "default": 4, "min": 1, "max": 12, "step": 1,

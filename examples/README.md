@@ -23,7 +23,7 @@
 4. 段号 = 1 → 换 prompt → Queue（第 2 段）。
 5. 日志出现 `钉住 22 帧` + `裁首 22 帧 = 钉住 22 + 沉降 0` + `起点干净` = 接通了。
 
-> **后处理 Post（`#17`）可整节点删掉**：17 个旋钮全部默认 0 = **逐位直通**，
+> **后处理 Post（`#14`）可整节点删掉**：17 个旋钮全部默认 0 = **逐位直通**，
 > 不接它行为与 0.4.x 一致。也**可以不接 `guide`**——只有 `match_prev` 与 `lowfreq_pull`
 > 两项需要 guide（不接时自动跳过，report 里会写「跳过（未接 guide）」）。
 > 最省的一次试法：把 `match_prev` 调到 `0.5`（段头色档/曝光对齐上段末帧，治缝上的亮度阶跃）。
@@ -73,7 +73,7 @@ python tools/check_ui_workflow.py examples/minimal_relay_official.json
 | 来源 | 用在 | 容器 |
 |---|---|---|
 | 服务端 `/object_info`（JSON） | 官方 / 第三方节点 | `list` |
-| 本包 `nodes.py` 的 `INPUT_TYPES()`（「本地定义优先」） | **本包 8 个节点** | **`tuple`** |
+| 本包 `nodes.py` 的 `INPUT_TYPES()`（「本地定义优先」） | **本包 7 个节点**（0.6.0 起） | **`tuple`** |
 
 所以任何形如 `isinstance(spec, list)` / `isinstance(spec[0], list)` 的写法，
 **对本包节点一律为假**。2026-09-19 的事故就是这么来的：`_ty()` 只认 `list` ⇒
