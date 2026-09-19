@@ -1769,6 +1769,35 @@ check("22.25 负向对照：prime_ms=0 开关真的不删（**每段都删** ⇒
          int(_w_np.shape[-1]) - int(_w_q.shape[-1]),
          float(_B22["waveform"].reshape(-1)[:_PRJ].abs().max())))
 
+# 22.26~22.28 —— 2026-09-19 深夜：自适应糊区补偿（settle_auto / 方向二「观测—校正闭环」落地）
+torch.manual_seed(9)
+_xsa = torch.rand(68, 24, 24, 3) * 0.2 + 0.4
+_xsa[:] = _xsa[64:65]                                    # 整段 = 同一清晰帧（body 基线零波动）
+_xsa[2:18] = CORE._box_blur_hwc(_xsa, 9)[2:18]          # 只有帧 2-17 软糊（真实爬升区形态）
+_osa, _rsa = CORE.settle_compensate(_xsa, body_start=40, strength=1.0)
+_hf = lambda t: (t.float() - CORE._box_blur_hwc(t.float(), 3)).abs().mean(dim=(1, 2, 3))
+_bsa = float(_hf(_xsa[40:]).median())
+check("22.26 自适应糊区补偿：亏空帧清晰度提升、帧 0-1 与段体逐位不动、报告含量测",
+      float(_hf(_osa)[2]) > float(_hf(_xsa)[2]) * 1.2
+      and torch.equal(_osa[40:], _xsa[40:])
+      and _hf(_osa)[0].sub(_hf(_xsa)[0]).abs().item() < 1e-6
+      and "回基线" in _rsa and "最低" in _rsa,
+      _rsa[:66])
+_xnb = torch.rand(24, 24, 3).unsqueeze(0).repeat(68, 1, 1, 1)
+                                                         # 整段同一帧 ⇒ 每帧 hf 精确相同 ⇒ deficit 精确 0
+_onb, _rnb = CORE.settle_compensate(_xnb, body_start=40, strength=1.0)
+check("22.27 无亏空 ⇒ 逐位直通（不误伤：亏空=0 的帧一个样本都不动）",
+      torch.equal(_onb, _xnb),
+      "输出差 %.2e" % float((_onb.float() - _xnb.float()).abs().max()))
+_oa1, _ra1 = NODES.H3RelayPost().apply(_xsa, None, settle_auto=1.0, settle_sharpen=0.6)
+_itp = NODES.H3RelayPost.INPUT_TYPES()["optional"]
+check("22.28 节点互斥（auto 优先、固定版弃权点名）+ settle_auto 默认 0、紧邻 settle_sharpen",
+      "固定锐化弃权" in _ra1
+      and _itp["settle_auto"][1]["default"] == 0.0
+      and list(_itp).index("settle_auto") == list(_itp).index("settle_sharpen") + 1
+      and "亏空" in _itp["settle_auto"][1]["tooltip"],
+      _ra1.split("；")[-1][:56])
+
 print()
 print("=" * 78)
 print("结果：通过 %d / 失败 %d" % (len(PASS), len(FAIL)))

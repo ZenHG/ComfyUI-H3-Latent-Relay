@@ -554,7 +554,7 @@ python tests/test_relay_core.py
 
 也支持 `pytest tests/`（找不到 ComfyUI 根目录时自动 skip，不会崩）。
 
-**275 项断言，零 GPU、不加载模型**，覆盖二十二个方面：
+**278 项断言，零 GPU、不加载模型**，覆盖二十二个方面：
 
 | 组 | 覆盖 |
 |---|---|

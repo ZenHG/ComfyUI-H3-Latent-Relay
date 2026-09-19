@@ -667,6 +667,23 @@ ck("K15b 掩码族专属参数全部带档位标签",
    and all("ramp 专属" in _opt_cb[k][1]["tooltip"] for k in ("ramp_top", "ramp_tokens"))
    and all("blend 专属" in _opt_cb[k][1]["tooltip"] for k in ("blend_top", "blend_tokens")))
 
+# K16 —— 2026-09-19 深夜：settle_auto 自适应糊区补偿（方向二「观测—校正闭环」落地）
+_optP16 = N.H3RelayPost.INPUT_TYPES()["optional"]
+ck("K16 settle_auto 槽：默认 0、紧邻 settle_sharpen、tooltip 含「亏空/自适应/弃权」",
+   _optP16["settle_auto"][1]["default"] == 0.0
+   and list(_optP16).index("settle_auto") == list(_optP16).index("settle_sharpen") + 1
+   and "亏空" in _optP16["settle_auto"][1]["tooltip"]
+   and "自适应" in _optP16["settle_auto"][1]["tooltip"]
+   and "弃权" in _optP16["settle_auto"][1]["tooltip"])
+_x16 = _T.rand(68, 16, 16, 3) * 0.2 + 0.4
+_x16[2:18] = CORE._box_blur_hwc(_x16, 9)[2:18]
+_o16, _r16 = CORE.settle_compensate(_x16, body_start=40, strength=1.0)
+_hf16 = lambda z: (z.float() - CORE._box_blur_hwc(z.float(), 3)).abs().mean(dim=(1, 2, 3))
+ck("K16b 补偿实效：亏空帧 hf 提升 ≥1.15× ｜ 段体逐位不动",
+   float(_hf16(_o16)[5]) > float(_hf16(_x16)[5]) * 1.15
+   and _T.equal(_o16[40:], _x16[40:]),
+   "hf %.5f -> %.5f" % (float(_hf16(_x16)[5]), float(_hf16(_o16)[5])))
+
 # K8 —— 2026-09-19 参数收口：组 2/3 的作用帧数归 `head_zone_frames`。
 #   事故背景：组 2（色档对齐）与组 3（高频补）的四个强度旋钮，作用区长度一直**偷偷借**
 #   组 4 的 `settle_sharpen_frames`（名字叫「糊区锐化帧数」）⇒ UI 上看不出谁管作用区。

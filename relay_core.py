@@ -1683,6 +1683,58 @@ def unsharp_frames(images: torch.Tensor, amount: float) -> torch.Tensor:
     return out.permute(0, 2, 3, 1).to(images.dtype)
 
 
+def settle_compensate(images: torch.Tensor, body_start: int = 40,
+                      strength: float = 1.0, smooth: int = 3) -> Tuple[torch.Tensor, str]:
+    """**自适应糊区补偿**——方向二「观测—校正闭环」的落地：settle 检测器升级成纠偏器。
+
+    症状（2026-09-19 逐帧剖面的定案）：缝后第 2 帧起清晰度断崖（实测段体基线的 42%）
+    再单调爬升 ~15 帧——**生成层 settle 行为在像素域的残留**。固定 ``settle_sharpen``
+    按「缝端最强→尾端 0」线性衰减，与真实亏空曲线（帧 0-1 清晰、第 2 帧最深）**不重合**；
+    本函数**当场量**每帧高频能量（与 3×3 盒式模糊之差，拉普拉斯能量比的廉价代理），
+    以段体稳健中位为基准，**按亏空比例**做 unsharp：
+
+      · 亏空越深补得越多（帧 2 最深 → 补最强）；
+      · 已达基线的帧（含清晰的帧 0-1）与**段体一律不动**（deficit=0）；
+      · 权重上限 1.0（防振铃/噪声放大）、时间平滑（默认 3 帧）防逐帧跳变；
+      · 段长 ≤ body_start 或 strength≤0 ⇒ 直通。
+
+    纯 torch、帧数守恒、零采样开销。返回 ``(out, report)``。
+    """
+    if strength <= 0.0 or images.dim() != 4:
+        return images, ""
+    x = images.float()
+    n = int(x.shape[0])
+    bs = int(body_start)
+    if n <= bs:
+        return images, ""
+    hp = x - _box_blur_hwc(x, 3)                            # 高通 [N,H,W,C]
+    hf = hp.abs().mean(dim=(1, 2, 3))                       # 每帧高频能量 [N]
+    body, _ = robust_body(x[bs:])                           # 段体稳健筛选（复用）
+    base = float((body - _box_blur_hwc(body, 3)).abs().mean())
+    if base <= 1e-7:
+        return images, ""
+    ratio = hf / base                                       # 每帧 / 段体基准
+    deficit = ((base - hf) / base).clamp(0.0, 1.0)          # 亏空比例 [0,1]
+    deficit[bs:] = 0.0                                      # 段体一律不动
+    w = (deficit * float(strength)).clamp(0.0, 1.0)
+    sm = max(1, int(smooth))
+    if sm > 1:                                              # 时间平滑（边缘复制 pad）
+        wp = torch.nn.functional.pad(w.view(1, 1, -1), (sm // 2, sm // 2), mode="replicate")
+        w = wp.view(-1)[sm // 2: sm // 2 + n].clamp(0.0, 1.0)
+    w = w.masked_fill(deficit <= 0.0, 0.0)              # 原本无亏空的帧（含帧 0-1）严格不动：
+                                                        # 平滑会把邻帧的亏空渗进来，必须屏蔽
+    out = (x + w.view(-1, 1, 1, 1) * hp).clamp(0.0, 1.0).to(images.dtype)
+
+    lo = int(torch.argmin(ratio[:bs]))                      # 量测报告（可审计）
+    climb = next((i for i in range(lo, n) if float(ratio[i]) >= 0.95), -1)
+    acted = int((w > 0.02).sum())
+    rep = ("自适应糊区补偿 %.2f：段头最低 %.0f%%（第 %d 帧）｜回基线第 %d 帧｜"
+           "补 %d 帧（最大增益 %.2f，段体与已达标帧不动）"
+           % (float(strength), float(ratio[:bs].min()) * 100, lo, climb,
+              acted, float(w.max())))
+    return out, rep
+
+
 def sharpen_head_zone(images: torch.Tensor, frames: int = SETTLE_SHARPEN_FRAMES,
                       amount: float = SETTLE_SHARPEN) -> torch.Tensor:
     """对**开头 frames 帧**做渐变锐化（缝端最强 → 尾端 0）。

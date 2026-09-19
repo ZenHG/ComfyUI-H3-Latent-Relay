@@ -1068,6 +1068,17 @@ class H3RelayPost:
                     "tooltip": "【组 4 · 收口】**糊区锐化**（unsharp）：对开头 N 帧做**渐变**锐化。\n"
                                "不裁、不动时间轴 ⇒ 从原理上不可能引入跳帧。建议 0.4–1.0。",
                 }),
+                "settle_auto": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "【推荐替代上面的 settle_sharpen】**自适应糊区补偿**：节点**当场量**每帧\n"
+                               "清晰度对段体基线的亏空，按亏空比例锐化——亏空越深补得越多；\n"
+                               "已达标的帧（含清晰的帧 0-1）与段体一律不动。\n"
+                               "固定 settle_sharpen 的「线性衰减」与真实亏空曲线（帧 0-1 清晰、\n"
+                               "第 2 帧最深、~15 帧爬回）不重合；本项跟着量出来的曲线走。\n"
+                               "  · 0（默认）= 关。0.5–1.0 = 推荐起点。\n"
+                               "  · 与 settle_sharpen 同时开 ⇒ 只作用本项（固定版弃权并点名）。\n"
+                               "报告打印量测结果：最低帧/比值、回基线帧数、补偿帧数。\n"
+                               "⚠ 同 settle_sharpen：只能恢复对比度，救不回彻底丢失的细节。",
+                }),
                 "settle_sharpen_frames": ("INT", {"advanced": True, "default": 24, "min": 1, "max": 96, "step": 1,
                                                   "tooltip": "【配合 settle_sharpen】作用帧数（渐变衰减到 0）。\n"
                                                              "⚠ **只管「糊区锐化」这一项**——组 2/组 3 的作用帧数\n"
@@ -1125,7 +1136,7 @@ class H3RelayPost:
               hist_match=0.0, wb_match=0.0,
               deconv_strength=0.0, deconv_radius=1.5,
               detail_borrow=0.0, detail_blur=9,
-              settle_sharpen=0.0, settle_sharpen_frames=24,
+              settle_sharpen=0.0, settle_auto=0.0, settle_sharpen_frames=24,
               match_prev_stats_frames=CORE.MATCH_PREV_STATS_FRAMES,
               baseline="robust", cross_seg_ack=False):
         n0 = int(images.shape[0])
@@ -1227,7 +1238,14 @@ class H3RelayPost:
                 notes.append("段体高频迁移 %.2f / 尺度 %d（前 %d 帧，baseline=%s）"
                              % (db_, int(detail_blur), hz, baseline))
                 _audit("段体高频迁移", b)
-        if float(settle_sharpen) > 0.0:
+        if float(settle_auto) > 0.0:
+            b = _snap()
+            if float(settle_sharpen) > 0.0:
+                notes.append("⚠ 互斥：settle_auto 与 settle_sharpen 同时开 ⇒ 只作用自适应版，固定锐化弃权")
+            out, _srep = CORE.settle_compensate(out, body_start=40, strength=float(settle_auto))
+            notes.append(_srep or "自适应糊区补偿 %.2f（段长不足，未触发）" % float(settle_auto))
+            _audit("自适应糊区补偿", b)
+        elif float(settle_sharpen) > 0.0:
             b = _snap()
             out = CORE.sharpen_head_zone(out, int(settle_sharpen_frames), float(settle_sharpen))
             notes.append("糊区锐化 %.2f（%d 帧）" % (float(settle_sharpen), int(settle_sharpen_frames)))
