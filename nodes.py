@@ -1338,6 +1338,22 @@ class H3RelayAudioSeam:
                                "默认 50 ms：只用来消掉拼点上的一次性瑕疵。\n"
                                "（上游若已用本节点的等长替换补过缝，两侧本来就是同源环境声，不需要长淡变）",
                 }),
+                "join_segment_seconds": ("FLOAT", {
+                    "advanced": True,
+                    "default": 0.0, "min": 0.0, "max": 60.0, "step": 0.001,
+                    "tooltip": "【joined 用】每段音频的**有效时长**（秒）= 该段视频帧数/fps。\n"
+                               "节点 PCM 通常比 mp4 长（实测 7.5s vs 3.75s），不截断则拼接超长。\n"
+                               "0 = 不截（旧行为）。产线 = 90帧/24fps = 3.75。",
+                }),
+                "join_align_seconds": ("FLOAT", {
+                    "advanced": True,
+                    "default": 0.0, "min": 0.0, "max": 10.0, "step": 0.001,
+                    "tooltip": "【joined 用】每缝的**画面裁量**（秒）= 裁掉的视频帧数/fps。\n"
+                               ">0 = **J-cut 时间轴守恒**：后段音频从其裁量处进入（与裁后画面第 0 帧对齐），\n"
+                               "其前 cross 秒素材电平对齐后渐入前段尾 —— 输出与裁后视频严格等长、\n"
+                               "缝上无电平凹陷（根治 acrossfade「缩短时间轴 ⇒ 音频提前 + 卡顿」）。\n"
+                               "0 = 旧缩短语义（仅兼容/对照）。要求 ≥ join_cross_ms。",
+                }),
             },
         }
 
@@ -1353,7 +1369,8 @@ class H3RelayAudioSeam:
                    "拼接这件事本身也在节点内完成，用户不需要外部 ffmpeg。**")
 
     def _joined(self, run_id, idx, curve="qsin",
-                prime_ms=CORE.AUDIO_ENCODER_PRIME_MS, cross_ms=50.0):
+                prime_ms=CORE.AUDIO_ENCODER_PRIME_MS, cross_ms=50.0,
+                segment_seconds=0.0, align_seconds=0.0):
         """把 0..本段 的落盘音频接成**一条**（复合进本节点，不新增轮子）。
 
         为什么拼接必须由本包做（两个病都不在**单段**可达范围内）：
@@ -1365,7 +1382,12 @@ class H3RelayAudioSeam:
 
         返回 ``(audio|None, note)``；段文件不全或读失败 ⇒ 返回 None 并说明（不抛，避免断链）。
         """
-        paths = [_audio_stage_path(run_id, i) for i in range(0, int(idx) + 1)]
+        _raw_dir = os.path.dirname(_audio_stage_path(run_id, 0))
+        paths = [os.path.join(_raw_dir, "audio_raw_%05d.safetensors" % i)
+                 for i in range(0, int(idx) + 1)]
+        _fallback = [_audio_stage_path(run_id, i) for i in range(0, int(idx) + 1)]
+        paths = [p if os.path.isfile(p) else f        # raw 缺失回退裁后（前奏不可得，退化为无前奏）
+                 for p, f in zip(paths, _fallback)]
         miss = [i for i, p in enumerate(paths) if not os.path.isfile(p)]
         if miss:
             return None, "（joined 跳过：缺第 %s 段落盘音频）" % miss
@@ -1376,7 +1398,17 @@ class H3RelayAudioSeam:
                 segs,
                 prime_samples=int(round(float(prime_ms) / 1000.0 * sr)),
                 cross_samples=int(round(float(cross_ms) / 1000.0 * sr)),
-                curve=str(curve or "qsin"))
+                curve=str(curve or "qsin"),
+                segment_seconds=float(segment_seconds or 0.0),
+                align_seconds=float(align_seconds or 0.0))
+            # J-cut 守恒结果落盘（组装层 --audio-pcm 直接取用；覆盖写，最后一次执行为准）
+            if float(align_seconds or 0.0) > 0:
+                try:
+                    jp = os.path.join(os.path.dirname(paths[-1]), "audio_joined.safetensors")
+                    CORE.save_audio(j, jp, note="joined align=%.3f" % float(align_seconds))
+                    rep += "\n           已落盘：%s" % jp
+                except Exception as _e:                                   # 落盘失败不断链
+                    rep += "\n           ⚠ joined 落盘失败：%r" % (_e,)
         except Exception as e:                                   # noqa: BLE001
             return None, "（joined 失败：%r）" % (e,)
         return j, rep
@@ -1385,16 +1417,34 @@ class H3RelayAudioSeam:
              fade_seconds=0.25, bed_stage=0, note="",
              bed_select=CORE.AUDIO_SEAM_BED_SELECT,
              join_curve="qsin", join_prime_ms=CORE.AUDIO_ENCODER_PRIME_MS,
-             join_cross_ms=50.0):
+             join_cross_ms=50.0, join_segment_seconds=0.0, join_align_seconds=0.0):
         me = _audio_stage_path(run_id, int(stage_index))
         idx = int(stage_index)
         patch = float(patch_seconds or 0.0)
+        # 🔴 2026-09-19 J-cut：原始（未裁）音频另落盘，供 _joined 取「被裁掉的前奏」；
+        #   工作视图切到 [align:]（= 裁后音频）—— patch/落盘 audio_0000i/第 1 路输出
+        #   的语义全部保持现状（都基于裁后视图）。
+        _al_s = float(join_align_seconds or 0.0)
+        _raw_wf, _raw_sr, _raw_lead, _raw_dt = CORE._audio_parts(audio)
+        _raw_path = os.path.join(os.path.dirname(me), "audio_raw_%05d.safetensors" % idx)
+        try:
+            CORE.save_audio(audio, _raw_path, note=note)
+        except Exception:
+            pass                                                  # 原始落盘失败不断链
+        if _al_s > 0:
+            _an = int(round(_al_s * _raw_sr))
+            if 0 < _an < int(_raw_wf.shape[-1]):
+                _shaped = _raw_wf[..., _an:].reshape(*_raw_lead, _raw_wf.shape[0],
+                                                     _raw_wf.shape[-1] - _an) if _raw_lead else \
+                    _raw_wf[..., _an:]
+                audio = {"waveform": _shaped.to(_raw_dt), "sample_rate": _raw_sr}
         if idx <= 0 or patch <= 0.0:
             CORE.save_audio(audio, me, note=note)
             why = "第 1 段无缝可补" if idx <= 0 else "补丁关（patch_seconds=0）"
             line = ("[H3 Relay] 音频缝：%s → 直通｜本段音频已落盘（供后段当床源）：%s"
                     % (why, me))
-            _j, _jn = self._joined(run_id, idx, join_curve, join_prime_ms, join_cross_ms)
+            _j, _jn = self._joined(run_id, idx, join_curve, join_prime_ms, join_cross_ms,
+                                  join_segment_seconds, join_align_seconds)
             if _jn.startswith("（joined"):
                 line += "｜ " + _jn
             else:
@@ -1434,7 +1484,8 @@ class H3RelayAudioSeam:
         line = rep + ("｜已落盘（供后段当床源）：%s" % me)
         if target is None:
             line += "｜ ⚠ 上一段音频文件缺失 ⇒ 电平目标退回床源尾部（不够准）"
-        _j, _jn = self._joined(run_id, idx, join_curve, join_prime_ms, join_cross_ms)
+        _j, _jn = self._joined(run_id, idx, join_curve, join_prime_ms, join_cross_ms,
+                                  join_segment_seconds, join_align_seconds)
         if _jn.startswith("（joined"):
             line += "｜ " + _jn
         else:

@@ -1311,6 +1311,22 @@
           "widget": {
             "name": "join_cross_ms"
           }
+        },
+        {
+          "name": "join_segment_seconds",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "join_segment_seconds"
+          }
+        },
+        {
+          "name": "join_align_seconds",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "join_align_seconds"
+          }
         }
       ],
       "outputs": [
@@ -1347,7 +1363,9 @@
         "tail",
         "qsin",
         33.0,
-        50.0
+        50.0,
+        0.0,
+        0.0
       ]
     },
     {

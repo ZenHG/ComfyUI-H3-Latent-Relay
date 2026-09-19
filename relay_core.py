@@ -2393,19 +2393,30 @@ AUDIO_ENCODER_PRIME_MS: float = 33.0     # AAC 编码器 priming 实测值（@32
 
 
 def join_audio_segments(audios, prime_samples: int = 0, cross_samples: int = 0,
-                        curve: str = "qsin"):
-    """把多段音频按序接成**一条**，返回 ``(audio, report)``。三件事全在节点内完成：
+                        curve: str = "qsin", segment_seconds: float = 0.0,
+                        align_seconds: float = 0.0):
+    """把多段音频按序接成**一条**，返回 ``(audio, report)``。两种语义：
 
-    1. **去编码器 priming**（``prime_samples``）：丢掉每段头 N 个样本。它不是内容
-       ⇒ 丢掉是**对齐修正**（留着 = 每缝白送 33 ms 静音，且交叉时再掉一层电平）。
-    2. **等功率交叉**（``curve="qsin"``）：不相关内容下，线性 ``tri`` 中缝掉 **−4.7 dB**
-       （听感「音量先小再恢复」），等功率只掉 −1.85 dB、配去 priming 掉 **−0.36 dB**（本次实测）。
-    3. **长度守恒**：输出 = Σ(段长 − prime) − (n−1)·cross，无残余重叠。
+    **J-cut 时间轴守恒（``align_seconds > 0``，推荐）**——``align`` = 每缝的**画面裁量**
+    （秒，= 裁帧数/fps）；``segment_seconds`` = 每段音频有效时长（秒，= 该段视频帧数/fps；
+    节点 PCM 通常比 mp4 长，必须截）。第 i≥1 段从其 ``align`` 处进入成片时间轴（与裁后
+    画面第 0 帧对齐），其前 ``cross`` 秒素材作**渐入前奏**：先**电平对齐**到前段尾
+    （±6 dB 限幅 + 0.995 峰值护栏），再按 ``curve`` 权重**叠加**到前段尾部（前段原位保留）
+    —— 电影业 J-cut：声音先走、时间轴不缩短、缝上无电平凹陷：
+    输出总长 = n·segment_seconds − (n−1)·align，**与裁后视频严格等长**。
 
-    采样率与声道以**第一段**为准；``audios`` = ``[{"waveform":[C,T],"sample_rate":int}, ...]``。
+    **旧缩短语义（``align_seconds = 0`` 且 ``segment_seconds = 0``，仅兼容/对照）**：
+    等功率交叉且 cross 计入时间轴（输出 = Σ(段长−prime) − (n−1)·cross）——
+    ⚠ 每缝使后段音频相对画面**提前 cross 秒**、片尾需补 cross 静音。
+
+    ``prime_samples``：编码器 priming（节点 PCM 源 = 0；mp4 源每段头 ~33 ms）。
+    采样率与声道以**第一段**为准。
     """
     if not audios:
         raise ValueError("join_audio_segments：至少需要一段音频。")
+    al_s = float(align_seconds)
+    if al_s < 0:
+        raise ValueError("align_seconds 不能为负（%r）。" % al_s)
     ws = []
     sr0 = ch0 = None
     dt0 = None
@@ -2420,30 +2431,96 @@ def join_audio_segments(audios, prime_samples: int = 0, cross_samples: int = 0,
                 raise ValueError("去 priming %d 样本 ≥ 第 %d 段长度 %d 样本，段太短。"
                                  % (k, i + 1, int(wf.shape[-1])))
             wf = wf[..., k:]
+        if segment_seconds > 0:
+            seg_n = int(round(float(segment_seconds) * sr0))
+            if seg_n <= 0 or seg_n > int(wf.shape[-1]):
+                raise ValueError("segment_seconds=%.3fs（%d 样本）超出第 %d 段实际 %d 样本。"
+                                 % (segment_seconds, seg_n, i + 1, int(wf.shape[-1])))
+            wf = wf[..., :seg_n]
         ws.append(wf)
     n = int(cross_samples)
+    align_n = int(round(al_s * sr0)) if al_s > 0 else 0
     out = ws[0]
+    notes_extra = ""
+    # 🔴 跨段响度匹配（2026-09-19 第三轮迭代）：各段 BGM 独立生成，段间整体电平差可达
+    #    ~8 dB（实测 A 中位 −14 vs B −22）—— 拼接点上表现为「瞬时卡顿」的真正来源之一。
+    #    参考电平 = 第 1 段常态 RMS；第 i≥1 段**整段**缩放（限幅 ±6 dB，峰值护栏 0.995）。
+    _ref_rms = float(out.pow(2).mean().sqrt())
+    for _wi in range(1, len(ws)):
+        _w = ws[_wi]
+        _cur = float(_w.pow(2).mean().sqrt())
+        if _cur > 0.0 and _ref_rms > 0.0:
+            _g_db = 20.0 * math.log10(_ref_rms / _cur)
+            _g = 10.0 ** (max(-6.0, min(6.0, _g_db)) / 20.0)
+            if abs(_g_db) > 6.0:
+                notes_extra += "｜ 第 %d 段响度匹配限幅 %+.1f dB" % (_wi + 1, _g_db)
+            _pk = float(_w.abs().max())
+            if _pk > 0.0:
+                _g = min(_g, 0.995 / _pk)          # 峰值护栏
+            ws[_wi] = _w * _g
     for w in ws[1:]:
-        if n > 0:
-            m = min(n, int(out.shape[-1]), int(w.shape[-1]))
-            t = torch.linspace(0.0, 1.0, m, device=out.device, dtype=torch.float32)
-            if curve == "qsin":                       # 等功率（四分之一正弦）
-                f1, f2 = torch.sin(t * math.pi / 2.0), torch.cos(t * math.pi / 2.0)
-            elif curve == "tri":                      # 线性（旧口径，仅对照；不相关内容掉 −4.7 dB）
-                f1, f2 = 1.0 - t, t
-            else:
-                raise ValueError("未知交叉曲线 %r（只认 qsin / tri）。" % (curve,))
-            out = torch.cat([out[..., :-m],
-                             out[..., -m:] * f1 + w[..., :m] * f2,
-                             w[..., m:]], dim=-1)
+        if align_n > 0:
+            # —— J-cut 守恒：前奏（电平对齐后渐入叠加）+ 本段从 align 起全量 ——
+            ent = min(align_n, int(w.shape[-1]) - 1)
+            m = min(n, ent, int(out.shape[-1]))
+            if m > 0:
+                pre = w[..., ent - m:ent]                       # 前奏素材（进入点之前）
+                t = torch.linspace(0.0, 1.0, m, device=out.device, dtype=torch.float32)
+                f2 = torch.sin(t * math.pi / 2.0) if curve == "qsin" else t
+                if curve not in ("qsin", "tri"):
+                    raise ValueError("未知交叉曲线 %r（只认 qsin / tri）。" % (curve,))
+                tail = out[..., -m:]
+                # 🔴 对齐目标 = max(前段尾, 本段常态中位)：只对齐到「已衰落的 A 尾」会让
+                #    缝上仍是两个低电平相加（jA 首轮实测缝上 −8.2 dB 更深）⇒ 取两者较大者，
+                #    保证交叉窗电平不低于任一侧的常态。
+                _w_med = float(w.pow(2).mean().sqrt())           # 本段（进入段）整体 RMS = 常态电平
+                tgt = max(float(tail.pow(2).mean().sqrt()), _w_med)
+                cur = float(pre.pow(2).mean().sqrt())
+                if cur > 0.0 and tgt > 0.0:
+                    g_db = 20.0 * math.log10(tgt / cur)
+                    g = 10.0 ** (max(-6.0, min(6.0, g_db)) / 20.0)
+                    if abs(g_db) > 6.0:
+                        notes_extra += "｜ 前奏电平对齐限幅 %+.1f dB" % g_db
+                    pre = pre * g
+                tail = tail + pre * f2                           # 前段原位保留 + 前奏渐入
+                pk = float(tail.abs().max())
+                if pk > 0.995:
+                    tail = tail * (0.995 / pk)
+                    notes_extra += "｜ 交叉窗峰值 %.3f 已按护栏回退" % pk
+                out = torch.cat([out[..., :-m], tail], dim=-1)
+            out = torch.cat([out, w[..., ent:]], dim=-1)
         else:
-            out = torch.cat([out, w], dim=-1)
+            # —— 旧缩短语义（兼容/对照；⚠ 每缝使后段音频提前 cross 秒）——
+            if n > 0:
+                m = min(n, int(out.shape[-1]), int(w.shape[-1]))
+                t = torch.linspace(0.0, 1.0, m, device=out.device, dtype=torch.float32)
+                if curve == "qsin":                       # 等功率（四分之一正弦）
+                    f1, f2 = torch.sin(t * math.pi / 2.0), torch.cos(t * math.pi / 2.0)
+                elif curve == "tri":                      # 线性（旧口径，仅对照；不相关内容掉 −4.7 dB）
+                    f1, f2 = 1.0 - t, t
+                else:
+                    raise ValueError("未知交叉曲线 %r（只认 qsin / tri）。" % (curve,))
+                out = torch.cat([out[..., :-m],
+                                 out[..., -m:] * f1 + w[..., :m] * f2,
+                                 w[..., m:]], dim=-1)
+            else:
+                out = torch.cat([out, w], dim=-1)
     lens = [int(w.shape[-1]) for w in ws]
     total = int(out.shape[-1])
     shaped = out.reshape(1, ch0, total).to(dt0) if dt0 is not None else out
-    rep = ("[H3 Relay] 音频拼接：%d 段 → %d 样本（%.3fs）｜ 去 priming %.1f ms/段 ｜ %s 交叉 %.1f ms/缝\n"
-           "           段长(样本) %s ｜ 采样率 %d ｜ 声道 %d ｜ 长度守恒 %s"
-           % (len(ws), total, total / float(sr0), int(prime_samples) / float(sr0) * 1000.0,
+    if align_n > 0:
+        exp_total = int(round(float(segment_seconds) * sr0)) * len(ws) - (len(ws) - 1) * align_n
+        mode = "J-cut 守恒（align=%.3fs/缝，与裁后视频等长）" % al_s
+    else:
+        exp_total = sum(lens) - (len(ws) - 1) * n
+        mode = "旧缩短语义（⚠ 缝后音画错位 cross 秒，仅兼容/对照）"
+    rep = ("[H3 Relay] 音频拼接：%d 段 → %d 样本（%.3fs）｜ %s\n"
+           "           去 priming %.1f ms/段 ｜ 段有效时长 %s ｜ %s 交叉 %.1f ms/缝 ｜ "
+           "段长(样本) %s ｜ 采样率 %d ｜ 声道 %d ｜ 长度%s%s"
+           % (len(ws), total, total / float(sr0), mode,
+              int(prime_samples) / float(sr0) * 1000.0,
+              ("%.3fs" % segment_seconds) if segment_seconds > 0 else "全量",
               curve, n / float(sr0) * 1000.0, lens, sr0, ch0,
-              "OK" if total == sum(lens) - (len(ws) - 1) * n else "⚠ 不守恒"))
+              ("守恒 OK" if total == exp_total else "⚠ 不守恒（期望 %d）" % exp_total),
+              notes_extra))
     return {"waveform": shaped, "sample_rate": sr0}, rep

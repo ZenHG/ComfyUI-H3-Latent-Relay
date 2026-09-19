@@ -1705,12 +1705,14 @@ check("22.19 增益后峰值护栏：床声不会被推过 1.0（削波防护）
 
 # —— 22.20~22.24：`joined`（**拼接复合在第 8 节点内**，不新增轮子；GG 2026-09-19 指令）——
 _it22j = NODES.H3RelayAudioSeam.INPUT_TYPES()
-check("22.20 AudioSeam 第 3 路输出 joined 追加末位 + 三个拼接旋钮全折叠",
+check("22.20 AudioSeam 第 3 路输出 joined 追加末位 + 五个拼接旋钮全折叠（J-cut 两参 2026-09-19）",
       NODES.H3RelayAudioSeam.RETURN_TYPES == ("AUDIO", "STRING", "AUDIO")
       and NODES.H3RelayAudioSeam.RETURN_NAMES == ("audio", "report", "joined")
-      and list(_it22j["optional"])[-3:] == ["join_curve", "join_prime_ms", "join_cross_ms"]
+      and list(_it22j["optional"])[-5:] == ["join_curve", "join_prime_ms", "join_cross_ms",
+                                            "join_segment_seconds", "join_align_seconds"]
       and all(_it22j["optional"][k][1].get("advanced")
-              for k in ("join_curve", "join_prime_ms", "join_cross_ms")),
+              for k in ("join_curve", "join_prime_ms", "join_cross_ms",
+                        "join_segment_seconds", "join_align_seconds")),
       "输出=%s" % (NODES.H3RelayAudioSeam.RETURN_NAMES,))
 
 # 两段**不相关**正弦（220 / 330 Hz）+ 头部 1056 采样静音（模拟 AAC 编码器 priming）
