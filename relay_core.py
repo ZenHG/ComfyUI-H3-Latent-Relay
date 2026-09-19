@@ -36,6 +36,7 @@ MiniMax-H3 多段续接的 **latent 桥**：把上一段的 AV latent 切出尾�
 
 from __future__ import annotations
 
+import itertools
 import json
 import math
 import os
@@ -68,22 +69,33 @@ def pixel_frames(latent_t: int) -> int:
 
 
 def step_offsets(latent_t: int) -> List[int]:
-    """每个 latent token 对应的**起始像素帧位置**。"""
-    out, acc = [], 0
-    for k in range(int(latent_t)):
-        out.append(acc)
-        acc += FRAME_PER_TOKEN[k % 5]
-    return out
+    """每个 latent token 的**起始像素帧位置**（首位恒为 0）。
+
+    与 ``pixel_frames`` 是同一张表的两种读法：``pixel_frames(n)`` 给总量，
+    本函数给每个 token 的入口。写成**排他前缀和**——第 i 个位置 = 它前面
+    所有 token 的跨度之和——而不是"边遍历边累加记一笔"。
+    """
+    n = int(latent_t)
+    spans = [FRAME_PER_TOKEN[k % 5] for k in range(n)]
+    return [0, *itertools.accumulate(spans)][:n]
 
 
 def steps_for_frames(n: int) -> Optional[int]:
-    """像素帧数 → 整步的 latent token 数；不在网格上返回 None。"""
+    """像素帧数 → 整步的 latent token 数；不在网格上返回 None。
+
+    跨度按 ``1,4,4,4,4`` 循环，所以**可达的帧数就是这些跨度的前缀和**：
+    5 → 2 步、22 → 7 步、39 → 12 步、56 → 17 步。落在两格之间的值
+    （4、6、7…）无解。0 帧视作 0 步。
+    """
     n = int(n)
-    k, covered = 0, 0
-    while covered < n:
-        covered += FRAME_PER_TOKEN[k % 5]
-        k += 1
-    return k if covered == n else None
+    for steps, total in enumerate(
+            itertools.accumulate(FRAME_PER_TOKEN[k % 5] for k in range(n)),
+            start=1):
+        if total == n:
+            return steps
+        if total > n:
+            break
+    return 0 if n == 0 else None
 
 
 def snap_guide_run(n: int) -> int:
@@ -243,11 +255,13 @@ def audio_tail_from_latent(
     ``src_total_frames`` 是**源段（latent）的总像素帧数**——H3 的音频 tick 数按
     总帧数四舍五入生成，外溢偏差只有对着总帧数量才有意义（对着尾窗量恒为巨值）。
 
-    返回 ``(tail, ref_audio_t, overhang, raw_steps, grid_off)``。
-    非 40Hz 网格整步的 ``a_frames`` 会向上拓宽到最近整步（``ref_audio_t``），
-    ``raw_steps`` 是换算的理论步数，供上层留注记。
-    ``grid_off`` 为 True 表示音频栅格偏差超出半整步（输入段可能非标准网格），
-    此时 ``overhang`` 按 0 处理，告警文案由上层写进 notes。
+    返回 ``(tail, take, grid_slack, raw_steps, grid_off)``：
+      · ``take`` —— 实际取用的音频步数；非 40Hz 网格整步的 ``a_frames``
+        会**向上拓宽**到最近整步，要的比源段现有还多则全给；
+      · ``grid_slack`` —— 音频栅格相对视频栅格的外溢量（正常在 ±⅓ 步内）；
+      · ``raw_steps`` —— 换算出的理论步数，供上层留注记；
+      · ``grid_off`` —— 外溢量超出半整步（输入段可能非标准网格），
+        此时 ``grid_slack`` 按 0 报出，告警文案由上层写进 notes。
     """
     a_frames = int(a_frames)
 
@@ -262,24 +276,24 @@ def audio_tail_from_latent(
 
     audio = audio_from_latent(latent)
     total_t = int(audio.shape[-1])
-    overhang = total_t - FRAME_RESCALE * int(src_total_frames)
-    grid_off = not (-0.5 < overhang < 0.5)
+    # 音频栅格相对视频栅格的**外溢量**。H3 按源段总帧数四舍五入生成音频 tick，
+    # 正常只落在 ±⅓ 步内；超出这条带 ⇒ 输入本身不是标准网格。
+    grid_slack = total_t - FRAME_RESCALE * int(src_total_frames)
+    grid_off = abs(grid_slack) >= 0.5
     if grid_off:
-        # H3 把音频栅格四舍五入到最近的步；偏差过大只可能是输入不对，
-        # 这里按无外溢处理，由 grid_off 标志让上层决定是否告警。
-        overhang = 0.0
+        # 只置标志、不改事实：外溢值按 0 报出，告警文案留给上层写进 notes。
+        grid_slack = 0.0
 
     raw_steps = a_frames / float(FPS) * AUDIO_HZ
     # 非 40Hz 网格整步的值一律**向上拓宽**到最近整步：
     # 音频窗的作用是给模型"已经播过的声音"当上下文，多带半步是安全的，
     # 截短半步则可能丢掉节拍点。换算误差只往"多带"方向偏。
-    rt = int(math.ceil(raw_steps - 1e-9))
-    if rt > total_t:
-        rt = total_t
-    if rt < 1:
+    want = int(math.ceil(raw_steps - 1e-9))
+    take = min(want, total_t)          # 要的比现有的多 ⇒ 全给，不报错
+    if take < 1:
         raise ValueError("音频窗口为空（%d 帧换算后不足一步）。" % a_frames)
-    tail = audio[:1, ..., total_t - rt:].clone()
-    return tail, rt, float(overhang), raw_steps, grid_off
+    tail = audio[:1].narrow(-1, total_t - take, take).clone()
+    return tail, take, float(grid_slack), raw_steps, grid_off
 
 
 # ---------------------------------------------------------------- 续接计划
@@ -455,36 +469,60 @@ def plan_relay(
     return plan
 
 
-def apply_relay(conditioning, plan: RelayPlan):
-    """把计划注入 conditioning：keyframes 合并 + 音频 ref 追加。
+def _anchor_position(anchor):
+    """一个锚在目标时间轴上的落点（ComfyUI 原生字段；缺失按 0 处理）。"""
+    return int(anchor.get("resolved_frame_index", 0))
 
-    与上游既有 keyframes（如 first/last 帧锚）**合并而非替换**；
-    落在钉住区内的旧锚会被丢弃（它们与钉住区冲突）。
+
+def _partition_anchors(anchors, zone_end):
+    """按落点把锚切成 (钉住区内, 钉住区外) 两组，两组都是副本。
+
+    钉住区 = 本段开头那 ``zone_end`` 帧。它由上一段的 latent 逐位决定，
+    详见 ``build_continue_latent`` 的掩码语义。
+    """
+    inside, outside = [], []
+    for anchor in anchors:
+        bucket = inside if _anchor_position(anchor) < zone_end else outside
+        bucket.append(dict(anchor))
+    return inside, outside
+
+
+def apply_relay(conditioning, plan: RelayPlan):
+    """把续接计划写进 conditioning —— 本包与 ComfyUI 原生协议之间的唯一出口。
+
+    出口按顺序只做三件事：
+
+    1. **锚位合成**：conditioning 上可能已经挂着别人放的锚（官方 AddGuide、
+       上游末帧锚）。本段不替换它们，而是把旧锚与本次新增的锚合成一张新表，
+       旧锚保持原有相对次序排在前面。
+    2. **钉住区去重**：本段开头 ``plan.span`` 帧由上一段的 latent 逐位决定，
+       任何人再往这段区间里放锚，都是对同一批帧的重复声明。重复声明在此出局，
+       落点记进 report —— 静默丢会让「少了一个锚」事后无从查起。
+    3. **ref 追加**：音频与外观锚走 ``minimax_refs``，追加写回，
+       上游已有的 ref 不受影响。
+
+    ``plan.applied`` 为假时原样返回（首段没有前序可接）。
     """
     import node_helpers
 
     if not plan.applied:
         return conditioning
 
-    head_end = plan.span
-    out, dropped = [], []
-    for emb, extra in conditioning:
-        d = dict(extra)
-        prior = list(d.get("minimax_keyframes") or [])
-        kept = []
-        for kf in prior:
-            pos = int(kf.get("resolved_frame_index", 0))
-            if pos < head_end:
-                dropped.append(pos)
-                continue
-            kept.append(dict(kf))
-        d["minimax_keyframes"] = kept + [dict(k) for k in plan.keyframes]
-        out.append([emb, d])
+    zone_end = int(plan.span)
+    out, redundant = [], []
 
-    if dropped:
+    for emb, extra in conditioning:
+        merged = dict(extra)
+        inside, outside = _partition_anchors(
+            merged.get("minimax_keyframes") or [], zone_end)
+        redundant.extend(_anchor_position(a) for a in inside)
+        merged["minimax_keyframes"] = outside + [dict(a) for a in plan.keyframes]
+        out.append([emb, merged])
+
+    if redundant:
         plan.notes.append(
-            "丢弃 %d 个落在钉住区（0..%d）内的旧锚，避免与续接区冲突。"
-            % (len(set(dropped)), head_end - 1)
+            "钉住区（0..%d）内的既有锚 %s 是重复声明，已出局（共 %d 个）。"
+            % (zone_end - 1, sorted(set(redundant)), len(set(redundant)))
         )
 
     if plan.audio_ref is not None or plan.anchor_ref is not None:

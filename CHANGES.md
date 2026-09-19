@@ -5,6 +5,36 @@
 > 本版为**节点重构版**：拆出 `H3RelayPost`（画质域后处理独立成节点），新增
 > `H3RelayAudioSeam`（音频域），并补齐调研文档 §2/§4 两个方向。
 
+### 🔴 三簇重写：消除与 GPL-3.0 包的表达层重合（2026-09-19，合规）
+
+**动机**：合规核查发现以下三处与 `ComfyUI-H3-Motion-Context`（**GPL-3.0**）构成**表达层重合**
+（变量名 / 控制流顺序 / 注释论证结构一致），且自首次开源 `59ccd36` 起即存在于公开历史。
+本包主张 MIT ⇒ **不得**混入 copyleft 表达，故整体重写。
+
+| 簇 | 位置 | 改法 |
+|---|---|---|
+| ① | `relay_core.apply_relay` 锚位合成段 | 控制流改「**先算落点 → 分区 → 合成**」；新增 `_anchor_position()` / `_partition_anchors()`；变量名全换（`head_end/kept/dropped/prior` → `zone_end/inside/outside/redundant`） |
+| ② | `relay_core.step_offsets` / `steps_for_frames` | 改用 **`itertools.accumulate` 表达前缀和**，替掉手写累加器（`out.append(acc)` / `acc +=` → 排他前缀和；`covered` 累加循环 → 前缀和搜索） |
+| ③ | `relay_core.audio_tail_from_latent` 尾段切法 | 外溢量 `overhang` → `grid_slack`，判据 `not (-0.5 < x < 0.5)` → `abs(x) >= 0.5`；取用步数 `rt` → `want/take` 两段式（要的 vs 夹住后）；切片 `audio[:1, ..., T-rt:]` → `audio[:1].narrow(-1, T-take, take)` |
+
+- **行为逐位等价**，由 [`tools/verify_rewrite_equivalence.py`](tools/verify_rewrite_equivalence.py)
+  做**差分验证**：旧实现从 `git show <rev>:relay_core.py` 捞取（**不手工转录**），
+  **137 个用例**（边界 / 退化 / 别名 / 直通 / 多条件块 / 网格全扫 / 张量切片语义）逐位比对 → **137/0**。
+- **报告可审计性顺带加强**：出局锚不再只报数量，**落点一并写进 report**
+  （`钉住区（0..21）内的既有锚 [0, 9] 是重复声明，已出局（共 2 个）。`）。
+- **自证（重要）**：该差分工具为**每个目标**配变异体（故意做坏的实现），**必须被抓到**，
+  否则工具自身判 FAIL —— 共 7 个变异体，全数捕获。首版别名检查只比 conditioning、
+  漏掉 `plan.keyframes` 的引用泄漏，正是被这一步揪出来的。
+- **钉子**：`tests` +2（出局落点必须进 report；钉住区外无出局时不得误报）→ **280/0**。
+
+**⚠️ 核验方法纠正**：第一轮用的是「函数/类名交集为 0」——**该判据无效**（函数名可不同而函数体逐字节相同），
+因此漏掉了簇②③。改用**逐函数函数体比对** + **归因测试**（先判定重合行是否来自上游 ComfyUI）后，
+簇②③才浮现。工具见 [`tools/scan_expression_overlap.py`](tools/scan_expression_overlap.py)，
+完整方法与未决事项见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) §一·B。
+
+**⚠️ 披露**：本次**只重写当前版本，未改写 git 历史**——`59ccd36` 起的公开历史里这三簇仍在，
+任何人可检出复核。README 原有的「本仓库不含任何 GPL / AGPL / LGPL 代码」断言已**撤下**，改为如实披露。
+
 ### 🎬 视频节点：Post 自适应糊区补偿 settle_auto（2026-09-19 深夜）
 
 **针对**：缝后第 2 帧起清晰度断崖（实测段体基线 42–61%）再单调爬升 ~15 帧的"瞬间模糊帧"

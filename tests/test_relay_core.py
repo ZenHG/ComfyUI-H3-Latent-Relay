@@ -203,6 +203,21 @@ check("音频 ref 已追加到 minimax_refs",
 check("直通路径不改 conditioning",
       CORE.apply_relay(cond, CORE.plan_relay(cur, None, 22)) is cond)
 
+# 钉子（2026-09-19）：出局的旧锚必须留痕 —— 静默丢会让「少了一个锚」事后无从查起。
+plan_n = CORE.plan_relay(cur, prev, 22)
+CORE.apply_relay(cond, plan_n)
+check("出局旧锚的**落点**写进 report（不只是数量）",
+      any("重复声明" in n and "[0]" in n for n in plan_n.notes),
+      "notes=%r" % (plan_n.notes,))
+cond_far = [[torch.zeros(1, 8), {"minimax_keyframes": [
+    {"resolved_frame_index": 191, "latent": torch.ones(1, 24, 1, 28, 48)},
+]}]]
+plan_far = CORE.plan_relay(cur, prev, 22)
+CORE.apply_relay(cond_far, plan_far)
+check("反证：旧锚全在钉住区外 ⇒ report 不出现该条（钉子能失败）",
+      not any("重复声明" in n for n in plan_far.notes),
+      "notes=%r" % (plan_far.notes,))
+
 print()
 print("=" * 78)
 print("5) AV latent 落盘往返")

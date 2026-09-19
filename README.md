@@ -584,7 +584,7 @@ python tests/test_relay_core.py
 
 也支持 `pytest tests/`（找不到 ComfyUI 根目录时自动 skip，不会崩）。
 
-**278 项断言，零 GPU、不加载模型**，覆盖二十二个方面：
+**280 项断言，零 GPU、不加载模型**，覆盖二十二个方面：
 
 | 组 | 覆盖 |
 |---|---|
@@ -907,11 +907,18 @@ Latent 桥填 `anchor_stage=0`（或接 `anchor_latent`）、拷贝桥接 `ancho
 ## 📄 许可与出处
 
 - **本包 = MIT**（见 [`LICENSE`](LICENSE)）。可商用、可修改、可再发布，保留版权声明即可。
-  协议与网格常量来自 MiniMax-H3 的公开实现，本包为独立实现。
+  协议与网格常量来自 MiniMax-H3 的公开实现（`minimax_keyframes` / `minimax_refs` /
+  `FRAME_PER_TOKEN` 等），**运行时 import 上游源码、不复制**。
 - **第三方出处与署名 → [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)**：
   机制/契约层面参考了 `ComfyUI_MiniMaxH3_Director`（Apache-2.0，已按保守口径随包附
   [`licenses/Apache-2.0.txt`](licenses/Apache-2.0.txt)）与 `comfyui-minimax-h3-audio-T8`（MIT）；
-  算法出处见论文表。**本仓库不含任何 GPL / AGPL / LGPL 代码**。
+  算法出处见论文表。
+- **⚠️ 关于 `ComfyUI-H3-Motion-Context`（GPL-3.0）—— 引用本包前请先读这条**：
+  `H3RelayMotionContext` 的锚位合成段（`relay_core.apply_relay`）在 **v0.2.1–v0.5.0 的公开历史**里，
+  曾与该包（GPL-3.0，NikoDemon80）构成**表达层重合**。该段已于 **2026-09-19 整体重写**
+  （控制流、命名、注释结构全部重做，行为逐位等价并留有差分验证工具），**当前版本不含其派生表达**。
+  历史提交**未做改写**——事实与核验方法完整记录在
+  [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) §一·B。
 - **依赖**：仅 `torch`（BSD-3-Clause）与 `safetensors`（Apache-2.0），均与 MIT 兼容；
   运行时不发起任何远端请求（见 [`SECURITY.md`](SECURITY.md)）。
 - ⚠️ 若你要**再发布**本包：请一并保留 `LICENSE`、`THIRD-PARTY-NOTICES.md` 与 `licenses/`。
