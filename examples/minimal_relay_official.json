@@ -309,15 +309,14 @@
           "type": "CONDITIONING",
           "links": [
             3,
-            4
+            5
           ]
         },
         {
           "name": "LATENT",
           "type": "LATENT",
           "links": [
-            5,
-            10
+            4
           ]
         }
       ],
@@ -368,7 +367,7 @@
     },
     {
       "id": 8,
-      "type": "H3RelayMotionContext",
+      "type": "H3RelayCopyBridge",
       "pos": [
         800,
         40
@@ -382,14 +381,9 @@
       "mode": 0,
       "inputs": [
         {
-          "name": "conditioning",
-          "type": "CONDITIONING",
-          "link": 4
-        },
-        {
           "name": "latent",
           "type": "LATENT",
-          "link": 5
+          "link": 4
         },
         {
           "name": "context_latent",
@@ -402,19 +396,117 @@
           "link": null
         },
         {
-          "name": "trim_frames",
+          "name": "conditioning",
+          "type": "CONDITIONING",
+          "link": 5
+        },
+        {
+          "name": "ref_anchor_latent",
+          "type": "LATENT",
+          "link": null
+        },
+        {
+          "name": "context_frames",
           "type": "INT",
           "link": null,
           "widget": {
-            "name": "trim_frames"
+            "name": "context_frames"
           }
         },
         {
-          "name": "audio_frames",
+          "name": "mask_mode",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "mask_mode"
+          }
+        },
+        {
+          "name": "taper_tokens",
           "type": "INT",
           "link": null,
           "widget": {
-            "name": "audio_frames"
+            "name": "taper_tokens"
+          }
+        },
+        {
+          "name": "seam_min",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "seam_min"
+          }
+        },
+        {
+          "name": "pin_audio",
+          "type": "BOOLEAN",
+          "link": null,
+          "widget": {
+            "name": "pin_audio"
+          }
+        },
+        {
+          "name": "ramp_top",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "ramp_top"
+          }
+        },
+        {
+          "name": "ramp_tokens",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "ramp_tokens"
+          }
+        },
+        {
+          "name": "anchor_blend",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "anchor_blend"
+          }
+        },
+        {
+          "name": "blend_top",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "blend_top"
+          }
+        },
+        {
+          "name": "blend_tokens",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "blend_tokens"
+          }
+        },
+        {
+          "name": "blend_shape",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "blend_shape"
+          }
+        },
+        {
+          "name": "window_top",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "window_top"
+          }
+        },
+        {
+          "name": "window_shape",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "window_shape"
           }
         },
         {
@@ -434,28 +526,28 @@
           }
         },
         {
-          "name": "anchor_stage",
+          "name": "ref_anchor_stage",
           "type": "INT",
           "link": null,
           "widget": {
-            "name": "anchor_stage"
+            "name": "ref_anchor_stage"
           }
         },
         {
-          "name": "anchor_frames",
+          "name": "ref_anchor_frames",
           "type": "INT",
           "link": null,
           "widget": {
-            "name": "anchor_frames"
+            "name": "ref_anchor_frames"
           }
         }
       ],
       "outputs": [
         {
-          "name": "conditioning",
-          "type": "CONDITIONING",
+          "name": "latent",
+          "type": "LATENT",
           "links": [
-            8
+            10
           ]
         },
         {
@@ -469,15 +561,33 @@
           "links": [
             19
           ]
+        },
+        {
+          "name": "conditioning",
+          "type": "CONDITIONING",
+          "links": [
+            8
+          ]
         }
       ],
       "properties": {
-        "Node name for S&R": "H3RelayMotionContext"
+        "Node name for S&R": "H3RelayCopyBridge"
       },
-      "title": "🔗 续接 Latent 桥（context_latent 不用接，自动读上一段）",
+      "title": "🔗 续接 拷贝桥（复合桥：第 0 路 latent → 采样器 latent_image，第 4 路 conditioning → positive）",
       "widgets_values": [
         22,
+        "hard",
+        4,
+        0.1,
+        true,
+        0.25,
         0,
+        1.0,
+        0.5,
+        0,
+        "smoothstep",
+        0.5,
+        "sine",
         "relay_demo",
         0,
         -1,
@@ -1586,25 +1696,25 @@
     [
       4,
       6,
-      0,
-      8,
-      0,
-      "CONDITIONING"
-    ],
-    [
-      5,
-      6,
       1,
       8,
-      1,
+      0,
       "LATENT"
     ],
     [
+      5,
+      6,
+      0,
+      8,
+      3,
+      "CONDITIONING"
+    ],
+    [
       6,
       5,
       0,
       8,
-      7,
+      19,
       "INT"
     ],
     [
@@ -1618,7 +1728,7 @@
     [
       8,
       8,
-      0,
+      3,
       9,
       1,
       "CONDITIONING"
@@ -1633,8 +1743,8 @@
     ],
     [
       10,
-      6,
-      1,
+      8,
+      0,
       9,
       3,
       "LATENT"
