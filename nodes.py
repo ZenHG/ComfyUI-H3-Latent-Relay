@@ -824,20 +824,24 @@ class H3RelayCopyBridge:
                 }),
             },
             "optional": {
-                "mask_mode": (["hard", "taper", "ramp", "blend"], {
+                "mask_mode": (["hard", "taper", "ramp", "blend", "window"], {
                     "default": "hard",
                     "tooltip": "【分型】🟢 生产档：hard（真续接唯一推荐，保持默认）｜🟡 对照档：ramp｜🔴 实验档：taper / blend\n"
                                "掩码语义：每步输出 = 模型生成 * m + 上段尾 * (1-m)。**m=0 才钉住，m=1 是重绘。**\n"
                                "🟢 hard = 全窗 m=0（钉住区零重绘）——真续接请保持它，下面的都不用看；\n"
                                "🟡 ramp = 0.4.3 噪声斜坡（软证据）：远端 m=0 硬钉 → 缝端线性升到 ramp_top；\n"
                                "        原生契约把连续 m 当逐 token sigma 标签（sigma_row = m * sigma_video），\n"
-                               "        缝侧轻度 harmonize、每步仍被 (1-m) 锚回拷贝尾。**对照档理由**：\n"
-                               "        copy 桥实测与 hard **三项完全等同**（缝阶跃 0.0407 vs 0.0402）⇒ 无增益；\n"
-                               "        cond 桥缝阶跃 0.0007 本就无可感靶。仅复现 0.4.3 行为时用。\n"
+                               "        缝侧轻度 harmonize、每步仍被 (1-m) 锚回拷贝尾。\n"
                                "🔴 taper = 头部 m=1.0（**完全重绘**）线性降到缝端 seam_min ——\n"
                                "        ⚠ **钉住区实际没有被钉住**，只是软提示；仅「渐进接管」对照实验。\n"
                                "🔴 blend = 重叠区双向窗形融合（ramp 的窗形版，FlowLong 式 Hamming 混合）——\n"
-                               "        与 ramp 同语义不同曲线；同样仅对照实验。",
+                               "        与 ramp 同语义不同曲线；同样仅对照实验。\n"
+                               "🔴🔴 **2026-09-19 修正一条过时结论**：旧 tooltip 写「ramp 与 hard 三项完全等同 ⇒ 无增益」——\n"
+                               "     那是用**看不见跳帧的指标集**（亮度阶跃/锐度/运动余弦）测的，已作废。\n"
+                               "     用含「缝后单帧尖峰 + 缝对构图相关」的判据重测：**四个掩码档在缝处全都跳**，\n"
+                               "     只是失败模式不同——hard 保取景但运动尖峰大；ramp/blend 运动平了但**取景被改写**。\n"
+                               "     ⇒ 「钉住」与「释放」在单机制内对立，**单靠掩码调参治不好**。\n"
+                               "     详见 I:\\_handover\\copy方案彻底优化-2026-09-19.md。",
                 }),
                 "taper_tokens": ("INT", {"advanced": True, 
                     "default": 4, "min": 1, "max": 12, "step": 1,
@@ -855,10 +859,20 @@ class H3RelayCopyBridge:
                                "掩码只做视频流；可见的声画拼接仍归「裁重叠」与组装层。",
                 }),
                 "ramp_top": ("FLOAT", {"advanced": True, 
-                    "default": 0.25, "min": 0.0, "max": 0.95, "step": 0.05,
+                    "default": 0.25, "min": 0.0, "max": 1.0, "step": 0.05,
                     "tooltip": "【🟡 对照档 ramp 专属】缝端最大 m（= 该 token 参与去噪的 sigma 比例）。\n"
-                               "0 = 退化为 hard；0.25 默认 = 缝端 25% 强度 harmonize；\n"
-                               ">0.5 起锚定明显变弱，接近 taper 的行为，慎用。",
+                               "0 = 退化为 hard；0.25 默认 = 缝端 25% 强度 harmonize。\n"
+                               "🔴 **1.0 是有理论依据的最优档，别怕它**：\n"
+                               "  · FIFO-Diffusion(NeurIPS 2024) Theorem 3.3：对角去噪的误差\n"
+                               "    **以噪声等级差为上界** O(|σ_τf − σ_τ1|)；\n"
+                               "  · 本档的掩码只在**前 N 个 token** 上铺斜坡，第 N+1 个 token 直接是 1.0。\n"
+                               "    若 ramp_top<1，边界处就有 (1−ramp_top) 的**噪声断崖**，直接进误差上界；\n"
+                               "    **ramp_top=1.0 让斜坡恰好抵达满噪声 ⇒ 断崖归零**。\n"
+                               "  · ⚠ 与 taper 不是一回事：ramp 只有**最后一个** token 到 ramp_top，\n"
+                               "    前面的 token 仍被 (1−m) 锚回拷贝尾；taper 是**头部 m=1（完全不钉）**。\n"
+                               "  · 实测单调规律（7 token 窗）：窗内最大台阶 = ramp_top/6，\n"
+                               "    台阶越大缝处阶跃越大（hard 0.0076 < 0.50 档 0.0281 < 0.95 档 0.1040）\n"
+                               "    ⇒ 想在 ramp_top 大时仍不恶化，**必须同时加长窗口**（RELAY_FRAMES）。",
                 }),
                 "ramp_tokens": ("INT", {"advanced": True, 
                     "default": 0, "min": 0, "max": 12, "step": 1,
@@ -901,11 +915,56 @@ class H3RelayCopyBridge:
                                " · hann = (1−cos πx)/2，余弦 S 曲线\n"
                                "两者都是**两端导数为 0**的单调升 ⇒ 与窗外衔接无折角、过渡更柔。",
                 }),
+                # ⚠ 追加在**最后**（保护既有 widgets_values 的按位对槽）
+                "window_top": ("FLOAT", {"advanced": True,
+                    "default": CORE.SEAM_WINDOW_TOP, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "【🟡 对照档 window 专属】**窗函数峰值**（中心处允许的最大重绘自由度）。\n"
+                               "0 = 退化为 hard（整窗硬钉）。\n"
+                               "🔴 与 ramp 的关键差别：ramp 是**单调升**（缝端最自由）；\n"
+                               "   本档是**对称窗**——缝端那一头**回落到低位 ⇒ 缝端重新钉牢**。\n"
+                               "依据（2026-09-19 联网核实）：VideoMerge(arXiv:2503.09926) 用 sine weighting\n"
+                               "   替代线性加权以消除「abrupt change in semantics」；Diff-VF(arXiv:2608.05976)\n"
+                               "   的 WWS「中心权重高、边界权重低」，消融证明去掉它 → **窗口边界突然跳跃**。",
+                }),
+                "window_shape": (list(CORE.WINDOW_SHAPES), {"advanced": True,
+                    "default": CORE.WINDOW_SHAPE_DEFAULT,
+                    "tooltip": "【仅 window 模式】窗形：\n"
+                               " · sine = sin(π(i+0.5)/n)，端点低但不为 0（默认，留一点自由度防死钉）\n"
+                               " · hann = (1−cos2πx)/2，端点**严格 0**（两端完全硬钉）",
+                }),
+                # ⚠ 以下为 0.6.0「复合桥」折叠槽位——**一律追加在末尾**（守 widgets_values 按位对槽）
+                "conditioning": ("CONDITIONING", {
+                    "tooltip": "【可选·复合桥】接上后，本节点**同时**在 conditioning 上追加钉帧\n"
+                               "（管取景/构图），与 latent 钉住窗（管运动）**并联生效**。\n"
+                               "两条路径改的是不同对象 ⇒ 互不冲突。\n"
+                               "不接 = 只做拷贝桥（行为与旧版完全一致）。\n"
+                               "🔴 实测（0.3MP 受控）：接上后缝处亮度阶跃 0.0009 vs 单 cond 桥 0.0097（10.8× 更好）。",
+                }),
+                "run_id": ("STRING", {
+                    "default": "relay",
+                    "tooltip": "【可选·复合桥】片子名。用来自动读外观锚段（ref_anchor_stage ≥ 0 时）。",
+                }),
+                "stage_index": ("INT", {
+                    "advanced": True, "default": 0, "min": 0, "max": 9999, "step": 1,
+                    "tooltip": "【可选·复合桥】本段段号；与 ref_anchor_stage 一起用于自动读锚。",
+                }),
+                "ref_anchor_latent": ("LATENT", {
+                    "tooltip": "【可选·复合桥】全局外观锚（通常第 1 段）的 AV latent。\n"
+                               "走 minimax_refs 原生协议，近零噪声全程骑乘每一步 = attention sink，防长程漂移。",
+                }),
+                "ref_anchor_stage": ("INT", {
+                    "advanced": True, "default": -1, "min": -1, "max": 9999, "step": 1,
+                    "tooltip": "≥ 0 = 没接 ref_anchor_latent 时自动读 output/relay_kit/<run_id>/stage_<该值> 当锚。",
+                }),
+                "ref_anchor_frames": ("INT", {
+                    "advanced": True, "default": 5, "min": 1, "max": 64, "step": 1,
+                    "tooltip": "外观锚取该段**开头**多少帧（取头不取尾）。",
+                }),
             },
         }
 
-    RETURN_TYPES = ("LATENT", "STRING", "INT")
-    RETURN_NAMES = ("latent", "report", "trim_frames")
+    RETURN_TYPES = ("LATENT", "STRING", "INT", "CONDITIONING")
+    RETURN_NAMES = ("latent", "report", "trim_frames", "conditioning")
     FUNCTION = "bridge"
     CATEGORY = CATEGORY
     DESCRIPTION = (
@@ -919,19 +978,60 @@ class H3RelayCopyBridge:
                ramp_top=0.25, ramp_tokens=0,
                blend_top=CORE.SEAM_BLEND_TOP, blend_tokens=0,
                blend_shape=CORE.BLEND_SHAPE_DEFAULT,
-               anchor_latent=None, anchor_blend=1.0):
+               window_top=CORE.SEAM_WINDOW_TOP,
+               window_shape=CORE.WINDOW_SHAPE_DEFAULT,
+               anchor_latent=None, anchor_blend=1.0,
+               conditioning=None, run_id="relay", stage_index=0,
+               ref_anchor_latent=None, ref_anchor_stage=-1, ref_anchor_frames=5):
         CONTRACT.enforce()
         out, covered, report = CORE.build_continue_latent(
             latent, context_latent, int(context_frames),
             mask_mode=mask_mode, taper=int(taper_tokens),
             seam_min=float(seam_min), pin_audio=bool(pin_audio),
             ramp_top=float(ramp_top), ramp_tokens=int(ramp_tokens),
+            window_top=float(window_top), window_shape=window_shape,
             blend_top=float(blend_top), blend_tokens=int(blend_tokens),
             blend_shape=str(blend_shape),
             anchor_latent=anchor_latent, anchor_blend=float(anchor_blend),
         )
+
+        # —— 0.6.0 复合桥：接上 conditioning 时，**同时**在 conditioning 上追加钉帧 ——
+        # 两条路径改的是不同对象（latent vs conditioning）⇒ 并联不冲突。
+        # 不接 conditioning = 行为与旧版完全一致（第 4 路返回 None）。
+        cond_out = None
+        if conditioning is not None:
+            a_idx = int(ref_anchor_stage)
+            if ref_anchor_latent is None and a_idx >= 0 and (run_id or "").strip():
+                if a_idx == int(stage_index):
+                    raise RuntimeError(
+                        "ref_anchor_stage=%d 与本段 stage_index 相同——外观锚必须是**更早**的"
+                        "已落盘段（通常是 0，即第 1 段）。" % a_idx)
+                try:
+                    ref_anchor_latent = CORE.load_av_latent(_stage_path(run_id, a_idx))
+                    print("[H3 Relay] 复合桥：自动读外观锚（第 %d 段）" % (a_idx + 1),
+                          flush=True)
+                except FileNotFoundError:
+                    raise RuntimeError(
+                        "ref_anchor_stage=%d 的落盘文件不存在：%s\n"
+                        "先把锚段跑完，或把 ref_anchor_stage 改回 -1。"
+                        % (a_idx, _stage_path(run_id, a_idx)))
+            plan = CORE.plan_relay(
+                latent, context_latent,
+                trim_frames=int(context_frames),
+                audio_frames=None,
+                anchor_latent=ref_anchor_latent,
+                anchor_frames=int(ref_anchor_frames),
+            )
+            cond_out = CORE.apply_relay(conditioning, plan)
+            extra = ["[H3 Relay] 复合桥·钉帧路径：" + plan.summary()]
+            for n in plan.notes:
+                extra.append("    注记：" + n)
+            extra.append("    ⚠ 第 4 路 conditioning 必须接到采样器的 positive；"
+                         "不接 = 只做拷贝桥。")
+            report = report + "\n" + "\n".join(extra)
+
         print(report, flush=True)
-        return (out, report, covered)
+        return (out, report, covered, cond_out)
 
 
 class H3RelayPost:

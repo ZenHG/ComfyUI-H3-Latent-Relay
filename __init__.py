@@ -18,6 +18,8 @@ resolved_frame_index）由 ComfyUI 原生消费。
     🔗 H3 续接 Latent 读    H3RelayLatentLoad     手动连线时读上一段（桥自动取源时不用）
     🔗 H3 续接 Latent 桥    H3RelayMotionContext  核心：上一段尾段钉进本段 conditioning
     🔗 H3 续接 拷贝桥       H3RelayCopyBridge     上一段尾段逐位拷进本段 latent + 噪声掩码（钉住区不重绘）
+                                                  **0.6.0 起 = 复合桥**：接上 conditioning 时同时追加钉帧（管取景），
+                                                  与 latent 钉住窗（管运动）并联；不接则行为与旧版完全一致
     🔗 H3 续接裁重叠        H3RelayTrimAV         裁掉钉住区重播帧（音画同裁+接缝自检），并交出 prev_tail
     🔗 H3 续接后处理 Post   H3RelayPost           画质域后处理（跨段统计匹配/低频残差/直方图+白平衡/反卷积/高频迁移/糊区锐化/自适应糊区补偿；互斥组 + 逐层可审计）
     🔗 H3 续接音频缝        H3RelayAudioSeam      音频域：上一段环境声补本段头（床声电平对齐，长度守恒，零 A/V 位移）+ joined 整片拼接（J-cut 时间轴守恒）
@@ -38,4 +40,4 @@ WEB_DIRECTORY = "./web"
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"

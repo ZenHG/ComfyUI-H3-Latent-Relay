@@ -2201,7 +2201,11 @@ SEAM_MIN_MASK: float = 0.10
 SEAM_MIN_FLOOR: float = 0.0
 SEAM_RAMP_TOP: float = 0.25
 SEAM_RAMP_TOP_MIN: float = 0.0     # 0 = 显式退化为 hard
-SEAM_RAMP_TOP_MAX: float = 1.0     # widget 侧再收紧；m=1 即无锚，归 taper 管
+SEAM_RAMP_TOP_MAX: float = 1.0     # 1.0 是**理论最优**（FIFO-Diffusion Thm 3.3：误差以噪声等级差为上界；
+                                   # ramp_top=1.0 让斜坡恰好抵达满噪声 ⇒ 窗边界断崖归零）。
+                                   # ⚠ 旧注释写「m=1 即无锚，归 taper 管」是**误判**：ramp 只有最后
+                                   # 一个 token 到 top，前面的 token 仍被 (1−m) 锚回拷贝尾；taper 是头部 m=1。
+                                   # ⚠ 想在大 ramp_top 下不恶化，必须**同时加长窗口**（窗内台阶 = ramp_top/(n−1)）。
 AUDIO_RELEASE_TICKS: int = 6
 
 # —— 0.5.0 `blend`：重叠区双向融合（RESEARCH_seam_frontier §4 方向四）——
@@ -2219,7 +2223,15 @@ SEAM_BLEND_TOP_MAX: float = 1.0
 BLEND_SHAPES: Tuple[str, ...] = ("smoothstep", "hann")
 BLEND_SHAPE_DEFAULT: str = "smoothstep"
 
-MASK_MODES: Tuple[str, ...] = ("hard", "taper", "ramp", "blend")
+# —— 0.6.0 `window`：**对称窗**（两端低、中心高）——
+# 与 ramp/blend 的本质区别：那两档**单调上升**（缝端最自由），本档缝端**回落**（缝端重新钉牢）。
+# 依据：VideoMerge(arXiv:2503.09926) 正弦窗；Diff-VF(arXiv:2608.05976) WWS
+#   「中心权重高、边界权重低」+ 消融「移除 WWS → 窗口边界突然跳跃」（= 本项目症状）。
+SEAM_WINDOW_TOP: float = 0.50      # 窗函数峰值（中心处允许的最大重绘自由度）
+WINDOW_SHAPES: Tuple[str, ...] = ("sine", "hann")
+WINDOW_SHAPE_DEFAULT: str = "sine"
+
+MASK_MODES: Tuple[str, ...] = ("hard", "taper", "ramp", "blend", "window")
 
 
 def prefix_taper_weights(
@@ -2290,6 +2302,42 @@ def _window_shape(x: float, shape: str) -> float:
     return x * x * (3.0 - 2.0 * x)                     # smoothstep
 
 
+def prefix_window_weights(
+    steps: int,
+    top: float = SEAM_WINDOW_TOP,
+    shape: str = WINDOW_SHAPE_DEFAULT,
+) -> Tuple[float, ...]:
+    """0.6.0 `window` 档：**对称窗**——两端低、中心高（非单调）。
+
+    与 ramp / blend 的**本质区别**：那两档都是**单调上升**（远端钉住、缝端最自由）；
+    本档是**窗函数**，缝端那一头重新回到低位（= 缝端重新钉牢）。
+
+    依据（2026-09-19 联网核实原文）：
+      · **VideoMerge**(arXiv:2503.09926)：「用 **sine weighting** 替代线性加权……
+        minimizes artifacts due to **abrupt change in semantics**」；
+      · **Diff-VF**(arXiv:2608.05976) 的 WWS：「窗口**中心**的帧获得**更高**权重，
+        靠近**边界**的帧获得**较低**权重」，且消融证明
+        「**移除 WWS 导致窗口边界处出现突然的「跳跃」**」——正是本项目的症状。
+
+    ⚠️ 诚实标注：我们的钉住窗**整窗都会被 TrimAV 裁掉**（不进成片），
+    所以本档的作用是**塑造模型状态**，而不是"让可见区变柔"。
+    缝端那一头重新钉牢（窗函数在 i=n−1 处回落到低位）才是它相对 ramp 的关键差别。
+    """
+    n = int(steps)
+    if n < 1:
+        return ()
+    t = min(1.0, max(0.0, float(top)))
+    if n == 1:
+        return (float(t),)
+    import math
+    if shape == "hann":
+        # Hann：端点严格 0（完全硬钉），中心 1
+        return tuple(t * (0.5 - 0.5 * math.cos(2.0 * math.pi * (i + 0.5) / n))
+                     for i in range(n))
+    # sine：端点低但不为 0（留一点自由度，避免整窗死钉）
+    return tuple(t * math.sin(math.pi * (i + 0.5) / n) for i in range(n))
+
+
 def prefix_blend_weights(
     steps: int,
     blend_top: float = SEAM_BLEND_TOP,
@@ -2357,6 +2405,8 @@ def build_continue_latent(
     blend_top: float = SEAM_BLEND_TOP,
     blend_tokens: int = 0,
     blend_shape: str = BLEND_SHAPE_DEFAULT,
+    window_top: float = SEAM_WINDOW_TOP,
+    window_shape: str = WINDOW_SHAPE_DEFAULT,
     anchor_latent: Optional[Any] = None,
     anchor_blend: float = 1.0,
 ) -> Tuple[Dict[str, Any], int, str]:
@@ -2452,6 +2502,12 @@ def build_continue_latent(
         vmask[:, :, :steps] = torch.tensor(w, dtype=torch.float32,
                                            device=vmask.device).view(1, 1, steps, 1, 1)
         mask_desc = "重叠区双向融合 0.00→%.2f（%s 窗，两端导数 0 ⇒ 过渡柔）" % (w[-1], blend_shape)
+    elif mask_mode == "window":
+        w = prefix_window_weights(steps, window_top, window_shape)
+        vmask[:, :, :steps] = torch.tensor(w, dtype=torch.float32,
+                                           device=vmask.device).view(1, 1, steps, 1, 1)
+        mask_desc = ("对称窗 %s（峰值 %.2f）：两端低、中心高 ⇒ **缝端重新钉牢**，"
+                     "中心留自由度" % (window_shape, max(w) if w else 0.0))
     else:
         w = prefix_taper_weights(steps, taper, seam_min)
         # 权重直接建在掩码设备上，省一次跨设备拷贝（latent 在 GPU 时 vmask 也在 GPU）

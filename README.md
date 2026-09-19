@@ -409,7 +409,7 @@ MiniMaxH3ImageToVideo ─ positive ───────────────
 | `latent` | — | 本段初始 AV latent（接采样器上游） |
 | `context_latent` | — | 上一段完整 AV latent（第 1 段不接本节点） |
 | `context_frames` | 22 | 拷贝窗口帧数，合法值 5/22/39/56/73/90/107/124，须小于本段帧数 |
-| `mask_mode` | `hard` | **掩码语义 = `模型生成 * m + 上段尾 * (1-m)`，m=0 才钉住、m=1 是重绘。**<br>`hard` = 全窗 m=0（钉住区零重绘，**真续接用这个**）；<br>`ramp`（0.4.3）= 噪声斜坡「软证据」：远端 m=0 硬钉 → 缝端**线性**升到 `ramp_top`，全程有锚（每步被 (1-m) 锚回拷贝尾）。原生 H3 契约把连续 m 当逐 token 的 sigma 标签（sigma_row = m·sigma_video），缝侧轻度 harmonize——治硬接缝处的色档/曝光台阶；<br>`blend`（0.5.0）= 重叠区**双向融合**：与 `ramp` 同语义，但权重用**窗形**升（两端导数为 0 ⇒ 过渡更柔，见 `blend_shape`）；<br>`taper` = 头部 m=1.0（**完全重绘**）线性降到缝端 `seam_min` —— ⚠ **钉住区实际上没有被钉住**，只作「渐进接管」对照实验档 |
+| `mask_mode` | `hard` | **掩码语义 = `模型生成 * m + 上段尾 * (1-m)`，m=0 才钉住、m=1 是重绘。**<br>`hard` = 全窗 m=0（钉住区零重绘，**真续接用这个**）；<br>`ramp`（0.4.3）= 噪声斜坡「软证据」：远端 m=0 硬钉 → 缝端**线性**升到 `ramp_top`，全程有锚（每步被 (1-m) 锚回拷贝尾）。原生 H3 契约把连续 m 当逐 token 的 sigma 标签（sigma_row = m·sigma_video），缝侧轻度 harmonize——治硬接缝处的色档/曝光台阶；<br>`blend`（0.5.0）= 重叠区**双向融合**：与 `ramp` 同语义，但权重用**窗形**升（两端导数为 0 ⇒ 过渡更柔，见 `blend_shape`）；<br>`window`（0.6.0）= **对称窗**：两端低、中心高 —— 与 ramp/blend 的**本质差别**是**缝端回落到低位 ⇒ 缝端重新钉牢**。依据 VideoMerge(arXiv:2503.09926) 的正弦窗与 Diff-VF(arXiv:2608.05976) 的 WWS（「中心权重高、边界权重低」，消融证明去掉它 → **窗口边界突然跳跃**）；<br>`taper` = 头部 m=1.0（**完全重绘**）线性降到缝端 `seam_min` —— ⚠ **钉住区实际上没有被钉住**，只作「渐进接管」对照实验档。<br>⚠️ **一条已作废的旧结论**：曾写「ramp 与 hard 三项完全等同 ⇒ 无增益」——那是用**看不见跳帧的指标集**测的。改用含「缝后单帧尖峰 + 缝对构图相关」的判据重测后：**四个掩码档在缝处全都跳**，只是失败模式不同（hard 保取景但运动尖峰大；ramp/blend 运动平了但**取景被改写**）⇒ **单靠掩码调参治不好**，须配合「复合桥」（见下）|
 | `blend_top` | 0.50 | 仅 `blend`：缝端**模型占比**上限（对应 ramp 的 `ramp_top`）。0 = 退化成 hard |
 | `blend_tokens` | 0 | 仅 `blend`：参与融合的缝端 token 数；0 = 整窗铺开，小值（2~3）= 「只融缝、锁运动」 |
 | `blend_shape` | `smoothstep` | 仅 `blend`：窗形。`smoothstep` = x²(3−2x) ／ `hann` = (1−cos πx)/2，**两者都是两端导数为 0 的单调升** |
@@ -418,6 +418,8 @@ MiniMaxH3ImageToVideo ─ positive ───────────────
 | `pin_audio` | `true` | 上一段音频尾拷进本段音频开头（采样上下文）。纯视频 latent 关掉它 |
 | `ramp_top` | 0.25 | 仅 ramp：缝端最大 m（= 该 token 参与去噪的 sigma 比例）。`0` = 退化为 hard；`>0.5` 锚定明显变弱、接近 taper，慎用 |
 | `ramp_tokens` | 0 | 仅 ramp：参与斜坡的缝端 token 数；`0` = 整个拷贝窗铺开；小值（2~3）=「只松缝、锁运动」的窄斜坡 |
+| **`conditioning`**（0.6.0） | — | **复合桥开关**：接上 ⇒ 本节点**同时**在 conditioning 上追加钉帧（管**取景/构图**），与 latent 钉住窗（管**运动**）**并联生效**——两条路径改的是不同对象（latent vs conditioning），采样器两个入口分开 ⇒ 互不冲突。<br>**不接 = 只做拷贝桥，行为与 0.5.0 完全一致**（第 4 路返回 `None`）。<br>实测（0.3MP 受控）：缝处亮度阶跃 **0.0009 vs 单用 cond 桥 0.0097（10.8×）**；与第三方 `Motion-Context` 同条件比 **4/5 项胜出** |
+| `ref_anchor_latent` / `ref_anchor_stage` / `ref_anchor_frames`（0.6.0） | — / `-1` / `5` | **全局外观锚**（走 `minimax_refs` 原生协议，近零噪声全程骑乘每一步 = attention sink）。<br>依据 **Diff-VF 的 Skip Residual Guidance**（把真实细节按当前噪声水平混入，既填细节又守运动）——refs 块是它的黑盒等价物 ⇒ **既防长程漂移，又可能治缝后糊闪**。<br>`ref_anchor_stage ≥ 0` 时自动读 `output/relay_kit/<run_id>/stage_<该值>` 当锚；`-1` = 关 |
 | `anchor_latent` / `anchor_blend` | — / `1.0` | **色档纠偏锚**（0.5.0）：全局锚段（通常第 1 段）的 AV latent。接上后拷贝前缀的逐通道均值/方差被 Reinhard 矩匹配拉向锚段 ⇒ 每步钉回的就是已复位色档的上下文，本段新内容跟着回到全局色档。**纠偏只作用于被裁掉的钉住前缀，不碰上一段成片。** `anchor_blend` = 纠偏强度（1 全量对齐；锚段与本段有意的风格差异时调低；不接锚时无效） |
 
 **续接裁重叠**

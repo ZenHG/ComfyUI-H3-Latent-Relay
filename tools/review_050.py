@@ -118,8 +118,20 @@ ck("C4 MotionContext：anchor_* 在末位", _mc[-3:] == ["anchor_latent", "ancho
    "末 3=%s" % _mc[-3:])
 
 _cb = list(N.H3RelayCopyBridge.INPUT_TYPES()["optional"])
-ck("C5 CopyBridge：blend_* 在末位",
-   _cb[-3:] == ["blend_top", "blend_tokens", "blend_shape"], "末 3=%s" % _cb[-3:])
+# 2026-09-19 更新：新增了 window_* 与复合桥族，旧的「blend_* 在末位」不再成立。
+# **真正的不变量**是：掩码族参数**连续**，且任何**新槽位一律追加在它们之后**
+#   （widgets_values 是按位对槽的，中间插入会让其后所有取值整体前移——铁律 10）。
+_MASK_FAMILY = ["mask_mode", "taper_tokens", "seam_min", "pin_audio", "ramp_top",
+                "ramp_tokens", "anchor_latent", "anchor_blend",
+                "blend_top", "blend_tokens", "blend_shape", "window_top", "window_shape"]
+ck("C5 CopyBridge：掩码族参数连续，且其后只允许追加新族",
+   _cb[:len(_MASK_FAMILY)] == _MASK_FAMILY,
+   "前 %d = %s" % (len(_MASK_FAMILY), _cb[:len(_MASK_FAMILY)]))
+ck("C5b 复合桥族紧随掩码族之后（追加，未插队）",
+   _cb[len(_MASK_FAMILY):len(_MASK_FAMILY) + 6]
+   == ["conditioning", "run_id", "stage_index", "ref_anchor_latent",
+       "ref_anchor_stage", "ref_anchor_frames"],
+   "实际 = %s" % _cb[len(_MASK_FAMILY):len(_MASK_FAMILY) + 6])
 
 print()
 print("=" * 78)
@@ -136,12 +148,34 @@ _ok_d = True
 for k, v in N.H3RelayCopyBridge.INPUT_TYPES()["optional"].items():
     if not isinstance(v, tuple) or not isinstance(v[1], dict) or "default" not in v[1]:
         continue
-    if k in _LEGACY_NEUTRAL or k.startswith("blend_"):
-        continue                      # 既有项 / 仅 blend 模式生效
+    if k in _LEGACY_NEUTRAL or k.startswith("blend_") or k.startswith("window_"):
+        continue                      # 既有项 / 仅 blend 模式生效 / 仅 window 模式生效
+    if k in ("conditioning", "run_id", "stage_index",
+             "ref_anchor_latent", "ref_anchor_stage", "ref_anchor_frames"):
+        continue                      # 复合桥族：**仅在接上 conditioning 时**才生效（见 D1b）
     if v[1]["default"] not in (0, 0.0, False, "hard", "smoothstep"):
         _ok_d = False
         print("      · %s 默认=%r" % (k, v[1]["default"]))
 ck("D1 CopyBridge：**新件**在默认模式下不生效（既有项豁免）", _ok_d)
+
+# D1b —— 2026-09-19 新增：复合桥族的安全属性。
+# 不接 conditioning 时，第 4 路必须**为 None**，且前 3 路与旧版逐位一致
+#   ⇒ 既有工作流（只接拷贝桥）行为**完全不变**。这是"折叠而非新节点"的前提。
+import torch as _t4
+import comfy.nested_tensor as _NT4
+_g4 = _t4.Generator().manual_seed(7)
+_st4 = CORE.steps_for_frames(90)
+_lat4 = {"samples": _NT4.NestedTensor([
+    _t4.randn(1, 24, _st4, 46, 26, generator=_g4),
+    _t4.randn(1, 32, 2, 300, generator=_g4)])}
+_prev4 = {"samples": _NT4.NestedTensor([
+    _t4.randn(1, 24, _st4, 46, 26, generator=_g4),
+    _t4.randn(1, 32, 2, 300, generator=_g4)])}
+_r4 = N.H3RelayCopyBridge().bridge(latent=_lat4, context_latent=_prev4, context_frames=22)
+ck("D1b 不接 conditioning 时返回 4 路且第 4 路为 None（既有工作流行为不变）",
+   isinstance(_r4, tuple) and len(_r4) == 4 and _r4[3] is None,
+   "len=%s 第4路=%r" % (len(_r4) if isinstance(_r4, tuple) else "?",
+                        _r4[3] if isinstance(_r4, tuple) and len(_r4) > 3 else "?"))
 
 _itp = N.H3RelayPost.INPUT_TYPES()["optional"]
 _off = all(_itp[k][1]["default"] == 0.0 for k in
@@ -160,14 +194,16 @@ print()
 print("=" * 78)
 print("E. mask_mode 三处一致")
 print("=" * 78)
-ck("E1 relay_core.MASK_MODES", CORE.MASK_MODES == ("hard", "taper", "ramp", "blend"),
+ck("E1 relay_core.MASK_MODES",
+   CORE.MASK_MODES == ("hard", "taper", "ramp", "blend", "window"),
    "%s" % (CORE.MASK_MODES,))
 ck("E2 节点选项与 MASK_MODES 一致",
    list(N.H3RelayCopyBridge.INPUT_TYPES()["optional"]["mask_mode"][0]) == list(CORE.MASK_MODES),
    "%s" % (N.H3RelayCopyBridge.INPUT_TYPES()["optional"]["mask_mode"][0],))
 ck("E3 四个权重函数齐备",
    all(hasattr(CORE, f) for f in ("prefix_taper_weights", "prefix_ramp_weights",
-                                  "prefix_blend_weights", "_window_shape")))
+                                  "prefix_blend_weights", "prefix_window_weights",
+                                  "_window_shape")))
 
 print()
 print("=" * 78)
@@ -656,10 +692,12 @@ ck("K14b 去 priming 抬升交叉窗最静点（编码器 33ms 静音被丢掉�
 # K15 —— 2026-09-19 深夜：mask_mode 生产/对照/实验分型（防产线再误跑）
 _mm = N.H3RelayCopyBridge.INPUT_TYPES()["optional"]["mask_mode"]
 _tt = _mm[1]["tooltip"]
-ck("K15 mask_mode 分型写进 tooltip（生产/对照/实验三档 + ramp 等同实测结论）",
+ck("K15 mask_mode 分型写进 tooltip（生产/对照/实验三档 + 2026-09-19 修正结论）",
    "生产档" in _tt and "对照档" in _tt and "实验档" in _tt
-   and "0.0407 vs 0.0402" in _tt
-   and _mm[0] == ["hard", "taper", "ramp", "blend"]          # 枚举顺序不变（保护 widgets_values）
+   # 2026-09-19：旧断言查 "0.0407 vs 0.0402"（「ramp 与 hard 等同」）——该结论已用
+   # **看不见跳帧的指标集**测出，已作废并从 tooltip 撤下。改查修正后的结论。
+   and "2026-09-19 修正" in _tt and "取景被改写" in _tt
+   and _mm[0] == ["hard", "taper", "ramp", "blend", "window"]   # 枚举只追加、不插队（保护 widgets_values）
    and _mm[1]["default"] == "hard")
 _opt_cb = N.H3RelayCopyBridge.INPUT_TYPES()["optional"]
 ck("K15b 掩码族专属参数全部带档位标签",
