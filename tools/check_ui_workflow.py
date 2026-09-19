@@ -68,9 +68,10 @@ def load_object_info(api: str) -> dict:
 
 
 def _ty(spec):
-    if not isinstance(spec, list) or not spec:
+    # 同时接受 list（服务端 /object_info 的 JSON）与 tuple（本地 INPUT_TYPES()）
+    if not isinstance(spec, (list, tuple)) or not spec:
         return None
-    return "COMBO" if isinstance(spec[0], list) else spec[0]
+    return "COMBO" if isinstance(spec[0], (list, tuple)) else spec[0]
 
 
 def spec_of(defn, name):
@@ -94,6 +95,37 @@ def frontend_slots(defn) -> list:
     return out
 
 
+def widget_input_names(defn) -> list:
+    """schema 里**是 widget** 的输入名（不含 control_after_generate 伪槽）。"""
+    return [k for k in frontend_slots(defn) if k != "control_after_generate"]
+
+
+def check_widget_markers(n, defn) -> list:
+    """🔴 2026-09-19 新增：输入槽的 `widget` 标记。
+
+    前端把**没有 `widget` 标记**的输入当普通插槽渲染成**空圆点**：
+    ``renderer/extensions/vueNodes/utils/nodeDataUtils.ts`` 的 ``nonWidgetedInputs()``
+    就是 ``inputs.filter(i => !('widget' in i && i.widget))``；
+    而 ``extensions/core/widgetInputs.ts`` 的 ``onGraphConfigured`` **只删不补**——
+    它只清理「带标记但找不到同名 widget」的输入，绝不会给缺标记的输入补上标记。
+
+    ⇒ 缺标记的后果：每个 widget 在画布上多一个空插槽（Post 16 个 / TrimAV 22 个），
+      **文件能开、能跑、不报错**，但节点一眼就是坏的。
+
+    历史（2026-09-19）：``examples/make_minimal_workflow.py`` 的 ``_ty()`` 只认 list，
+    而「本地定义优先」走的是 ``nodes.py`` 的 ``INPUT_TYPES()``（tuple）⇒
+    本包全部节点退化成 ``type="*"`` 且丢标记，生成的示例图正是这个样子。
+    """
+    want = widget_input_names(defn)
+    ins = n.get("inputs") or []
+    got = [i.get("name") for i in ins
+           if isinstance(i, dict) and i.get("widget")]
+    if got[:len(want)] == want:
+        return []
+    return ["输入槽的 widget 标记与 schema 对不上：文件里是 %s，schema 推导是 %s"
+            "（缺标记的会被前端渲染成空插槽）" % (got or "（一个都没有）", want)]
+
+
 def check_value(defn, name, value):
     """返回 (问题描述, 是否硬错误)。
 
@@ -108,7 +140,7 @@ def check_value(defn, name, value):
     if t == "COMBO":
         if not isinstance(value, str):
             return "%s=%r 不是合法 COMBO 值（期望字符串）" % (name, value), True
-        opts = spec[0] if isinstance(spec[0], list) else extra.get("options")
+        opts = spec[0] if isinstance(spec[0], (list, tuple)) else extra.get("options")
         if opts and value not in opts:
             return "%s=%r 不在当前候选项内（动态文件列表？请确认文件在）" % (name, value), False
         return "", False
@@ -148,11 +180,19 @@ def check_file(path: str, oi: dict, verbose: bool = True) -> int:
             warns.append("node %s 类型 %s 服务端没有（前端虚拟节点或未装该包）"
                          % (n["id"], n.get("type")))
             continue
-        wv = n.get("widgets_values")
-        if not isinstance(wv, list):
-            continue
+        # 🔴 标记检查必须在 widgets_values 的 null 判定**之前**做：
+        #   原实现在 widgets_values 非 list 时整节点 continue ⇒ 这类问题全被漏掉（假绿）。
+        for msg in check_widget_markers(n, defn):
+            problems.append("node %s %s: %s" % (n["id"], n["type"], msg))
 
         exp = frontend_slots(defn)
+        wv = n.get("widgets_values")
+        if not isinstance(wv, list):
+            if exp:
+                warns.append("node %s %s: 有 %d 个 widget 槽位，但 widgets_values 不是数组"
+                             "（前端会全部回落到默认值）"
+                             % (n["id"], n["type"], len(exp)))
+            continue
         for k, v in zip(exp, wv):
             msg, hard = check_value(defn, k, v)
             if msg:

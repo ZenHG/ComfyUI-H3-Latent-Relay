@@ -74,9 +74,23 @@ PROMPT_PLACEHOLDER = (
 
 # ---------------------------------------------------------------- schema 工具
 def _ty(spec):
-    if not isinstance(spec, list) or not spec:
+    """取输入的声明类型（``"INT"`` / ``"FLOAT"`` / ``"COMBO"`` / ``"IMAGE"`` …）。
+
+    🔴 **必须同时接受 ``list`` 与 ``tuple``**（2026-09-19 修复）。
+    本脚本有两个 schema 来源，容器类型**不一样**：
+      · 服务端 ``/object_info``（JSON）→ ``list``；
+      · 本包节点的**本地** ``nodes.py`` 的 ``INPUT_TYPES()`` → ``tuple``。
+    原实现只认 ``list`` ⇒ 本地来源的每个输入都返回 ``None`` ⇒ 调用点 ``_ty(spec) or "*"``
+    把类型退化成 ``"*"``，且 ``t in WIDGET_TYPES`` 恒假 ⇒ **widget 全部被当成普通插槽**：
+      · 生成的 ``inputs`` 缺 ``{"widget": {"name": …}}`` 标记 ⇒ 前端
+        ``nonWidgetedInputs()`` 把每个 widget 都渲染成**空的输入圆点**
+        （Post 16 个 / TrimAV 22 个 / MotionContext 10 个），示例图一眼就是坏的；
+      · ``widgets_values`` 算出来是空列表 ⇒ 写成 ``null``。
+    核心节点走服务端来源所以显示正常 —— 这正是「只有本包自己的节点坏」的原因。
+    """
+    if not isinstance(spec, (list, tuple)) or not spec:
         return None
-    return "COMBO" if isinstance(spec[0], list) else spec[0]
+    return "COMBO" if isinstance(spec[0], (list, tuple)) else spec[0]
 
 
 def spec_of(defn, name):
@@ -84,6 +98,20 @@ def spec_of(defn, name):
         if name in (defn.get("input", {}).get(sec) or {}):
             return defn["input"][sec][name]
     return None
+
+
+def spec_type_strict(spec):
+    """独立取类型 —— **刻意不复用 `_ty()`**。
+
+    🔴 判据不能与被判对象共用同一个函数：`_ty()` 坏掉时两边同时变空，
+    比较结果永远「相等」⇒ 自证式假绿。这条钉子第一版就踩了这个坑
+    （把 `_ty()` 换回只认 list 的旧实现，`validate()` 依旧报 0 问题）。
+    本函数只做「取类型」，且拿到异常输入**直接吵**，不安静放过。
+    """
+    if not isinstance(spec, (list, tuple)) or not spec:
+        raise AssertionError("schema 项格式异常（应为非空 list/tuple）：%r" % (spec,))
+    t = spec[0]
+    return "COMBO" if isinstance(t, (list, tuple)) else t
 
 
 def all_inputs(defn):
@@ -118,7 +146,7 @@ def default_value(defn, name):
     extra = spec[1] if len(spec) > 1 and isinstance(spec[1], dict) else {}
     t = _ty(spec)
     if t == "COMBO":
-        opts = spec[0] if isinstance(spec[0], list) else extra.get("options") or []
+        opts = spec[0] if isinstance(spec[0], (list, tuple)) else extra.get("options") or []
         pref = PREFERRED.get(name)
         cands = pref if isinstance(pref, list) else [pref]
         for c in cands:
@@ -348,6 +376,19 @@ def validate(g, oi):
         if len(wv) != len(slots):
             bad.append("%s 的 widgets_values 有 %d 项，schema 推导出 %d 个槽位 %s"
                        % (n["type"], len(wv), len(slots), slots))
+        # 🔴 widget 标记（2026-09-19 新增）：前端把**没有 `widget` 标记**的输入渲染成空插槽
+        #   （`nonWidgetedInputs()`），而 `onGraphConfigured` 只删不补 ⇒ 缺标记 = 每个 widget
+        #   在画布上多一个空圆点，且**不报任何错**。历史事故：`_ty()` 只认 list 而本地 schema
+        #   是 tuple ⇒ 本包节点全部丢标记。这条判据就是那次事故的回归钉子。
+        # ⚠ 这里**必须用 `spec_type_strict` 而不是 `_ty`**：两边共用 `_ty` 会自证式假绿
+        #   （`_ty` 坏掉 ⇒ 期望集与实收集同时变空 ⇒ 恒相等）。见 `spec_type_strict` 注释。
+        want_w = [name for name, spec in all_inputs(d)
+                  if spec_type_strict(spec) in WIDGET_TYPES]
+        got_w = [i.get("name") for i in (n.get("inputs") or []) if i.get("widget")]
+        if got_w[:len(want_w)] != want_w:
+            bad.append("%s 的 widget 标记与 schema 对不上：生成的是 %s，schema 推导是 %s"
+                       "（缺标记的会被前端渲染成空插槽）"
+                       % (n["type"], got_w or "（一个都没有）", want_w))
         for i, o in enumerate(n["outputs"]):
             got = set(o.get("links") or [])
             exp = want_out.get((n["id"], i), set())
@@ -423,6 +464,12 @@ def build(oi, length=73, width=448, height=768):
                values={"fps": 24.0})
     g.add("SaveVideo", pos=[2620, 300], links_in={"video": (mk, "VIDEO")})
 
+    # 🔴 Note 里的旋钮数**从 schema 现算**，不写死。
+    #   2026-09-19 修：这里原本硬编码「15 个旋钮」，而 H3RelayPost 早已是 16 个
+    #   （0.5.0 修正加了 match_prev_stats_frames）—— 同一页 README 写 16、注释框写 15，
+    #   用户按注释框对不上。计数一律现算，杜绝这类漂移。
+    n_post = len(widget_slots(g.defn("H3RelayPost")))
+
     g.add("Note", pos=[420, 700], title="怎么用", values={"text":
         "【最小续接演示 · 官方节点 + ComfyUI-H3-Relay-Kit】\n"
         "\n"
@@ -448,7 +495,7 @@ def build(oi, length=73, width=448, height=768):
         "  · 「起点干净」= 没有跳变，可以拼\n"
         "\n"
         "后处理 Post（0.5.0 新增，整节点可以删掉）：\n"
-        "  15 个旋钮**全部默认关 = 逐位直通**，不接它行为与 0.4.x 一致。\n"
+        f"  {n_post} 个旋钮**全部默认关 = 逐位直通**，不接它行为与 0.4.x 一致。\n"
         "  最省的一档试法：match_prev = 0.5（段头色档/曝光对齐上段末帧，治缝上亮度阶跃）。\n"
         "\n"
         "音频缝（0.5.0 新增，整节点也可以删掉）：\n"
@@ -520,7 +567,11 @@ def main():
         "version": 0.4,
     }
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
-    io.open(a.out, "w", encoding="utf-8").write(json.dumps(wf, ensure_ascii=False, indent=2))
+    # 🔴 `newline="\n"` 必须显式给：Python 在 Windows 上默认把 `\n` 翻成 `\r\n`，
+    #   会让同一份生成结果在 Windows / Linux 上**字节不同**，且与 `.gitattributes`
+    #   的 `* text=auto eol=lf` 打架（git 会在 commit 时改回去 ⇒ 工作树与提交态不一致）。
+    io.open(a.out, "w", encoding="utf-8", newline="\n").write(
+        json.dumps(wf, ensure_ascii=False, indent=2))
     print("已写出：%s（节点 %d / 连线 %d）" % (a.out, len(g.nodes), len(g.links)))
     print("下一步复核：python tools/check_ui_workflow.py %s" % a.out)
 

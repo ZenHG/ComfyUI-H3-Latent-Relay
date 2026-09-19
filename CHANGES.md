@@ -5,6 +5,61 @@
 > 本版为**节点重构版**：拆出 `H3RelayPost`（画质域后处理独立成节点），新增
 > `H3RelayAudioSeam`（音频域），并补齐调研文档 §2/§4 两个方向。
 
+### 🔴 示例模板修复：生成的节点长出一排空插槽（2026-09-19，面向普通用户）
+
+**症状**：打开 `examples/minimal_relay_official.json`，本包的节点会显示**一排空的输入圆点**
+（`H3RelayPost` 16 个 / `H3RelayTrimAV` 20 个 / `H3RelayMotionContext` 6 个），
+而**官方节点（`PrimitiveInt` 等）显示正常**。文件能开、能跑、不报任何错。
+
+**根因**：`examples/make_minimal_workflow.py` 的 `_ty()` 只认 `list`：
+
+```python
+if not isinstance(spec, list) or not spec:   # ← 旧实现
+    return None
+```
+
+本脚本有两个 schema 来源，容器类型**不一样**：
+服务端 `/object_info`（JSON）给 `list`，而「本地定义优先」走的本包 `nodes.py` 的
+`INPUT_TYPES()` 给 **`tuple`** ⇒ `_ty()` 对本包每个输入都返回 `None` ⇒ 调用点
+`_ty(spec) or "*"` 把类型退化成 `"*"`，`t in WIDGET_TYPES` 恒假 ⇒ **widget 全部被当成普通插槽**：
+
+- 生成的 `inputs` 缺 `{"widget": {"name": …}}` 标记；
+- `widgets_values` 算出来是空列表 ⇒ 写成 `null`。
+
+**为什么这会让节点变坏**（前端源码判据，非推测）：
+
+- `renderer/extensions/vueNodes/utils/nodeDataUtils.ts`：
+  `nonWidgetedInputs()` = `inputs.filter(i => !('widget' in i && i.widget))`
+  ⇒ **没有标记的输入被当普通插槽渲染成空圆点**；
+- `extensions/core/widgetInputs.ts` 的 `onGraphConfigured` **只删不补**：
+  它只清理「带标记但找不到同名 widget」的输入，**绝不会**给缺标记的输入补上标记。
+
+**修法**：`_ty()` 与 `default_value()` 的候选解析改为同时接受 `list` / `tuple`。
+修完示例图与前端**自己存出来**的同类型工作流逐节点对齐（槽数 4/4、10/10、22/22，
+`widgets_values` 长度全同，仅 `run_id` 与 `settle_frames` 取值不同）。
+
+**顺带修**：
+
+- Note 注释框里的「15 个旋钮」改为**从 schema 现算**（实际 16 个 —— 0.5.0 加了
+  `match_prev_stats_frames` 后没同步，README 写 16、注释框写 15，用户对不上）。
+- `tools/check_ui_workflow.py` / `tools/review_050.py` 里同类的
+  `isinstance(spec[0], list)`（COMBO 候选校验）一并放宽到 `tuple`。
+
+**回归钉子（都验过「能失败」）**：
+
+| 位置 | 判据 | 反证 |
+|---|---|---|
+| `examples/make_minimal_workflow.py` `validate()` | 每个 widget 型输入必须带 `widget` 标记，且顺序与 schema 一致 | 把 `_ty()` 换回旧实现 → 报 5 条 |
+| `tools/review_050.py` **I3** | 示例图 widget 标记与 schema 一致 | 换成修复前的示例图 → 61/1 |
+| `tools/check_ui_workflow.py` | 文件级 widget 标记检查（**先于** `widgets_values` 的 null 判定） | 旧示例图 → 5 条硬错 |
+
+> ⚠️ 两条踩坑教训（值得记）：
+> 1. **`check_ui_workflow.py` 原本在这件事上是假绿**：旧代码 `if not isinstance(wv, list): continue`
+>    把 `widgets_values: null` 的节点**整节点跳过**，而本包节点当时全是 `null` ⇒ 一个都没查过。
+> 2. **第一版回归钉子自己就是假绿**：期望集与实收集**共用同一个 `_ty()`**，它一坏两边同时变空、
+>    比较恒相等 ⇒ 旧实现下依旧报 0 问题。改为独立的 `spec_type_strict()` 后才能真正失败。
+>    **判据不能与被判对象共用同一个函数。**
+
 ### 🔴 新增节点：`H3RelayAudioSeam`（音频域——把音频缝从组装层搬进节点）
 
 **为什么搬**：音频接缝此前靠**组装层**（外部 ffmpeg）的 crossfade / room tone 头部补丁 /

@@ -65,3 +65,31 @@ python tools/check_ui_workflow.py examples/minimal_relay_official.json
 不通过就不写文件。
 
 **上游升级后重跑一次即可**（比如 ComfyUI 改了官方节点端口）。
+
+### ⚠️ 改这个生成器前必读：两个 schema 来源的容器类型不一样
+
+本脚本有**两个** schema 来源，同一个「输入定义」在两边是**不同的 Python 容器**：
+
+| 来源 | 用在 | 容器 |
+|---|---|---|
+| 服务端 `/object_info`（JSON） | 官方 / 第三方节点 | `list` |
+| 本包 `nodes.py` 的 `INPUT_TYPES()`（「本地定义优先」） | **本包 8 个节点** | **`tuple`** |
+
+所以任何形如 `isinstance(spec, list)` / `isinstance(spec[0], list)` 的写法，
+**对本包节点一律为假**。2026-09-19 的事故就是这么来的：`_ty()` 只认 `list` ⇒
+本包节点全部退化成 `type="*"` 且丢掉 `{"widget": {"name": …}}` 标记 ⇒
+生成的示例图里，本包节点会**长出一排空的输入圆点**（官方节点正常），
+**文件能开、能跑、不报任何错**。修法与前端判据见 `CHANGES.md` 0.5.0「示例模板修复」。
+
+改动后请跑这三步，缺一不可：
+
+```bash
+python examples/make_minimal_workflow.py                      # 生成（自带结构自检）
+python tools/check_ui_workflow.py examples/minimal_relay_official.json   # 期望「问题合计 0 条」
+python tools/review_050.py                                    # 期望 I3 通过
+```
+
+> **自检能不能失败？** 加判据时把 `_ty()` 临时换回 `isinstance(spec, list)` 的旧写法，
+> 确认自检会**报错**。第一版回归钉子就是因为「期望集与实收集共用同一个 `_ty()`」而恒真，
+> 旧实现下依旧报 0 问题 —— 判据不能与被判对象共用同一个函数。
+

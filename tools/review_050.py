@@ -351,7 +351,7 @@ for n in _wf["nodes"]:
         if not (isinstance(spec, tuple) and isinstance(spec[1], dict)):
             continue
         cfg = spec[1]
-        if isinstance(spec[0], list) and val not in spec[0]:
+        if isinstance(spec[0], (list, tuple)) and val not in spec[0]:
             _unknown.append("%s.%s=%r 不在候选项 %s" % (t, name, val, spec[0]))
         if isinstance(val, (int, float)) and not isinstance(val, bool):
             lo, hi = cfg.get("min"), cfg.get("max")
@@ -366,6 +366,26 @@ for _t, _pairs in _map:
     print("      %s：%s" % (_t, ", ".join("%s=%r" % kv for kv in _pairs[:5])))
 ck("I2 取值都在候选/范围内（错位会在这里露出来）", not _unknown,
    "异常=%s" % _unknown[:4])
+
+# 🔴 I3（2026-09-19 新增）：示例图的 widget 输入必须带 `widget` 标记。
+#   前端 `nonWidgetedInputs()`（renderer/.../nodeDataUtils.ts）把**没有标记**的输入
+#   当普通插槽渲染成**空圆点**；而 `widgetInputs.ts` 的 `onGraphConfigured` **只删不补**
+#   ⇒ 缺标记 = 每个 widget 在画布上多一个空插槽（Post 16 / TrimAV 20），
+#     **文件能开、能跑、不报任何错**，但节点一眼就是坏的。
+#   历史事故：`examples/make_minimal_workflow.py` 的 `_ty()` 只认 list，
+#   而「本地定义」的 schema 是 tuple ⇒ 本包节点全部丢标记。
+_mark = []
+for n in _wf["nodes"]:
+    _t = n["type"]
+    _cls = getattr(N, _t, None)
+    if _cls is None:
+        continue
+    _want = [s for s in _widget_slots(_cls) if s != "<control_after_generate>"]
+    _got = [i.get("name") for i in (n.get("inputs") or []) if i.get("widget")]
+    if _got[:len(_want)] != _want:
+        _mark.append("%s: 文件=%s 期望=%s" % (_t, _got or "（无）", _want))
+ck("I3 示例图 widget 输入带 `widget` 标记（缺标记会被前端渲染成空插槽）",
+   not _mark, "不符=%s" % _mark[:2])
 
 print()
 print("=" * 78)
