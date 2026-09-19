@@ -2,7 +2,9 @@
 
 本包（ComfyUI-H3-Relay-Kit）以 **MIT** 发布（见 [`LICENSE`](LICENSE)）。
 下列第三方作品在**设计阶段被阅读、参考或对照**，按「机制 / 契约 / 论文」三类分别说明。
-**本仓库不包含任何 GPL / AGPL / LGPL 代码**（见 §三）。
+**当前版本（≥ 0.6.0）不包含任何 GPL / AGPL / LGPL 代码**（历史版本见 §一·B）。
+⚠️ 但本包的**运行时宿主 ComfyUI 是 GPL-3.0**，且本包在进程内 import 其模块 —— 见 **§一·C**，
+那是本文件里唯一一条"不是复制、但是 copyleft 依赖"的关系，引用本包前请一并阅读。
 
 ---
 
@@ -11,7 +13,8 @@
 | 第三方 | 许可 | 被参考的内容 | 我们的实现 | 性质 |
 |---|---|---|---|---|
 | **AIMixer / `ComfyUI_MiniMaxH3_Director`** | Apache-2.0（*待一手复核，见 §四*） | ① 拷贝桥：上一段 AV latent 硬拷贝 + 噪声掩码 + 音频尾拷贝 + NestedTensor 双流打包；② 段头低频残差对齐（`_lowfreq_appearance_pull` / `match_export_opening_grade`）；③ 批量化盒式模糊（把 guide 的模糊提到循环外、逐帧模糊合成一次 `avg_pool2d`） | `relay_core.build_continue_latent` / `lowfreq_pull` / `_box_blur_hwc`；节点 `H3RelayCopyBridge`、`H3RelayPost.lowfreq_pull` | **读源码后按机制重写**：公式层面对齐（差分式低频残差传递本身是**唯一写法**），但控制流、参数面、权重曲线、边界与降级处理均为本仓库独立设计（本包另加：逐帧线性权重斜坡、画布不一致即不动刀、掩码按上游原生契约走） |
-| **`comfyui-minimax-h3-audio-T8`** | **MIT** | 掩码语义：走 ComfyUI **原生 H3 契约**（`MiniMaxH3.scale_latent_inpaint` / `mask_row_values`），与具体采样器无关；全 0 硬锁 = 钉住区零重绘 | `relay_core.prefix_*_weights` + `build_continue_latent` 的 `noise_mask` 构造 | 该契约来自**上游 ComfyUI 宿主源码**（Apache-2.0，运行时 import，不复制）；T8 作为用法佐证 |
+| **`comfyui-minimax-h3-audio-T8`** | **MIT** | 掩码语义：走 ComfyUI **原生 H3 契约**（`MiniMaxH3.scale_latent_inpaint` / `mask_row_values`），与具体采样器无关；全 0 硬锁 = 钉住区零重绘 | `relay_core.prefix_*_weights` + `build_continue_latent` 的 `noise_mask` 构造 | 该契约来自**上游 ComfyUI 宿主源码**（**GPL-3.0**，运行时 import，不复制）——见 **§一·C**；T8 作为用法佐证 |
+| **`ComfyUI-Apt_Preset`** | **许可未知**（包已于 2026-09-13 从开发机移除，无从复核；已移除 ⇒ 现无从取得其许可） | 仅**沿用其 latent 字典键名**做兼容读取：`apt_h3_export_tail_latent` / `apt_h3_export_tail_audio_latent` / `apt_h3_export_context_frames` | `relay_core.KEY_EXPORT_*`（常量名与取值） | **数据键名，非代码**：无 import、无调用、无复制；仅当上游 latent 里带了这些键才复用其值，否则走本包自己的切片路径 |
 
 > ⚠️ **「机制不受版权保护，表达受保护」**：上表两行均为**机制层**参考。
 > 若后续有维护者发现任何段落与第三方源码构成**表达层**重合，请按 §四 流程处理
@@ -62,6 +65,18 @@
   `H3RelayChain` + `web/relay_kit_chain.js`（行为对标其 Chain，代码独立实现，见 `CHANGES.md`）；
   `layout_contract.py`（"读上游源码 + 不一致即拒绝运行"的**思路**相同，检查对象与实现不同）。
 
+### C. ⚠️ 运行时宿主：ComfyUI 是 **GPL-3.0**（本文件此前误记为 Apache-2.0）
+
+**这一条不是"参考"，是"运行时依赖"——而且宿主是强 copyleft。单独成节，因为它决定了引用本包时你要评估什么。**
+
+| 项 | 内容 |
+|---|---|
+| 事实 | ComfyUI（`comfyanonymous/ComfyUI`）以 **GPL-3.0** 发布。已一手核对本机 `ComfyUI/LICENSE`：首行 `GNU GENERAL PUBLIC LICENSE Version 3`，且全文**没有**任何针对自定义节点 / 插件的例外条款（grep `custom node` / `plugin` / `exception` 只命中 GPL 通用条款） |
+| 本包与它的关系 | 运行时 **import** `folder_paths` / `node_helpers` / `comfy.nested_tensor`；`layout_contract.py` 读取上游 `comfy_extras/nodes_minimax_h3.py` 的 `FRAME_PER_TOKEN` 做契约核对。**不复制**任何 ComfyUI 源码文件，仓库内无 GPL 文本 |
+| 我方立场（**主张，不是结论**） | 本包是独立程序，仅通过 ComfyUI 公开的 Python API 与公开数据结构交互，不以 ComfyUI 源码为派生基础；这也是 ComfyUI 自定义节点生态的通行做法（大量节点包以 MIT / Apache 发布，Comfy Registry 亦接受） |
+| ⚠️ 未决 | GPL-3.0 对"进程内 import 的插件"是否构成派生作品，**既无司法判例，也无 ComfyUI 官方书面确认**。插件耦合度比"跨进程 arm's length 通信"更紧，严格解释下存在被主张的空间。需要确定性的场景（企业合规审查 / 再分发）请自行取得法律意见 |
+| 更正记录 | 2026-09-19 之前本文件把宿主写成 **Apache-2.0 —— 那是错的**，现已更正；README「📄 许可与出处」同步 |
+
 ## 二、论文与公开算法（仅算法出处，无代码）
 
 | 出处 | 用在哪 |
@@ -75,8 +90,9 @@
 
 ## 三、copyleft 作品清单（含一次已消除的历史重合）
 
-| 作品 | 许可 | 状态 |
+| 作品 / 依赖 | 许可 | 状态 |
 |---|---|---|
+| **ComfyUI（运行时宿主）** | **GPL-3.0** | ⚠️ **运行时 import，非复制**。仓库内不含其代码；但是本包唯一一条 copyleft 关系，且宿主无插件例外条款。**详见 §一·C**（含我方立场与未决事项）。2026-09-19 之前误记为 Apache-2.0，已更正 |
 | `h3_drift.py`（改编自 **Contex-Loop**） | GPL-3.0（二次改编 ⇒ 传染性更强） | **❌ 未进入本包**。本包不含其任何代码、注释结构或派生表达；相关思路**未被采用** |
 | **`ComfyUI-H3-Motion-Context`** | **GPL-3.0**（NikoDemon80） | ⚠️ **曾重合，已重写** —— `apply_relay` 锚位合成段在 v0.2.1–v0.5.0 公开历史中构成表达层重合，2026-09-19 整体重写。**详见 §一·B**（含范围核验、未决事项、历史未改写的原因） |
 
@@ -85,6 +101,7 @@
 | 项 | 状态 |
 |---|---|
 | 本包自身许可 | ✅ MIT（`LICENSE`） |
+| **宿主 ComfyUI 许可** | ✅ **已一手核对 = GPL-3.0**（本机 `ComfyUI/LICENSE` 首行；无插件例外条款）。2026-09-19 更正了本文件此前误记的 Apache-2.0，披露见 §一·C |
 | 依赖许可 | ✅ `torch`（BSD-3-Clause）/ `safetensors`（Apache-2.0）—— 均为宽松许可，与 MIT 兼容 |
 | T8 许可 | ✅ 已一手复核 = MIT（+ 内容层 CC BY 4.0，本包未使用其内容库） |
 | **Motion-Context 重合** | ✅ **已核验范围并重写**（§一·B）：重合仅 `apply_relay` 一段，2026-09-19 整体重写，差分验证通过。<br>⚠️ **未决**：派生方向未定（可能经已消失的 Apt_Preset 中转）；**尚未取得对方作者书面确认**。<br>**待办**：联系 NikoDemon80 说明情况。**在此完成前，请勿对外主张"本包与 GPL 无关"** |

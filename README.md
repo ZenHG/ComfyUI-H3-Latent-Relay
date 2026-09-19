@@ -900,9 +900,14 @@ stage 链（落盘/读回）按段号自续（本段段号 - 1 = 要读的段号
   协议与网格常量来自 MiniMax-H3 的公开实现（`minimax_keyframes` / `minimax_refs` /
   `FRAME_PER_TOKEN` 等），**运行时 import 上游源码、不复制**。
 - **第三方出处与署名 → [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)**：
-  机制/契约层面参考了 `ComfyUI_MiniMaxH3_Director`（Apache-2.0，已按保守口径随包附
-  [`licenses/Apache-2.0.txt`](licenses/Apache-2.0.txt)）与 `comfyui-minimax-h3-audio-T8`（MIT）；
-  算法出处见论文表。
+  机制/契约层面参考了 `ComfyUI_MiniMaxH3_Director`（**标注为 Apache-2.0，⚠️ 尚未一手复核**，
+  已按保守口径随包附 [`licenses/Apache-2.0.txt`](licenses/Apache-2.0.txt)；复核结论出来前，
+  不要把它当作已确定的事实）与 `comfyui-minimax-h3-audio-T8`（**MIT**，已复核）；算法出处见论文表。
+- **⚠️ 运行时宿主 ComfyUI 是 GPL-3.0**（本包在进程内 import 其模块，**但不复制其代码**；
+  ComfyUI 的 LICENSE 内无自定义节点/插件例外条款）。这是引用本包前需要你自己评估的一条，
+  完整事实、我方立场与未决事项见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) **§一·C**。
+  本包主张自己是独立程序、仅通过 ComfyUI 公开 API 交互（亦为本生态通行做法），
+  但**这一点没有司法判例、也没有 ComfyUI 官方书面确认**。
 - **⚠️ 关于 `ComfyUI-H3-Motion-Context`（GPL-3.0）—— 引用本包前请先读这条**：
   `H3RelayMotionContext` 的锚位合成段（`relay_core.apply_relay`）在 **v0.2.1–v0.5.0 的公开历史**里，
   曾与该包（GPL-3.0，NikoDemon80）构成**表达层重合**。该段已于 **2026-09-19 整体重写**
@@ -911,4 +916,10 @@ stage 链（落盘/读回）按段号自续（本段段号 - 1 = 要读的段号
   [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) §一·B。
 - **依赖**：仅 `torch`（BSD-3-Clause）与 `safetensors`（Apache-2.0），均与 MIT 兼容；
   运行时不发起任何远端请求（见 [`SECURITY.md`](SECURITY.md)）。
+- **模型权重不含在本包内**：MiniMax-H3 等权重需你自备，其许可与商用条件由提供方决定，本包不分发、不作任何授权。
+- **使用合规**：本包是通用视频生成工具，使用者须自行遵守当地法律与所用模型/素材的许可；
+  不得用于伪造他人肖像、传播虚假信息或侵犯他人权利。MIT 许可不含任何用途担保。
+- **本包非 MiniMax 官方作品**，与 MiniMax、ComfyUI 官方均无隶属或背书关系（`H3` / `ComfyUI-` 为指示性使用）。
+- ⚠️ **版本合规提示**：≤ `v0.5.0` 的历史版本含有已于 2026-09-19 重写前的实现（见 NOTICES §一·B）。
+  需要严格合规的场合请使用 **≥ 0.6.0**。
 - ⚠️ 若你要**再发布**本包：请一并保留 `LICENSE`、`THIRD-PARTY-NOTICES.md` 与 `licenses/`。
