@@ -57,6 +57,9 @@ DEFAULT_API = "http://127.0.0.1:8188"
 WIDGET_TYPES = {"INT", "FLOAT", "STRING", "BOOLEAN", "COMBO"}
 
 # 前端追加在**末尾**、不进 INPUT_TYPES 的 widget（末尾追加不会造成错位）
+# 已知会被前端注入在 widgets_values **尾部**的槽位名。
+# ⚠ 这只是「已知名」，不是判据本身：2026-09-20 起改按性质判（尾部名字不在后端 schema 里
+#    ⇒ 前端自定义/DOM widget，值合法，只记 warn）。见 check_one 里的注释与实证两例。
 TAIL_INJECTED = {"upload", "lora面板", "视频上传", "音频上传", "image_upload"}
 
 
@@ -340,10 +343,28 @@ def check_file(path: str, oi: dict, verbose: bool = True) -> int:
             nk = list(nm.keys()) if isinstance(nm, dict) else []
             tail = nk[len(exp):] if nk else []
             if not tail or any(t not in TAIL_INJECTED for t in tail):
-                problems.append(
-                    "node %s %s: widgets_values 比前端槽位多 %d 项（尾部 %s）—— "
-                    "若不是 upload/DOM 面板，就是多写了"
-                    % (n["id"], n["type"], len(wv) - len(exp), tail or "未知"))
+                # 🔴 2026-09-20 修正：硬编码白名单拦不住下一个第三方包，改按**性质**判。
+                #    前端 addDOMWidget 注册的自定义 widget（后端 schema 里没有同名输入）
+                #    会合法地把值追加在 widgets_values 尾部 —— 不是「多写了」。
+                #    实证：ComfyUI-Banzhang-All 的 `guhai_ig`（js/banzhang_ignore_groups.js）
+                #    与 `painter_preview`（js/painter_video.js）都被本判据误报过。
+                #    ⚠ 仍旧报 problem 的情形（杀伤力必须保留）：
+                #      · 尾部在 widgets_values_named 里**没有名字**（对不上号）；
+                #      · 或尾部的名字**能在后端 schema 的 input 里找到**（那是真重复写了一格）。
+                backend = set(defn.get("input", {}).get("required", {}) or {}) \
+                    | set(defn.get("input", {}).get("optional", {}) or {})
+                dom_extra = bool(tail) and all(
+                    (t in TAIL_INJECTED) or (t not in backend) for t in tail)
+                if dom_extra:
+                    warns.append(
+                        "node %s %s: 尾部 %d 项是**前端自定义 widget**（%s；后端 schema 无此输入，"
+                        "值合法地序列化在末尾）——非多写，无需处理"
+                        % (n["id"], n["type"], len(wv) - len(exp), ", ".join(tail)))
+                else:
+                    problems.append(
+                        "node %s %s: widgets_values 比前端槽位多 %d 项（尾部 %s）—— "
+                        "若不是 upload/DOM 面板，就是多写了"
+                        % (n["id"], n["type"], len(wv) - len(exp), tail or "未知"))
 
         # 🔴 2026-09-19 补：**少写**方向的盲点。
         #   原实现只查「多了」+「逐位取值」，`widgets_values` 比槽位**短**时一路静默放行
