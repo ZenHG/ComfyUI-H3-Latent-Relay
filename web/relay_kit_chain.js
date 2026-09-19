@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 ComfyUI-H3-Relay-Kit contributors
+// 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 // H3 Relay Kit · Chain 前端
 // 在 H3RelayChain 节点上提供按钮：Run / Approve / 连跑 / Stop / Reset。
 // 作用：自动推进同一张图里「拷贝桥（复合 CopyBridge）+ 落盘」两个节点的 stage_index，

@@ -1,0 +1,44 @@
+# 回归三件套（CPU-only、零 GPU、秒级）
+#
+# 三个脚本在失败时都会以非零退出码退出（tests/test_relay_core.py:1822、
+# tools/review_050.py:864、tools/smoke_nodes.py:236），所以不需要额外解析输出。
+#
+# 期望值：281/0（算法层）、77/0（文档—代码一致性）、15/0（节点层冒烟）。
+# 改动后若这些数字变了，请同步 CONTRIBUTING.md「方面数/断言数」与 tests 头注释。
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # 只需要 ComfyUI 作为「宿主」：comfy.nested_tensor / node_helpers / folder_paths
+      # 都是纯 Python，不装它的依赖（torch 单独用 CPU 版装，避免拖 CUDA 包）。
+      - name: Fetch ComfyUI (host only)
+        run: git clone --depth 1 https://github.com/comfyanonymous/ComfyUI.git "$RUNNER_TEMP/ComfyUI"
+
+      - name: Install runtime deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+          pip install "safetensors>=0.4"
+
+      - name: Regression trio
+        env:
+          COMFYUI_PATH: ${{ runner.temp }}/ComfyUI
+          PYTHONPATH: ${{ runner.temp }}/ComfyUI
+        run: |
+          python tests/test_relay_core.py   # 期望 281/0
+          python tools/review_050.py        # 期望 77/0
+          python tools/smoke_nodes.py       # 期望 15/0

@@ -26,6 +26,16 @@ python tests/test_relay_core.py
 - `relay_core.py` 是纯算法层，**不得 import 任何 ComfyUI 模块**，以保证可独立单测与复用。
 - 新增 / 修改节点时，请同步更新 `README.md`（节点表 / 参数表 / 排障表）与 `CHANGES.md`。
 
+## 许可（提 PR 前必读）
+
+- 提交 PR 即表示：你对你提交的代码拥有处分权，并同意以 **MIT** 许可随本仓库一同发布。
+- 🔴 **不得引入 GPL / AGPL / LGPL 或其它 copyleft 项目的代码、注释结构或逐字表达。**
+  本仓库主张 MIT，而"机制不受版权保护、表达受保护"——照抄一个函数体哪怕改了函数名也算。
+  本仓库曾因此**整体重写过一次**，见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) §一·B。
+- 参考第三方实现时：只取**机制**，自己写**表达**；并在 NOTICES 的 §一 表里补一行出处。
+- ⚠️ 运行时宿主 **ComfyUI 是 GPL-3.0**（我们 import 它、但不复制它），见 NOTICES §一·C。
+  新增 `import comfy.*` 之前先想清楚这一步的耦合代价。
+
 ## 提交信息
 - 建议清晰说明「改了什么 / 为什么」，并关联相关 Issue。中英文均可。
 - 提交请使用**非个人敏感**的 git 身份（例如 GitHub 提供的 no-reply 邮箱），避免把私人邮箱写进公开历史。

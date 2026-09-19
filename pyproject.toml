@@ -7,7 +7,12 @@ description = "MiniMax-H3 多段续接的 latent 桥：上一段 AV latent 直�
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
+authors = [{ name = "ZenHG" }]
 # 第三方署名：THIRD-PARTY-NOTICES.md；随包分发的许可全文：LICENSE、licenses/Apache-2.0.txt
+# ⚠️ 运行时宿主 ComfyUI 是 GPL-3.0（不复制其代码，但进程内 import），见 THIRD-PARTY-NOTICES.md §一·C
+[project.urls]
+Homepage = "https://github.com/ZenHG/ComfyUI-H3-Relay-Kit"
+Issues = "https://github.com/ZenHG/ComfyUI-H3-Relay-Kit/issues"
 keywords = ["comfyui", "minimax", "h3", "video", "continuation", "latent"]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -17,6 +22,15 @@ classifiers = [
 dependencies = [
     "safetensors>=0.4",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+exclude = ["__pycache__", ".git"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]
 
 # 若要发布到 Comfy Registry，取消注释并填上你自己的 PublisherId（在 registry.comfy.org 注册后获得）
 # [tool.comfy]
