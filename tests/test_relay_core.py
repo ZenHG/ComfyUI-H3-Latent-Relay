@@ -1717,8 +1717,13 @@ _it22j = NODES.H3RelayAudioSeam.INPUT_TYPES()
 check("22.20 AudioSeam 第 3 路输出 joined 追加末位 + 五个拼接旋钮全折叠（J-cut 两参 2026-09-19）",
       NODES.H3RelayAudioSeam.RETURN_TYPES == ("AUDIO", "STRING", "AUDIO")
       and NODES.H3RelayAudioSeam.RETURN_NAMES == ("audio", "report", "joined")
-      and list(_it22j["optional"])[-5:] == ["join_curve", "join_prime_ms", "join_cross_ms",
-                                            "join_segment_seconds", "join_align_seconds"]
+      # ⚠️ 2026-09-20 判据修正：原本要求这五个**占据 optional 末位**，
+      #    但那与「新 widget 只能追加末位（守 widgets_values 按位对槽）」直接冲突——
+      #    实验档一追加就把这条判成失败。真正要守的是「五个都在 + 全折叠」，
+      #    不是「它们后面不能再有别人」。
+      and all(k in _it22j["optional"]
+              for k in ("join_curve", "join_prime_ms", "join_cross_ms",
+                        "join_segment_seconds", "join_align_seconds"))
       and all(_it22j["optional"][k][1].get("advanced")
               for k in ("join_curve", "join_prime_ms", "join_cross_ms",
                         "join_segment_seconds", "join_align_seconds")),

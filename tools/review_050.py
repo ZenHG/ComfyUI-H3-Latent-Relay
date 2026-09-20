@@ -146,6 +146,9 @@ for k, v in N.H3RelayCopyBridge.INPUT_TYPES()["optional"].items():
         continue
     if k in _LEGACY_NEUTRAL or k.startswith("blend_") or k.startswith("window_"):
         continue                      # 既有项 / 仅 blend 模式生效 / 仅 window 模式生效
+    if k.startswith("exp_"):
+        continue                      # 🧪 实验档：整族默认全关（其专属参数仅在该实验打开时生效，
+                                      #    与 blend_ / window_ 同族，按同一口径豁免）
     if k in ("conditioning", "run_id", "stage_index",
              "ref_anchor_latent", "ref_anchor_stage", "ref_anchor_frames"):
         continue                      # 复合桥族：**仅在接上 conditioning 时**才生效（见 D1b）

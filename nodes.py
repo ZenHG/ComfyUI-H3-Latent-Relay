@@ -446,6 +446,19 @@ class H3RelayTrimAV:
                        " ".join("%.4f" % v for v in prof["diff"][:18]),
                        " …" if len(prof["diff"]) > n_sh else "",
                        prof["ref_sharp"], prof["ref_rgb"][0], prof["ref_rgb"][1], prof["ref_rgb"][2]))
+            # 🧪 E3 DTW 残留量（调研 §11-A）：只读观测，**不进裁量契约**。
+            #   与 0.5.0 第 4 路（scan_head_repeat 的最小 MAE 单点）互补：
+            #   那个答「从 pin 起连续复现几帧」，这个答「整段对齐下来
+            #   平均每步多贵」⇒ 能看出残留强度与不连续形态。
+            #   ⚠ 故意不喂给 detect_settle：DTW 路把「运动中的相似姿态」
+            #     也给低代价，单独当裁量会多吃内容（2026-09-20 定）。
+            _dtw = CORE.head_repeat_dtw(images, pin)
+            if _dtw:
+                bj_note += (
+                    "\n           🧪 DTW 对齐代价（只读观测，不改裁量）："
+                    "窗→钉住区 %.5f｜反向 %.5f｜比较 %d vs %d 帧"
+                    % (_dtw["align_cost"], _dtw["reverse_cost"],
+                       _dtw["frames"][0], _dtw["frames"][1]))
             # 裁量→跳跃曲线：成片缝 = raw[pin-1] → raw[pin+settle]（相隔 settle+1 帧），
             # **裁得越多、跳得越大**（GG：裁切=时间跳跃=跳切）。裁之前就把它算出来供权衡。
             curve = CORE.trim_jump_curve(images, pin)
@@ -786,6 +799,35 @@ class H3RelayCopyBridge:
                     "advanced": True, "default": 5, "min": 1, "max": 64, "step": 1,
                     "tooltip": "外观锚取该段**开头**多少帧（取头不取尾）。",
                 }),
+                # ⚠️ 以下为 **实验档**（exp/seam-frontier）——一律追加在末尾，默认全关。
+                #    关 = 与主干逐位一致；开着跑出来的是实验数据，别当结论用。
+                "exp_history_depth": ("INT", {
+                    "advanced": True, "default": CORE.EXP_HISTORY_DEPTH_DEFAULT,
+                    "min": 0, "max": 4, "step": 1,
+                    "tooltip": "🧪【实验·默认关】E1 多尺度历史：追加几级**更早**的段作为 refs。\n"
+                               "依据 FramePack(arXiv:2504.12626)：历史按时间距离分级压缩（越旧越粗）。\n"
+                               "我们是「最近 context_frames 帧全量 + 更早全丢」的两级阶跃，本项补中间。\n"
+                               "取段规则：按段号往回读 stage_index-2、-3…（**不是** UI 输入），\n"
+                               "已由本节点自动完成——从第 3 段起才有历史可读。\n"
+                               "🔴 帧档约束（不满足会 raise，不静默降级）：每级取 ref_anchor_frames\n"
+                               "   按 stride^i 往下取**合法网格档**（5/22/39/56/73/90/107/124）。\n"
+                               "   · ref_anchor_frames=5 时只能出 1 级（再往下没有更粗的合法档）；\n"
+                               "   · 想要 2 级请把 ref_anchor_frames 设到 ≥22；想要 3 级设到 ≥90。\n"
+                               "⚠️ 宿主对多块 refs 的容忍度未实测 —— 这是要试的东西。",
+                }),
+                "exp_history_stride": ("INT", {
+                    "advanced": True, "default": CORE.EXP_HISTORY_STRIDE_DEFAULT,
+                    "min": 1, "max": 16, "step": 1,
+                    "tooltip": "🧪【实验】E1 每远一级的时序抽稀步长（帧数按 stride^i 衰减，下限 5 帧）。",
+                }),
+                "exp_cond_noise": ("FLOAT", {
+                    "advanced": True, "default": CORE.EXP_COND_NOISE_DEFAULT,
+                    "min": 0.0, "max": 1.0, "step": 0.01,
+                    "tooltip": "🧪【实验·默认关】E2 SDEdit 式软钉入：给钉住块加 σ 比例噪声\n"
+                               "（σ 以块自身 std 归一）。依据 SDEdit(arXiv:2108.01073)：\n"
+                               "σ 小锁结构、σ 大允许重新上色。与 ramp（latent 侧软证据）是**两条路**，\n"
+                               "叠加是否有增益未测 ⇒ 先做开关。σ=0 = 逐位不变。",
+                }),
             },
         }
 
@@ -808,7 +850,12 @@ class H3RelayCopyBridge:
                window_shape=CORE.WINDOW_SHAPE_DEFAULT,
                anchor_latent=None, anchor_blend=1.0,
                conditioning=None, run_id="relay", stage_index=0,
-               ref_anchor_latent=None, ref_anchor_stage=-1, ref_anchor_frames=5):
+               ref_anchor_latent=None, ref_anchor_stage=-1, ref_anchor_frames=5,
+               exp_history_depth=None, exp_history_stride=None, exp_cond_noise=None):
+        # 🧪 实验档：None 视为「未接线」⇒ 取默认（全关），保证老图/API 调用零变化
+        exp_history_depth = CORE.EXP_HISTORY_DEPTH_DEFAULT if exp_history_depth is None else exp_history_depth
+        exp_history_stride = CORE.EXP_HISTORY_STRIDE_DEFAULT if exp_history_stride is None else exp_history_stride
+        exp_cond_noise = CORE.EXP_COND_NOISE_DEFAULT if exp_cond_noise is None else exp_cond_noise
         CONTRACT.enforce()
         # 0.6.0：Latent 桥（H3RelayMotionContext）已删除，本节点成为**唯一桥**。
         # 原 Latent 桥「段号>=1 却无来源 -> 必须 raise（不得静默直通）」是反坏片关键守卫，
@@ -867,6 +914,32 @@ class H3RelayCopyBridge:
                 anchor_latent=ref_anchor_latent,
                 anchor_frames=int(ref_anchor_frames),
             )
+            # 🧪 E2 SDEdit 软钉入：给钉住块加 σ 噪声（σ=0 时逐位不动）
+            if float(exp_cond_noise) > 0.0:
+                for k in plan.keyframes:
+                    k["latent"] = CORE.sdeedit_noise(k["latent"], float(exp_cond_noise))
+                print("[H3 Relay] 实验 E2：SDEdit 软钉入 σ=%.3f（%d 块）"
+                      % (float(exp_cond_noise), len(plan.keyframes)), flush=True)
+            # 🧪 E1 多尺度历史：按 stage_index-2, -3… 自动读更早段做分级 refs
+            if int(exp_history_depth) > 0 and (run_id or "").strip():
+                hist, miss = [], []
+                for k in range(2, 2 + int(exp_history_depth)):
+                    idx = int(stage_index) - k
+                    if idx < 0:
+                        break
+                    try:
+                        hist.append(CORE.load_av_latent(_stage_path(run_id, idx)))
+                    except FileNotFoundError:
+                        miss.append(idx)
+                if miss:
+                    print("[H3 Relay] 实验 E1：更早段 %s 未落盘，已跳过对应级" % miss, flush=True)
+                refs = CORE.build_history_refs(
+                    hist, frames=int(ref_anchor_frames),
+                    depth=int(exp_history_depth), stride=int(exp_history_stride))
+                if refs:
+                    plan.extra_refs = refs
+                    print("[H3 Relay] 实验 E1：多尺度历史 %d 级（stride=%d）"
+                          % (len(refs), int(exp_history_stride)), flush=True)
             cond_out = CORE.apply_relay(conditioning, plan)
             extra = ["[H3 Relay] 复合桥·钉帧路径：" + plan.summary()]
             for n in plan.notes:
@@ -1318,6 +1391,14 @@ class H3RelayAudioSeam:
                                "缝上无电平凹陷（根治 acrossfade「缩短时间轴 ⇒ 音频提前 + 卡顿」）。\n"
                                "0 = 旧缩短语义（仅兼容/对照）。要求 ≥ join_cross_ms。",
                 }),
+                # ⚠️ 实验档（exp/seam-frontier）——追加末尾，默认关
+                "exp_bed_jitter": ("FLOAT", {"advanced": True,
+                    "default": CORE.EXP_BED_JITTER_DEFAULT, "min": 0.0, "max": 2.0, "step": 0.05,
+                    "tooltip": "🧪【实验·默认关】E5 床声去重复：按段号把床窗起点错开 N 秒。\n"
+                               "缺口出处：调研 §11-C —— 实测**所有片子 s2 头部 2s 的音频完全相同**\n"
+                               "（补丁把头部整段换成同一段 room tone），这本身可能被听成「重复」。\n"
+                               "0 = 各段取同一床窗（既有行为）。仅在 tile_seconds=0 时生效。",
+                }),
             },
         }
 
@@ -1381,7 +1462,8 @@ class H3RelayAudioSeam:
              fade_seconds=0.25, bed_stage=0, note="",
              bed_select=CORE.AUDIO_SEAM_BED_SELECT,
              join_curve="qsin", join_prime_ms=CORE.AUDIO_ENCODER_PRIME_MS,
-             join_cross_ms=50.0, join_segment_seconds=0.0, join_align_seconds=0.0):
+             join_cross_ms=50.0, join_segment_seconds=0.0, join_align_seconds=0.0,
+             exp_bed_jitter=None):
         me = _audio_stage_path(run_id, int(stage_index))
         idx = int(stage_index)
         patch = float(patch_seconds or 0.0)
@@ -1443,7 +1525,10 @@ class H3RelayAudioSeam:
                                          patch, float(tile_seconds or 0.0),
                                          float(fade_seconds),
                                          select=str(bed_select or CORE.AUDIO_SEAM_BED_SELECT),
-                                         target_audio=target)
+                                         target_audio=target,
+                                         bed_jitter=(CORE.EXP_BED_JITTER_DEFAULT
+                                                     if exp_bed_jitter is None else float(exp_bed_jitter)),
+                                         stage_index=idx)
         CORE.save_audio(out, me, note=note)
         line = rep + ("｜已落盘（供后段当床源）：%s" % me)
         if target is None:
