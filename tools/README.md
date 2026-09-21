@@ -4,7 +4,7 @@
 
 | 脚本 | 判什么 | 期望 | 怎么跑 |
 |---|---|---|---|
-| `review_050.py` | **文档—代码一致性**：节点清单 / 参数表 / 断言数 / 版本号 / 示例图槽位 | **77/0** | `python tools/review_050.py` |
+| `review_050.py` | **文档—代码一致性**：节点清单 / 参数表 / 断言数 / 版本号 / 示例图槽位 | **78/0** | `python tools/review_050.py` |
 | `smoke_nodes.py` | **节点层功能冒烟**：7 个节点真跑一遍（不是只看 INPUT_TYPES） | **15/0** | `python tools/smoke_nodes.py` |
 | `check_ui_workflow.py` | **UI 格式工作流 JSON**：槽位下标、连线两端、类型相容、widgets_values 项数 | 问题合计 **0** 条 | `python tools/check_ui_workflow.py examples/minimal_relay_official.json` |
 | `scan_expression_overlap.py` | 🔍 **合规取证**：与第三方包逐函数「表达层重合」扫描 | 人工判读（**只报数、不定性**） | `python tools/scan_expression_overlap.py <对方仓库路径>` |

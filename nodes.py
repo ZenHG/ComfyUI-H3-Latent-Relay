@@ -600,6 +600,14 @@ class H3RelayTrimAV:
                 int(audio["waveform"].shape[-1]), int(audio_out["waveform"].shape[-1]))
         else:
             line += "；⚠ 未接 audio，画面裁了但音频没裁 → 可能音画不同步"
+        # 🔴 2026-09-21 铁律·音画同步：把「音频拼接该填多少」**直接算给用户**。
+        #   以前要用户自己从「裁首 N 帧」换算 fps，于是没人填对 ⇒ 默认落在「旧缩短语义」上
+        #   ⇒ 每缝后段音频提前 cross 秒。少一次心算 = 少一类错位片。
+        if n > 0:
+            line += ("\n           ▶ 音频拼接（AudioSeam 的 joined）：J-cut 守恒路的 "
+                     "`join_align_seconds` 填 **%.4f**（= 裁首 %d 帧 ÷ %g fps）；"
+                     "若只想等长拼接不做交叉 ⇒ `join_cross_ms` 填 0（默认）。"
+                     % (n / float(fps), n, float(fps)))
         print(line)
         # 接缝自检：裁后起点若仍有突变，说明沉降量不够
         check = CORE.describe_head_jump(out)
@@ -1413,10 +1421,13 @@ class H3RelayAudioSeam:
                 }),
                 "join_cross_ms": ("FLOAT", {
                     "advanced": True,
-                    "default": 50.0, "min": 0.0, "max": 2000.0, "step": 5.0,
-                    "tooltip": "【joined 用】拼接缝的交叉淡变长度（毫秒）。\n"
-                               "默认 50 ms：只用来消掉拼点上的一次性瑕疵。\n"
-                               "（上游若已用本节点的等长替换补过缝，两侧本来就是同源环境声，不需要长淡变）",
+                    "default": 0.0, "min": 0.0, "max": 2000.0, "step": 5.0,
+                    "tooltip": "【joined 用】拼接缝的交叉淡变长度（毫秒）。**默认 0 = 不做交叉**。\n"
+                               "🔴 交叉淡变是 overlap-add ⇒ **必然缩短时间轴** ⇒ 每缝后段音频相对\n"
+                               "画面**提前** cross 毫秒、且逐段累积（第 3 段起口型明显对不上）。\n"
+                               "所以它只在你**同时给了** `join_align_seconds`（画面裁量）时才有意义\n"
+                               "（那时走 J-cut 守恒路，输出与裁后视频严格等长）。\n"
+                               "只填 cross 不填 align ⇒ 本节点直接报错，不会静默拼出一条错位音轨。",
                 }),
                 "join_segment_seconds": ("FLOAT", {
                     "advanced": True,
@@ -1505,7 +1516,7 @@ class H3RelayAudioSeam:
              fade_seconds=0.25, bed_stage=0, note="",
              bed_select=CORE.AUDIO_SEAM_BED_SELECT,
              join_curve="qsin", join_prime_ms=CORE.AUDIO_ENCODER_PRIME_MS,
-             join_cross_ms=50.0, join_segment_seconds=0.0, join_align_seconds=0.0,
+             join_cross_ms=0.0, join_segment_seconds=0.0, join_align_seconds=0.0,
              exp_bed_jitter=None):
         me = _audio_stage_path(run_id, int(stage_index))
         idx = int(stage_index)
@@ -1514,6 +1525,21 @@ class H3RelayAudioSeam:
         #   工作视图切到 [align:]（= 裁后音频）—— patch/落盘 audio_0000i/第 1 路输出
         #   的语义全部保持现状（都基于裁后视图）。
         _al_s = float(join_align_seconds or 0.0)
+        # 🔴 2026-09-21 铁律·音画同步：`joined` 只有在**给了画面裁量**时才能做交叉淡变。
+        #   交叉淡变是 overlap-add ⇒ **必然缩短时间轴** ⇒ 每缝后段音频相对画面提前 cross 秒
+        #   （第 3 段起口型明显对不上，且逐段累积）。这类「静默产出一条错位音轨」按包内纪律
+        #   **必须 raise**，不给"忽略参数"的中间态（R5：无断言即未验收；硬错误不静默降级）。
+        _cross_ms = float(join_cross_ms or 0.0)
+        if _cross_ms > 0.0 and _al_s <= 0.0:
+            raise ValueError(
+                "音频缝：给了 join_cross_ms=%.0f ms，但 join_align_seconds=0。\n"
+                "    交叉淡变是 overlap-add ⇒ **必然缩短时间轴** ⇒ 每缝后段音频相对画面"
+                "提前 %.0f ms，逐段累积到口型对不上。\n"
+                "    二选一（两条路都不会错位）：\n"
+                "      ① J-cut 守恒路（缝上更平滑）：join_align_seconds 填「续接裁重叠」"
+                "报告里那行建议值（= 裁首帧数 ÷ fps），且 join_cross_ms ≤ 它；\n"
+                "      ② 等长拼接（不做交叉，与段文件首尾相接等价）：join_cross_ms 填 0（默认）。"
+                % (_cross_ms, _cross_ms))
         _raw_wf, _raw_sr, _raw_lead, _raw_dt = CORE._audio_parts(audio)
         _raw_path = os.path.join(os.path.dirname(me), "audio_raw_%05d.safetensors" % idx)
         try:

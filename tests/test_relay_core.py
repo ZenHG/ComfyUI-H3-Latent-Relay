@@ -39,6 +39,8 @@
  20. 拆节点（0.5.0）：`H3RelayPost` 独立 + TrimAV 追加第 4 路输出 `prev_tail`
  21. 重叠区双向融合 blend（0.5.0 / 调研 §4）：窗形权重（smoothstep / hann），两端导数为 0
  22. 音频缝（0.5.0 / 节点内实现）：长度守恒、最静窗、边界 blend、床环铺、采样率/声道兜底、落盘往返、节点守卫
+ 23. 音画同步守恒（0.6.2）：`joined` 只在给了画面裁量时才能交叉（否则 raise）；默认等长拼接；
+     TrimAV 直接给出 `join_align_seconds` 建议值
 """
 
 import os
@@ -1813,6 +1815,67 @@ check("22.28 节点互斥（auto 优先、固定版弃权点名）+ settle_auto 
       and list(_itp).index("settle_auto") == list(_itp).index("settle_sharpen") + 1
       and "亏空" in _itp["settle_auto"][1]["tooltip"],
       _ra1.split("；")[-1][:56])
+
+# ============================================================================
+# 23. 音画同步守恒（0.6.2）—— `joined` 只在**给了画面裁量**时才能交叉
+# ============================================================================
+# 事故：`AudioSeam` 第 3 路 `joined` 的**默认档**（join_cross_ms=50 且 join_align_seconds=0）
+#   走「旧缩短语义」—— 交叉淡变是 overlap-add ⇒ **每缝使后段音频提前 50 ms**，且逐段累积
+#   （第 3 段起口型明显对不上）。而它只在一行 report 里带个 ⚠ ⇒ 属于「静默产出错位片」。
+# 处置：① 默认 join_cross_ms 归 0（默认 = 等长拼接，与段文件首尾相接等价）；
+#       ② cross>0 而 align=0 ⇒ **直接 raise**（硬错误不静默降级）；
+#       ③ TrimAV 报告里直接算出 `join_align_seconds` 建议值，免去用户心算 fps。
+import inspect as _insp23  # noqa: E402
+
+_it23 = NODES.H3RelayAudioSeam.INPUT_TYPES()["optional"]
+_sig23 = _insp23.signature(NODES.H3RelayAudioSeam.seam).parameters
+check("23.1 `joined` 默认档不再缩短时间轴：join_cross_ms 默认 0（widget 与函数签名一致）",
+      _it23["join_cross_ms"][1]["default"] == 0.0
+      and _sig23["join_cross_ms"].default == 0.0,
+      "widget=%r sig=%r" % (_it23["join_cross_ms"][1]["default"],
+                            _sig23["join_cross_ms"].default))
+
+_o23, _r23 = CORE.join_audio_segments([_A22, _B22], prime_samples=_PRJ, cross_samples=0)
+_w23 = _o23["waveform"].reshape(1, 1, -1)
+_b23 = _B22["waveform"].reshape(1, 1, -1)[..., _PRJ:]
+_L023 = int(_A22["waveform"].shape[-1]) - _PRJ
+# ⚠ 后段会被**跨段响度匹配**整体缩一个标量（±6 dB 限幅 + 峰值护栏，见 relay_core 2753~2768）
+#   ⇒ 断言「逐位相同」是错的；要断言的命题是「**零时间轴位移**」：后段与源段**逐样本位置对齐**，
+#   比值处处相等（= 只有幅度差、没有搬运）。这正是「不做交叉 ⇒ 不缩短」的直接取证。
+_m23 = _b23.abs() > 0.05
+_rr23 = _w23[..., _L023:][_m23] / _b23[_m23]
+_g23 = float((_rr23 - _rr23.median()).abs().max())
+check("23.2 cross=0 ⇒ 等长 + **零时间轴位移**（后段只被整段增益缩放，样本位置一一对齐）",
+      int(_w23.shape[-1]) == _L023 + int(_b23.shape[-1])
+      and torch.equal(_w23[..., :_L023], _A22["waveform"].reshape(1, 1, -1)[..., _PRJ:])
+      and _g23 < 1e-5
+      and "等长拼接" in _r23,
+      "%d vs %d ｜ 后段比值离散度 %.2e ｜ 增益 %.6f ｜ mode=%s"
+      % (int(_w23.shape[-1]), _L023 + int(_b23.shape[-1]), _g23,
+         float(_rr23.median()), _r23.split("｜")[1].strip()[:22]))
+
+_N23 = NODES.H3RelayAudioSeam()
+_D23 = {"waveform": torch.zeros(1, 1, 16000), "sample_rate": _SRJ}
+expect_raise("23.3 cross>0 而 align=0 ⇒ 节点必须 raise（不静默拼出一条错位音轨）",
+             lambda: _N23.seam(_D23, "unit_n23", 0,
+                               join_cross_ms=50.0, join_align_seconds=0.0),
+             "overlap-add")
+
+_al23, _ss23 = 0.25, 1.0
+_o23j, _r23j = CORE.join_audio_segments(
+    [_A22, _B22], prime_samples=0, cross_samples=int(0.05 * _SRJ),
+    segment_seconds=_ss23, align_seconds=_al23)
+_exp23j = int(round(_ss23 * _SRJ)) * 2 - int(round(_al23 * _SRJ))
+check("23.4 J-cut 守恒路：输出 == n·段有效时长 − (n−1)·裁量（与裁后视频严格等长）",
+      int(_o23j["waveform"].shape[-1]) == _exp23j and "守恒 OK" in _r23j,
+      "%d vs %d" % (int(_o23j["waveform"].shape[-1]), _exp23j))
+
+_g23t = torch.rand(30, 8, 8, 3)
+_o23t, _a23t, _r23t, _t23t = NODES.H3RelayTrimAV().trim(
+    _g23t, trim_frames=22, fps=24.0, audio=None)
+check("23.5 TrimAV 报告**直接算出** join_align_seconds 建议值（= 裁首帧数 ÷ fps）",
+      "join_align_seconds" in _r23t and "0.9167" in _r23t,
+      [l.strip() for l in _r23t.splitlines() if "join_align_seconds" in l][:1][0][:80])
 
 print()
 print("=" * 78)

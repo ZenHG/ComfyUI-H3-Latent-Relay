@@ -5,14 +5,16 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 
 | 项 | 值 |
 |---|---|
-| 版本 | **0.6.1**（7 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
+| 版本 | **0.6.2**（7 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
 | 许可 | **MIT**（第三方出处见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)） |
 | 宿主 | 需要**带 MiniMax-H3 支持的 ComfyUI**（其自身为 GPL-3.0，见「11. 许可与出处」） |
 
 > **本文约定（结构锁死）**：12 节顺序固定，编号即目录。
 > ① 槽位号一律 **`[N]` = 0 起算**（UI 上第 N 个口 = `[N-1]`）；
 > ② 表格只放结论，长推导全部外链 `docs/`；
-> ③ 前三节读完就能跑，4–8 节是查表，9 节以后是验收与背景。
+> ③ 前三节读完就能跑，4–8 节是查表，9 节以后是验收与背景；
+> ④ 🔴 **每个功能都有两条用法 —— 画布手动（多数用户）与 API 提交图 JSON，二者必须是同一套节点实现。**
+> 只写在脚本里的功能不算本包的功能（判据见 [`CONTRIBUTING.md`](CONTRIBUTING.md) 「代码纪律·铁律一」）。
 
 ## 0. 目录
 
@@ -293,15 +295,15 @@ ffmpeg -y -i s0.mp4 -i s1.mp4 -i s2.mp4 -i s3.mp4 \
 ## 8. 离线自测
 
 ```bash
-python tests/test_relay_core.py     # 期望 281/0
-python tools/review_050.py          # 期望 77/0（文档—代码一致性）
+python tests/test_relay_core.py     # 期望 286/0
+python tools/review_050.py          # 期望 78/0（文档—代码一致性）
 python tools/smoke_nodes.py         # 期望 15/0（节点层冒烟）
 ```
 
 脚本会自动上溯定位 ComfyUI 根目录；装在别处时用
 `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。
 
-**281 项断言，零 GPU、不加载模型**，覆盖二十二个方面 —— 例如：
+**286 项断言，零 GPU、不加载模型**，覆盖二十三个方面 —— 例如：
 
 | 组 | 覆盖 |
 |---|---|

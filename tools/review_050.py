@@ -857,6 +857,14 @@ ck("L9 README 的音频缝章节已改口径：节点实现（且不再写「要
    "要靠组装层补" not in _rd and "续接音频缝" in _rd
    and "必须在节点里做" in _rd)
 
+# L10 —— 2026-09-21 铁律：UI 与 API 必须同一套节点实现（写在 README 约定块 + CONTRIBUTING 纪律里）
+#   为什么机检它：这条规则若只活在人的记忆里，下一个人照样会去改私有脚本 ——
+#   而本包**多数用户是画布手动跑的**，"只在脚本里生效"等于对他们不存在。
+_cg = open(os.path.join(KIT, "CONTRIBUTING.md"), encoding="utf-8").read()
+ck("L10 双轨铁律在位：UI 与 API 同一套节点实现（README 约定块 + CONTRIBUTING 纪律）",
+   "同一套节点实现" in _rd and "UI 与 API 必须同一套实现" in _cg
+   and "只在脚本里生效" in _cg)
+
 print("=" * 78)
 print("结果：通过 %d / 失败 %d" % (len(OK), len(BAD)))
 if BAD:

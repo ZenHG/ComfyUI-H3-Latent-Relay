@@ -13,7 +13,7 @@ python tests/test_relay_core.py
 `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。也支持 `pytest tests/`
 （找不到 ComfyUI 根目录时自动 skip，不会崩）。
 
-**281 项断言，零 GPU、不加载模型**，覆盖二十二个方面：
+**286 项断言，零 GPU、不加载模型**，覆盖二十三个方面：
 
 | 组 | 覆盖 |
 |---|---|
@@ -41,12 +41,13 @@ python tests/test_relay_core.py
 | 20 | 拆节点：`H3RelayPost` 独立 + TrimAV 追加 `[3]` 输出 `prev_tail` |
 | 21 | 重叠区双向融合 blend：窗形权重（smoothstep / hann），两端导数为 0 |
 | 22 | 音频缝：长度守恒、床声选窗两档、电平对齐 + 峰值护栏、边界 blend、床环铺无台阶、落盘往返、节点两道守卫、`joined` 拼接复合 |
+| 23 | **音画同步守恒（0.6.2）**：`joined` 只在给了画面裁量时才能交叉（否则 raise）；默认等长 + **零时间轴位移**；J-cut 守恒路长度公式；TrimAV 直出 `join_align_seconds` 建议值 |
 
 ## tools/ 下的另两个
 
 | 工具 | 判什么 | 期望 |
 |---|---|---|
-| `tools/review_050.py` | 文档—代码一致性（节点清单 / 参数表 / 断言数 / 版本号 / 示例图槽位） | **77/0** |
+| `tools/review_050.py` | 文档—代码一致性（节点清单 / 参数表 / 断言数 / 版本号 / 示例图槽位 / **双轨铁律**） | **78/0** |
 | `tools/smoke_nodes.py` | 节点层功能冒烟（7 个节点真跑一遍） | **15/0** |
 
 详见 [`tools/README.md`](../tools/README.md)。CI 会跑这三个（`.github/workflows/ci.yml`），

@@ -2819,6 +2819,11 @@ def join_audio_segments(audios, prime_samples: int = 0, cross_samples: int = 0,
     if align_n > 0:
         exp_total = int(round(float(segment_seconds) * sr0)) * len(ws) - (len(ws) - 1) * align_n
         mode = "J-cut 守恒（align=%.3fs/缝，与裁后视频等长）" % al_s
+    elif n == 0:
+        # 🔴 2026-09-21：cross=0 ⇒ 不存在任何缩短。旧文案把它一并叫作「⚠ 缝后音画错位」
+        #   是**假警告**，会让用户以为拼坏了 —— 这条正是「默认档」，必须如实说清。
+        exp_total = sum(lens)
+        mode = "等长拼接（不做交叉；等效于段文件首尾相接，零 A/V 位移）"
     else:
         exp_total = sum(lens) - (len(ws) - 1) * n
         mode = "旧缩短语义（⚠ 缝后音画错位 cross 秒，仅兼容/对照）"
