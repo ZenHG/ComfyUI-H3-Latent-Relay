@@ -29,6 +29,6 @@ labels: bug
 ## 已排除
 
 - [ ] 已重启 ComfyUI 后端（不是只刷新浏览器）
-- [ ] 已跑 `python tests/test_relay_core.py`（期望 300/0）
+- [ ] 已跑 `python tests/test_relay_core.py`（期望 304/0）
 
 > ⚠️ 请不要粘贴本机绝对路径、模型路径或任何凭证（见 SECURITY.md）。

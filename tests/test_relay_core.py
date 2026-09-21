@@ -44,6 +44,7 @@
  24. 床源选窗语音规避**全路径**（0.6.5）：瓦片档（tile>0）也必须过判据、阈值收紧到 0、
      E5 错开不再被静默忽略、rank 约定一致、无解时不 raise、报告不静默、O(T²) 回归锁、
      持续帧滤波（瞬态不计入）、退化输入不炸、前缀和能量选窗 == 参照
+ 25. 🛡 patch 台词守卫（0.6.5）：patch 不许吃本段台词（收缩/关闭/零副作用/关=旧行为）
 """
 
 import os
@@ -2045,6 +2046,65 @@ _naive24 = max(_c24, key=lambda c: float(_b24[..., c:c + _W24].pow(2).mean().sqr
 check("24.14 候选能量前缀和 == 逐候选参照（性能修补不许改结果）",
       int(_ct24[int(torch.argmax(_wr24))]) == int(_naive24),
       "前缀和 @%.3fs / 参照 @%.3fs" % (_ct24[int(torch.argmax(_wr24))] / _SR24, _naive24 / _SR24))
+
+# ---------------------------------------------------------------------------
+# 25. 🛡 patch 台词守卫（0.6.5）：patch 不许吃本段自己的台词
+#     🔴 起因（2026-09-21 GG 耳检 + 词级时间戳实锤）：patch=2.0 把 okBed2 段2 的
+#       「这家店」0.60–1.70s 整句吃掉（撑 跨淡变残缺）—— patch 只管"换床声"，
+#       根本不看本段头上有没有话。守卫 = 探测本段头部台词起点 ⇒ patch 收缩到
+#       onset − 0.25s；onset ≤ 0.10s 可用 ⇒ patch 关闭。判据 **宁枉勿纵**（2×P10）。
+_SR25 = 32000
+
+
+def _mktarget25(onset=0.6, dur_s=4.0, quiet=0.02, loud=0.40):
+    g = torch.Generator().manual_seed(25)
+    w = torch.rand(2, int(dur_s * _SR25), generator=g) * quiet
+    w[..., int(onset * _SR25):int((onset + 1.6) * _SR25)] = loud
+    return w
+
+
+_g25bed = torch.rand(2, int(6.0 * _SR25), generator=torch.Generator().manual_seed(26)) * 0.015
+_t25 = {"waveform": _mktarget25(), "sample_rate": _SR25}
+_b25d = {"waveform": _g25bed, "sample_rate": _SR25}
+_X25 = int(0.25 * _SR25)
+
+# 25.1 头部带台词 ⇒ 收缩 + 台词区逐位保留
+_o25a, _r25a = CORE.audio_seam_patch(_t25, _b25d, patch=2.0, tile=0.0, fade=0.25,
+                                     select="tail", bed_jitter=0.0, stage_index=1)
+_on25 = CORE._speech_onset_in_head(CORE._audio_parts(_t25)[0], int(2.0 * _SR25))
+_w25o = CORE._audio_parts(_o25a)[0]
+_w25r = CORE._audio_parts(_t25)[0]
+check("25.1 头部台词 @%.2fs ⇒ patch 自动收缩且台词起逐位无损" % (_on25 / _SR25),
+      _on25 is not None and "避让台词" in _r25a
+      and torch.equal(_w25o[..., _on25:], _w25r[..., _on25:]),
+      "report: " + [l for l in _r25a.splitlines() if "🛡" in l][0][-70:])
+
+# 25.2 头部干净 ⇒ 守卫开 == 守卫关（逐位，零副作用）
+_t25q = {"waveform": _mktarget25(onset=99), "sample_rate": _SR25}
+_o25g, _ = CORE.audio_seam_patch(_t25q, _b25d, patch=2.0, tile=0.0, fade=0.25,
+                                 select="tail", bed_jitter=0.0, stage_index=1)
+_o25n, _ = CORE.audio_seam_patch(_t25q, _b25d, patch=2.0, tile=0.0, fade=0.25,
+                                 select="tail", bed_jitter=0.0, stage_index=1, patch_guard=False)
+check("25.2 头部无台词 ⇒ 守卫开与关输出逐位一致（干净素材零行为变化）",
+      torch.equal(CORE._audio_parts(_o25g)[0], CORE._audio_parts(_o25n)[0]))
+
+# 25.3 台词太靠前（onset − margin < 0.10s 可用）⇒ patch 关闭 + 原样返回 + report 说明
+_t25e = {"waveform": _mktarget25(onset=0.05), "sample_rate": _SR25}
+_o25e, _r25e = CORE.audio_seam_patch(_t25e, _b25d, patch=2.0, tile=0.0, fade=0.25,
+                                     select="tail", bed_jitter=0.0, stage_index=1)
+check("25.3 台词太靠前 ⇒ patch 自动关闭、音频原样返回、report 说明",
+      torch.equal(CORE._audio_parts(_o25e)[0], CORE._audio_parts(_t25e)[0])
+      and "patch 自动关闭" in _r25e,
+      _r25e.splitlines()[0][:80])
+
+# 25.4 守卫关 ⇒ 旧行为（头部确实被替换 ⇒ 可能吞字，这是用户显式选择的语义）
+_o25f, _r25f = CORE.audio_seam_patch(_t25, _b25d, patch=2.0, tile=0.0, fade=0.25,
+                                     select="tail", bed_jitter=0.0, stage_index=1,
+                                     patch_guard=False)
+_w25f = CORE._audio_parts(_o25f)[0]
+check("25.4 守卫关 ⇒ 旧行为（头部被替换、report 无 🛡）",
+      "🛡" not in _r25f
+      and not torch.equal(_w25f[..., :int(0.5 * _SR25)], _w25r[..., :int(0.5 * _SR25)]))
 
 print()
 print("=" * 78)

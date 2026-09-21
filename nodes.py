@@ -1456,6 +1456,16 @@ class H3RelayAudioSeam:
                                "此前瓦片档会被静默忽略）。只有「床源不比取样窗长」时才报错 ——\n"
                                "没有可错开的空间，报错好过假装生效。",
                 }),
+                "patch_guard": ("BOOLEAN", {"advanced": True, "default": True,
+                    "label_on": "🛡 台词守卫开", "label_off": "守卫关（旧行为）",
+                    "tooltip": "🛡 patch 台词守卫（默认开，0.6.5）：patch_seconds>0 会整段替换**本段**头部——\n"
+                               "本段自己的台词落在里面就被吞（2026-09-21 耳检+词级时间戳实锤：\n"
+                               "「这家店」0.60–1.70s 被 2.0s patch 吃掉）。\n"
+                               "开 ⇒ 自动探测本段头部台词起点（P10 能量判据 + 持续帧），\n"
+                               "patch 收缩到台词前 0.15s；台词太靠前（<0.10s 可用）则 patch 整个关闭。\n"
+                               "头部本来就是环境声 ⇒ 行为与关闭时**逐位一致**（零副作用）。\n"
+                               "关 ⇒ 旧行为（可能吞字）。",
+                }),
             },
         }
 
@@ -1520,7 +1530,7 @@ class H3RelayAudioSeam:
              bed_select=CORE.AUDIO_SEAM_BED_SELECT,
              join_curve="qsin", join_prime_ms=CORE.AUDIO_ENCODER_PRIME_MS,
              join_cross_ms=0.0, join_segment_seconds=0.0, join_align_seconds=0.0,
-             exp_bed_jitter=None):
+             exp_bed_jitter=None, patch_guard=True):
         me = _audio_stage_path(run_id, int(stage_index))
         idx = int(stage_index)
         patch = float(patch_seconds or 0.0)
@@ -1600,7 +1610,7 @@ class H3RelayAudioSeam:
                                          target_audio=target,
                                          bed_jitter=(CORE.EXP_BED_JITTER_DEFAULT
                                                      if exp_bed_jitter is None else float(exp_bed_jitter)),
-                                         stage_index=idx)
+                                         stage_index=idx, patch_guard=bool(patch_guard))
         CORE.save_audio(out, me, note=note)
         line = rep + ("｜已落盘（供后段当床源）：%s" % me)
         if target is None:

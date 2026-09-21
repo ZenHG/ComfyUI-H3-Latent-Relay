@@ -795,6 +795,14 @@ AUDIO_SEAM_BED_TILE_VOICED_FRAC: float = 0.0
 #   主要保护**瓦片档**：那里阈值是 0%，没有它一帧瞬态就会触发换窗。
 #   ⚠ 能量判据的既有边界不变：低电平人声（<3× 中位）与「语音当底噪/BGM 型」仍漏检。
 AUDIO_SEAM_BED_VOICED_SUSTAIN: int = 2
+# 🛡 patch 台词守卫（2026-09-21 P0）：patch 会整段替换**本段**头部 ⇒ 本段自己的台词
+#   落在里面就被吞（耳检实锤：「这家店」0.60–1.70s 被 patch=2.0 吃掉，词级时间戳钉死）。
+#   守卫 = 探测本段头部台词起点 ⇒ patch 收缩到 onset − MARGIN；onset ≤ MIN ⇒ patch 关闭。
+AUDIO_SEAM_PATCH_GUARD_MARGIN_S: float = 0.40   # 收缩后与台词起点保留的安全间隔（覆盖探测滞后：实测能量判据对弱起音滞后 0.30s）
+AUDIO_SEAM_PATCH_GUARD_MIN_S: float = 0.10      # 收缩后小于此值 ⇒ patch 整个关闭（0）
+#   守卫判据 **宁枉勿纵**：误报（把环境当台词）代价 = patch 变短；漏报代价 = 吞字（GG 耳检抓的）。
+#   故探测阈值用 **2×P10**（低于床窗判据的 3×中位）—— 实测把「这家店」的起音低估从
+#   0.85s 修正回 0.60s（能量判据对渐强起音天然滞后，margin 再兜一层）。
 _AUDIO_META_KEY = "relay_kit_audio_meta"
 
 
@@ -928,6 +936,43 @@ def _voiced_frac_from_frames(rms: torch.Tensor, hop: int, nfr: int, start: int,
            (d == 1).nonzero(as_tuple=False).flatten()
     keep = lens[lens >= sus]
     return float(int(keep.sum())) / max(1, int(seg.numel()))
+
+
+AUDIO_SEAM_PATCH_GUARD_K: float = 2.0
+
+
+def _speech_onset_in_head(wf: torch.Tensor, n_probe: int,
+                          hop_samples: int = 1600,
+                          k: float = AUDIO_SEAM_PATCH_GUARD_K,
+                          sustain: int = AUDIO_SEAM_BED_VOICED_SUSTAIN) -> Optional[int]:
+    """目标段**头部 [0, n_probe)** 里首个「持续 ≥sustain 帧」有声 run 的起点（样本）；无 ⇒ None。
+
+    与床窗判据（`_voiced_frac_from_frames`）同机件同基线（**全源中位**），阈值松一档（2× vs 3×，
+    宁枉勿纵：误报 = patch 变短；漏报 = 吞字）。
+    🔴 2026-09-21 压力矩阵（S2-2/S2-5）打回过一版 **P10 基线**：连续 BGM 素材上 P10 = BGM
+    谷底 ⇒ 2×谷底低于 BGM 乐句峰 ⇒ **BGM 被当台词**，守卫误触发、patch 被过度收缩
+    （「头部干净 ⇒ 零副作用」承诺在 BGM 素材上被打破）。中位的失效域只有「语音占 >50% 帧」
+    —— 那是「语音当底噪」既知边界，且那种素材 patch 本来就无意义。BGM 乐句峰（±3dB 起伏）
+    < 2×中位 ⇒ 不触发；台词通常 +14dB 以上 ⇒ 稳触发。
+    """
+    rms, hop, nfr = _frame_rms(wf, hop_samples)
+    if rms is None:
+        return None
+    base = float(rms.median())
+    if base <= 0.0:
+        return None
+    thr = base * float(k)
+    sus = max(1, int(sustain))
+    nframes = min(nfr, max(1, (int(n_probe) + hop - 1) // hop))
+    v = (rms[:nframes] > thr).to(torch.int8)
+    pad = torch.cat([v.new_zeros(1), v, v.new_zeros(1)])
+    d = pad[1:] - pad[:-1]                       # +1=run 起点，-1=run 结束后一位
+    starts = (d == 1).nonzero(as_tuple=False).flatten().tolist()
+    ends = (d == -1).nonzero(as_tuple=False).flatten().tolist()
+    for s, e in zip(starts, ends):
+        if e - s >= sus:
+            return int(s * hop)
+    return None
 
 
 def bed_window_voiced_fraction(wf: torch.Tensor, start: int, n_samples: int,
@@ -1177,7 +1222,8 @@ def audio_seam_patch(audio: Any, bed_audio: Any, patch: float = AUDIO_SEAM_PATCH
                      target_audio: Any = None,
                      gain_max_db: float = AUDIO_SEAM_BED_GAIN_MAX_DB,
                      bed_jitter: float = EXP_BED_JITTER_DEFAULT,
-                     stage_index: int = 0) -> Tuple[Any, str]:
+                     stage_index: int = 0,
+                     patch_guard: bool = True) -> Tuple[Any, str]:
     """把本段头部 ``patch`` 秒换成 ``bed_audio``（上一段）里的床声窗；**长度守恒**。
 
     替换区 ``[0, N-X)`` 纯床声，``[N-X, N)`` 是床声 → 本段自身音频的交叉淡变
@@ -1204,6 +1250,23 @@ def audio_seam_patch(audio: Any, bed_audio: Any, patch: float = AUDIO_SEAM_PATCH
         warn = "｜ ⚠ 补丁超出段长，已夹到 %.3fs" % (n / float(sr))
     if X >= n:                                  # 边界淡变不能吃掉整个替换区
         X = max(0, n - 1)
+    # 🛡 patch 台词守卫（0.6.5，默认开）：见常量区注释。检不出台词 ⇒ 逐位走旧行为。
+    guard_note = ""
+    if patch_guard:
+        _onset = _speech_onset_in_head(wf, n)
+        if _onset is not None:
+            _margin = int(round(AUDIO_SEAM_PATCH_GUARD_MARGIN_S * sr))
+            _safe = _onset - _margin
+            if _safe < int(round(AUDIO_SEAM_PATCH_GUARD_MIN_S * sr)):
+                return audio, ("[H3 Relay] 音频缝：🛡 patch 台词守卫 —— 本段头部台词 @%.2fs 太靠前\n"
+                               "           （< 最小保护窗 %.2fs）⇒ patch 自动关闭（0），本段头部原样保留。\n"
+                               "           缝处平滑交回「裁重叠」与出词侧段首留白纪律（docs/06）。"
+                               % (_onset / float(sr), AUDIO_SEAM_PATCH_GUARD_MIN_S))
+            guard_note = ("｜ 🛡 patch 台词守卫：本段头部台词 @%.2fs ⇒ patch 自动 %.2f→%.2fs（避让台词）"
+                          % (_onset / float(sr), float(n) / sr, _safe / float(sr)))
+            n = _safe
+            if X >= n:
+                X = max(0, n - 1)
     bed_wf, bed_sr, _, _ = _audio_parts(bed_audio)
     bed_wf = _match_channels(_resample_to(bed_wf, bed_sr, sr), ch)
     tgt_wf = bed_wf
@@ -1275,6 +1338,7 @@ def audio_seam_patch(audio: Any, bed_audio: Any, patch: float = AUDIO_SEAM_PATCH
     elif _changed:
         voice_note += ("；首选窗原撞语音（占比 %.0f%%）⇒ 已换到非语音窗 @%.2fs"
                        % (100.0 * _vf_first, start / float(sr)))
+    warn = warn + guard_note
     rep = ("[H3 Relay] 音频缝：头部补丁 %.2fs ← 床源%s @%.2fs%s，边界交叉淡变 %.2fs\n"
            "           床声电平 %.1f dBFS → 对齐目标 %.1f dBFS（%s %+.1f dB%s）\n"
            "           音频 %d → %d 采样点（长度守恒，零 A/V 位移）%s%s"

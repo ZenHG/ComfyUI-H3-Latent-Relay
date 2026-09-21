@@ -5,7 +5,7 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 
 | 项 | 值 |
 |---|---|
-| 版本 | **0.6.4**（7 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
+| 版本 | **0.6.5**（7 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
 | 许可 | **MIT**（第三方出处见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)） |
 | 宿主 | 需要**带 MiniMax-H3 支持的 ComfyUI**（其自身为 GPL-3.0，见「11. 许可与出处」） |
 
@@ -257,6 +257,7 @@ ComfyUI 上，节点能注册但**续接静默无效**——用前先确认 Comf
 - 不接它或 `patch_seconds=0`，音频逐位直通。
 - **输出接法**：`音频缝 [0] audio` → 落盘节点的 `audio`（`CreateVideo.audio`）。**别让 `VAEDecodeAudio` 直连落盘节点** —— 那是未裁的原始音频，会音画不同步（见 §4 的红色警示）。
 - ⚠️ `patch_seconds > 0` 会把**本段头 `patch_seconds` 秒整段换成上一段的环境声**。若本段头部本来有台词，这 N 秒的台词会被换掉 ⇒ 段首留白是硬纪律（见 [`docs/06`](docs/06-continuity-scripting.md)）。节点会自动**避开床源里的有声区**（挑窗时跳过含语音的位置），并在日志里报 `🎙 窗内有声帧占比`。
+- 🛡 **patch 台词守卫（默认开）**：patch 也会吃掉**本段自己**落在头部的台词（实测「这家店」0.60–1.70s 被 2.0s patch 整句吞掉）⇒ 节点自动探测本段头部台词起点，**patch 收缩到台词前 0.25s**；台词太靠前则 patch 自动关闭。report 显式打印收缩前后值。守卫只保台词 —— 缝处保护相应变弱，**出词侧段首留白仍是根治**。`patch_guard=0` 回旧行为。
 
 出词层面的配套纪律（段首缓冲、台词安全时刻、末帧锚链）见
 [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md)。
@@ -324,7 +325,7 @@ ffmpeg -y -i s0.mp4 -i s1.mp4 -i s2.mp4 -i s3.mp4 \
 ## 8. 离线自测
 
 ```bash
-python tests/test_relay_core.py     # 期望 300/0
+python tests/test_relay_core.py     # 期望 304/0
 python tools/review_050.py          # 期望 80/0（文档—代码一致性）
 python tools/smoke_nodes.py         # 期望 15/0（节点层冒烟）
 ```
@@ -332,7 +333,7 @@ python tools/smoke_nodes.py         # 期望 15/0（节点层冒烟）
 脚本会自动上溯定位 ComfyUI 根目录；装在别处时用
 `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。
 
-**300 项断言，零 GPU、不加载模型**，覆盖二十四个方面 —— 例如：
+**304 项断言，零 GPU、不加载模型**，覆盖二十五个方面 —— 例如：
 
 | 组 | 覆盖 |
 |---|---|

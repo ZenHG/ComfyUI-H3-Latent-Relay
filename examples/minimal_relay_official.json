@@ -1488,7 +1488,15 @@
           "type": "FLOAT",
           "link": null,
           "widget": {
-            "name": "exp_bed_jitter"
+            "name": "patch_guard"
+          }
+        },
+        {
+          "name": "patch_guard",
+          "type": "BOOLEAN",
+          "link": null,
+          "widget": {
+            "name": "patch_guard"
           }
         }
       ],
@@ -1529,7 +1537,8 @@
         50.0,
         0.0,
         0.0,
-        0.0
+        0.0,
+        true
       ]
     },
     {

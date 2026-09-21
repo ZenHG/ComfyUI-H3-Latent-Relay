@@ -13,7 +13,7 @@ python tests/test_relay_core.py
 `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。也支持 `pytest tests/`
 （找不到 ComfyUI 根目录时自动 skip，不会崩）。
 
-**300 项断言，零 GPU、不加载模型**，覆盖二十四个方面：
+**304 项断言，零 GPU、不加载模型**，覆盖二十五个方面：
 
 | 组 | 覆盖 |
 |---|---|
@@ -43,6 +43,7 @@ python tests/test_relay_core.py
 | 22 | 音频缝：长度守恒、床声选窗两档、电平对齐 + 峰值护栏、边界 blend、床环铺无台阶、落盘往返、节点两道守卫、`joined` 拼接复合 |
 | 23 | **音画同步守恒（0.6.2）**：`joined` 只在给了画面裁量时才能交叉（否则 raise）；默认等长 + **零时间轴位移**；J-cut 守恒路长度公式；TrimAV 直出 `join_align_seconds` 建议值 |
 | 24 | **床源选窗语音规避·全路径（0.6.4）**：瓦片档（tile>0）也必须过判据且阈值收紧到 0、E5 错开不再被静默忽略、rank 约定一致（2D/3D 同点）、全源皆撞时不 raise 退最静窗、默认关逐位不变、O(T²) 回归锁、报告不静默、持续帧滤波（瞬态不计入）、退化输入不炸、前缀和能量选窗 == 参照 |
+| 25 | **🛡 patch 台词守卫（0.6.5）**：本段头部台词起点 ⇒ patch 自动收缩（onset−0.25s）/关闭；台词区逐位无损；干净素材零副作用；守卫关=旧行为 |
 
 ## tools/ 下的另两个
 
