@@ -12,7 +12,7 @@
 （``E1``~``E5``，见 relay_core.py 的实验层注释）：
 
   E1 多尺度历史   build_history_refs / segment 分级抽稀
-  E2 SDEdit 软钉入 sdeedit_noise
+  E2 conditioning 参考噪声 sdeedit_noise（原名「SDEdit 软钉入」，2026-09-21 语义更正）
   E3 DTW 残留量   dtw_residual / head_repeat_dtw
   E4 漂移曲线     segment_appearance_stats / drift_curve
   E5 床声去重复   bed_jitter_start
@@ -122,7 +122,7 @@ expect_raise("E1.11 stride=1 ⇒ 每级等长 ⇒ raise（等价于重复同一�
 # ============================================================================
 print()
 print("=" * 78)
-print("E2｜SDEdit 式软钉入 sdeedit_noise")
+print("E2｜conditioning 参考噪声 sdeedit_noise（原名「SDEdit 式软钉入」，语义更正 2026-09-21）")
 print("=" * 78)
 
 _blk = frames_seq(6, seed=7)
@@ -185,20 +185,27 @@ check("E3.0 基准自洽：全异源代价 > 0（否则下面的「低于基准�
 
 _prev = None
 _mono = True
+_legal = True
 for _r in (0, 1, 3):
     _w = _window(_r)
-    _fa = CORE._dtw_feat(_w)
-    _fb = CORE._dtw_feat(_pin)
-    _cost, _ = CORE.dtw_residual(_fa, _fb)
-    _rev, _ = CORE.dtw_residual(_fb, _fa)
+    _cost, _ = CORE.dtw_residual(CORE._dtw_feat(_w), CORE._dtw_feat(_pin))
+    if not (0.0 <= _cost and _cost == _cost):      # 合法 + 有限（NaN 自查）
+        _legal = False
     if _prev is not None and _cost > _prev + 1e-6:
         _mono = False
     _prev = _cost
-    check("E3.%d 复现 %d 帧：代价合法、两方向一致"
-          % (_r + 1, _r),
-          0.0 <= _cost and abs(_cost - _rev) < 1e-9,
-          "窗→钉住区 %.4f｜反向 %.4f｜全异源基准 %.4f"
-          % (_cost, _rev, _COST_REF))
+check("E3.1 复现 0/1/3 帧：代价合法且有限（观测层只读，不进裁量）", _legal,
+      "r=3 末值 %.4f｜全异源基准 %.4f" % (_prev, _COST_REF))
+# 🔴 2026-09-21 性质锁：dtw_residual 对调换参数**不变**（局部代价 |a−b| 对称 ⇒ DP 总代价
+#   对称 + 回溯 tie-break 镜像 ⇒ 步数相等、平均代价恒等）。原先在循环里逐档断言
+#   「两方向一致」（旧 E3.1–3），那是把**数学必然**当待测性质、还白算一半 DTW。
+#   ⇒ 改成一次显式性质锁；head_repeat_dtw 已删掉那次冗余的反向调用（E3.12b 守返回值）。
+_fx, _fy = CORE._dtw_feat(_window(1)), CORE._dtw_feat(_pin)
+_c_xy, _ = CORE.dtw_residual(_fx, _fy)
+_c_yx, _ = CORE.dtw_residual(_fy, _fx)
+check("E3.2 性质锁：dtw_residual 双向对称（(a,b) 与 (b,a) 代价恒等）",
+      abs(_c_xy - _c_yx) < 1e-12,
+      "a→b %.6f｜b→a %.6f" % (_c_xy, _c_yx))
 check("E3.3b 代价随复现帧数**单调不增**（复现越多越便宜）", _mono,
       "观察序列见上（r=0,1,3）")
 check("E3.3c 复现 3 帧显著低于全异源基准（残留确实让路径变便宜）",
@@ -247,10 +254,12 @@ check("E3.11 反向（2 vs 8）：代价同为有限值且不因边界读错 mv 
 # —— head_repeat_dtw：接 IMAGE 的只读观测层 ——
 _img = torch.cat([_pin, _window(3)], dim=0)
 _d1 = CORE.head_repeat_dtw(_img, 4)
-check("E3.12 head_repeat_dtw 报出代价对 + 帧数 + 特征形状",
-      _d1 and _d1["align_cost"] > 0.0 and _d1["reverse_cost"] >= 0.0
+check("E3.12 head_repeat_dtw 报出代价 + 帧数 + 特征形状",
+      _d1 and _d1["align_cost"] > 0.0
       and _d1["frames"] == [6, 4] and len(_d1["feat"]) == 2,
       str(_d1))
+check("E3.12b 返回值**不含** reverse_cost（对称 ⇒ 反向是纯冗余，2026-09-21 删）",
+      "reverse_cost" not in _d1, str(sorted(_d1)))
 check("E3.13 pin<1 ⇒ 空 dict（调用方跳过该行，不 raise）",
       CORE.head_repeat_dtw(_img, 0) == {})
 check("E3.14 窗太短（不足 REPEAT_MIN_RUN）⇒ 空 dict",

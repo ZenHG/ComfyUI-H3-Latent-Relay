@@ -472,8 +472,8 @@ class H3RelayTrimAV:
         if _dtw:
             bj_note += (
                 "\n           🧪 DTW 对齐代价（只读观测，不改裁量）："
-                "窗→钉住区 %.5f｜反向 %.5f｜比较 %d vs %d 帧"
-                % (_dtw["align_cost"], _dtw["reverse_cost"],
+                "窗→钉住区 %.5f｜比较 %d vs %d 帧"
+                % (_dtw["align_cost"],
                    _dtw["frames"][0], _dtw["frames"][1]))
         # 裁量→跳跃曲线：成片缝 = raw[pin-1] → raw[pin+settle]（相隔 settle+1 帧），
         # **裁得越多、跳得越大**（GG：裁切=时间跳跃=跳切）。裁之前就把它算出来供权衡。
@@ -874,9 +874,12 @@ class H3RelayCopyBridge:
                 "exp_cond_noise": ("FLOAT", {
                     "advanced": True, "default": CORE.EXP_COND_NOISE_DEFAULT,
                     "min": 0.0, "max": 1.0, "step": 0.01,
-                    "tooltip": "🧪【实验·默认关】E2 SDEdit 式软钉入：给钉住块加 σ 比例噪声\n"
-                               "（σ 以块自身 std 归一）。依据 SDEdit(arXiv:2108.01073)：\n"
-                               "σ 小锁结构、σ 大允许重新上色。与 ramp（latent 侧软证据）是**两条路**，\n"
+                    "tooltip": "🧪【实验·默认关】E2 conditioning 参考噪声（原名「SDEdit 式软钉入」，\n"
+                               "2026-09-21 语义更正）：给**钉住块**加 σ 比例噪声（σ 以块自身 std 归一）。\n"
+                               "⚠ 它**不是 SDEdit**（SDEdit arXiv:2108.01073 要求扰动去噪初值 + 按调度表\n"
+                               "σ_t0 + 从 t0 跑完整反向，本项三条都不满足）—— 效果 = **把参考弄脏**，\n"
+                               "σ 越大模型越不信参考。这也是它**与硬锁互斥**的真因（硬锁自检 0.00000\n"
+                               "会被打破）。真 SDEdit 软钉另立项（两遍法）。与 ramp 是**两条路**，\n"
                                "叠加是否有增益未测 ⇒ 先做开关。σ=0 = 逐位不变。",
                 }),
             },
@@ -965,11 +968,14 @@ class H3RelayCopyBridge:
                 anchor_latent=ref_anchor_latent,
                 anchor_frames=int(ref_anchor_frames),
             )
-            # 🧪 E2 SDEdit 软钉入：给钉住块加 σ 噪声（σ=0 时逐位不动）
+            # 🧪 E2 conditioning 参考噪声：给**钉住块**加 σ 噪声（σ=0 时逐位不动）。
+            #   🔴 2026-09-21 语义更正：这**不是 SDEdit** —— 加噪对象是 conditioning 钉帧
+            #      （不是去噪初值），采样器也不会还原它 ⇒ 效果 = 把参考弄脏，
+            #      且与硬锁（缝 = 上段尾逐位拷贝）互斥。真 SDEdit 软钉另立项（两遍法）。
             if float(exp_cond_noise) > 0.0:
                 for k in plan.keyframes:
                     k["latent"] = CORE.sdeedit_noise(k["latent"], float(exp_cond_noise))
-                print("[H3 Relay] 实验 E2：SDEdit 软钉入 σ=%.3f（%d 块）"
+                print("[H3 Relay] 实验 E2：conditioning 参考噪声 σ=%.3f（%d 块）"
                       % (float(exp_cond_noise), len(plan.keyframes)), flush=True)
             # 🧪 E1 多尺度历史：按 stage_index-2, -3… 自动读更早段做分级 refs
             if int(exp_history_depth) > 0 and (run_id or "").strip():

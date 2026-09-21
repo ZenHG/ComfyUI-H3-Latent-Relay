@@ -71,10 +71,16 @@ EXP_HISTORY_DEPTH_DEFAULT: int = 0     # 0 = 关（只用全局锚）；>0 = 追
 EXP_HISTORY_STRIDE_DEFAULT: int = 4    # 每远一级的时序抽稀步长（帧）
 EXP_HISTORY_FRAMES_DEFAULT: int = 5    # 每级取多少帧（受 5+17k 网格约束）
 
-# —— E2 SDEdit 式软钉入（给条件 latent 加轻量噪声）——
-# 出处：SDEdit《SDEdit: Guided Image Synthesis and Editing with Stochastic
-#   Differential Equations》ICLR 2022, arXiv:2108.01073：内容注入强度 = 中途加噪量 σ，
-#   σ 小锁结构、σ 大允许重新上色。调研 §1 路径 2（当前走的是路径 1 = ramp 掩码）。
+# —— E2 conditioning 参考噪声（原名「SDEdit 式软钉入」，语义更正 2026-09-21）——
+# ⚠️ **这不是 SDEdit**。核实比对论文（SDEdit, Meng et al. ICLR 2022, arXiv:2108.01073）
+#   三要素 —— ① 扰动对象是**去噪初值**（模型会去噪还原它）② 幅度按**调度表 σ_t0**
+#   ③ 从 t0 跑**完整反向** —— 本实现**一条都不满足**：它给 **conditioning 钉帧**加
+#   σ·std 噪声 = 「把参考弄脏」，不是软钉。这也正是它与**硬锁（缝 = 上段尾逐位拷贝）
+#   互斥**的真因（零 GPU 已量化：σ=0.1/0.25/0.5 ⇒ 钉住块相对扰动 0.100/0.250/0.501，
+#   而硬锁自检阈值是 0.00000 ⇒ 开 E2 = 主动放弃该自检）。
+# 真 SDEdit 软钉已**另立项**（两遍法：Pass1 采样终态 latent → Pass2 noise-mask +
+#   sigmas 从 t0 起），见 `_handover\SDEdit-立项-真软钉-20260921.md`。
+#   本函数保留（兼容 + 实验档），行为**不改**。
 # 默认关：ramp 已覆盖「缝处软证据」；本项是**另一条路**（在 conditioning 侧加噪），
 #   两者叠加是否有增益未测，先做成可开关的实验档。
 EXP_COND_NOISE_DEFAULT: float = 0.0    # 0 = 不加噪（逐位不变）
@@ -3121,10 +3127,24 @@ def build_history_refs(history_latents, frames: int = EXP_HISTORY_FRAMES_DEFAULT
 
 def sdeedit_noise(blk: torch.Tensor, sigma: float = EXP_COND_NOISE_DEFAULT,
                   generator=None) -> torch.Tensor:
-    """E2｜SDEdit 语义：给条件 latent 块加 σ 比例的**同形状**噪声。
+    """E2｜给**条件 latent 块**加 σ 比例的**同形状**噪声（conditioning 参考脏化）。
 
     ``out = blk + sigma * std(blk) * N(0,1)``——用块自身 std 归一，
     使 σ 的意义与量纲无关（σ=0.1 = 注入 10% 该块自身尺度的噪声）。
+
+    🔴 2026-09-21 语义更正（**函数名保留是为了兼容，别再按名字理解它**）：
+      它**不是 SDEdit**。核实比对论文（SDEdit, Meng et al. ICLR 2022,
+      arXiv:2108.01073）三要素 —— ① 扰动对象是**去噪初值**（模型会去噪还原它）
+      ② 幅度按**调度表 σ_t0** ③ 从 t0 跑**完整反向** —— 本实现一条都不满足：
+      这里被加噪的是 **conditioning 钉帧**（喂给模型的条件，不是去噪初值），
+      采样器也不会去还原它 ⇒ 效果 = **把参考弄脏**（σ 越大，模型越不信参考）。
+      这也正是「**与硬锁互斥**」的真因：硬锁要求缝 = 上段尾**逐位拷贝**，
+      而本函数按定义就在改钉住块（零 GPU 已量化 σ=0.1/0.25/0.5 ⇒
+      相对扰动 0.100/0.250/0.501，而硬锁自检阈值是 0.00000）。
+      真 SDEdit 软钉已**另立项**（两遍法：Pass1 采样终态 latent → Pass2
+      ``SetLatentNoiseMask`` + sigmas 切片从 t0 起），见
+      `_handover\\SDEdit-立项-真软钉-20260921.md`。
+      本函数**行为不变**，继续作为可开关实验档。
 
     σ=0（默认）**逐位返回同一张量**（不是副本也等价），保证主干零变化。
     """
@@ -3166,6 +3186,12 @@ def dtw_residual(a: torch.Tensor, b: torch.Tensor, max_steps: int = 64):
       · ``align_cost`` = 最优路径的**平均每步代价**（已按路径长度归一）——
         与 ``len(a)-len(b)`` **无关**的量，这才是可跨窗口比较的相似度；
       · ``mean_cost``  = 总代价 ÷ 路径步数（同上，保留给想直接读 dp 的人）。
+
+    🔴 对称性（2026-09-21 补记）：局部代价 ``|a−b|`` 对调换参数**不变** ⇒ 本函数
+      对 ``(a, b)`` **双向对称**（``dtw_residual(a,b)[0] == dtw_residual(b,a)[0]``
+      恒成立：DP 总代价矩阵转置不变 + 回溯 tie-break 镜像）。
+      ⇒ **调用方不要重复调反向** —— 那两个数永远相等，反向调用是纯冗余（DTW 是 O(n²)）。
+      性质证明与真实链实测证据见 ``head_repeat_dtw`` docstring。
 
     🔴 2026-09-20 语义更正（第一次接线时写错过，别再回潮）：
       旧版返回 ``stay_b`` = 路径里「a 走一步而 b 原地踏步」的次数。
@@ -3247,10 +3273,19 @@ def head_repeat_dtw(images: torch.Tensor, pin: int,
     返回 dict（**不返回裁量**——本函数不出 settle，理由见 ``dtw_residual``
     「为什么只作观测」）：
       · ``align_cost``  = 窗→钉住区 最优路径的平均每步代价（小 = 像复现）
-      · ``reverse_cost``= 钉住区→窗 的反向代价（两个方向都算，便于看出
-                         是否只是长度差造成的假象；同源时两者都小）
       · ``feat``        = 实际喂给 DTW 的特征形状（出问题时可复现）
-      · ``frames``      = 参与比较的 (窗帧数, 钉住帧数)
+      · ``frames``      = 参与比较的 (窗帧数, 钉住帧数）
+
+    🔴 2026-09-21 删 ``reverse_cost``（GG 拍板方案 a）——**对称性证明**：
+      ``dtw_residual`` 的局部代价是 ``|a−b|``，对调换两个参数**不变**（对称）
+      ⇒ DP 递推的总代价矩阵转置不变 ⇒ 最优总代价对称；回溯的 tie-break 在镜像
+      输入下也镜像 ⇒ **两方向路径步数相等、平均代价恒等**。
+      真实链三次实测两列逐位恒等（0.10644 / 0.08962 / 0.17440）。
+      ⇒ 反向那次调用是**纯冗余计算**（DTW 是 O(n²)，白算一半）。
+      旧 docstring 声称反向代价能「看出是否只是长度差造成的假象」——**该用途永不生效**：
+      长度差假象已由 ``dtw_residual`` 自身的「按路径长度归一」消掉（见其 09-20 语义更正）。
+      对称性作为**性质**锁进单测（``tests/test_experimental.py`` E3.2），不再逐档断言。
+
     画布退化 / 序列超长 / ``pin`` 非法 ⇒ 返回空 dict（调用方跳过该行，**不 raise**：
     这是 report 里的一行观测，不该让它炸掉整条链）。
     """
@@ -3271,11 +3306,9 @@ def head_repeat_dtw(images: torch.Tensor, pin: int,
         if max(fa.shape[0], fb.shape[0]) > int(max_steps):
             return {}
         align_cost, _ = dtw_residual(fa, fb, max_steps=int(max_steps))
-        reverse_cost, _ = dtw_residual(fb, fa, max_steps=int(max_steps))
     except Exception:                       # noqa: BLE001 —— 观测层绝不炸链
         return {}
     return {"align_cost": float(align_cost),
-            "reverse_cost": float(reverse_cost),
             "frames": [int(fa.shape[0]), int(fb.shape[0])],
             "feat": [int(fa.shape[0]), int(fa.shape[1])]}
 
