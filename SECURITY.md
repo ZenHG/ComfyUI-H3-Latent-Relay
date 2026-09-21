@@ -12,7 +12,7 @@
 - CI（`.github/workflows/ci.yml`）在 GitHub Actions 上 `git clone` 上游 ComfyUI 并装 CPU 版 torch ——属构建期行为，不进入你的运行时。
 
 ## 支持版本
-- 安全修复只在**最新小版本**上做（当前 **0.6.2**）。≤ 0.5.0 仅作历史存档，不再接收修复
+- 安全修复只在**最新小版本**上做（当前 **0.6.3**）。≤ 0.5.0 仅作历史存档，不再接收修复
   （其许可披露亦不完整，见 `THIRD-PARTY-NOTICES.md` §一·B）。
 - 依赖不锁上限：上游 `torch` / ComfyUI 的大版本变更可能改变行为，请以最新 tag 为准。
 

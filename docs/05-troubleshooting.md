@@ -30,6 +30,7 @@
 | **升级后节点签名没变**（例：`H3RelayTrimAV` 在 `/object_info` 里仍只有 3 路输出、没有 `prev_tail`），而盘上源码明明是新版 | 🔴 **`custom_nodes/` 里有本包的第二份副本**（典型：同步时留下的 `ComfyUI-H3-Relay-Kit.bak-<日期>`）——两份都带 `__init__.py` ⇒ **ComfyUI 全都加载**，节点定义被后加载的那份**覆盖**。⚠️ 官方只忽略 **`.disabled` 结尾**的目录（`nodes.py` 的 `if module_path.endswith(".disabled"): continue`），**`.bak` 不认** | 把非现役那份**移出 `custom_nodes/`**（或改名以 `.disabled` 结尾）后重启后端。自检：`python tools/review_050.py` 的 **J3** 节会扫出同包副本 |
 | 日志出现 `上游时序网格已变` | ComfyUI 更新后 H3 网格与本版不匹配 | 按提示到本仓库提 Issue；在修复版发布前别用续接 |
 | **示例图里本包节点显示一排空的输入圆点**（官方节点正常），而功能其实没坏 | 工作流文件的 `inputs` 缺 `{"widget": {"name": …}}` 标记。前端 `nonWidgetedInputs()` 把没有该标记的输入**当普通插槽渲染**；`widgetInputs.ts` 的 `onGraphConfigured` **只删不补**，不会自动帮你补上 | 用当前版重新生成：`python examples/make_minimal_workflow.py`。自检：`python tools/check_ui_workflow.py <文件>`（本判据 2026-09-19 加入；见 `CHANGES.md` 0.5.0「示例模板修复」） |
+| **音画越到后面越不同步**（第 3 段起口型明显对不上） | 落盘节点的 `audio` 接的是 **`VAEDecodeAudio`（未裁原始音频）**，而画面走的是「裁重叠」的裁后帧 ⇒ 每缝差 ~0.9s 且逐段累积 | 把 `audio` 改接「裁重叠 `[1] audio`」（用了音频缝则接它的 `[0] audio`）。自检：`python tools/check_ui_workflow.py <文件>` —— **本判据 2026-09-21 加入**（节点只能发现「输入没接」，发现不了「输出被悬空」，所以必须由工具查） |
 
 > ⚠️ 最后一条是 **0.2.1 起新增的硬拦**。旧版遇到这种情况会**静默按独立段直通**——
 > 界面一路绿灯，产出的却是没有续接的接缝，只有目检才发现。现在直接报错。

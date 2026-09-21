@@ -62,6 +62,15 @@ WIDGET_TYPES = {"INT", "FLOAT", "STRING", "BOOLEAN", "COMBO"}
 #    ⇒ 前端自定义/DOM widget，值合法，只记 warn）。见 check_one 里的注释与实证两例。
 TAIL_INJECTED = {"upload", "lora面板", "视频上传", "音频上传", "image_upload"}
 
+# ── A/V 同步接线自检用的类型集合（2026-09-21）──────────────────────────────
+#   落盘类：带 `audio` 输入的成片落盘节点（官方 CreateVideo/SaveVideo 与常见的第三方合并器）
+SAVE_LIKE = {"CreateVideo", "SaveVideo", "SaveWEBM", "SaveAnimatedWEBP",
+             "VHS_VideoCombine", "banzhangVideoCombine"}
+#   原始音频源：**未裁** —— 它们的音频长度 = 整段 video latent 对应的全长，
+#   而画面会被「裁重叠」砍掉头部 ⇒ 直连落盘节点必然音画不同步。
+RAW_AUDIO_SRC = {"VAEDecodeAudio", "LoadAudio", "VHS_LoadAudio", "LoadAudioUpload",
+                 "AudioUpload", "LoadAudioFromPath"}
+
 
 def guess_comfyui_root() -> str:
     """本脚本在 <ComfyUI>/custom_nodes/<pkg>/tools/ 下时，往上三级就是 ComfyUI 根。"""
@@ -299,6 +308,56 @@ def check_value(defn, name, value):
     return "", False
 
 
+def check_av_link(wf):
+    """A/V 同步接线自检（2026-09-21）：落盘节点的 `audio` 必须是**裁后**音频。
+
+    【为什么必须由**工具**来查，节点查不了】
+    `H3RelayTrimAV` 只能发现「我的 `audio` **输入**没接」（会打警告），
+    **发现不了「我的 `audio` 输出被悬空」** —— ComfyUI 不会告诉节点"我的输出有没有被消费"。
+    于是最常见的错法是：`VAEDecodeAudio → CreateVideo.audio`（= **未裁**的原始音频），
+    而 `裁重叠 [1] audio` 那根线悬空 ⇒ **画面裁了、音频没裁** ⇒ 每缝差 ~0.9s、**逐段累积**
+    （第 3 段起口型明显对不上）。用户按接线图最自然的手就会这么接。
+
+    【判据】
+    图里存在**续接桥**（`H3RelayCopyBridge` ⇒ stage≥1 时 `trim_frames` 非 0）时：
+      · 落盘节点的 `audio` 上游 = 原始音频源（`VAEDecodeAudio` / LoadAudio 家族） ⇒ **报错**；
+      · 上游 = `裁重叠 [1]` 或 `音频缝 [0]` ⇒ 通过（这两条都是长度守恒的裁后音频）。
+    没有桥（单段图）时两者都不裁 ⇒ **不报**（避免误伤）。
+    """
+    nodes = {n["id"]: n for n in (wf.get("nodes") or []) if n.get("mode") != 4}
+    src = {}
+    for L in (wf.get("links") or []):
+        if isinstance(L, list) and len(L) >= 3:
+            src[L[0]] = (L[1], L[2])            # link_id -> (origin_id, origin_slot)
+    has_bridge = any(n.get("type") in ("H3RelayCopyBridge", "H3RelayMotionContext")
+                     for n in nodes.values())
+    if not has_bridge:
+        return []
+    out = []
+    for n in nodes.values():
+        if n.get("type") not in SAVE_LIKE:
+            continue
+        tgt = None
+        for i in (n.get("inputs") or []):
+            if i.get("name") == "audio":
+                tgt = i.get("link")
+        if tgt is None:
+            continue                            # 没接音频（无声片）不算错
+        o = src.get(tgt)
+        if not o:
+            continue
+        ot = (nodes.get(o[0]) or {}).get("type")
+        if ot in RAW_AUDIO_SRC:
+            out.append("node %s %s: `audio` 接的是 **%s**（未裁的原始音频），"
+                       "而图里有续接桥 ⇒ 画面裁了音频没裁 ⇒ 音画不同步（每缝 ~0.9s、逐段累积）。"
+                       "改接「裁重叠」的 `[1] audio`（若用了音频缝，则接它的 `[0] audio`）"
+                       % (n["id"], n.get("type"), ot))
+        elif ot == "H3RelayTrimAV" and o[1] != 1:
+            out.append("node %s %s: `audio` 接的是「裁重叠」的第 %s 路 —— 那不是音频"
+                       "（第 1 路才是 `audio`）" % (n["id"], n.get("type"), o[1]))
+    return out
+
+
 def check_file(path: str, oi: dict, verbose: bool = True) -> int:
     name = os.path.basename(path)
     try:
@@ -311,6 +370,7 @@ def check_file(path: str, oi: dict, verbose: bool = True) -> int:
         return 0
 
     problems, warns = [], []
+    problems.extend(check_av_link(wf))
     for n in wf.get("nodes") or []:
         if n.get("mode") == 4:      # bypass
             continue
