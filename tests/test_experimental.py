@@ -351,6 +351,46 @@ for _tot, _n, _st, _j in itertools.product([32000, 32010, 70000, 96000],
 check("E5.8 不变量 0≤start 且 start+n≤total（穷举组合）", not _bad, str(_bad[:3]))
 
 # ============================================================================
+# ---- E5.9~E5.11：🔴 2026-09-21 真渲染阳性 —— 床窗**撞语音**与规避 ----
+# 事故：expE5（jitter=1.2）把床窗挪到 @2.05s，**完整包住**床源段（stage 0）的台词
+#   （该段台词覆盖 3.0–4.0s）⇒ patch 把整句台词搬进本段头部 ⇒ 再叠缝处 crossfade
+#   ⇒ 听感「对白重叠」（成片 4.46–5.66s）。⚠ 产线默认（jitter=0、尾窗 @3.25s）**同样撞**。
+# 覆盖范围：本条走 **audio_seam_patch 的完整调用路径** —— 此前只测 build_bed 内部，
+#   2026-09-21 因此漏掉一个 NameError（日志行引用了 build_bed 的形参名 start_override）。
+_BED_SR = 32000
+# ⚠ 必须带非零底噪：全零波形会让帧 RMS 中位 = 0 ⇒ 判据短路返回 0（真实音频不会这样）
+_g = torch.Generator().manual_seed(7)
+_bed = torch.rand(1, 2, int(4.0 * _BED_SR), generator=_g) * 0.002
+_bn = int(1.2 * _BED_SR)
+_btot = int(_bed.shape[-1])
+_bed[..., _btot - _bn + int(0.1 * _BED_SR): _btot - _bn + int(0.5 * _BED_SR)] = 0.5   # 尾窗内塞"台词"
+_raw = torch.zeros(1, 2, int(3.5 * _BED_SR))
+_raw[..., int(0.5 * _BED_SR): int(1.0 * _BED_SR)] = 0.3
+_BED_D = {"waveform": _bed, "sample_rate": _BED_SR}
+_RAW_D = {"waveform": _raw, "sample_rate": _BED_SR}
+
+_vf_tail = CORE.bed_window_voiced_fraction(_bed, _btot - _bn, _bn)
+check("E5.9 尾部窗撞语音时 voiced_fraction 超阈值（判据有效）",
+      _vf_tail > CORE.AUDIO_SEAM_BED_VOICED_FRAC, "占比=%.2f" % _vf_tail)
+
+_ok, _rep, _o = True, "", None
+try:
+    _o, _rep = CORE.audio_seam_patch(_RAW_D, _BED_D, 1.2, 0.0, 0.25, select="tail",
+                                     target_audio=None, bed_jitter=0.0, stage_index=1)
+except Exception as _e:
+    _ok, _rep = False, "%s: %s" % (type(_e).__name__, _e)
+check("E5.10 audio_seam_patch 尾部窗撞语音 ⇒ 不抛异常、长度守恒、日志含 🎙",
+      _ok and int(_o["waveform"].shape[-1]) == int(_raw.shape[-1]) and "🎙" in _rep,
+      (_rep.splitlines()[0][:120] if _rep else ""))
+
+_lens = []
+for _j in (0.5, 1.2):
+    _o2, _r2 = CORE.audio_seam_patch(_RAW_D, _BED_D, 1.2, 0.0, 0.25, select="tail",
+                                     target_audio=None, bed_jitter=_j, stage_index=1)
+    _lens.append(int(_o2["waveform"].shape[-1]))
+check("E5.11 jitter 撞语音后仍长度守恒（规避不改变时间轴）",
+      _lens == [int(_raw.shape[-1])] * 2, str(_lens))
+
 print()
 print("=" * 78)
 print("结果：通过 %d / 失败 %d" % (len(PASS), len(FAIL)))

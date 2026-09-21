@@ -775,6 +775,14 @@ AUDIO_SEAM_BED_SELECT: str = "tail"      # tail（默认，新：取床源尾部
                                          # quiet（0.5.0 旧行为，仅作对照复现）
 AUDIO_SEAM_BED_FLOOR_DB: float = 12.0    # quiet 档的选窗下限：只取「≥ 目标 − 该值 dB」的窗（避免取到静默）
 AUDIO_SEAM_BED_GAIN_MAX_DB: float = 6.0  # 床声电平对齐上限（±dB）；超出则夹住并报 ⚠
+# 🔴 2026-09-21 语音规避（GG 耳检阳性，真渲染）：**tail 窗会撞上一句台词**。
+#   实测 expE5（patch=1.2 + jitter=1.2）：床窗 @2.05s×1.2s **完整包住**床源段（stage 0）
+#   的台词（该段台词在 3.0–3.2s）⇒ patch 把整句台词搬进本段头部 ⇒ 再叠上缝处 0.25s
+#   crossfade 里的床源尾 ⇒ 听感「**对白重叠**」（4.46–5.66s，很短很轻）。
+#   故：tail 窗撞语音 ⇒ 退到「**非语音窗里能量最高**」的窗
+#   （避开语音，同时避开 771 行那个「最静窗近乎无内容」的坑）。
+AUDIO_SEAM_BED_VOICED_K: float = 3.0       # 帧 RMS 超全源中位多少倍 ⇒ 该帧算「有声」
+AUDIO_SEAM_BED_VOICED_FRAC: float = 0.10   # 窗内「有声帧」占比超此值 ⇒ 判定撞语音
 _AUDIO_META_KEY = "relay_kit_audio_meta"
 
 
@@ -852,6 +860,90 @@ def quietest_window(wf: torch.Tensor, n_samples: int,
     return i, float(rms[i])
 
 
+def bed_window_voiced_fraction(wf: torch.Tensor, start: int, n_samples: int,
+                               hop_samples: int = 1600,
+                               k: float = AUDIO_SEAM_BED_VOICED_K) -> float:
+    """窗内「**有声帧**」占比（0–1）——用来判一个床窗是否撞上了语音。
+
+    做法：把床源切成 ``hop``（默认 50ms@32k）帧，算逐帧 RMS，取其**中位数当环境基线**；
+    帧 RMS 超过 ``k`` × 基线即判「有声」。对白/口播是**间歇性高能**，稳态环境声不是
+    ⇒ 这个占比能把两者分开（实测：段1 台词落在 3.0–3.2s，尾部窗占比高而全源中位段为 0）。
+
+    ``k`` 取值动机：雨声/room tone 的帧间起伏通常 <2×；语音相对环境通常 >6 dB（≥2×）
+    ⇒ 3× 落在一个两侧都不敏感的位置。**这是判据不是定律，可随素材调整。**
+    """
+    if not isinstance(wf, torch.Tensor) or wf.numel() == 0:
+        return 0.0
+    x = wf
+    while x.dim() > 1:                      # 压到 1 维（[1,2,T]→[T]；[C,T]→[T]）
+        x = x.mean(dim=0)
+    total = int(x.shape[-1])
+    hop = max(1, int(hop_samples))
+    nfr = total // hop
+    if nfr < 2 or int(n_samples) <= 0:
+        return 0.0
+    frames = x[:nfr * hop].reshape(nfr, hop)
+    rms = frames.pow(2).mean(dim=1).clamp_min(0.0).sqrt()        # [nfr]
+    base = float(rms.median())
+    if base <= 0.0:
+        return 0.0
+    thr = base * float(k)
+    a = max(0, int(start) // hop)
+    b = min(nfr, max(a + 1, (int(start) + int(n_samples)) // hop))
+    if b <= a:
+        return 0.0
+    return float((rms[a:b] > thr).float().mean())
+
+
+def nonvoiced_candidates(wf: torch.Tensor, n_samples: int,
+                         hop_samples: int = 1600,
+                         frac: float = AUDIO_SEAM_BED_VOICED_FRAC) -> list:
+    """按位置升序列出所有「不撞语音」的候选窗起点（样本）。空列表 = 全撞语音。"""
+    total = int(wf.shape[-1])
+    n = int(min(n_samples, total))
+    if n <= 0:
+        return []
+    hop = max(1, int(hop_samples))
+    out = []
+    s = 0
+    while s + n <= total:
+        if bed_window_voiced_fraction(wf, s, n, hop) <= float(frac):
+            out.append(s)
+        s += hop
+    return out
+
+
+def find_nonvoiced_bed_window(wf: torch.Tensor, n_samples: int,
+                              hop_samples: int = 1600,
+                              frac: float = AUDIO_SEAM_BED_VOICED_FRAC,
+                              prefer: Optional[int] = None
+                              ) -> Tuple[int, float]:
+    """在所有「不撞语音」的候选窗里挑一个 ⇒ ``(起点, 占比)``。
+
+    两种挑法（由 ``prefer`` 决定）：
+      · ``prefer=None`` ⇒ 取**能量最高**的（给 tail 用）。理由见 771 行 ——
+        最静窗在「环境声+音乐」素材上近乎无内容，会把缝上的洞换个位置。
+        **避开语音**与**避开静音洞**要同时满足，交集就是「非语音窗里最饱满的那个」。
+      · ``prefer=<样本>`` ⇒ 取**离该点最近**的（给 E5 的 jitter 用）。
+
+    全部候选都撞语音 ⇒ 返回 ``(-1, 1.0)``（由调用方决定退路，不在这里静默兜底）。
+    """
+    total = int(wf.shape[-1])
+    n = int(min(n_samples, total))
+    hop = max(1, int(hop_samples))
+    cands = nonvoiced_candidates(wf, n, hop, frac)
+    if not cands:
+        return -1, 1.0
+    if prefer is not None:
+        return min(cands, key=lambda c: abs(c - int(prefer))), 0.0
+    best, best_rms = cands[0], -1.0
+    for c in cands:
+        r = float(wf[..., c:c + n].pow(2).mean().sqrt())
+        if r > best_rms:
+            best, best_rms = c, r
+    return best, 0.0
+
+
 def _rms_db(x: torch.Tensor) -> float:
     return 20.0 * math.log10(max(float(x.pow(2).mean().sqrt()), 1e-9))
 
@@ -899,8 +991,26 @@ def build_bed(wf: torch.Tensor, n_samples: int, tile_samples: int,
     if tile_samples <= 0:
         if start_override is not None:          # 🧪 E5：实验档指定起点（默认 None = 既有逻辑）
             start = int(max(0, min(int(start_override), max(0, total - n))))
+            # 🔴 2026-09-21：jitter 指定的窗**也会撞语音**（实测 expE5 的 jitter=1.2 正好
+            #   撞上床源台词 ⇒ 听感「对白重叠」）。
+            #   错开语义**必须保留**（否则 E5 就没靶了）⇒ 不退到「最饱满窗」，
+            #   而是把「指定起点」映射成**合法候选的序号**：(start // hop) % len(cands)。
+            #   不同 jitter ⇒ 不同序号 ⇒ 各段窗仍不同，且每一段都避开了语音。
+            if bed_window_voiced_fraction(wf, start, min(n, total)) > AUDIO_SEAM_BED_VOICED_FRAC:
+                _c = nonvoiced_candidates(wf, min(n, total))
+                if _c:
+                    start = _c[(int(start) // 1600) % len(_c)]     # 1600 = 候选步长（50ms@32k）
         elif select == "tail":
             start = max(0, total - n)
+            # 🔴 2026-09-21 语音规避：尾部窗**撞台词**时换窗（实测撞法见常量区注释）。
+            #   退路优先级：非语音窗里能量最高 → floor 限定的最静窗 → 原尾部窗（不静默兜底）。
+            if bed_window_voiced_fraction(wf, start, min(n, total)) > AUDIO_SEAM_BED_VOICED_FRAC:
+                _alt, _ = find_nonvoiced_bed_window(wf, min(n, total))
+                if _alt >= 0:
+                    start = _alt
+                else:
+                    _q, _ = quietest_window(wf, min(n, total), floor=floor)
+                    start = _q
         else:
             start, _ = quietest_window(wf, min(n, total), floor=floor)
         bed = wf[..., start:start + n]
@@ -1006,14 +1116,24 @@ def audio_seam_patch(audio: Any, bed_audio: Any, patch: float = AUDIO_SEAM_PATCH
 
     tile_note = "，%.2fs 瓦片自叠化环铺" % float(tile) if float(tile) > 0 else ""
     mode_note = "尾部窗（与缝天然连续）" if str(select) == "tail" else "最静窗（旧口径·仅对照）"
+    # 🔴 2026-09-21：报出**实际使用窗**的语音占比，并对「已换窗」「仍撞语音」显式标注 ——
+    #   不静默：撞语音是可见的（否则会像 expE5 那样只能靠人耳发现重叠）。
+    _vf = bed_window_voiced_fraction(bed_wf, start, n)
+    _tail = max(0, int(bed_wf.shape[-1]) - n)
+    voice_note = "｜ 🎙 窗内有声帧占比 %.0f%%" % (100.0 * _vf)
+    if _vf > AUDIO_SEAM_BED_VOICED_FRAC:
+        voice_note += (" ⚠ **撞语音**（该窗含对白 ⇒ 开头 %.2fs 会把它带进来，可能听到重叠）"
+                       % float(patch))
+    elif str(select) == "tail" and start != _tail and _ov is None:
+        voice_note += "；尾部窗原撞语音 ⇒ 已换到非语音窗 @%.2fs" % (start / float(sr))
     rep = ("[H3 Relay] 音频缝：头部补丁 %.2fs ← 床源%s @%.2fs%s，边界交叉淡变 %.2fs\n"
            "           床声电平 %.1f dBFS → 对齐目标 %.1f dBFS（%s %+.1f dB%s）\n"
-           "           音频 %d → %d 采样点（长度守恒，零 A/V 位移）%s"
+           "           音频 %d → %d 采样点（长度守恒，零 A/V 位移）%s%s"
            % (float(patch), mode_note, start / float(sr), tile_note, X / float(sr),
               bed_db, 20.0 * math.log10(max(tgt, 1e-9)),
               "增益" + ("已夹住" if clamped else ""), g_db,
               "⚠ 超出限幅，建议换床源段" if clamped else "",
-              total, int(out.shape[-1]), warn))
+              total, int(out.shape[-1]), warn, voice_note))
     shaped = out.reshape(*lead, ch, total) if lead else out
     return {"waveform": shaped.to(dtype), "sample_rate": sr}, rep
 

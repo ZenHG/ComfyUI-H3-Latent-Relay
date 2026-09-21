@@ -1066,6 +1066,14 @@
           "widget": {
             "name": "match_prev_offset_max"
           }
+        },
+        {
+          "name": "run_id",
+          "type": "STRING",
+          "link": null,
+          "widget": {
+            "name": "run_id"
+          }
         }
       ],
       "outputs": [
@@ -1120,7 +1128,8 @@
         0.0,
         12,
         1.15,
-        0.06
+        0.06,
+        ""
       ]
     },
     {

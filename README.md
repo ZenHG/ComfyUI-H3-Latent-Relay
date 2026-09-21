@@ -5,7 +5,7 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 
 | 项 | 值 |
 |---|---|
-| 版本 | **0.6.0**（7 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
+| 版本 | **0.6.1**（7 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
 | 许可 | **MIT**（第三方出处见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)） |
 | 宿主 | 需要**带 MiniMax-H3 支持的 ComfyUI**（其自身为 GPL-3.0，见「11. 许可与出处」） |
 
@@ -24,7 +24,7 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 | [4](#4-接线唯一桥) | 接线（唯一桥） | 每次搭图 |
 | [5](#5-节点速览) | 节点速览（7 个） | 找节点时 |
 | [6](#6-参数主旋钮) | 参数（主旋钮） | 要调参时 |
-| [7](#7-音频缝) | 音频缝 | 出片有咔哒声 |
+| [7](#7-音频缝) | 音频缝 · **多段拼接** | 出片有咔哒声 / 段接不起来 |
 | [8](#8-离线自测) | 离线自测 | 改完代码 / 提 PR |
 | [9](#9-排障) | 排障 | 跑不通时 |
 | [10](#10-原理与机制) | 原理与机制（概述） | 想搞懂为什么 |
@@ -120,6 +120,9 @@ ComfyUI 上，节点能注册但**续接静默无效**——用前先确认 Comf
 | 画面从第 1 帧就开始重播上一段 | 「裁重叠」没接上，或它的 `trim_frames` 没接桥的 `[2]` 输出 | 按「4. 接线」检查 |
 | 换新片子却接了旧片尾巴 | 没换 `run_id`（同名会覆盖同段号文件） | 换新名字 |
 
+> **跑完 N 段之后**：每段各出一个 mp4（`H3RelayChain` 连跑也只负责跑、**不负责拼**）。
+> 怎么接成一条、以及**拼完怎么自检**，见 [§7.1 多段拼接](#71-多段拼接n-个-mp4-怎么接成一条)。
+
 ---
 
 ## 4. 接线（唯一桥）
@@ -144,12 +147,28 @@ ComfyUI 上，节点能注册但**续接静默无效**——用前先确认 Comf
                                                   └──→ VAEDecode / VAEDecodeAudio
                                                             ↓
                                 🔗 续接裁重叠 [0] images ← IMAGE
-                                              [3] audio  ← AUDIO
+                                              [3] audio  ← VAEDecodeAudio  ★输入
                                               [1] trim_frames ← 桥 [2]
                                         │
-                          [0] images ───┴──→ CreateVideo → SaveVideo
-                          [3] prev_tail ──→（可选）后处理 Post [1] guide
+          ┌─────────────────────────────┤
+          │                             │
+          │            [1] audio ───────┴──→ 🔗 音频缝 [0] audio
+          │                                  （可选；第 1 段也要接，见 §7）
+          │                                        │
+          │                                   [0] audio
+          │                                        │
+          └→ [0] images ────────────┬──────────────┴──→ CreateVideo → SaveVideo
+                                    │                    ↑
+                                    │              ★ audio 必须接这一条
+                                    │                （不是 VAEDecodeAudio 那条）
+                                    │
+                       [3] prev_tail ──→（可选）后处理 Post [1] guide
 ```
+
+> 🔴 **音频线只有一条是对的**：`裁重叠 [1] audio`（或再经 `音频缝 [0] audio`）→ `CreateVideo.audio`。
+> **直接把 `VAEDecodeAudio` 接到 `CreateVideo` 会音画不同步** —— 画面裁掉了头部重叠帧、音频没裁，
+> 每缝差 ~0.9s，且**逐段累积**（第 3 段起口型明显对不上）。节点只能发现"输入没接"，
+> **发现不了"输出被悬空"**，所以这条得自己盯住。
 
 **槽位速查**（0 起算）
 
@@ -201,7 +220,7 @@ ComfyUI 上，节点能注册但**续接静默无效**——用前先确认 Comf
 | 🔗 **H3 续接裁重叠** | 裁掉本段头部的重生成帧（音画同裁）——不裁就会在拼接处重播/跳变；`[3]` 输出 `prev_tail` = 上一段末帧 |
 | 🔗 **H3 续接后处理 Post** | **画质域**：跨段统计匹配 / 低频残差 / 色调 / 反卷积 / 高频迁移 / 糊区锐化，全部默认关 |
 | 🔗 **H3 续接音频缝** | **音频域**：把上一段环境声补进本段头部，**长度守恒**（零 A/V 位移），默认关 |
-| 🔗 **H3 续接连跑 Chain** | 自动连跑控制器：同分组框内自动推进「桥 + 落盘」段号并排队 |
+| 🔗 **H3 续接连跑 Chain** | 自动连跑控制器：同分组框内自动推进「桥 + 落盘」段号并排队。**本身不拼片** —— 它只把 N 段各自跑完，N 个 mp4 怎么接成一条见 §7.1 |
 
 > **三个域，别混挂**：时间轴 = `H3RelayTrimAV`（冻结）／画质域 = `H3RelayPost`／音频域 = `H3RelayAudioSeam`。
 > 节点数不是复杂度，**"哪些线必须接对"**才是。
@@ -234,9 +253,40 @@ ComfyUI 上，节点能注册但**续接静默无效**——用前先确认 Comf
 
 - 第 1 段也要接（它会把第 1 段音频落盘，第 2 段的床源就是它）；段号顺序跑，别跳段。
 - 不接它或 `patch_seconds=0`，音频逐位直通。
+- **输出接法**：`音频缝 [0] audio` → 落盘节点的 `audio`（`CreateVideo.audio`）。**别让 `VAEDecodeAudio` 直连落盘节点** —— 那是未裁的原始音频，会音画不同步（见 §4 的红色警示）。
+- ⚠️ `patch_seconds > 0` 会把**本段头 `patch_seconds` 秒整段换成上一段的环境声**。若本段头部本来有台词，这 N 秒的台词会被换掉 ⇒ 段首留白是硬纪律（见 [`docs/06`](docs/06-continuity-scripting.md)）。节点会自动**避开床源里的有声区**（挑窗时跳过含语音的位置），并在日志里报 `🎙 窗内有声帧占比`。
 
 出词层面的配套纪律（段首缓冲、台词安全时刻、末帧锚链）见
 [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md)。
+
+### 7.1 多段拼接：N 个 mp4 怎么接成一条
+
+**先记住一条契约**：`裁重叠` 把**视频和音频同裁**，`音频缝` 又是**长度守恒**的
+⇒ **每个段文件的音频长度 = 视频长度**，段与段之间**没有任何重叠**。
+所以正确拼法就是**纯粹的首尾相接**，不需要任何"聪明的拼接器"。
+
+> ⚠️ **【连跑 ≠ 成片】** `H3RelayChain` 只负责"把 N 段跑完"，**不拼片**；跑完你会得到 N 个 mp4。
+
+| 别这么拼 | 症状 | 为什么 |
+|---|---|---|
+| `ffmpeg -f concat`（demuxer，最常见） | 每缝 ~0.87s **静止画**（PTS 洞） | 段间时间戳不连续时会插空 |
+| `acrossfade`（看着最专业） | **每缝偷 0.25s** ⇒ 第 3 段起音画错位、**逐段累积** | crossfade 是 overlap-add，而视频**没有**对应的重叠可裁 |
+
+**推荐做法**（`list.txt` 里按段号顺序写绝对路径，每行 `file '/abs/path/s0.mp4'`）：
+
+```bash
+# ① 先试无损重封装（秒级；段文件的 A==V 时通常成立）
+ffmpeg -y -f concat -safe 0 -i list.txt -c copy out_copy.mp4
+
+# ② 拼完立刻自检 —— 帧数应 = 各段帧数之和，且 A/V 时长差 ≤ 1 帧
+ffprobe -v error -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -of csv=p=0 out_copy.mp4
+ffprobe -v error -select_streams a:0 -show_entries stream=duration -of csv=p=0 out_copy.mp4
+
+# ③ 自检不过 ⇒ 退回 concat filter 单遍重编码（时间轴最干净；N 个输入按顺序列举）
+ffmpeg -y -i s0.mp4 -i s1.mp4 -i s2.mp4 -i s3.mp4 \
+  -filter_complex "[0:v][0:a][1:v][1:a][2:v][2:a][3:v][3:a]concat=n=4:v=1:a=1[v][a]" \
+  -map "[v]" -map "[a]" -c:v libx264 -crf 16 -pix_fmt yuv420p -c:a aac -b:a 192k out.mp4
+```
 
 ---
 
@@ -269,6 +319,9 @@ python tools/smoke_nodes.py         # 期望 15/0（节点层冒烟）
 | 节点列表里一个都没有 | 装的不是带 H3 的 ComfyUI，或没重启后端 | 更新 ComfyUI + 重启 Python 进程 |
 | 续接"看起来没生效" | ComfyUI 版本不含 H3 支持 | 确认 `comfy_extras/nodes_minimax_h3.py` 存在 |
 | 成片接缝处重播上一段 | 裁重叠的 `trim_frames` 没接桥 `[2]` | 按「4. 接线」补线 |
+| **音画越到后面越不同步**（第 3 段起口型明显对不上） | **音频线没走「裁重叠」**：`VAEDecodeAudio` 直连了落盘节点，画面裁了音频没裁 ⇒ 每缝差 ~0.9s 且累积 | 把落盘节点的 `audio` 改接 `裁重叠 [1] audio`（或经 `音频缝 [0] audio`）——见 §4 |
+| **连跑好几段，每段台词却一模一样** | `H3RelayChain` 的「连跑」是**反复提交同一张图**、只改段号 ⇒ **词不换** | 连跑前手动改 prompt；或按段分批跑（当前版本不做词分发） |
+| 拼成一条后每缝有 ~0.87s 静止画 / 声音整体前移 | 用了 `ffmpeg -f concat` 或 `acrossfade` 拼 | 见 §7.1 的拼法 + 自检 |
 
 完整排障表、工作流文件自检工具、API 提交方式见
 [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md)。
@@ -324,6 +377,7 @@ python tools/smoke_nodes.py         # 期望 15/0（节点层冒烟）
 | [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md) | 出词纪律：段首缓冲 · 台词安全时刻 · 末帧锚链 · 音频缝配套 |
 | [`docs/07-chain.md`](docs/07-chain.md) | Chain 自动连跑 |
 | [`docs/08-testing.md`](docs/08-testing.md) | 离线自测：22 组断言明细 · `tools/` 清单 |
+| [`docs/09-metrics.md`](docs/09-metrics.md) | 观测量参考区间（DTW 残留 / 外观漂移）· 怎么自校准 |
 | [`CHANGES.md`](CHANGES.md) | 版本史与每次实测证据 |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 开发环境 · 自测纪律 · 许可条款 |
 | [`SECURITY.md`](SECURITY.md) | 密钥 / 依赖 / 网络行为声明 |

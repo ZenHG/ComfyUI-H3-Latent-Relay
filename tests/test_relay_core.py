@@ -1286,11 +1286,13 @@ check("19.6 只对齐统计量（逐通道仿射）⇒ 空间结构不被复制�
       min(_corrs) > 0.999, "逐通道 corr=%s" % ["%.6f" % c for c in _corrs])
 
 # 19.7 节点层：新 widget **追加在 optional 末位**（旧工作流取值不前移）
+# 🔴 2026-09-21：`run_id`（E3/E4 观测用）追加在末位 ⇒ 尾部断言跟着延长一位。
+#   本断言的作用是「**防止有人把新 widget 插到中间**」⇒ 延长尾部列表即可，不是放宽。
 _opt19 = list(NODES.H3RelayTrimAV.INPUT_TYPES()["optional"])
 check("19.7 新 widget 追加在 optional 末位（前缀顺序稳定）",
-      _opt19[-4:] == ["match_prev", "match_prev_frames", "match_prev_gain_max",
-                      "match_prev_offset_max"],
-      "尾部=%s" % (_opt19[-4:],))
+      _opt19[-5:] == ["match_prev", "match_prev_frames", "match_prev_gain_max",
+                      "match_prev_offset_max", "run_id"],
+      "尾部=%s" % (_opt19[-5:],))
 
 # 19.8 节点层：默认全关（不接线时行为与 0.4.x 逐位一致）
 _it19 = NODES.H3RelayTrimAV.INPUT_TYPES()["optional"]

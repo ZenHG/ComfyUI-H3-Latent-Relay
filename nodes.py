@@ -38,6 +38,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import os
 
@@ -367,6 +368,14 @@ class H3RelayTrimAV:
                     "tooltip": "【护栏，一般不用动】逐通道亮度/色度偏移上限（μ目标−μ源 的截断）。\n"
                                "调大 = 允许更大的色档修正，但过大易见「整段换色」。",
                 }),
+                # 🔴 2026-09-21 新增（E3/E4 可达性改造）：观测层的 run 标识。
+                #   E3（DTW）/ E4（漂移）都是**只读观测**，不该依赖裁量开关（settle<0）才能执行。
+                #   填了 ⇒ E4 把本段外观三元组追加进 <run>/appearance_log.jsonl 并读历史算漂移曲线；
+                #   留空（默认）⇒ 只算本段三元组、不写盘，行为与加此 widget 之前一致。
+                "run_id": ("STRING", {"default": "",
+                    "tooltip": "【观测用，可留空】续接 run 标识（与「续接 Latent 存」的 run_id 一致）。\n"
+                               "填了才会把每段外观统计写入 <run>/appearance_log.jsonl 并算漂移曲线（E4）。",
+                }),
             },
         }
 
@@ -387,7 +396,8 @@ class H3RelayTrimAV:
              detail_borrow=0.0, detail_blur=9,
              hist_match=0.0, wb_match=0.0,
              match_prev=0.0, match_prev_frames=12,
-             match_prev_gain_max=1.15, match_prev_offset_max=0.06):
+             match_prev_gain_max=1.15, match_prev_offset_max=0.06,
+             run_id=""):
         CONTRACT.enforce()   # 裁帧算术同样依赖上游网格，先过契约
         # 服务端防线：widget 的 min=1.0 只挡 UI，API 提交 fps=0/NaN 会一路除到底
         try:
@@ -446,27 +456,60 @@ class H3RelayTrimAV:
                        " ".join("%.4f" % v for v in prof["diff"][:18]),
                        " …" if len(prof["diff"]) > n_sh else "",
                        prof["ref_sharp"], prof["ref_rgb"][0], prof["ref_rgb"][1], prof["ref_rgb"][2]))
-            # 🧪 E3 DTW 残留量（调研 §11-A）：只读观测，**不进裁量契约**。
-            #   与 0.5.0 第 4 路（scan_head_repeat 的最小 MAE 单点）互补：
-            #   那个答「从 pin 起连续复现几帧」，这个答「整段对齐下来
-            #   平均每步多贵」⇒ 能看出残留强度与不连续形态。
-            #   ⚠ 故意不喂给 detect_settle：DTW 路把「运动中的相似姿态」
-            #     也给低代价，单独当裁量会多吃内容（2026-09-20 定）。
-            _dtw = CORE.head_repeat_dtw(images, pin)
-            if _dtw:
-                bj_note += (
-                    "\n           🧪 DTW 对齐代价（只读观测，不改裁量）："
-                    "窗→钉住区 %.5f｜反向 %.5f｜比较 %d vs %d 帧"
-                    % (_dtw["align_cost"], _dtw["reverse_cost"],
-                       _dtw["frames"][0], _dtw["frames"][1]))
-            # 裁量→跳跃曲线：成片缝 = raw[pin-1] → raw[pin+settle]（相隔 settle+1 帧），
-            # **裁得越多、跳得越大**（GG：裁切=时间跳跃=跳切）。裁之前就把它算出来供权衡。
-            curve = CORE.trim_jump_curve(images, pin)
-            if curve:
-                bj_note += ("\n           裁量→跳跃曲线（settle : 归一跳跃）：%s"
-                            % "  ".join("%d:%.1f×" % (s, r) for s, r in curve[:13]))
         else:
             settle, why = want, "手动指定"
+
+        # 🧪 E3 DTW 残留量（调研 §11-A）：只读观测，**不进裁量契约**。
+        #   🔴 2026-09-21 移出 `want<0` 分支 —— 原位置使产线 settle=0（默认）时**永不执行**
+        #      ⇒ 功能等于不存在（《开发验收纪律》：产线路径可达 + 有消费者才叫完成）。
+        #      观测层不该依赖裁量开关（观测 ≠ 裁量）。
+        #   与 0.5.0 第 4 路（scan_head_repeat 的最小 MAE 单点）互补：
+        #   那个答「从 pin 起连续复现几帧」，这个答「整段对齐下来
+        #   平均每步多贵」⇒ 能看出残留强度与不连续形态。
+        #   ⚠ 故意不喂给 detect_settle：DTW 路把「运动中的相似姿态」
+        #     也给低代价，单独当裁量会多吃内容（2026-09-20 定）。
+        _dtw = CORE.head_repeat_dtw(images, pin)
+        if _dtw:
+            bj_note += (
+                "\n           🧪 DTW 对齐代价（只读观测，不改裁量）："
+                "窗→钉住区 %.5f｜反向 %.5f｜比较 %d vs %d 帧"
+                % (_dtw["align_cost"], _dtw["reverse_cost"],
+                   _dtw["frames"][0], _dtw["frames"][1]))
+        # 裁量→跳跃曲线：成片缝 = raw[pin-1] → raw[pin+settle]（相隔 settle+1 帧），
+        # **裁得越多、跳得越大**（GG：裁切=时间跳跃=跳切）。裁之前就把它算出来供权衡。
+        curve = CORE.trim_jump_curve(images, pin)
+        if curve:
+            bj_note += ("\n           裁量→跳跃曲线（settle : 归一跳跃）：%s"
+                        % "  ".join("%d:%.1f×" % (s, r) for s, r in curve[:13]))
+        # 🧪 E4 漂移曲线（调研 §11-B）：逐段外观三元组 + 跨段斜率，**只读观测**。
+        #   🔴 2026-09-21 接进产线路径（此前 `nodes.py` 零引用 = 死代码）。
+        #   run_id 空（默认）⇒ 只算本段三元组、不写盘；填了 ⇒ 追加 <run>/appearance_log.jsonl
+        #   并读全部历史算 drift_curve。**同一把尺子逐段量**（segment_appearance_stats 统一口径）。
+        try:
+            _st = CORE.segment_appearance_stats(images)
+            bj_note += ("\n           🧪 外观三元组（E4 只读）：mean %.5f ｜ std %.5f ｜ 锐度 %.5f"
+                        % (float(_st[0]), float(_st[1]), float(_st[2])))
+            if run_id:
+                _rd = os.path.join(_RELAY_ROOT, str(run_id))
+                os.makedirs(_rd, exist_ok=True)
+                _lg = os.path.join(_rd, "appearance_log.jsonl")
+                _hist = []
+                if os.path.isfile(_lg):
+                    with open(_lg, "r", encoding="utf-8") as _fh:
+                        for _ln in _fh:
+                            if _ln.strip():
+                                _hist.append(tuple(json.loads(_ln)["stats"]))
+                _hist.append(tuple(float(v) for v in _st))
+                with open(_lg, "a", encoding="utf-8") as _fh:
+                    _fh.write(json.dumps({"stats": [float(v) for v in _st]},
+                                         ensure_ascii=False) + "\n")
+                if len(_hist) >= 2:
+                    _dc = CORE.drift_curve(_hist)
+                    bj_note += ("\n           🧪 漂移曲线（E4，累计 %d 段）：亮度斜率 %+.5f ｜ "
+                                "对比度 %+.5f ｜ 锐度 %+.5f（后两项无量纲、可跨片比）"
+                                % (len(_hist), _dc["slope"], _dc["std_slope"], _dc["sharp_slope"]))
+        except Exception as _e:      # 观测失败**绝不阻断渲染**，但必须可见（不静默）
+            bj_note += "\n           🧪 E4 观测失败（不影响裁切）：%r" % (_e,)
         if pin + settle >= before:
             settle = max(0, before - 1 - pin)
             why += "（已夹到本段长度上限）"

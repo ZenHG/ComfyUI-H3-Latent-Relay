@@ -103,9 +103,9 @@ ck("C1 TrimAV：core 项前缀原序保留",
                  "settle_sharpen"],
    "前 5=%s" % _trim[:5])
 ck("C2 TrimAV：新件 match_prev* 在**末位**",
-   _trim[-4:] == ["match_prev", "match_prev_frames", "match_prev_gain_max",
-                  "match_prev_offset_max"],
-   "末 4=%s" % _trim[-4:])
+   _trim[-5:] == ["match_prev", "match_prev_frames", "match_prev_gain_max",
+                  "match_prev_offset_max", "run_id"],
+   "末 5=%s" % _trim[-5:])
 ck("C3 TrimAV：新增第 4 路输出 prev_tail 在末位",
    N.H3RelayTrimAV.RETURN_NAMES[:3] == ("images", "audio", "report")
    and N.H3RelayTrimAV.RETURN_NAMES[3] == "prev_tail",
