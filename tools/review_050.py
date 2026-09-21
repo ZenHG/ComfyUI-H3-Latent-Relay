@@ -865,6 +865,13 @@ ck("L10 双轨铁律在位：UI 与 API 同一套节点实现（README 约定块
    "同一套节点实现" in _rd and "UI 与 API 必须同一套实现" in _cg
    and "只在脚本里生效" in _cg)
 
+ck("L11 铁律三在位（给建议必须写好/坏两面）+ tile 缺口已**根修**且能力边界仍在",
+   "铁律三" in _cg and "不许只说一半" in _cg and "能力边界" in _cg
+   and "已知缺口登记" in _cg and "已根修" in _cg)
+ck("L12 README §7.2 判据能力边界与兜底措施在位（能量型边界 + 两条漏检 + 兜底链）",
+   "判据能抓什么、抓不住什么" in _rd and "低电平人声" in _rd and "语音当底噪" in _rd
+   and "兜底措施" in _rd and "最终判定是人耳" in _rd)
+
 print("=" * 78)
 print("结果：通过 %d / 失败 %d" % (len(OK), len(BAD)))
 if BAD:

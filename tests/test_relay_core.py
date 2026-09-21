@@ -41,6 +41,9 @@
  22. 音频缝（0.5.0 / 节点内实现）：长度守恒、最静窗、边界 blend、床环铺、采样率/声道兜底、落盘往返、节点守卫
  23. 音画同步守恒（0.6.2）：`joined` 只在给了画面裁量时才能交叉（否则 raise）；默认等长拼接；
      TrimAV 直接给出 `join_align_seconds` 建议值
+ 24. 床源选窗语音规避**全路径**（0.6.5）：瓦片档（tile>0）也必须过判据、阈值收紧到 0、
+     E5 错开不再被静默忽略、rank 约定一致、无解时不 raise、报告不静默、O(T²) 回归锁、
+     持续帧滤波（瞬态不计入）、退化输入不炸、前缀和能量选窗 == 参照
 """
 
 import os
@@ -1876,6 +1879,172 @@ _o23t, _a23t, _r23t, _t23t = NODES.H3RelayTrimAV().trim(
 check("23.5 TrimAV 报告**直接算出** join_align_seconds 建议值（= 裁首帧数 ÷ fps）",
       "join_align_seconds" in _r23t and "0.9167" in _r23t,
       [l.strip() for l in _r23t.splitlines() if "join_align_seconds" in l][:1][0][:80])
+
+# ---------------------------------------------------------------------------
+# 24. 床源选窗：语音规避必须覆盖**全部**取床源路径（0.6.5）
+#     🔴 起因（2026-09-21，真人耳检阳性 → 根修）：
+#       规避原先只加在 `tile_samples <= 0` 分支，而 `tile > 0` 恰恰是产线脚本的**默认档**
+#       （`TILE_W=1.2`）⇒ 默认档走的是**没被保护**的那条路；瓦片还会被自叠化环铺 **k 遍**
+#       （实测 patch=2.0 + tile=1.2 ⇒ k=2）⇒ 窗内任何一段语音都会被听成 k 遍。
+#       修法：所有路径共用 `pick_bed_window`；瓦片档阈值收紧到 **0**（任何有声帧都不许）。
+#     ⚠ 判据能力边界：能量型（帧 RMS 超全源中位 3×）⇒ 只能抓「安静底噪里冒出来的语音」；
+#       **素材本身以语音为底噪时不报** ⇒ 过判据 ≠「对白重叠」绝迹。
+_SR24 = 32000
+
+
+def _mkbed24(voice=((3.0, 4.0),), total_s=4.5, quiet=0.02, loud=0.40):
+    """稳态底噪 + 若干段「台词」的合成床源（2D ``[C,T]``，与产线 `_audio_parts` 同形）。"""
+    g = torch.Generator().manual_seed(24)
+    w = torch.rand(2, int(total_s * _SR24), generator=g) * quiet
+    for a, b in voice:
+        w[..., int(a * _SR24):int(b * _SR24)] = loud
+    return w
+
+
+_b24 = _mkbed24()
+_W24 = int(1.2 * _SR24)
+_n24 = int(1.2 * _SR24)
+_f0_24 = int(_b24.shape[-1]) - _W24            # 尾部瓦片窗起点（旧代码的盲点）
+_vf0_24 = CORE.bed_window_voiced_fraction(_b24, _f0_24, _W24)
+check("24.1 判据自证：尾部瓦片窗确实撞语音（占比 > 单窗阈值）",
+      _vf0_24 > CORE.AUDIO_SEAM_BED_VOICED_FRAC,
+      "@%.3fs 占比 %.0f%%" % (_f0_24 / _SR24, 100 * _vf0_24))
+
+_s24, _ch24, _v1_24, _v2_24 = CORE.pick_bed_window(
+    _b24, _W24, select="tail", prefer=None, floor=0.0,
+    frac=CORE.AUDIO_SEAM_BED_TILE_VOICED_FRAC)
+check("24.2 瓦片档 tail：首选窗撞语音 ⇒ 换到非语音窗（旧代码此处**不换窗**）",
+      _ch24 and _s24 != _f0_24 and _v1_24 > CORE.AUDIO_SEAM_BED_VOICED_FRAC and _v2_24 == 0.0,
+      "@%.3fs vf %.0f%%→%.0f%%" % (_s24 / _SR24, 100 * _v1_24, 100 * _v2_24))
+check("24.3 瓦片档阈值(0) 比单窗档(10%) 更严：窗内**任何**有声帧都判撞（会被铺 k 遍）",
+      CORE.AUDIO_SEAM_BED_TILE_VOICED_FRAC == 0.0
+      and CORE.AUDIO_SEAM_BED_TILE_VOICED_FRAC < CORE.AUDIO_SEAM_BED_VOICED_FRAC,
+      "tile %.2f vs 单窗 %.2f" % (CORE.AUDIO_SEAM_BED_TILE_VOICED_FRAC,
+                                  CORE.AUDIO_SEAM_BED_VOICED_FRAC))
+
+# 24.4~24.5 瓦片档 + E5：错开**不能**再被静默忽略（走 build_bed = 节点真正调用的那段）
+_ov24a = CORE.bed_jitter_start(int(_b24.shape[-1]), _W24, 1, 1.2, _SR24)
+_ov24b = CORE.bed_jitter_start(int(_b24.shape[-1]), _W24, 2, 1.2, _SR24)
+_sa24, _, _va1_24, _va2_24 = CORE.pick_bed_window(
+    _b24, _W24, select="tail", prefer=_ov24a, floor=0.0,
+    frac=CORE.AUDIO_SEAM_BED_TILE_VOICED_FRAC)
+_sb24, _, _, _vb2_24 = CORE.pick_bed_window(
+    _b24, _W24, select="tail", prefer=_ov24b, floor=0.0,
+    frac=CORE.AUDIO_SEAM_BED_TILE_VOICED_FRAC)
+_bd24a, _st24a, _ = CORE.build_bed(_b24, int(2.0 * _SR24), _W24, int(0.25 * _SR24),
+                                   select="tail", start_override=_ov24a)
+_bd24b, _st24b, _ = CORE.build_bed(_b24, int(2.0 * _SR24), _W24, int(0.25 * _SR24),
+                                   select="tail", start_override=_ov24b)
+check("24.4 瓦片档 + E5：段1/段2 瓦片起点不同且都非语音（旧代码 jitter 被静默忽略）",
+      _sa24 != _sb24 and _st24a != _st24b and _va2_24 == 0.0 and _vb2_24 == 0.0,
+      "seg1 @%.3fs / seg2 @%.3fs（请求 %.3fs / %.3fs）"
+      % (_st24a / _SR24, _st24b / _SR24, _ov24a / _SR24, _ov24b / _SR24))
+check("24.5 瓦片环铺在**新窗**上仍长度守恒（规避不改时间轴）",
+      int(_bd24a.shape[-1]) == int(2.0 * _SR24) and int(_bd24b.shape[-1]) == int(2.0 * _SR24),
+      "%d / %d" % (int(_bd24a.shape[-1]), int(_bd24b.shape[-1])))
+
+# 24.6 同族函数的 rank 约定必须一致（此前 quietest_window 写死 sum(dim=0) ⇒ 3D 崩）
+check("24.6 rank 一致：2D 与 3D 床源选窗完全相同（quietest / pick 各验一遍）",
+      CORE.quietest_window(_b24, int(0.5 * _SR24), floor=0.0)[0]
+      == CORE.quietest_window(_b24.unsqueeze(0), int(0.5 * _SR24), floor=0.0)[0]
+      and CORE.pick_bed_window(_b24, _W24, select="quiet", frac=0.0)[0]
+      == CORE.pick_bed_window(_b24.unsqueeze(0), _W24, select="quiet", frac=0.0)[0],
+      "2D/3D 同点")
+
+# 24.7 无候选（全源皆撞）⇒ 退回首选窗、**不 raise**（「素材本身以语音为底噪」是合法素材）
+_b24d = _mkbed24(voice=tuple((i * 0.75, i * 0.75 + 0.30) for i in range(12)), total_s=9.0)
+_nc24 = len(CORE.nonvoiced_candidates(_b24d, _W24, 1600, 0.0))
+_s24d, _ch24d, _v1_24d, _v2_24d = CORE.pick_bed_window(
+    _b24d, _W24, select="tail", prefer=None, floor=0.0,
+    frac=CORE.AUDIO_SEAM_BED_TILE_VOICED_FRAC)
+check("24.7 全源皆撞语音 ⇒ 不 raise，tail 退到最静窗（语音残留最少）且占比不升",
+      _nc24 == 0 and _ch24d and _s24d != _b24d.shape[-1] - _W24 and _v2_24d <= _v1_24d,
+      "候选 %d 个 ⇒ 尾窗@%.3fs(vf %.0f%%) → 最静窗@%.3fs(vf %.0f%%)"
+      % (_nc24, (_b24d.shape[-1] - _W24) / _SR24, 100 * _v1_24d,
+         _s24d / _SR24, 100 * _v2_24d))
+
+# 24.8 默认关不变量：尾部窗**不撞语音**时 ⇒ 起点与「直接切尾窗」逐位相同
+_b24q = _mkbed24(voice=((0.5, 1.0),))            # 语音在中段，尾部干净
+_bq24, _stq24, _ = CORE.build_bed(_b24q, _n24, 0, int(0.25 * _SR24), select="tail")
+check("24.8 默认关不变量：尾部不撞语音 ⇒ 起点=尾部且床声逐位相同（干净素材零行为变化）",
+      _stq24 == int(_b24q.shape[-1]) - _n24
+      and torch.equal(_bq24, _b24q[..., _stq24:_stq24 + _n24]),
+      "起点 %.3fs" % (_stq24 / _SR24))
+
+# 24.9 性能回归锁：候选遍历必须先算一次帧 RMS（原实现每个候选重算整段 ⇒ O(T²)）
+_calls24 = [0]
+_orig_fr24 = CORE._frame_rms
+
+
+def _count_fr24(*a, **kw):
+    _calls24[0] += 1
+    return _orig_fr24(*a, **kw)
+
+
+CORE._frame_rms = _count_fr24
+try:
+    CORE.nonvoiced_candidates(_b24, _W24, 1600, 0.0)
+finally:
+    CORE._frame_rms = _orig_fr24
+check("24.9 候选遍历只算一次帧 RMS（原实现 O(T²)：60s 床源会卡住主线程）",
+      _calls24[0] == 1, "调用 %d 次" % _calls24[0])
+
+# 24.10~24.11 报告：说清「为什么换窗」+ 报出阈值；E5 档窗位只印一次
+_cur24 = {"waveform": torch.zeros(1, 2, int(3.5 * _SR24)), "sample_rate": _SR24}
+_cur24["waveform"][..., int(0.5 * _SR24):int(1.0 * _SR24)] = 0.3
+_bed24 = {"waveform": _b24.unsqueeze(0), "sample_rate": _SR24}
+_, _rep24 = CORE.audio_seam_patch(_cur24, _bed24, patch=2.0, tile=1.2, fade=0.25,
+                                  select="tail", bed_jitter=0.0, stage_index=1)
+check("24.10 瓦片档报告：阈值 + 「首选窗原撞语音 ⇒ 已换到非语音窗」都在（不静默）",
+      "判据阈值 0%" in _rep24 and "首选窗原撞语音（占比" in _rep24
+      and "已换到非语音窗 @" in _rep24,
+      next((l for l in _rep24.splitlines() if "🎙" in l), "")[:150])
+_, _rep24b = CORE.audio_seam_patch(_cur24, _bed24, patch=2.0, tile=1.2, fade=0.25,
+                                   select="tail", bed_jitter=1.2, stage_index=1)
+check("24.11 E5 档报告：首行窗位只出现一次（mode 里不再重复打印错开位置）",
+      _rep24b.splitlines()[0].count("@") == 1
+      and "E5 错开窗（按段号错开）" in _rep24b.splitlines()[0],
+      str(_rep24b.splitlines()[0])[:110])
+
+# 24.12 持续帧滤波（P0）：单帧瞬态不计入，连续台词无损（瓦片档 0% 阈值的瞬态防线）
+_b24t = _mkbed24()                                   # 尾窗 58% 台词（连续块）
+_b24x = _mkbed24(voice=())                           # 纯底噪
+_b24x[..., _b24x.shape[-1] - int(0.3 * _SR24) - 1600: _b24x.shape[-1] - int(0.3 * _SR24) - 1600 + 1600] = 0.6
+_vt24 = CORE.bed_window_voiced_fraction(_b24t, _b24t.shape[-1] - _W24, _W24)
+_vx24 = CORE.bed_window_voiced_fraction(_b24x, _b24x.shape[-1] - _W24, _W24)
+check("24.12 持续帧滤波：连续台词占比无损（58% 级）且单帧瞬态不计入（0%）",
+      _vt24 > 0.5 and _vx24 == 0.0,
+      "台词 %.0f%% / 瞬态 %.0f%%" % (100 * _vt24, 100 * _vx24))
+
+# 24.13 退化输入不炸：prefer 越界钳制 / 全零床源 / 超短床源（<2 帧无法判定 ⇒ 放行不 raise）
+_b24z = torch.zeros(2, int(1.0 * _SR24))
+_ok24 = []
+try:
+    _s24p, _, _, _ = CORE.pick_bed_window(_b24, _W24, select="tail", prefer=10 ** 9, frac=0.0)
+    _ok24.append(_s24p <= _b24.shape[-1] - _W24)
+    _s24m, _, _, _ = CORE.pick_bed_window(_b24, _W24, select="tail", prefer=-5, frac=0.0)
+    _ok24.append(_s24m == 0)
+    CORE.pick_bed_window(_b24z, int(0.5 * _SR24), select="tail", frac=0.0)
+    _ok24.append(True)
+    _st24s, _, _, _ = CORE.pick_bed_window(torch.zeros(2, 3000), 2000, select="tail", frac=0.0)
+    _ok24.append(_st24s == 3000 - 2000)          # tail 语义：超短床源放行但起点仍在尾部
+    _ok24.append(True)
+except Exception as _e24:
+    _ok24 = ["raise: %s" % _e24]
+check("24.13 退化输入不炸：prefer 越界钳制 / 全零 / 超短床源（<2 帧放行不判定）",
+      all(x is True for x in _ok24), str(_ok24))
+
+# 24.14 前缀和能量选窗 == 逐候选参照实现（0.6.4 性能修补的正确性锁）
+_c24 = CORE.nonvoiced_candidates(_b24, _W24, 1600, CORE.AUDIO_SEAM_BED_TILE_VOICED_FRAC)
+_ct24 = torch.tensor(_c24, dtype=torch.long)
+_ch24n = 2
+_p24 = (_b24 ** 2).reshape(-1, _b24.shape[-1]).sum(dim=0)
+_c24c = torch.cat([_p24.new_zeros(1), torch.cumsum(_p24, dim=0)])
+_wr24 = torch.sqrt((_c24c[_ct24 + _W24] - _c24c[_ct24]).clamp_min(0.0) / (_W24 * _ch24n))
+_naive24 = max(_c24, key=lambda c: float(_b24[..., c:c + _W24].pow(2).mean().sqrt()))
+check("24.14 候选能量前缀和 == 逐候选参照（性能修补不许改结果）",
+      int(_ct24[int(torch.argmax(_wr24))]) == int(_naive24),
+      "前缀和 @%.3fs / 参照 @%.3fs" % (_ct24[int(torch.argmax(_wr24))] / _SR24, _naive24 / _SR24))
 
 print()
 print("=" * 78)

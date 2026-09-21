@@ -13,7 +13,7 @@ python tests/test_relay_core.py
 `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。也支持 `pytest tests/`
 （找不到 ComfyUI 根目录时自动 skip，不会崩）。
 
-**286 项断言，零 GPU、不加载模型**，覆盖二十三个方面：
+**300 项断言，零 GPU、不加载模型**，覆盖二十四个方面：
 
 | 组 | 覆盖 |
 |---|---|
@@ -42,12 +42,13 @@ python tests/test_relay_core.py
 | 21 | 重叠区双向融合 blend：窗形权重（smoothstep / hann），两端导数为 0 |
 | 22 | 音频缝：长度守恒、床声选窗两档、电平对齐 + 峰值护栏、边界 blend、床环铺无台阶、落盘往返、节点两道守卫、`joined` 拼接复合 |
 | 23 | **音画同步守恒（0.6.2）**：`joined` 只在给了画面裁量时才能交叉（否则 raise）；默认等长 + **零时间轴位移**；J-cut 守恒路长度公式；TrimAV 直出 `join_align_seconds` 建议值 |
+| 24 | **床源选窗语音规避·全路径（0.6.4）**：瓦片档（tile>0）也必须过判据且阈值收紧到 0、E5 错开不再被静默忽略、rank 约定一致（2D/3D 同点）、全源皆撞时不 raise 退最静窗、默认关逐位不变、O(T²) 回归锁、报告不静默、持续帧滤波（瞬态不计入）、退化输入不炸、前缀和能量选窗 == 参照 |
 
 ## tools/ 下的另两个
 
 | 工具 | 判什么 | 期望 |
 |---|---|---|
-| `tools/review_050.py` | 文档—代码一致性（节点清单 / 参数表 / 断言数 / 版本号 / 示例图槽位 / **双轨铁律**） | **78/0** |
+| `tools/review_050.py` | 文档—代码一致性（节点清单 / 参数表 / 断言数 / 版本号 / 示例图槽位 / **三条铁律**） | **80/0** |
 | `tools/smoke_nodes.py` | 节点层功能冒烟（7 个节点真跑一遍） | **15/0** |
 
 详见 [`tools/README.md`](../tools/README.md)。CI 会跑这三个（`.github/workflows/ci.yml`），

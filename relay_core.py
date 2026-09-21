@@ -781,8 +781,20 @@ AUDIO_SEAM_BED_GAIN_MAX_DB: float = 6.0  # 床声电平对齐上限（±dB）；
 #   crossfade 里的床源尾 ⇒ 听感「**对白重叠**」（4.46–5.66s，很短很轻）。
 #   故：tail 窗撞语音 ⇒ 退到「**非语音窗里能量最高**」的窗
 #   （避开语音，同时避开 771 行那个「最静窗近乎无内容」的坑）。
+#   🔴 2026-09-21 二次修正（GG：发现问题就从根本处理）：规避原先只加在 `tile<=0` 分支，
+#   而 `tile>0` 恰是产线脚本默认档（`TILE_W=1.2`）⇒ 默认档走的是**没被保护**的那条路。
+#   现改为**所有取床源路径共用同一个选窗器** `pick_bed_window`（含 tail / quiet / E5 错开）。
 AUDIO_SEAM_BED_VOICED_K: float = 3.0       # 帧 RMS 超全源中位多少倍 ⇒ 该帧算「有声」
 AUDIO_SEAM_BED_VOICED_FRAC: float = 0.10   # 窗内「有声帧」占比超此值 ⇒ 判定撞语音
+# 🔴 瓦片档（tile>0）的阈值**必须更严**：瓦片会被自叠化环铺 **k 次**（k≈2–3），
+#   窗内任何一段语音都会**被听成 k 遍**（实测 tile=1.2 + patch=2.0 ⇒ k=2）。
+#   故瓦片窗**不允许出现任何有声帧**（0.0），而不是沿用 10%。
+AUDIO_SEAM_BED_TILE_VOICED_FRAC: float = 0.0
+# 持续帧滤波（2026-09-21 P0）：单帧瞬态（关门/砰响，<100ms）不计入「有声帧」——
+#   人声起振至少持续 2 帧（100ms@32k）；连续台词实测 58% 占比**无损保留**，瞬态归零。
+#   主要保护**瓦片档**：那里阈值是 0%，没有它一帧瞬态就会触发换窗。
+#   ⚠ 能量判据的既有边界不变：低电平人声（<3× 中位）与「语音当底噪/BGM 型」仍漏检。
+AUDIO_SEAM_BED_VOICED_SUSTAIN: int = 2
 _AUDIO_META_KEY = "relay_kit_audio_meta"
 
 
@@ -838,6 +850,11 @@ def quietest_window(wf: torch.Tensor, n_samples: int,
 
     返回 ``(起点样本, 窗内 RMS)``。用前缀和一次算完全部窗（O(T)，不是 O(T·n)）。
 
+    **入参形状**：接受 ``[T]`` / ``[C,T]`` / ``[B,C,T]``（同族判据 ``bed_window_voiced_fraction``
+    也接受任意 rank，两边**必须一致** —— 2026-09-21 修：此前本函数写死 ``sum(dim=0)``，
+    以 3D 调用时会把**批维当时间轴**求和，得到零指向性的崩溃；产线走 ``_audio_parts``（2D）
+    故为潜伏缺陷）。
+
     ``floor``（可选）：只接受 RMS ≥ 该值的窗；**全部不达标才**退回全局最静窗。
     动机（2026-09-19 实测）：全局最静窗在「环境声 + 音乐」素材上是**近乎静默**的一段
     （实测 −42 dBFS，比缝前低 29 dB）⇒ 拿它当床声等于把缝上的洞换个位置。
@@ -846,10 +863,11 @@ def quietest_window(wf: torch.Tensor, n_samples: int,
     n = int(n_samples)
     if n <= 0 or n > total:
         return 0, float("nan")
-    p = (wf ** 2).sum(dim=0)                    # [T] 逐样本跨声道能量
+    ch = max(1, int(wf.numel()) // max(1, total))         # 跨前导维的声道/批数
+    p = (wf ** 2).reshape(-1, total).sum(dim=0)           # [T] 逐样本能量（跨声道合计）
     c = torch.cat([p.new_zeros(1), torch.cumsum(p, dim=0)])
     win = c[n:] - c[:-n]                        # [T-n+1] 每窗总能量
-    rms = torch.sqrt(win.clamp_min(0.0) / (n * max(1, int(wf.shape[0]))))
+    rms = torch.sqrt(win.clamp_min(0.0) / (n * ch))
     if float(floor) > 0.0:
         ok = rms >= float(floor)
         if bool(ok.any()):
@@ -860,30 +878,37 @@ def quietest_window(wf: torch.Tensor, n_samples: int,
     return i, float(rms[i])
 
 
-def bed_window_voiced_fraction(wf: torch.Tensor, start: int, n_samples: int,
-                               hop_samples: int = 1600,
-                               k: float = AUDIO_SEAM_BED_VOICED_K) -> float:
-    """窗内「**有声帧**」占比（0–1）——用来判一个床窗是否撞上了语音。
+def _frame_rms(wf: torch.Tensor, hop_samples: int = 1600):
+    """整段「逐帧 RMS」+ 帧参数 ⇒ ``(rms[nfr], hop, nfr)``；不足 2 帧返回 ``(None, hop, 0)``。
 
-    做法：把床源切成 ``hop``（默认 50ms@32k）帧，算逐帧 RMS，取其**中位数当环境基线**；
-    帧 RMS 超过 ``k`` × 基线即判「有声」。对白/口播是**间歇性高能**，稳态环境声不是
-    ⇒ 这个占比能把两者分开（实测：段1 台词落在 3.0–3.2s，尾部窗占比高而全源中位段为 0）。
-
-    ``k`` 取值动机：雨声/room tone 的帧间起伏通常 <2×；语音相对环境通常 >6 dB（≥2×）
-    ⇒ 3× 落在一个两侧都不敏感的位置。**这是判据不是定律，可随素材调整。**
+    为什么单列一个函数（2026-09-21 性能修补）：语音判据是**每候选窗算一次占比**，
+    而每个候选窗都要重算一遍整段帧 RMS ⇒ 原实现是 **O(T²/hop)**。床源 4.5s 时无感
+    （70 候选 × 112k），但 5 分钟床源就是 6000 × 9.6M ≈ 5×10¹⁰ 次乘加 ——
+    节点在主线程上跑，会卡成假死。现在整段**只算一次**，候选遍历是 O(候选数)。
     """
     if not isinstance(wf, torch.Tensor) or wf.numel() == 0:
-        return 0.0
+        return None, max(1, int(hop_samples)), 0
     x = wf
     while x.dim() > 1:                      # 压到 1 维（[1,2,T]→[T]；[C,T]→[T]）
         x = x.mean(dim=0)
     total = int(x.shape[-1])
     hop = max(1, int(hop_samples))
     nfr = total // hop
-    if nfr < 2 or int(n_samples) <= 0:
-        return 0.0
-    frames = x[:nfr * hop].reshape(nfr, hop)
-    rms = frames.pow(2).mean(dim=1).clamp_min(0.0).sqrt()        # [nfr]
+    if nfr < 2:
+        return None, hop, 0
+    rms = x[:nfr * hop].reshape(nfr, hop).pow(2).mean(dim=1).clamp_min(0.0).sqrt()
+    return rms, hop, nfr
+
+
+def _voiced_frac_from_frames(rms: torch.Tensor, hop: int, nfr: int, start: int,
+                             n_samples: int, k: float,
+                             sustain: int = AUDIO_SEAM_BED_VOICED_SUSTAIN) -> float:
+    """由**预算好的**帧 RMS 求窗内有声帧占比（判据本体，见 ``bed_window_voiced_fraction``）。
+
+    ``sustain``（持续帧滤波，默认 2 = 100ms@32k）：只有**连续 ≥sustain 帧**超阈值
+    才计入「有声帧」—— 人声起振不可能只有一帧；单帧尖峰是瞬态（关门/砰响），
+    计入它会让瓦片档（阈值 0%）被一帧瞬态触发换窗。连续台词实测占比无损（58%→58%）。
+    """
     base = float(rms.median())
     if base <= 0.0:
         return 0.0
@@ -892,22 +917,60 @@ def bed_window_voiced_fraction(wf: torch.Tensor, start: int, n_samples: int,
     b = min(nfr, max(a + 1, (int(start) + int(n_samples)) // hop))
     if b <= a:
         return 0.0
-    return float((rms[a:b] > thr).float().mean())
+    v = (rms[a:b] > thr)
+    sus = int(sustain)
+    if sus <= 1:
+        return float(v.float().mean())
+    seg = v.to(torch.int8)
+    pad = torch.cat([seg.new_zeros(1), seg, seg.new_zeros(1)])
+    d = pad[1:] - pad[:-1]                       # +1=run 起点，-1=run 结束后一位
+    lens = (d == -1).nonzero(as_tuple=False).flatten() - \
+           (d == 1).nonzero(as_tuple=False).flatten()
+    keep = lens[lens >= sus]
+    return float(int(keep.sum())) / max(1, int(seg.numel()))
+
+
+def bed_window_voiced_fraction(wf: torch.Tensor, start: int, n_samples: int,
+                               hop_samples: int = 1600,
+                               k: float = AUDIO_SEAM_BED_VOICED_K,
+                               sustain: int = AUDIO_SEAM_BED_VOICED_SUSTAIN) -> float:
+    """窗内「**有声帧**」占比（0–1）——用来判一个床窗是否撞上了语音。
+
+    做法：把床源切成 ``hop``（默认 50ms@32k）帧，算逐帧 RMS，取其**中位数当环境基线**；
+    帧 RMS 超过 ``k`` × 基线**且连续 ≥ ``sustain`` 帧**（人声起振 ≥100ms，滤掉单帧瞬态）
+    即判「有声」。对白/口播是**间歇性高能**，稳态环境声不是
+    ⇒ 这个占比能把两者分开（实测：段1 台词落在 3.0–4.0s，尾部窗占比高而全源中位段为 0）。
+
+    ``k`` 取值动机：雨声/room tone 的帧间起伏通常 <2×；语音相对环境通常 >6 dB（≥2×）
+    ⇒ 3× 落在一个两侧都不敏感的位置。**这是判据不是定律，可随素材调整。**
+
+    ⚠ 需要**逐窗多次调用**时（候选遍历），请用 ``_frame_rms`` + ``_voiced_frac_from_frames``
+    复用帧 RMS —— 本函数每次调用都会重算整段（单次调用无妨，循环调用是 O(T²)）。
+    """
+    rms, hop, nfr = _frame_rms(wf, hop_samples)
+    if rms is None:
+        return 0.0
+    return _voiced_frac_from_frames(rms, hop, nfr, start, n_samples, k, sustain)
 
 
 def nonvoiced_candidates(wf: torch.Tensor, n_samples: int,
                          hop_samples: int = 1600,
                          frac: float = AUDIO_SEAM_BED_VOICED_FRAC) -> list:
-    """按位置升序列出所有「不撞语音」的候选窗起点（样本）。空列表 = 全撞语音。"""
+    """按位置升序列出所有「不撞语音」的候选窗起点（样本）。空列表 = 全撞语音。
+
+    O(候选数) 而非 O(T²)：整段帧 RMS 只算一次（见 ``_frame_rms``）。
+    """
+    rms, hop, nfr = _frame_rms(wf, hop_samples)
+    if rms is None:
+        return []
     total = int(wf.shape[-1])
     n = int(min(n_samples, total))
     if n <= 0:
         return []
-    hop = max(1, int(hop_samples))
     out = []
     s = 0
     while s + n <= total:
-        if bed_window_voiced_fraction(wf, s, n, hop) <= float(frac):
+        if _voiced_frac_from_frames(rms, hop, nfr, s, n, AUDIO_SEAM_BED_VOICED_K) <= float(frac):
             out.append(s)
         s += hop
     return out
@@ -927,6 +990,9 @@ def find_nonvoiced_bed_window(wf: torch.Tensor, n_samples: int,
       · ``prefer=<样本>`` ⇒ 取**离该点最近**的（给 E5 的 jitter 用）。
 
     全部候选都撞语音 ⇒ 返回 ``(-1, 1.0)``（由调用方决定退路，不在这里静默兜底）。
+
+    ⚠ **策略层入口是 ``pick_bed_window``** —— 它才是「首选窗 + 规避 + 退路」的**唯一**实现；
+    本函数只负责「在候选里按一种挑法取一个」。取床源的新代码请走 ``pick_bed_window``。
     """
     total = int(wf.shape[-1])
     n = int(min(n_samples, total))
@@ -942,6 +1008,90 @@ def find_nonvoiced_bed_window(wf: torch.Tensor, n_samples: int,
         if r > best_rms:
             best, best_rms = c, r
     return best, 0.0
+
+
+def bed_source_window_len(total: int, n_samples: int, tile_samples: int) -> int:
+    """取床源时**实际采样**的窗长（样本）：瓦片档 = 瓦片长，否则 = 补丁长。
+
+    为什么要有这个函数：窗长同时决定 ① 选窗器该看多长的一段、② report 按哪个窗算语音占比。
+    两处必须**同源** —— 否则会出现「报告说安全、实际取的那段撞了语音」（2026-09-21 立）。
+    """
+    total = int(max(0, int(total)))
+    W = int(tile_samples)
+    if W > 0:
+        return int(min(W, total))
+    return int(min(int(n_samples), total))
+
+
+def pick_bed_window(wf: torch.Tensor, n_samples: int,
+                    select: str = AUDIO_SEAM_BED_SELECT,
+                    prefer: Optional[int] = None,
+                    floor: float = 0.0,
+                    frac: float = AUDIO_SEAM_BED_VOICED_FRAC
+                    ) -> Tuple[int, bool, float, float]:
+    """**统一的床窗选取** —— 所有「从床源取窗」的路径都必须走它。
+
+    返回 ``(起点样本, 是否因撞语音换过窗, 首选窗语音占比, 最终窗语音占比)``。
+    （两个占比都要给：report 要能说清「首选窗撞了 X% ⇒ 已换到 Y 窗」，只报最终值等于隐瞒原因。）
+
+    首选窗（按语义）：
+      · ``prefer`` 给定（E5 按段号错开）⇒ 从该点起；
+      · ``select="tail"``（默认）⇒ 床源**尾部同长窗**（与缝天然连续）；
+      · 其它（``quiet``，0.5.0 旧口径）⇒ ``floor`` 限定的最静窗。
+
+    首选窗**撞语音**（占比 > ``frac``）⇒ 换到非语音候选：
+      · ``prefer`` ⇒ 起点映射成候选序号 ``(start // hop) % len(cands)`` —— **错开语义必须保留**，
+        若改成"取最饱满"或"取最静"，各段会退到同一个窗，E5 就没了靶（第一版踩过）；
+      · ``tail`` ⇒ 非语音候选里**能量最高**（避开语音，同时避开「最静窗近乎无内容」，见 771 行）；
+      · ``quiet`` ⇒ 非语音候选里**最静**（保持 quiet 的语义）。
+    **全部候选都撞语音** ⇒ 退回首选窗、``changed=False`` —— 调用方在 report 里显式告警，
+    **不 raise**（「素材本身以语音为底噪」是合法素材，raise 会把可用素材判死）。
+    """
+    total = int(wf.shape[-1])
+    n = int(min(int(n_samples), total))
+    if n <= 0:
+        raise ValueError("床声长度必须为正，得到 %d。" % int(n_samples))
+    hop = 1600                                   # 候选步长（50ms@32k），与既有实现一致
+    if prefer is not None:
+        start = int(max(0, min(int(prefer), max(0, total - n))))
+    elif str(select) == "tail":
+        start = max(0, total - n)
+    else:
+        start, _ = quietest_window(wf, n, floor=floor)
+    _rms, _hop, _nfr = _frame_rms(wf, hop)
+    def _vf(s):                                  # 帧 RMS 复用 ⇒ 不做 O(T²) 重算
+        if _rms is None:
+            return 0.0
+        return float(_voiced_frac_from_frames(_rms, _hop, _nfr, int(s), n,
+                                               AUDIO_SEAM_BED_VOICED_K))
+    vf_first = _vf(start)
+    if vf_first <= float(frac):
+        return int(start), False, float(vf_first), float(vf_first)
+    cands = nonvoiced_candidates(wf, n, hop, frac)
+    if not cands:
+        # 无解：**不静默兜底**。tail 档退回「最静窗」（= 语音残留最少的那段，旧行为），
+        # 其余档保持首选窗；两条都由调用方在 report 里带上 ⚠（占比 > 阈值）。
+        if prefer is None and str(select) == "tail":
+            alt, _ = quietest_window(wf, n, floor=floor)
+            return int(alt), int(alt) != int(start), float(vf_first), _vf(alt)
+        return int(start), False, float(vf_first), float(vf_first)
+    if prefer is not None:
+        # 错开语义保留：不同 prefer ⇒ 不同候选序号 ⇒ 各段窗仍互不相同。
+        alt = cands[(int(start) // hop) % len(cands)]
+    else:
+        # 候选窗能量：前缀和一次算全（O(候选数)）。
+        # 🔴 2026-09-21 性能修补：原先逐候选切窗重算 O(n) ⇒ 全静音素材上候选数 ~T/hop，
+        #    退化为 O(T²/hop) —— 与帧 RMS 那次（`_frame_rms`）同类，5 分钟床源会卡死主线程。
+        _ct = torch.tensor(cands, dtype=torch.long)
+        _ch = max(1, int(wf.numel()) // max(1, total))
+        _p = (wf ** 2).reshape(-1, total).sum(dim=0)
+        _c = torch.cat([_p.new_zeros(1), torch.cumsum(_p, dim=0)])
+        _wr = torch.sqrt((_c[_ct + n] - _c[_ct]).clamp_min(0.0) / (n * _ch))
+        if str(select) == "tail":
+            alt = int(_ct[int(torch.argmax(_wr))])       # 非语音候选里能量最高
+        else:
+            alt = int(_ct[int(torch.argmin(_wr))])       # quiet：保持「最静」语义
+    return int(alt), True, float(vf_first), _vf(alt)
 
 
 def _rms_db(x: torch.Tensor) -> float:
@@ -989,30 +1139,8 @@ def build_bed(wf: torch.Tensor, n_samples: int, tile_samples: int,
     if n <= 0:
         raise ValueError("床声长度必须为正，得到 %d。" % n)
     if tile_samples <= 0:
-        if start_override is not None:          # 🧪 E5：实验档指定起点（默认 None = 既有逻辑）
-            start = int(max(0, min(int(start_override), max(0, total - n))))
-            # 🔴 2026-09-21：jitter 指定的窗**也会撞语音**（实测 expE5 的 jitter=1.2 正好
-            #   撞上床源台词 ⇒ 听感「对白重叠」）。
-            #   错开语义**必须保留**（否则 E5 就没靶了）⇒ 不退到「最饱满窗」，
-            #   而是把「指定起点」映射成**合法候选的序号**：(start // hop) % len(cands)。
-            #   不同 jitter ⇒ 不同序号 ⇒ 各段窗仍不同，且每一段都避开了语音。
-            if bed_window_voiced_fraction(wf, start, min(n, total)) > AUDIO_SEAM_BED_VOICED_FRAC:
-                _c = nonvoiced_candidates(wf, min(n, total))
-                if _c:
-                    start = _c[(int(start) // 1600) % len(_c)]     # 1600 = 候选步长（50ms@32k）
-        elif select == "tail":
-            start = max(0, total - n)
-            # 🔴 2026-09-21 语音规避：尾部窗**撞台词**时换窗（实测撞法见常量区注释）。
-            #   退路优先级：非语音窗里能量最高 → floor 限定的最静窗 → 原尾部窗（不静默兜底）。
-            if bed_window_voiced_fraction(wf, start, min(n, total)) > AUDIO_SEAM_BED_VOICED_FRAC:
-                _alt, _ = find_nonvoiced_bed_window(wf, min(n, total))
-                if _alt >= 0:
-                    start = _alt
-                else:
-                    _q, _ = quietest_window(wf, min(n, total), floor=floor)
-                    start = _q
-        else:
-            start, _ = quietest_window(wf, min(n, total), floor=floor)
+        # 单窗档：tail / quiet / E5 错开，全部交给**同一个选窗器**（含语音规避）。
+        start, _, _, _ = pick_bed_window(wf, n, select=select, prefer=start_override, floor=floor)
         bed = wf[..., start:start + n]
     else:
         W, X = int(tile_samples), int(fade_samples)
@@ -1021,10 +1149,12 @@ def build_bed(wf: torch.Tensor, n_samples: int, tile_samples: int,
                 "瓦片环铺要求 0 < 边界淡变 %.3fs < 瓦片长 %.3fs。\n"
                 "    瓦片太短会退化成「同一段噪声原样重复」，反而听得出来。" % (X / 32000.0, W / 32000.0)
             )
-        if select == "tail":
-            start = max(0, total - W)
-        else:
-            start, _ = quietest_window(wf, min(W, total), floor=floor)
+        # 🔴 2026-09-21 修补（原缺口）：瓦片**也**必须过语音检查，且阈值更严 ——
+        #   瓦片会被自叠化环铺 k 次（k≈2–3），窗内任何一段语音都会被听成 k 遍。
+        #   旧代码只保护了 tile<=0 分支，而 tile>0 恰是产线脚本默认档（TILE_W=1.2）。
+        win = bed_source_window_len(total, n, W)
+        start, _, _, _ = pick_bed_window(wf, win, select=select, prefer=start_override,
+                                         floor=floor, frac=AUDIO_SEAM_BED_TILE_VOICED_FRAC)
         tile = wf[..., start:start + W]
         k = max(2, int(math.ceil((n - X) / float(W - X) - 1e-9)))
         w = torch.linspace(0.0, 1.0, X, device=wf.device, dtype=torch.float32)
@@ -1035,7 +1165,8 @@ def build_bed(wf: torch.Tensor, n_samples: int, tile_samples: int,
         bed = acc[..., :n]
     if int(bed.shape[-1]) < n:                  # 床源比 N 还短：循环凑够（防御，不炸）
         reps = int(math.ceil(n / max(1, int(bed.shape[-1]))))
-        bed = bed.repeat(1, reps)[..., :n]
+        # 任意 rank 通用（旧写法 ``repeat(1, reps)`` 只对 2D 成立）
+        bed = bed.repeat(*([1] * (bed.dim() - 1)), reps)[..., :n]
     return bed, start, float(bed.pow(2).mean().sqrt())
 
 
@@ -1083,13 +1214,23 @@ def audio_seam_patch(audio: Any, bed_audio: Any, patch: float = AUDIO_SEAM_PATCH
     floor = tgt * (10.0 ** (-AUDIO_SEAM_BED_FLOOR_DB / 20.0))
     # 🧪 E5：bed_jitter>0 时按段号错开床窗起点（治「各段头部 N 秒完全相同」）；
     #    默认 0 ⇒ start_override=None ⇒ 走既有逻辑，主干逐位不变。
+    #    🔴 2026-09-21 修补（原缺口）：**瓦片档也错开** —— 旧代码 `and tile<=0` 把 jitter 在
+    #      瓦片档**静默忽略**（不 print 不 raise），而 tile>0 恰是产线脚本默认档。
+    #      错开的对象是「实际取样那段窗」，故窗长按档位取（单窗 = 补丁长，瓦片 = 瓦片长）。
+    _tile_n = int(round(float(tile) * sr))
+    _bed_total = int(bed_wf.shape[-1])
+    _win = bed_source_window_len(_bed_total, n, _tile_n)
+    _frac = (AUDIO_SEAM_BED_TILE_VOICED_FRAC if _tile_n > 0
+             else AUDIO_SEAM_BED_VOICED_FRAC)
     _ov = None
-    if float(bed_jitter) > 0.0 and int(round(float(tile) * sr)) <= 0:
-        _ov = bed_jitter_start(int(bed_wf.shape[-1]), n, int(stage_index),
+    if float(bed_jitter) > 0.0:
+        _ov = bed_jitter_start(_bed_total, _win, int(stage_index),
                                float(bed_jitter), sr)
-    bed, start, bed_rms = build_bed(bed_wf, n, int(round(float(tile) * sr)), X,
+    start, _changed, _vf_first, _vf_final = pick_bed_window(
+        bed_wf, _win, select=select, prefer=_ov, floor=floor, frac=_frac)
+    bed, start, bed_rms = build_bed(bed_wf, n, _tile_n, X,
                                     select=select, floor=floor,
-                                    start_override=_ov)
+                                    start_override=start)
     bed_db = _rms_db(bed)
     # 电平对齐 + 峰值护栏，**一步做完**（不额外加处理层：少一层 = 少一层累计误差）
     g_db, clamped = 0.0, False
@@ -1116,16 +1257,24 @@ def audio_seam_patch(audio: Any, bed_audio: Any, patch: float = AUDIO_SEAM_PATCH
 
     tile_note = "，%.2fs 瓦片自叠化环铺" % float(tile) if float(tile) > 0 else ""
     mode_note = "尾部窗（与缝天然连续）" if str(select) == "tail" else "最静窗（旧口径·仅对照）"
-    # 🔴 2026-09-21：报出**实际使用窗**的语音占比，并对「已换窗」「仍撞语音」显式标注 ——
-    #   不静默：撞语音是可见的（否则会像 expE5 那样只能靠人耳发现重叠）。
-    _vf = bed_window_voiced_fraction(bed_wf, start, n)
-    _tail = max(0, int(bed_wf.shape[-1]) - n)
-    voice_note = "｜ 🎙 窗内有声帧占比 %.0f%%" % (100.0 * _vf)
-    if _vf > AUDIO_SEAM_BED_VOICED_FRAC:
-        voice_note += (" ⚠ **撞语音**（该窗含对白 ⇒ 开头 %.2fs 会把它带进来，可能听到重叠）"
-                       % float(patch))
-    elif str(select) == "tail" and start != _tail and _ov is None:
-        voice_note += "；尾部窗原撞语音 ⇒ 已换到非语音窗 @%.2fs" % (start / float(sr))
+    if _ov is not None:
+        mode_note = "E5 错开窗（按段号错开）"
+    elif _changed and str(select) == "tail":
+        # 🔴 2026-09-21 措辞诚实化：已换窗就别再自称「尾部窗」—— 实测首行曾打出
+        #   「尾部窗…@0.80s」（0.80 并非尾部），靠后续 🎙 行才能纠正 = 前后矛盾。
+        mode_note = "非语音窗（首选尾窗撞语音，已避开）"
+    # 🔴 2026-09-21：报出**实际取样窗**的语音占比，并对「已换窗」「仍撞语音」显式标注 ——
+    #   不静默：撞语音必须可见（否则会像 expE5 那样只能靠人耳发现重叠）。
+    #   瓦片档按**瓦片窗**（_win）算，与 ① 选窗器看的窗 ② 实际取样 三者同源。
+    _vf = _vf_final
+    voice_note = "｜ 🎙 取样窗内有声帧占比 %.0f%%（判据阈值 %.0f%%）" % (
+        100.0 * _vf, 100.0 * _frac)
+    if _vf > _frac:
+        voice_note += (" ⚠ **撞语音**（全源无非语音窗可选）：该窗含对白 ⇒ 开头 %.2fs 会把它"
+                       "带进来，可能听到重叠" % float(patch))
+    elif _changed:
+        voice_note += ("；首选窗原撞语音（占比 %.0f%%）⇒ 已换到非语音窗 @%.2fs"
+                       % (100.0 * _vf_first, start / float(sr)))
     rep = ("[H3 Relay] 音频缝：头部补丁 %.2fs ← 床源%s @%.2fs%s，边界交叉淡变 %.2fs\n"
            "           床声电平 %.1f dBFS → 对齐目标 %.1f dBFS（%s %+.1f dB%s）\n"
            "           音频 %d → %d 采样点（长度守恒，零 A/V 位移）%s%s"
