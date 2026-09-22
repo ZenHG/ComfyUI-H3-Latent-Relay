@@ -77,6 +77,18 @@
 | ⚠️ 未决 | GPL-3.0 对"进程内 import 的插件"是否构成派生作品，**既无司法判例，也无 ComfyUI 官方书面确认**。插件耦合度比"跨进程 arm's length 通信"更紧，严格解释下存在被主张的空间。需要确定性的场景（企业合规审查 / 再分发）请自行取得法律意见 |
 | 更正记录 | 2026-09-19 之前本文件把宿主写成 **Apache-2.0 —— 那是错的**，现已更正；README「📄 许可与出处」同步 |
 
+### D. ✅ 运行时**可选**依赖：`Comfyui_Minimax_h3_latent_Upscaler`（MIT）
+
+| 项 | 内容 |
+|---|---|
+| 上游 | `LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler`（本机 `custom_nodes/` 内，git remote 一手核对）；**LICENSE 首行 `MIT License`，`Copyright (c) 2026 LBH-123-AI`** |
+| 权重出处 | `https://huggingface.co/LBH-123-AI/Minimax_h3_latent_upscaler` → 放 `ComfyUI/models/latent_upscale_models/` |
+| 本包用它的方式 | `H3RelayLatentUpscale` = **适配层**，运行时从 ComfyUI 节点注册表取 `MinimaxH3LatentUpscaler3D` 的类并调用其 `execute()`（**不 import 其包内 `nodes/` 子包** —— 与 ComfyUI 根 `nodes` 同名，迟早撞车）；**零 patch、不改其源码、不复制其模型代码** |
+| 模型路径 | **优先直接调用作者的 `scan_models()`** ⇒ 装了上游节点即**共用同一份权重文件与同一目录**，本包不另立目录、不做第二份拷贝 |
+| 数学出处 | 分块拼接（两侧 replicate 帧填充 + 线性渐变权重 + 按累计权重归一）的**口径**与作者 `forward()` 内部一致，以免"换个实现换条缝"；本包重写为 CPU 可测函数（`relay_core.upscale_chunk_plan` / `temporal_tile_upscale`），未复制其神经网络结构代码 |
+| 未装会怎样 | 本包**照常加载、其余 7 个节点功能不变**；只有使用 `H3RelayLatentUpscale` 时抛 RuntimeError，把仓库地址与 HF 权重地址写进报错里（不静默降级、不假成功） |
+| 二次开发注意 | MIT 允许闭源/商用/再分发，**唯一义务 = 保留版权声明与许可文本**；若你把放大模型的实现复制进自己的发行版（本包**没有**），请随件附上作者的 LICENSE |
+
 ## 二、论文与公开算法（仅算法出处，无代码）
 
 | 出处 | 用在哪 |

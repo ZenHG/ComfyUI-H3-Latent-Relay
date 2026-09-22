@@ -654,9 +654,9 @@ ck("K12b 逐层审计：报告含「↳ …后：段头亮度 … 高频 …」"
 
 # K13~K14 —— 2026-09-19：拼接**复合在第 8 节点内**（不新增轮子；GG 指令）
 _SeamNode = N.H3RelayAudioSeam
-ck("K13 AudioSeam 第 3 路输出 joined + 拼接旋钮折叠（复合而非新节点；仍 7 节点）",
+ck("K13 AudioSeam 第 3 路输出 joined + 拼接旋钮折叠（复合而非新节点；当时 7 个，0.6.8 起 8 个）",
    _SeamNode.RETURN_NAMES == ("audio", "report", "joined")
-   and len(N.NODE_CLASS_MAPPINGS) == 7
+   and len(N.NODE_CLASS_MAPPINGS) == 8
    and all(_SeamNode.INPUT_TYPES()["optional"][k][1].get("advanced")
            for k in ("join_curve", "join_prime_ms", "join_cross_ms")))
 _srq = 32000
@@ -782,10 +782,10 @@ import tempfile as _tf                                                   # noqa:
 
 _it_l = N.H3RelayAudioSeam.INPUT_TYPES()
 _ol = _it_l["optional"]
-ck("L1 H3RelayAudioSeam 已注册（7 节点）+ 显示名以 🔗 开头",
+ck("L1 H3RelayAudioSeam 已注册（8 节点）+ 显示名以 🔗 开头",
    N.NODE_CLASS_MAPPINGS.get("H3RelayAudioSeam") is N.H3RelayAudioSeam
    and N.NODE_DISPLAY_NAME_MAPPINGS["H3RelayAudioSeam"].startswith("🔗")
-   and len(N.NODE_CLASS_MAPPINGS) == 7,
+   and len(N.NODE_CLASS_MAPPINGS) == 8,
    "%d 节点" % len(N.NODE_CLASS_MAPPINGS))
 ck("L2 默认全关（patch=0 / tile=0 / fade=0.25）+ OUTPUT_NODE（否则第 1 段床源永不落盘）",
    _ol["patch_seconds"][1]["default"] == 0.0 and _ol["tile_seconds"][1]["default"] == 0.0

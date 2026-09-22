@@ -49,6 +49,8 @@
      音频代际 2 → 1（PCM 边车直读 ⇒ 逐位一致；AAC 默认 256k）；
      音频逐段去 priming 对齐/退路（重编码）/history 落盘条目筛选/多生产者候选裁决/
      PyAV 版本兼容/CLI 入口（合成 mp4 + 合成边车，零 GPU）
+ 27. 画质域 AV latent 分块放大（0.6.8）：块数自选的合规边界（每块 ≥ 2·overlap+1）、
+     单块=整段放大恒等、分块边界无跳变、帧数不许被改、上游口径常量不漂移（拆包/回包见节点）
 """
 
 import importlib.util
@@ -2779,6 +2781,139 @@ else:
           and _fast14["pts_contiguous"] and _deep14["pts_contiguous"]
           and _fast14["dts_strictly_increasing"] and _deep14["dts_strictly_increasing"],
           "fast=%d deep=%d" % (_fast14["frames"], _deep14["frames"]))
+
+# ============================ 27 · 画质域 AV latent 分块放大 ============================
+# 上游学习式 3D 放大器只吃普通 [B,C,T,H,W]（接不住 NestedTensor）且分块写死 32 帧，
+# 故本包自持「块数自选 + 重叠加权拼接」。fake 放大器 = nearest ×2（逐帧独立 ⇒ 可求解析解）。
+
+def _sr2(seg):
+    return torch.nn.functional.interpolate(seg, scale_factor=(1, 2, 2), mode="nearest")
+
+
+_T27, _H27, _W27 = 57, 8, 6
+_v27 = (torch.linspace(0.0, 1.0, _T27).view(1, 1, _T27, 1, 1)
+        * torch.linspace(0.0, 1.0, _W27 * _H27).view(1, 1, 1, _H27, _W27)).to(torch.float32)
+
+_p1 = CORE.upscale_chunk_plan(_T27, chunks=1)
+_p2 = CORE.upscale_chunk_plan(_T27, chunks=2)
+_p9 = CORE.upscale_chunk_plan(_T27, chunks=9, overlap=0)   # 9 块要 overlap=0 才合规（每块 7 帧 < 2*5+1）
+check("27.1 块数→块长：chunks=1→1 块；=2→29 帧/2 块；=9→7 帧/9 块（ceil 不多出空块）",
+      (_p1["n_chunks"], _p1["chunk_frames"]) == (1, _T27)
+      and (_p2["n_chunks"], _p2["chunk_frames"]) == (2, 29)
+      and _p9["n_chunks"] == 9 and _p9["chunk_frames"] == 7,
+      "p1=%s p2=%s p9=%s/%s" % (_p1["n_chunks"], _p2["chunk_frames"], _p9["n_chunks"], _p9["chunk_frames"]))
+
+check("27.2 spans 无缝覆盖：首块从 0 起、末块到 T 止、相邻块的 out_start == 前块 out_end 之前（有重叠）或 == 前块 out_end（overlap=0）",
+      _p2["spans"][0]["out_start"] == 0 and _p2["spans"][-1]["out_end"] == _T27
+      and all(b["out_start"] <= a["out_end"] for a, b in zip(_p2["spans"], _p2["spans"][1:])))
+
+_ov0 = CORE.upscale_chunk_plan(_T27, chunks=4, overlap=0)
+check("27.3 overlap=0 ⇒ 各块正好平铺（Σ 帧数 == T，blend 全 0）",
+      sum(s["out_end"] - s["out_start"] for s in _ov0["spans"]) == _T27
+      and all(s["blend_head"] == 0 and s["blend_tail"] == 0 for s in _ov0["spans"]))
+
+check("27.4 合法最大块数 = T // (2·overlap+1)：T=57 overlap=5 → 5",
+      CORE.max_upscale_chunks(57, 5) == 5 and CORE.max_upscale_chunks(57, 0) == 57)
+
+expect_raise("27.5 超上限的块数必须 raise 并给出合法上限",
+             lambda: CORE.upscale_chunk_plan(57, chunks=6, overlap=5), "最大合法块数 = 5")
+expect_raise("27.6 chunks<1 / overlap<0 / total<1 一律 raise（不静默改参数）",
+             lambda: CORE.upscale_chunk_plan(57, chunks=0))
+
+_o1 = CORE.temporal_tile_upscale(_v27, _sr2, _p1)
+_whole = _sr2(_v27)
+check("27.7 单块 == 整段直接放大（恒等，逐位）", torch.equal(_o1, _whole),
+      "max|d|=%.3e" % float((_o1 - _whole).abs().max()))
+
+_chunked = CORE.temporal_tile_upscale(_v27, _sr2, CORE.upscale_chunk_plan(_T27, chunks=4))
+check("27.8 分 4 块 == 整段一次过（nearest 逐帧独立 ⇒ 线性加权必须精确复原）",
+      _chunked.shape == _whole.shape
+      and float((_chunked - _whole).abs().max()) < 1e-4,
+      "shape=%s max|d|=%.3e" % (tuple(_chunked.shape), float((_chunked - _whole).abs().max())))
+
+check("27.9 只放大空间、时间维不动：T 保持 57、H/W 翻倍",
+      tuple(_chunked.shape) == (1, 1, _T27, _H27 * 2, _W27 * 2), str(tuple(_chunked.shape)))
+
+expect_raise("27.10 放大器改变帧数 ⇒ 当场 raise（否则拼接静默错位）",
+             lambda: CORE.temporal_tile_upscale(
+                 _v27, lambda s: s[:, :, :-1], CORE.upscale_chunk_plan(_T27, chunks=3)),
+             "改变了帧数")
+expect_raise("27.11 plan 与 latent 帧数不符 ⇒ raise（不许拿错尺子拼）",
+             lambda: CORE.temporal_tile_upscale(_v27[:, :, :20], _sr2, _p2), "与 latent 的")
+expect_raise("27.12 秩不对（3D）⇒ raise",
+             lambda: CORE.temporal_tile_upscale(_v27.squeeze(0), _sr2,
+                                                 CORE.upscale_chunk_plan(_T27, chunks=2)))
+
+_s4 = _v27[:, :, 0]                                  # [B,C,H,W] 单帧
+check("27.15 4D 单帧进 → 4D 出（与上游同口径），且空间确实翻倍",
+      tuple(_s4.shape) == (1, 1, _H27, _W27)
+      and tuple(CORE.temporal_tile_upscale(_s4, _sr2,
+              CORE.upscale_chunk_plan(1, chunks=1, overlap=0)).shape) == (1, 1, _H27 * 2, _W27 * 2))
+
+check("27.13 上游口径常量锁死（换实现不许换接缝）：overlap=5(=temporal_kernel) / 默认块长=32",
+      CORE.UPSCALE_OVERLAP_DEFAULT == 5 and CORE.UPSCALE_CHUNK_FRAMES_DEFAULT == 32)
+
+_r27 = CORE.upscale_chunk_plan(_T27, chunks=3)
+check("27.14 plan 回报字段齐备（给用户核数值：requested/实际块数/块长/overlap）",
+      all(k in _r27 for k in ("requested_chunks", "n_chunks", "chunk_frames", "overlap", "spans"))
+      and _r27["requested_chunks"] == 3 and _r27["n_chunks"] == 3)
+
+
+# --- 适配层本身：注入假上游类，验拆包 / 回包 / 音频守恒 / 报错文案 ---
+#     ⚠ 不打 ComfyUI 注册表（测试环境里 `import nodes` 会绑到本包自己的 nodes.py，
+#        正是 `_comfy_registry()` 要防的影子情形）⇒ 直接换掉本包那个接缝函数。
+
+
+class _FakeUp:
+    """替身上游放大节点：只做 nearest ×2（时间维不动），并记录被怎么调用。"""
+    calls = []
+
+    @classmethod
+    def execute(cls, latent, model_name, mode, align, enable_temporal_chunking,
+                force_unload, device, precision):
+        cls.calls.append(dict(model_name=model_name, mode=mode, align=align,
+                              chunking=enable_temporal_chunking, device=device))
+        s = latent["samples"]
+        return ({"samples": torch.nn.functional.interpolate(s, scale_factor=(1, 2, 2), mode="nearest")},)
+
+
+_REG = {"MinimaxH3LatentUpscaler3D": _FakeUp}
+_ORIG_REGFN = NODES._comfy_registry
+NODES._comfy_registry = lambda: _REG
+try:
+    _lat27 = av_latent(24, a_ticks=16, seed=7, w=6, h=8)
+    _a0 = CORE.audio_from_latent(_lat27).clone()
+    _FakeUp.calls.clear()
+    _out27, _rep27 = NODES.H3RelayLatentUpscale().upscale(
+        _lat27, "fake_h3_3d.safetensors", "scale by multiplier", 2.0, 1280, 704, 1.0,
+        chunks=2, overlap=5, align=32, precision="fp32", device="cpu", force_unload=False)
+    _v27b = CORE.video_from_latent(_out27)
+    _a27b = CORE.audio_from_latent(_out27)
+    check("27.16 适配器：拆包→放大→回包双流，音频**逐位不变**、T 不变、宽高翻倍",
+          torch.equal(_a27b, _a0) and tuple(_v27b.shape) == (1, 4, 24, 16, 12),
+          "video=%s audio=%s" % (tuple(_v27b.shape), tuple(_a27b.shape)))
+    check("27.17 分块由本包做 ⇒ 传上游必须 enable_temporal_chunking=False（调了 2 次 = 2 块）",
+          len(_FakeUp.calls) == 2 and all(c["chunking"] is False for c in _FakeUp.calls)
+          and _FakeUp.calls[0]["mode"] == {"mode": "scale by multiplier", "scale": 2.0}
+          and _FakeUp.calls[0]["model_name"] == "fake_h3_3d.safetensors",
+          str(_FakeUp.calls))
+    check("27.18 report 数字自证（请求/实际块数、T、音频形状都在）",
+          "块数 请求2→实际2" in _rep27 and "T=24" in _rep27 and "(1, 2, 2, 16)" in _rep27,
+          _rep27[:120])
+    expect_raise("27.19 非法块数 ⇒ raise 且报错给出最大合法块数（绝不偷改参数）",
+                 lambda: NODES.H3RelayLatentUpscale().upscale(
+                     _lat27, "fake", "scale by multiplier", 2.0, 1280, 704, 1.0,
+                     chunks=5, overlap=5, align=32, precision="fp32", device="cpu", force_unload=False),
+                 "最大合法块数")
+    NODES._comfy_registry = lambda: {}
+    expect_raise("27.20 未装上游 ⇒ 报错把作者仓库与 HF 权重地址都写出来（不静默、不假成功）",
+                 lambda: NODES.H3RelayLatentUpscale().upscale(
+                     _lat27, "fake", "scale by multiplier", 2.0, 1280, 704, 1.0,
+                     chunks=1, overlap=5, align=32, precision="fp32", device="cpu", force_unload=False),
+                 "huggingface.co/LBH-123-AI")
+finally:
+    NODES._comfy_registry = _ORIG_REGFN
+
 
 print()
 print("=" * 78)

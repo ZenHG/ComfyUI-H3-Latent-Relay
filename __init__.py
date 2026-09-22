@@ -12,6 +12,8 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）。
 
 本包不依赖任何第三方 H3 节点包：所用协议（minimax_keyframes / minimax_refs /
 resolved_frame_index）由 ComfyUI 原生消费。
+唯一例外 = `H3RelayLatentUpscale`（它是 MIT 上游节点 `MinimaxH3LatentUpscaler3D` 的
+AV 打包 latent 适配器）：**未装那个包时本包照常加载**，只有该节点在被使用时报可照做的安装指引。
 
 节点：
     🔗 H3 续接 Latent 存    H3RelayLatentSave     本段 latent 落盘（下一段的接力棒）
@@ -23,6 +25,7 @@ resolved_frame_index）由 ComfyUI 原生消费。
     🔗 H3 续接后处理 Post   H3RelayPost           画质域后处理（跨段统计匹配/低频残差/直方图+白平衡/反卷积/高频迁移/糊区锐化/自适应糊区补偿；互斥组 + 逐层可审计）
     🔗 H3 续接音频缝        H3RelayAudioSeam      音频域：上一段环境声补本段头（床声电平对齐，长度守恒，零 A/V 位移）+ joined 整片拼接（J-cut 时间轴守恒）
     🔗 H3 续接连跑 Chain    H3RelayChain          UI 自动连跑（段号自动推进 + 自动排队 + **词分发** + **自动拼接成片**）
+    🔍 H3 潜空间分块放大    H3RelayLatentUpscale  画质域：拆 AV 打包 latent → 逐块调学习式 3D 放大器（**零去噪、时间维不动**）→ 回包保留原音频；块数自选、分块==整段
 
 后端路由（不是节点；由 Chain 的按钮触发）：
     POST /h3relay/concat    把已跑完的 N 段拼成一条成片（画面流拷贝无损 + 音频逐段对齐 + 断言）
@@ -45,7 +48,7 @@ WEB_DIRECTORY = "./web"
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
 
-__version__ = "0.6.7"
+__version__ = "0.6.8"
 
 
 # ============================================================================

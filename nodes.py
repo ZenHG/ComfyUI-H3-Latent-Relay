@@ -4,7 +4,7 @@
 # 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 """H3 Relay Kit · 节点层
 
-七个节点，覆盖"用作者的续接方式"所需的全部接线：
+八个节点（0.6.8 起）：续接七件套 + 一个画质域潜空间放大适配器，覆盖"用作者的续接方式"所需的全部接线：
 
   🔗 H3 续接 Latent 存   —— 把本段的 AV latent 落盘，供下一段读
   🔗 H3 续接 Latent 读   —— 读回上一段的 AV latent
@@ -125,6 +125,270 @@ def _pcm_sidecar(audio, enabled: bool):
     except Exception as exc:      # noqa: BLE001
         return None, ("\n           ⚠ PCM 边车写入失败（**不影响本段产物**，拼成片会自动"
                       "退回 mp4 解码）：%r" % (exc,))
+
+
+# ==================== 画质域 · AV latent 分块放大（0.6.8）====================
+
+_UPSCALER_NODE = "MinimaxH3LatentUpscaler3D"
+_UPSCALER_MODELS_URL = "https://huggingface.co/LBH-123-AI/Minimax_h3_latent_upscaler"
+
+
+
+
+def _comfy_registry() -> dict:
+    """ComfyUI 根 `nodes` 模块的 `NODE_CLASS_MAPPINGS`。
+
+    ⚠ 不能直接 `import nodes` 就算数：ComfyUI 装载自定义节点时会把**本包目录**插进
+    ``sys.path[0]``，而本包自己就有 ``nodes.py`` ⇒ 早期/测试环境下 `import nodes`
+    可能绑到**我们自己这份**（影子模块），拿到的注册表里没有上游节点，就会假报「未装上游」。
+    这里按「模块文件是否真在 ComfyUI 根」验身，验不上就退到已加载模块里找真正那份
+    （**绝不重复 exec 宿主源码** —— 那玩意副作用不可控）。
+    """
+    import os
+    import sys
+
+    import nodes as _n
+    root = os.path.normcase(os.path.abspath(str(getattr(folder_paths, "base_path", "") or "")))
+    target = os.path.join(root, "nodes.py")
+
+    def _at_root(mod):
+        f = os.path.normcase(os.path.abspath(str(getattr(mod, "__file__", "") or "")))
+        return f == target and getattr(mod, "NODE_CLASS_MAPPINGS", None) is not None
+
+    if _at_root(_n):
+        return _n.NODE_CLASS_MAPPINGS or {}
+    for _name, mod in list(sys.modules.items()):
+        if _at_root(mod):
+            return mod.NODE_CLASS_MAPPINGS or {}
+    raise RuntimeError(
+        "取不到 ComfyUI 的节点注册表（ComfyUI 根的 nodes 模块没加载？）。\n"
+        "    本节点要在 ComfyUI 进程内运行，不能脱离宿主单跑。")
+
+
+def _upscaler_cls():
+    """取上游学习式 3D 放大节点类（MIT，LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler）。
+
+    走 ComfyUI 的节点注册表而不是 import 它的包 —— 那个包内有 `nodes/` 子包，
+    与 ComfyUI 根 `nodes` 模块**同名**，按路径 import 迟早撞车。
+    """
+    cls = _comfy_registry().get(_UPSCALER_NODE)
+    if cls is None:
+        raise RuntimeError(
+            "本节点是「%s」的 AV 打包 latent 适配器，需要先装作者的节点包（MIT）：\n"
+            "    git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git\n"
+            "    放进 ComfyUI/custom_nodes/ 后重启 ComfyUI。\n"
+            "权重与上面那个包共用同一目录 models/latent_upscale_models/，从作者处下载：\n"
+            "    %s" % (_UPSCALER_NODE, _UPSCALER_MODELS_URL))
+    return cls
+
+
+def _upscaler_module():
+    try:
+        cls = _upscaler_cls()
+    except RuntimeError:
+        return None
+    import sys as _sys
+
+    return _sys.modules.get(getattr(cls, "__module__", None))
+
+
+def _upscale_model_names() -> list:
+    """放大权重清单 —— **优先直接调原作者的 `scan_models()`**。
+
+    作者的目录就是 ComfyUI 标准的 `models/latent_upscale_models/`，过滤规则是
+    `.pth/.safetensors` ⇒ 装了上游节点就**共用同一份权重文件**，本包不另立目录、不复制第二份。
+    没装上游（本包照常加载）时按同一条规则自查。
+    """
+    mod = _upscaler_module()
+    scan = getattr(mod, "scan_models", None)
+    if callable(scan):
+        try:
+            names = [str(n) for n in (scan() or [])]
+            if names:
+                return names
+        except Exception as e:
+            print("[H3 Relay] 上游 scan_models() 失败，退回本包自查：%r" % e)
+    names = [str(n) for n in (folder_paths.get_filename_list("latent_upscale_models") or [])
+             if os.path.splitext(str(n))[1].lower() in (".pth", ".safetensors")]
+    return names or ["(权重缺失：见 model_name 提示行的下载指引)"]
+
+
+def _upscale_model_hint() -> str:
+    return ("【填什么】H3 潜空间放大权重，目录 = ComfyUI/models/latent_upscale_models/"
+            "（与原作者节点同一个目录、同一份文件，本包不另建目录）。\n"
+            "📥 权重请从作者处下载：%s\n"
+            "    放好后重启 ComfyUI 才会出现在下拉里。\n"
+            "⚠ 不是普通 ESRGAN 放大模型 —— 那些与本节点架构不匹配。" % _UPSCALER_MODELS_URL)
+
+
+class H3RelayLatentUpscale:
+    """🔍 画质域 · H3 AV latent **分块放大**（学习式 3D 潜空间放大，**零去噪**，块数自选）。
+
+    为什么要有这个节点（2026-09-22，全流程 PREVIEW 真跑撞出来的）：
+      上游 `MinimaxH3LatentUpscaler3D` ① **只吃普通 [B,C,T,H,W]**，直接喂 H3 的
+      **AV 打包 latent（NestedTensor）会当场炸** `'NestedTensor' object has no attribute 'dim'`
+      （实测：一采+二采全跑完，到 SR 那步才死）；② 内部分块**写死 32 帧**，用户没法按显存调。
+      本节点 = 「拆包 → 逐块调上游 → 回包」的适配层，**零 patch 第三方包**。
+
+    性质（与上游一致，实测核过源码）：
+      · **不产生任何去噪/重采样** —— 只放大空间，**时间维原样不动**（`target_size=(t, H2, W2)`）
+        ⇒ 钉住区逐位连续、口型、表演都不被改写；帧数域不变 ⇒ TrimAV 的 22 帧裁量照旧。
+      · **音频流完全不碰** ⇒ 回包时原样带过，「音频不走 SR」是结构性成立，不是靠旁路接线。
+      · 分块只是**显存/时间**的取舍：块内是模型的全部工作集 ⇒ 峰值显存 = 一块。
+        `chunks=1` = 整段一次过（最快、最省计算，最吃显存）。
+      · 拼接数学与上游同口径（两侧 replicate 填充 + 线性渐变权重 + 按累计权重归一），
+        并有单测锁「分块结果 == 整段结果」（见 tests 第 27 组）⇒ **换块数不换画面**。
+
+    ⚠ 域纪律：本节点属**画质域**（与 `H3RelayPost` 同域，一个动 latent 一个动像素）；
+      时间轴（裁重叠）仍归 `H3RelayTrimAV`，音频仍归 `H3RelayAudioSeam`。
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "latent": ("LATENT", {
+                    "tooltip": "【接法】接本段采样器（或二采）的输出，原样拉线 —— 打包 AV latent 与普通 latent 都吃。\n"
+                               "⚠ 续接契约（落盘给下一段的 latent）应当仍取**放大前**的原生 latent：\n"
+                               "    下段桥拷的是原生域数据，若拷放大后的再过一次放大 = 双重放大必漂。",
+                }),
+                "model_name": (_upscale_model_names(), {"tooltip": _upscale_model_hint()}),
+                "mode": (["scale by multiplier", "target dimensions", "megapixels"], {
+                    "tooltip": "【怎么选】① ×倍数：给个系数（最常用）；② 目标尺寸：直填宽×高（平台规格，如 720×1280）；"
+                               "③ 兆像素：按预算定档（1.0 / 2.0 / 4.0 MP）。\n"
+                               "三种都由**下面的对应参数**决定，其余参数忽略。",
+                }),
+                "scale": ("FLOAT", {
+                    "default": 2.0, "min": 1.0, "max": 4.0, "step": 0.05,
+                    "tooltip": "【×倍数模式】放大系数，1.0 = 不变。⚠ 本节点只放大不缩小（<1 会由上游报错）。",
+                }),
+                "width": ("INT", {
+                    "default": 1280, "min": 64, "max": 8192, "step": 32,
+                    "tooltip": "【目标尺寸模式】目标**像素**宽（自动收边到 align 的倍数）。",
+                }),
+                "height": ("INT", {
+                    "default": 704, "min": 64, "max": 8192, "step": 32,
+                    "tooltip": "【目标尺寸模式】目标**像素**高（自动收边到 align 的倍数）。",
+                }),
+                "megapixels": ("FLOAT", {
+                    "default": 1.0, "min": 0.06, "max": 16.0, "step": 0.05,
+                    "tooltip": "【兆像素模式】目标总像素（MP）。12GB 卡建议 ≤1.5；显存吃紧就调小。",
+                }),
+                "chunks": ("INT", {
+                    "default": 1, "min": 1, "max": 64, "step": 1,
+                    "tooltip": "【显存旋钮】沿时间维分几块跑。**1 = 整段一次过**（最快，最吃显存）。\n"
+                               "显存不足就加大它，画面上与 1 块等价（有单测锁这条）。\n"
+                               f"上限受重叠约束：每块至少 2×overlap+1 帧 ⇒ 最大合法块数会写进输出 report，超了直接报错不偷改。",
+                }),
+                "overlap": ("INT", {
+                    "default": CORE.UPSCALE_OVERLAP_DEFAULT, "min": 0, "max": 16, "step": 1,
+                    "tooltip": "【块间重叠】两侧各留几帧做渐变混合。默认 5 = 上游模型的 3D 时间核（temporal_kernel）。\n"
+                               "分块（chunks>1）时才起作用；0 = 硬切不混合（只在你自己确认无接缝问题时用）。",
+                }),
+                "align": ("INT", {
+                    "default": 32, "min": 1, "max": 512, "step": 1,
+                    "tooltip": "【对齐网格】输出宽高收边到此的倍数。32 是 H3 放大模型的硬要求，别改小。",
+                }),
+                "precision": (["bf16", "fp16", "fp32"], {
+                    "default": "bf16",
+                    "tooltip": "【精度】bf16/fp16 省显存；fp32 最稳但慢。与权重自身精度一致最保险。",
+                }),
+                "device": (["cuda", "rocm", "cpu"], {
+                    "default": "cuda",
+                    "tooltip": "【算在哪】cpu 档只用于排查，实际慢得多。",
+                }),
+                "force_unload": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "【跑完卸载】把放大模型退回 CPU 腾显存。⚠ 分多块时开启会反复装卸（更慢），\n"
+                               "所以默认关；单块且后面还要接采样器时才开。",
+                }),
+            },
+        }
+
+    RETURN_TYPES = ("LATENT", "STRING")
+    RETURN_NAMES = ("latent", "report")
+    FUNCTION = "upscale"
+    CATEGORY = CATEGORY
+    DESCRIPTION = ("H3 AV latent 分块放大：拆包→逐块调上游学习式 3D 放大器（零去噪、只放大空间、时间维不动）"
+                   "→回包保留原音频；块数自选，分块与整段结果等价。")
+
+    def upscale(self, latent, model_name, mode, scale, width, height, megapixels,
+                chunks, overlap, align, precision, device, force_unload):
+        import time
+        import torch
+
+        up_cls = _upscaler_cls()
+        src = latent["samples"] if isinstance(latent, dict) else latent
+        parts = CORE.streams_from_latent(latent)
+        video = parts[0]
+        audio = parts[1] if len(parts) > 1 else None
+        if video.dim() == 4:
+            n_frames = 1
+        elif video.dim() == 5:
+            n_frames = int(video.shape[2])
+        else:
+            raise ValueError("期望 latent [B,C,T,H,W]（或单帧 [B,C,H,W]），得到 %s。" % (tuple(video.shape),))
+
+        plan = CORE.upscale_chunk_plan(n_frames, chunks=int(chunks), overlap=int(overlap))
+        cfg = {"mode": mode}
+        if mode == "scale by multiplier":
+            cfg["scale"] = float(scale)
+        elif mode == "target dimensions":
+            cfg["width"] = int(width)
+            cfg["height"] = int(height)
+        elif mode == "megapixels":
+            cfg["megapixels"] = float(megapixels)
+        else:
+            raise ValueError("未知 mode=%r（可选：scale by multiplier / target dimensions / megapixels）。" % mode)
+
+        if device == "cuda" and torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+
+        t0 = time.time()
+        calls = [0]
+
+        def _one(seg: "torch.Tensor") -> "torch.Tensor":
+            calls[0] += 1
+            r = up_cls.execute(latent={"samples": seg}, model_name=model_name, mode=cfg,
+                              align=int(align), enable_temporal_chunking=False,
+                              force_unload=bool(force_unload), device=device, precision=precision)
+            r = getattr(r, "result", r)
+            d = r[0] if isinstance(r, (tuple, list)) else r
+            out = d["samples"] if isinstance(d, dict) else d
+            if not torch.is_tensor(out):
+                raise ValueError("上游放大器没返回张量（得到 %s）—— 检查权重与 models/latent_upscale_models/。" % type(out))
+            return out.unsqueeze(2) if out.dim() == 4 else out
+
+        v2 = CORE.temporal_tile_upscale(video, _one, plan)
+        dt = time.time() - t0
+
+        if int(v2.shape[-1]) == int(video.shape[-1]) and int(v2.shape[-2]) == int(video.shape[-2]):
+            print("[H3 Relay] 潜空间放大：目标尺寸与输入相同 ⇒ 原样直通（T=%d，latent %dx%d 未变）"
+                  % (n_frames, int(video.shape[-1]), int(video.shape[-2])))
+
+        samples_out = v2 if audio is None else CORE._nested_pair(v2, audio, template=src)
+        packed = {"samples": samples_out}
+
+        # latent→像素 的倍数由上游定义，我们不自已猜一个
+        import sys as _sys
+        _mod = _sys.modules.get(type(up_cls).__module__)
+        vae_ds = int(getattr(_mod, "VAE_DOWNSAMPLE", 0) or 0)
+        px = (" | 像素域 %dx%d → %dx%d" % (int(video.shape[-1]) * vae_ds, int(video.shape[-2]) * vae_ds,
+                                           int(v2.shape[-1]) * vae_ds, int(v2.shape[-2]) * vae_ds)) if vae_ds else ""
+        peak = ""
+        if device == "cuda" and torch.cuda.is_available():
+            peak = " | 显存峰值 %.1f MB" % (torch.cuda.max_memory_allocated() / 1024 ** 2)
+        report = ("放大 %dx%d → %dx%d latent（align=%d）%s | 时间维不动 T=%d | "
+                  "块数 请求%d→实际%d（每块 %d 帧，overlap %d）| 音频流原样 %s | 上游调用 %d 次 | "
+                  "精度 %s/%s | force_unload=%s | 合法块数上限 %d%s | %.1fs"
+                  % (int(video.shape[-1]), int(video.shape[-2]), int(v2.shape[-1]), int(v2.shape[-2]),
+                     int(align), px, n_frames, int(chunks), plan["n_chunks"], plan["chunk_frames"],
+                     int(overlap),
+                     tuple(audio.shape) if audio is not None else "无",
+                     calls[0], precision, device, bool(force_unload),
+                     CORE.max_upscale_chunks(n_frames, int(overlap)), peak, dt))
+        print("[H3 Relay] " + report)
+        return (packed, report)
 
 
 class H3RelayLatentSave:
@@ -1807,6 +2071,7 @@ NODE_CLASS_MAPPINGS = {
     "H3RelayPost": H3RelayPost,
     "H3RelayAudioSeam": H3RelayAudioSeam,
     "H3RelayChain": H3RelayChain,
+    "H3RelayLatentUpscale": H3RelayLatentUpscale,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -1817,4 +2082,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "H3RelayPost": "🔗 H3 续接后处理 Post",
     "H3RelayAudioSeam": "🔗 H3 续接音频缝",
     "H3RelayChain": "🔗 H3 续接连跑 Chain",
+    "H3RelayLatentUpscale": "🔍 H3 潜空间分块放大",
 }
