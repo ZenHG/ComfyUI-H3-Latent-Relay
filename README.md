@@ -468,7 +468,7 @@ python tools/concat_segments.py s1.mp4 s2.mp4 -o film.mp4 --json   # 退出码 0
 脚本会自动上溯定位 ComfyUI 根目录；装在别处时用
 `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。
 
-**385 项断言，零 GPU、不加载模型**，覆盖二十七个方面 —— 例如：
+**382 项断言，零 GPU、不加载模型**，覆盖二十七个方面 —— 例如：
 
 | 组 | 覆盖 |
 |---|---|

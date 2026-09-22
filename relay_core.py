@@ -61,48 +61,6 @@ KEY_EXPORT_TAIL_VIDEO = "apt_h3_export_tail_latent"
 KEY_EXPORT_TAIL_AUDIO = "apt_h3_export_tail_audio_latent"
 KEY_EXPORT_FRAMES = "apt_h3_export_context_frames"
 
-# —— E1 多尺度历史（FramePack 式距离衰减压缩）——
-# 出处：FramePack《Frame Context Packing and Drift Prevention in Next-Frame
-#   Prediction Video Diffusion Models》NeurIPS 2025, arXiv:2504.12626：
-#   历史帧按**时间距离分级压缩**（越旧越粗）进定长上下文 + 固定噪声水平防漂移。
-# 现状缺口：我们是「最近 context_frames 帧全量 + 更早全丢」的两级阶跃。
-# 默认关：minimax_refs 能塞几个块、宿主对多块 refs 的容忍度**未实测**（推测性中等）。
-EXP_HISTORY_DEPTH_DEFAULT: int = 0     # 0 = 关（只用全局锚）；>0 = 追加几级更早历史
-EXP_HISTORY_STRIDE_DEFAULT: int = 4    # 每远一级的时序抽稀步长（帧）
-EXP_HISTORY_FRAMES_DEFAULT: int = 22   # 每级基准帧数（受 5+17k 网格约束）
-# 🔴 2026-09-22（#6）：旧默认 5 是**死值**——5 是最小合法档，按 stride 抽稀后各级都退化成 5
-#   ⇒ 只能出 1 级（根本不是「多尺度」），2 级起必然 raise。改为 22：
-#   base=22 + stride=4 ⇒ 第 0 级 22 帧、第 1 级 5 帧 = **两级可分辨**，默认参数即可用。
-#   （5 帧起只能出 1 级；3 级需 base=90；**4 级需 stride=2 且 base=124** —— 2026-09-22 实测更正，
-#     旧注释写「4 级需 ≥107」是错的：107+stride4 只能分 3 级。）
-#   ⚠️ 性能：第 0 级按 base 出 token ⇒ base=22 时新增 token ≈ 本段的 28%，base=90 时 ≈112%（翻倍）。
-
-# —— E2 conditioning 参考噪声（原名「SDEdit 式软钉入」）——
-# 🔴 **2026-09-22 关项归档（GG 拍板「E2 定死」）**：本旋钮**无效且与硬锁互斥** ⇒ 永久保持默认 0。
-#   真 SDEdit（两遍法，扰动去噪初值）也已实现并实测**对靶无效** ⇒ **整条 E2 线关闭**。
-#   结项见 `_handover\SDEdit-立项-真软钉-20260921.md` §4：机制五项全达标（含段体逐位 Δ=0）、
-#   三项判据全无改善（色档阶跃 / 缝后运动量 / 音频缝凹陷）、且**扰动比靶信号大 15–25 倍**
-#   ⇒ **负结果不是「剂量不够」**，是靶不存在。
-# ⚠️ **这不是 SDEdit**。核实比对论文（SDEdit, Meng et al. ICLR 2022, arXiv:2108.01073）
-#   三要素 —— ① 扰动对象是**去噪初值**（模型会去噪还原它）② 幅度按**调度表 σ_t0**
-#   ③ 从 t0 跑**完整反向** —— 本实现**一条都不满足**：它给 **conditioning 钉帧**加
-#   σ·std 噪声 = 「把参考弄脏」，不是软钉。这也正是它与**硬锁（缝 = 上段尾逐位拷贝）
-#   互斥**的真因（零 GPU 已量化：σ=0.1/0.25/0.5 ⇒ 钉住块相对扰动 0.100/0.250/0.501，
-#   而硬锁自检阈值是 0.00000 ⇒ 开 E2 = 主动放弃该自检）。
-# 真 SDEdit 软钉已**另立项**（两遍法：Pass1 采样终态 latent → Pass2 noise-mask +
-#   sigmas 从 t0 起），见 `_handover\SDEdit-立项-真软钉-20260921.md`。
-#   本函数保留（兼容 + 实验档），行为**不改**。
-# 默认关：ramp 已覆盖「缝处软证据」；本项是**另一条路**（在 conditioning 侧加噪），
-#   两者叠加是否有增益未测，先做成可开关的实验档。
-EXP_COND_NOISE_DEFAULT: float = 0.0    # 0 = 不加噪（逐位不变）
-
-# —— E4 床声去重复 ——
-# 缺口出处：调研 §11-C：实测**所有片子 s2 头部 2s 的音频完全相同**——因为补丁把头部
-#   整段替换成同一段 room tone，这本身可能被听成「重复」。
-# 默认关：需要人耳判定「错开 vs 重复」哪个更像缺陷，先给可量化的开关。
-EXP_BED_JITTER_DEFAULT: float = 0.0    # 0 = 各段取同一床窗；>0 = 按段号错开起点（秒）
-
-
 # ---------------------------------------------------------------- 网格工具
 def pixel_frames(latent_t: int) -> int:
     """latent token 数 → 覆盖的像素帧数。"""
@@ -354,7 +312,6 @@ class RelayPlan:
     keyframes: List[Dict[str, Any]] = field(default_factory=list)
     audio_ref: Optional[Dict[str, Any]] = None
     anchor_ref: Optional[Dict[str, Any]] = None   # 0.5.0 全局外观锚（refs 路线）
-    extra_refs: List[Dict[str, Any]] = field(default_factory=list)  # 🧪 E1 多尺度历史（默认空）
     clipped_channels: Optional[int] = None
     notes: List[str] = field(default_factory=list)
 
@@ -572,8 +529,6 @@ def apply_relay(conditioning, plan: RelayPlan):
 
     if plan.audio_ref is not None or plan.anchor_ref is not None:
         refs = [r for r in (plan.audio_ref, plan.anchor_ref) if r is not None]
-        if getattr(plan, "extra_refs", None):      # 🧪 E1：默认空 ⇒ 主干逐位不变
-            refs = refs + [r for r in plan.extra_refs if r is not None]
         out = node_helpers.conditioning_set_values(
             out, {"minimax_refs": refs}, append=True
         )
@@ -1238,7 +1193,6 @@ def audio_seam_patch(audio: Any, bed_audio: Any, patch: float = AUDIO_SEAM_PATCH
                      select: str = AUDIO_SEAM_BED_SELECT,
                      target_audio: Any = None,
                      gain_max_db: float = AUDIO_SEAM_BED_GAIN_MAX_DB,
-                     bed_jitter: float = EXP_BED_JITTER_DEFAULT,
                      stage_index: int = 0,
                      patch_guard: bool = True) -> Tuple[Any, str]:
     """把本段头部 ``patch`` 秒换成 ``bed_audio``（上一段）里的床声窗；**长度守恒**。
@@ -1292,22 +1246,13 @@ def audio_seam_patch(audio: Any, bed_audio: Any, patch: float = AUDIO_SEAM_PATCH
         tgt_wf = _match_channels(_resample_to(_t, _tsr, sr), ch)
     tgt = target_level(tgt_wf, int(round(0.2 * sr)))
     floor = tgt * (10.0 ** (-AUDIO_SEAM_BED_FLOOR_DB / 20.0))
-    # 🧪 E5：bed_jitter>0 时按段号错开床窗起点（治「各段头部 N 秒完全相同」）；
-    #    默认 0 ⇒ start_override=None ⇒ 走既有逻辑，主干逐位不变。
-    #    🔴 2026-09-21 修补（原缺口）：**瓦片档也错开** —— 旧代码 `and tile<=0` 把 jitter 在
-    #      瓦片档**静默忽略**（不 print 不 raise），而 tile>0 恰是产线脚本默认档。
-    #      错开的对象是「实际取样那段窗」，故窗长按档位取（单窗 = 补丁长，瓦片 = 瓦片长）。
     _tile_n = int(round(float(tile) * sr))
     _bed_total = int(bed_wf.shape[-1])
     _win = bed_source_window_len(_bed_total, n, _tile_n)
     _frac = (AUDIO_SEAM_BED_TILE_VOICED_FRAC if _tile_n > 0
              else AUDIO_SEAM_BED_VOICED_FRAC)
-    _ov = None
-    if float(bed_jitter) > 0.0:
-        _ov = bed_jitter_start(_bed_total, _win, int(stage_index),
-                               float(bed_jitter), sr)
     start, _changed, _vf_first, _vf_final = pick_bed_window(
-        bed_wf, _win, select=select, prefer=_ov, floor=floor, frac=_frac)
+        bed_wf, _win, select=select, floor=floor, frac=_frac)
     bed, start, bed_rms = build_bed(bed_wf, n, _tile_n, X,
                                     select=select, floor=floor,
                                     start_override=start)
@@ -1337,9 +1282,7 @@ def audio_seam_patch(audio: Any, bed_audio: Any, patch: float = AUDIO_SEAM_PATCH
 
     tile_note = "，%.2fs 瓦片自叠化环铺" % float(tile) if float(tile) > 0 else ""
     mode_note = "尾部窗（与缝天然连续）" if str(select) == "tail" else "最静窗（旧口径·仅对照）"
-    if _ov is not None:
-        mode_note = "E5 错开窗（按段号错开）"
-    elif _changed and str(select) == "tail":
+    if _changed and str(select) == "tail":
         # 🔴 2026-09-21 措辞诚实化：已换窗就别再自称「尾部窗」—— 实测首行曾打出
         #   「尾部窗…@0.80s」（0.80 并非尾部），靠后续 🎙 行才能纠正 = 前后矛盾。
         mode_note = "非语音窗（首选尾窗撞语音，已避开）"
@@ -3077,136 +3020,6 @@ def join_audio_segments(audios, prime_samples: int = 0, cross_samples: int = 0,
 # ============================================================================
 
 
-def build_history_refs(history_latents, frames: int = EXP_HISTORY_FRAMES_DEFAULT,
-                       depth: int = EXP_HISTORY_DEPTH_DEFAULT,
-                       stride: int = EXP_HISTORY_STRIDE_DEFAULT):
-    """E1｜把**更早的段**按时间距离分级抽稀，追加为多级 ``minimax_refs`` 块。
-
-    ``history_latents``：按时间**由近到远**排列的早期段 AV latent 列表
-    （``history_latents[0]`` = 上上段）。第 i 级抽稀步长 = ``stride ** i``
-    （越远越粗，对应 FramePack 的距离衰减）。每级仍走 ``build_anchor_ref``
-    的「取头不取尾」约定（refs 块按自身第 0 token 起重建时间格，开头切片恒合法）。
-
-    ``depth=0``（默认）返回空列表 ⇒ 行为与主干逐位一致，不引入任何 ref。
-
-    🔴 2026-09-20 三处修正（全部是「默认参数下机制是假的」那一类）：
-    1. **抽稀必须真的抽**：``max(5, frames//step)`` 在默认 ``frames=5`` 时
-       让每一级都退化成 5 帧（``5//4=1 → max(5,1)=5``）⇒ 两级**逐位相同**，
-       "多尺度"名不副实。改为按**帧数下限受合法网格约束**：每级帧数取自
-       ``GUIDE_RUNS`` 里**不超过**基准的那档（当前级取更粗的一档）。
-    2. **``depth`` 超过历史长度不再静默截断**：调用方（nodes.py）已经会
-       把「更早段未落盘」的级跳过并 log，若这里再静默截断，用户看到的
-       «追加 N 级» 与实际生效级数不一致且无从查起。缺级 ⇒ **raise**。
-    3. 每级必须真的比上一级**短**（否则抽稀无意义）——由 (1) 天然保证，
-       但历史段本身太短时仍会撞 ``build_anchor_ref`` 的 raise（不夹取）。
-    """
-    depth = int(depth)
-    if depth <= 0 or not history_latents:
-        return []
-    if stride < 1:
-        raise ValueError("抽稀步长必须 ≥1，得到 %d。" % int(stride))
-    if depth > len(history_latents):
-        raise ValueError(
-            "要求 %d 级历史，但只给了 %d 段（history_latents 由近到远）。"
-            "缺级时请把 exp_history_depth 调小，不要依赖静默截断。"
-            % (depth, len(history_latents)))
-    # 合法帧档（5+17k），升序——抽稀只能在这些档位上取值，否则切不出整步窗口
-    _runs = sorted(g for g in GUIDE_RUNS if g >= 5)
-    base = int(frames)
-    if base not in _runs:
-        raise ValueError(
-            "每级基准帧数 %d 不在合法网格 %s 上——请改用其中之一。"
-            % (base, ", ".join(str(g) for g in _runs)))
-    # 🆕 2026-09-22（#8）先算出**最多能分出几层**，超出即带建议值报错。
-    #   为什么需要：档位只有 8 个（5/22/39/56/73/90/107/124），抽稀很快撞到最小档 5，
-    #   再往下各级全同 ⇒ 旧实现只报「分不出层级」，用户不知道**该填几**。
-    _levels, _seen = [], set()
-    for i in range(max(depth, 1)):
-        _want = max(_runs[0], base // (int(stride) ** i))
-        _n = max([g for g in _runs if g <= _want] or [_runs[0]])
-        if _n in _seen:
-            break
-        _seen.add(_n)
-        _levels.append(_n)
-    if depth > len(_levels):
-        raise ValueError(
-            "exp_history_depth=%d 超出可分层级：基准 %d 帧、步长 %d 下最多只能分 %d 层（帧数 %s）。"
-            "请把 depth 降到 %d，或增大基准帧数 / 步长。"
-            % (depth, base, int(stride), len(_levels), _levels, len(_levels)))
-    out = []
-    for i in range(depth):
-        step = int(stride) ** i
-        # 第 i 级：从 base 起按 stride^i 往下取**最近的合法档**
-        want = max(_runs[0], base // step)
-        n = max([g for g in _runs if g <= want] or [_runs[0]])
-        ref = build_anchor_ref(history_latents[i], n)
-        ref["_exp_level"] = i
-        ref["_exp_stride"] = step
-        out.append(ref)
-    # 🆕 2026-09-22（#7）退化检查放宽到 depth≥1：旧写法 `len(out) > 1` 让 depth=1 绕过检查，
-    #   而「单级」根本不是多尺度、只是多加一个锚 ⇒ 必须让调用侧知道，别当成功。
-    if len({r["latent_t"] for r in out}) < len(out):
-        raise ValueError(
-            "抽稀后各级的 latent 步数仍然相同（%s）——步长/基准帧数组合"
-            "分不出层级。加大 exp_history_stride，或增大每级基准帧数。"
-            % [r["latent_t"] for r in out])
-    return out
-
-
-def filter_history_refs(entries, anchor_stage):
-    """E1｜去掉「与外观锚同段」的历史级，避免**撞源**白占参考配额。
-
-    🆕 2026-09-22（#4）新增。背景：历史级取 ``stage_index-2, -3, …``，而外观锚取
-    ``relay_ref_anchor_stage``（产线默认 **0**）⇒ 历史走到 stage 0 时**与外观锚指向同一段**，
-    等于把同一份内容当两份参考提交，白占多模态参考配额（硬上限 9 张）。旧实现**没有任何去重**。
-
-    ``entries`` = ``[(stage_index, latent), ...]``（由近到远）。
-    返回 ``(kept, skipped)``——``kept`` 与输入同形（只留不同段的），
-    ``skipped`` = 被去掉的 stage_index 列表（调用方应 log 出来，别静默丢）。
-    """
-    _anchor = int(anchor_stage)
-    kept, skipped = [], []
-    for idx, lat in entries:
-        if int(idx) == _anchor:
-            skipped.append(int(idx))
-        else:
-            kept.append((idx, lat))
-    return kept, skipped
-
-
-def sdeedit_noise(blk: torch.Tensor, sigma: float = EXP_COND_NOISE_DEFAULT,
-                  generator=None) -> torch.Tensor:
-    """E2｜给**条件 latent 块**加 σ 比例的**同形状**噪声（conditioning 参考脏化）。
-
-    ``out = blk + sigma * std(blk) * N(0,1)``——用块自身 std 归一，
-    使 σ 的意义与量纲无关（σ=0.1 = 注入 10% 该块自身尺度的噪声）。
-
-    🔴 2026-09-21 语义更正（**函数名保留是为了兼容，别再按名字理解它**）：
-      它**不是 SDEdit**。核实比对论文（SDEdit, Meng et al. ICLR 2022,
-      arXiv:2108.01073）三要素 —— ① 扰动对象是**去噪初值**（模型会去噪还原它）
-      ② 幅度按**调度表 σ_t0** ③ 从 t0 跑**完整反向** —— 本实现一条都不满足：
-      这里被加噪的是 **conditioning 钉帧**（喂给模型的条件，不是去噪初值），
-      采样器也不会去还原它 ⇒ 效果 = **把参考弄脏**（σ 越大，模型越不信参考）。
-      这也正是「**与硬锁互斥**」的真因：硬锁要求缝 = 上段尾**逐位拷贝**，
-      而本函数按定义就在改钉住块（零 GPU 已量化 σ=0.1/0.25/0.5 ⇒
-      相对扰动 0.100/0.250/0.501，而硬锁自检阈值是 0.00000）。
-      真 SDEdit 软钉已**另立项**（两遍法：Pass1 采样终态 latent → Pass2
-      ``SetLatentNoiseMask`` + sigmas 切片从 t0 起），见
-      `_handover\\SDEdit-立项-真软钉-20260921.md`。
-      本函数**行为不变**，继续作为可开关实验档。
-
-    σ=0（默认）**逐位返回同一张量**（不是副本也等价），保证主干零变化。
-    """
-    sigma = float(sigma)
-    if sigma == 0.0:
-        return blk
-    if sigma < 0.0:
-        raise ValueError("sigma 不得为负，得到 %.4f。" % sigma)
-    noise = torch.randn(blk.shape, device=blk.device, dtype=blk.dtype, generator=generator)
-    scale = float(blk.detach().std().clamp(min=1e-8))
-    return blk + sigma * scale * noise
-
-
 def _dtw_feat(frames: torch.Tensor) -> torch.Tensor:
     """E3｜把 ``[T,H,W,C]`` 帧序列压成 DTW 用的 ``[T,D]`` 特征。
 
@@ -3433,38 +3246,6 @@ def drift_curve(stats, ref_idx: int = 0):
             # ratio 是**无量纲**（跨片可比）⇒ 「漂移是否复利」优先看这两条。
             "std_slope": float(_ls(sr)),
             "sharp_slope": float(_ls(qr))}
-
-
-def bed_jitter_start(total: int, n: int, stage_index: int,
-                     jitter_seconds: float = EXP_BED_JITTER_DEFAULT,
-                     sample_rate: int = 32000) -> int:
-    """E5｜让各段的床声起点**错开**，避免「所有段头部 N 秒完全相同」被听成重复。
-
-    ``jitter_seconds=0``（默认）返回与主干完全相同的起点（尾部窗）。
-    >0 时按段号在床源里**向后**平移 ``stage_index * jitter``（循环回绕），
-    长度守恒不变——只换取的窗位置，不动任何电平/长度语义。
-
-    🔴 不变量（单测锁）：返回值恒满足 ``0 <= start`` 且 ``start + n <= total``。
-      ``total <= n``（源不比窗长）时**没有可平移的空间** ⇒ 回绕基准退化，
-      此时按纪律 **raise** 而不是静默返回 0（那会取到源头部，
-      语义与「尾部窗」完全不同，且调用方看不出来）。
-    """
-    total, n = int(total), int(n)
-    if n <= 0:
-        raise ValueError("床声长度必须为正，得到 %d。" % n)
-    j = float(jitter_seconds)
-    if j <= 0.0:
-        # 默认档：与 0.5.0 主干完全相同的起点（尾部窗）。
-        # ⚠ 这里**不 raise**（哪怕 total<n）：本分支是主干默认路径，
-        #   0.5.0 的行为由下游 build_bed 的夹取兜底，改它会动默认行为。
-        return max(0, total - n)
-    if total <= n:
-        raise ValueError(
-            "床源总长 %d 不大于补丁长度 %d——没有可平移的空间来错开起点。"
-            "换更长的床源段，或把 exp_bed_jitter 设回 0。" % (total, n))
-    shift = int(round(int(stage_index) * j * float(sample_rate)))
-    start = max(0, total - n) - (shift % max(1, (total - n)))
-    return int(start)
 
 
 # ============================================================================

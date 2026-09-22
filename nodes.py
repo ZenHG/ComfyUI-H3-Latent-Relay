@@ -1243,51 +1243,6 @@ class H3RelayCopyBridge:
                     "advanced": True, "default": 5, "min": 1, "max": 64, "step": 1,
                     "tooltip": "外观锚取该段**开头**多少帧（取头不取尾）。",
                 }),
-                # ⚠️ 以下为 **实验档**（exp/seam-frontier）——一律追加在末尾，默认全关。
-                #    关 = 与主干逐位一致；开着跑出来的是实验数据，别当结论用。
-                "exp_history_depth": ("INT", {
-                    "advanced": True, "default": CORE.EXP_HISTORY_DEPTH_DEFAULT,
-                    "min": 0, "max": 4, "step": 1,
-                    "tooltip": "🧪【实验·默认关】E1 多尺度历史：追加几级**更早**的段作为 refs。\n"
-                               "依据 FramePack(arXiv:2504.12626)：历史按时间距离分级压缩（越旧越粗）。\n"
-                               "我们是「最近 context_frames 帧全量 + 更早全丢」的两级阶跃，本项补中间。\n"
-                               "取段规则：按段号往回读 stage_index-2、-3…（**不是** UI 输入），\n"
-                               "已由本节点自动完成——从第 3 段起才有历史可读。\n"
-                               "🔴 帧档约束（不满足会 raise，不静默降级）：每级取 ref_anchor_frames\n"
-                               "   按 stride^i 往下取**合法网格档**（5/22/39/56/73/90/107/124）。\n"
-                               "   · ref_anchor_frames=5 时只能出 1 级（再往下没有更粗的合法档）；\n"
-                               "   · 想要 2 级请把 ref_anchor_frames 设到 ≥22；想要 3 级设到 ≥90。\n"
-                               "⚠️ 宿主对多块 refs 的容忍度未实测 —— 这是要试的东西。",
-                }),
-                "exp_history_stride": ("INT", {
-                    "advanced": True, "default": CORE.EXP_HISTORY_STRIDE_DEFAULT,
-                    "min": 1, "max": 16, "step": 1,
-                    "tooltip": "🧪【实验】E1 每远一级的时序抽稀步长（帧数按 stride^i 衰减，下限 5 帧）。",
-                }),
-                "exp_history_frames": ("INT", {
-                    "advanced": True, "default": CORE.EXP_HISTORY_FRAMES_DEFAULT,
-                    "min": 5, "max": 124, "step": 1,
-                    "tooltip": "🧪【实验·2026-09-22 新增】E1 每级**基准帧数**（已**独立**于 ref_anchor_frames）。\n"
-                               "为什么要独立：旧实现借用 ref_anchor_frames 当基准 ⇒ 想给 E1 一个够大的基准，\n"
-                               "   就必须把**外观锚**也一起改大 ⇒ 两个机制被迫同步改动、单变量对比不成立。\n"
-                               "🔴 只认合法网格 5/22/39/56/73/90/107/124（非法值 raise，不夹取）。\n"
-                               "   可分层级数（受档位数量限制，2026-09-22 实测）：22+stride4 ⇒ 2 级；90 ⇒ 3 级；\n"
-                               "   **4 级需 stride=2 且基准 124**；5 ⇒ 只有 1 级（**不是多尺度**，等于多加一个锚）。\n"
-                               "⚠️ 性能：第 0 级按基准帧数出 token，基准越大越贵 —— 22 帧 ⇒ latent_t 7\n"
-                               "   （新增 token ≈ 本段的 28%）；90 帧 ⇒ latent_t 27（≈ 112%，翻倍）。\n"
-                               "   故 **2 级请用 22**（最省）；要 3 级才用 90，且知悉代价。",
-                }),
-                "exp_cond_noise": ("FLOAT", {
-                    "advanced": True, "default": CORE.EXP_COND_NOISE_DEFAULT,
-                    "min": 0.0, "max": 1.0, "step": 0.01,
-                    "tooltip": "🔴【2026-09-22 关项归档，勿开】E2 conditioning 参考噪声（原名「SDEdit 式软钉入」）。\n"
-                               "**无效且与硬锁互斥** ⇒ 永久保持 0。给**钉住块**加 σ 比例噪声（σ 以块自身 std 归一）\n"
-                               "= **把参考弄脏**，σ 越大模型越不信参考；而硬锁自检阈值是 0.00000 ⇒ 开它 = 主动放弃该自检。\n"
-                               "⚠ 它**不是 SDEdit**（SDEdit arXiv:2108.01073 要求扰动去噪初值 + 按调度表 σ_t0 +\n"
-                               "从 t0 跑完整反向，本项三条都不满足）。真 SDEdit（两遍法）已实现并实测**对靶无效**\n"
-                               "（段体逐位不变，但色档阶跃 / 缝后运动量 / 音频缝凹陷三项全无改善）⇒ **整条 E2 线关闭**。\n"
-                               "σ=0 = 逐位不变（默认，勿改）。",
-                }),
             },
         }
 
@@ -1310,17 +1265,7 @@ class H3RelayCopyBridge:
                window_shape=CORE.WINDOW_SHAPE_DEFAULT,
                anchor_latent=None, anchor_blend=1.0,
                conditioning=None, run_id="relay", stage_index=0,
-               ref_anchor_latent=None, ref_anchor_stage=-1, ref_anchor_frames=5,
-               exp_history_depth=None, exp_history_stride=None, exp_history_frames=None,
-               exp_cond_noise=None):
-        # 🧪 实验档：None 视为「未接线」⇒ 取默认（全关），保证老图/API 调用零变化
-        exp_history_depth = CORE.EXP_HISTORY_DEPTH_DEFAULT if exp_history_depth is None else exp_history_depth
-        exp_history_stride = CORE.EXP_HISTORY_STRIDE_DEFAULT if exp_history_stride is None else exp_history_stride
-        # 🆕 2026-09-22（#1/#3）E1 基准帧数**独立**：旧实现借用 ref_anchor_frames ⇒ 两个机制被迫同步改。
-        #   ⚠ 判据用「假值」而非「is None」：API 侧（l1_api）统一传 `or 0` 表示未接线，
-        #   而 0 不是合法帧数（合法档最小 5）⇒ 不会与真实取值冲突。
-        exp_history_frames = CORE.EXP_HISTORY_FRAMES_DEFAULT if not exp_history_frames else exp_history_frames
-        exp_cond_noise = CORE.EXP_COND_NOISE_DEFAULT if exp_cond_noise is None else exp_cond_noise
+               ref_anchor_latent=None, ref_anchor_stage=-1, ref_anchor_frames=5):
         CONTRACT.enforce()
         # 0.6.0：Latent 桥（H3RelayMotionContext）已删除，本节点成为**唯一桥**。
         # 原 Latent 桥「段号>=1 却无来源 -> 必须 raise（不得静默直通）」是反坏片关键守卫，
@@ -1379,50 +1324,6 @@ class H3RelayCopyBridge:
                 anchor_latent=ref_anchor_latent,
                 anchor_frames=int(ref_anchor_frames),
             )
-            # 🧪 E2 conditioning 参考噪声：给**钉住块**加 σ 噪声（σ=0 时逐位不动）。
-            #   🔴 2026-09-21 语义更正：这**不是 SDEdit** —— 加噪对象是 conditioning 钉帧
-            #      （不是去噪初值），采样器也不会还原它 ⇒ 效果 = 把参考弄脏，
-            #      且与硬锁（缝 = 上段尾逐位拷贝）互斥。真 SDEdit 软钉另立项（两遍法）。
-            if float(exp_cond_noise) > 0.0:
-                for k in plan.keyframes:
-                    k["latent"] = CORE.sdeedit_noise(k["latent"], float(exp_cond_noise))
-                print("[H3 Relay] 实验 E2：conditioning 参考噪声 σ=%.3f（%d 块）"
-                      % (float(exp_cond_noise), len(plan.keyframes)), flush=True)
-            # 🧪 E1 多尺度历史：按 stage_index-2, -3… 自动读更早段做分级 refs
-            if int(exp_history_depth) > 0 and (run_id or "").strip():
-                # 🆕 2026-09-22（#4）读历史时**同时记下段号**，稍后用来剔除「与外观锚同段」的级。
-                # 🔴 补正：候选要**多取 1 个**（range 上界 +1）。去重会剔掉与外观锚同段的那级，
-                #   不多取 ⇒ kept < depth ⇒ 撞 build_history_refs 的缺级校验**直接崩**
-                #   —— 等于把「白占配额」换成「崩」，比不修还差。2026-09-22 自查实测到。
-                _want = int(exp_history_depth)
-                _pairs, miss = [], []
-                for k in range(2, 3 + _want):
-                    idx = int(stage_index) - k
-                    if idx < 0:
-                        break
-                    try:
-                        _pairs.append((idx, CORE.load_av_latent(_stage_path(run_id, idx))))
-                    except FileNotFoundError:
-                        miss.append(idx)
-                # 🆕（#4）撞源去重：历史级与**外观锚同段**时剔除，避免白占多模态参考配额
-                _keep, _dupe = CORE.filter_history_refs(_pairs, int(ref_anchor_stage))
-                if _dupe:
-                    print("[H3 Relay] 实验 E1：段 %s 与外观锚同源 ⇒ 已剔除对应级（避免撞源白占配额）"
-                          % _dupe, flush=True)
-                _keep = _keep[:_want]                     # 去重后按「由近到远」取前 depth 级
-                # 🆕（#5）旧文案写「已跳过对应级」，但下一行仍按**原始 depth** 校验 ⇒ 紧接 raise，
-                #   日志与行为矛盾（用户以为跳过了，其实崩了）。改成如实说明会 raise。
-                if len(_keep) < _want:
-                    print("[H3 Relay] 实验 E1：可用历史只剩 %d 级（请求 %d 级；缺段落 %s、去重剔除 %s）"
-                          " ⇒ 接下来会 raise（本实现不静默截断）。请把 exp_history_depth 调到 ≤%d 后重跑。"
-                          % (len(_keep), _want, miss, _dupe, len(_keep)), flush=True)
-                refs = CORE.build_history_refs(
-                    [lat for _, lat in _keep], frames=int(exp_history_frames),
-                    depth=_want, stride=int(exp_history_stride))
-                if refs:
-                    plan.extra_refs = refs
-                    print("[H3 Relay] 实验 E1：多尺度历史 %d 级（基准 %d 帧 / stride=%d）"
-                          % (len(refs), int(exp_history_frames), int(exp_history_stride)), flush=True)
             cond_out = CORE.apply_relay(conditioning, plan)
             extra = ["[H3 Relay] 复合桥·钉帧路径：" + plan.summary()]
             for n in plan.notes:
@@ -1877,17 +1778,6 @@ class H3RelayAudioSeam:
                                "缝上无电平凹陷（根治 acrossfade「缩短时间轴 ⇒ 音频提前 + 卡顿」）。\n"
                                "0 = 旧缩短语义（仅兼容/对照）。要求 ≥ join_cross_ms。",
                 }),
-                # ⚠️ 实验档（exp/seam-frontier）——追加末尾，默认关
-                "exp_bed_jitter": ("FLOAT", {"advanced": True,
-                    "default": CORE.EXP_BED_JITTER_DEFAULT, "min": 0.0, "max": 2.0, "step": 0.05,
-                    "tooltip": "🧪【实验·默认关】E5 床声去重复：按段号把床窗起点错开 N 秒。\n"
-                               "缺口出处：调研 §11-C —— 实测**所有片子 s2 头部 2s 的音频完全相同**\n"
-                               "（补丁把头部整段换成同一段 room tone），这本身可能被听成「重复」。\n"
-                               "0 = 各段取同一床窗（既有行为）。\n"
-                               "档位无关：单窗档（tile_seconds=0）与瓦片档**都生效**（2026-09-21 起；\n"
-                               "此前瓦片档会被静默忽略）。只有「床源不比取样窗长」时才报错 ——\n"
-                               "没有可错开的空间，报错好过假装生效。",
-                }),
                 "patch_guard": ("BOOLEAN", {"advanced": True, "default": True,
                     "label_on": "🛡 台词守卫开", "label_off": "守卫关（旧行为）",
                     "tooltip": "🛡 patch 台词守卫（默认开，0.6.5）：patch_seconds>0 会整段替换**本段**头部——\n"
@@ -1962,7 +1852,7 @@ class H3RelayAudioSeam:
              bed_select=CORE.AUDIO_SEAM_BED_SELECT,
              join_curve="qsin", join_prime_ms=CORE.AUDIO_ENCODER_PRIME_MS,
              join_cross_ms=0.0, join_segment_seconds=0.0, join_align_seconds=0.0,
-             exp_bed_jitter=None, patch_guard=True):
+             patch_guard=True):
         me = _audio_stage_path(run_id, int(stage_index))
         idx = int(stage_index)
         patch = float(patch_seconds or 0.0)
@@ -2044,8 +1934,6 @@ class H3RelayAudioSeam:
                                          float(fade_seconds),
                                          select=str(bed_select or CORE.AUDIO_SEAM_BED_SELECT),
                                          target_audio=target,
-                                         bed_jitter=(CORE.EXP_BED_JITTER_DEFAULT
-                                                     if exp_bed_jitter is None else float(exp_bed_jitter)),
                                          stage_index=idx, patch_guard=bool(patch_guard))
         CORE.save_audio(out, me, note=note)
         line = rep + ("｜已落盘（供后段当床源）：%s" % me)

@@ -42,7 +42,7 @@
  23. 音画同步守恒（0.6.2）：`joined` 只在给了画面裁量时才能交叉（否则 raise）；默认等长拼接；
      TrimAV 直接给出 `join_align_seconds` 建议值
  24. 床源选窗语音规避**全路径**（0.6.5）：瓦片档（tile>0）也必须过判据、阈值收紧到 0、
-     E5 错开不再被静默忽略、rank 约定一致、无解时不 raise、报告不静默、O(T²) 回归锁、
+     rank 约定一致、无解时不 raise、报告不静默、O(T²) 回归锁、
      持续帧滤波（瞬态不计入）、退化输入不炸、前缀和能量选窗 == 参照
  25. 🛡 patch 台词守卫（0.6.5）：patch 不许吃本段台词（收缩/关闭/零副作用/关=旧行为）
  26. 多段拼接成片（0.6.7）：探测/体检（含「音频绕过裁重叠」判据）/画面流拷贝无损/
@@ -1987,27 +1987,6 @@ check("24.3 瓦片档阈值(0) 比单窗档(10%) 更严：窗内**任何**有声
       "tile %.2f vs 单窗 %.2f" % (CORE.AUDIO_SEAM_BED_TILE_VOICED_FRAC,
                                   CORE.AUDIO_SEAM_BED_VOICED_FRAC))
 
-# 24.4~24.5 瓦片档 + E5：错开**不能**再被静默忽略（走 build_bed = 节点真正调用的那段）
-_ov24a = CORE.bed_jitter_start(int(_b24.shape[-1]), _W24, 1, 1.2, _SR24)
-_ov24b = CORE.bed_jitter_start(int(_b24.shape[-1]), _W24, 2, 1.2, _SR24)
-_sa24, _, _va1_24, _va2_24 = CORE.pick_bed_window(
-    _b24, _W24, select="tail", prefer=_ov24a, floor=0.0,
-    frac=CORE.AUDIO_SEAM_BED_TILE_VOICED_FRAC)
-_sb24, _, _, _vb2_24 = CORE.pick_bed_window(
-    _b24, _W24, select="tail", prefer=_ov24b, floor=0.0,
-    frac=CORE.AUDIO_SEAM_BED_TILE_VOICED_FRAC)
-_bd24a, _st24a, _ = CORE.build_bed(_b24, int(2.0 * _SR24), _W24, int(0.25 * _SR24),
-                                   select="tail", start_override=_ov24a)
-_bd24b, _st24b, _ = CORE.build_bed(_b24, int(2.0 * _SR24), _W24, int(0.25 * _SR24),
-                                   select="tail", start_override=_ov24b)
-check("24.4 瓦片档 + E5：段1/段2 瓦片起点不同且都非语音（旧代码 jitter 被静默忽略）",
-      _sa24 != _sb24 and _st24a != _st24b and _va2_24 == 0.0 and _vb2_24 == 0.0,
-      "seg1 @%.3fs / seg2 @%.3fs（请求 %.3fs / %.3fs）"
-      % (_st24a / _SR24, _st24b / _SR24, _ov24a / _SR24, _ov24b / _SR24))
-check("24.5 瓦片环铺在**新窗**上仍长度守恒（规避不改时间轴）",
-      int(_bd24a.shape[-1]) == int(2.0 * _SR24) and int(_bd24b.shape[-1]) == int(2.0 * _SR24),
-      "%d / %d" % (int(_bd24a.shape[-1]), int(_bd24b.shape[-1])))
-
 # 24.6 同族函数的 rank 约定必须一致（此前 quietest_window 写死 sum(dim=0) ⇒ 3D 崩）
 check("24.6 rank 一致：2D 与 3D 床源选窗完全相同（quietest / pick 各验一遍）",
       CORE.quietest_window(_b24, int(0.5 * _SR24), floor=0.0)[0]
@@ -2059,18 +2038,11 @@ _cur24 = {"waveform": torch.zeros(1, 2, int(3.5 * _SR24)), "sample_rate": _SR24}
 _cur24["waveform"][..., int(0.5 * _SR24):int(1.0 * _SR24)] = 0.3
 _bed24 = {"waveform": _b24.unsqueeze(0), "sample_rate": _SR24}
 _, _rep24 = CORE.audio_seam_patch(_cur24, _bed24, patch=2.0, tile=1.2, fade=0.25,
-                                  select="tail", bed_jitter=0.0, stage_index=1)
+                                  select="tail", stage_index=1)
 check("24.10 瓦片档报告：阈值 + 「首选窗原撞语音 ⇒ 已换到非语音窗」都在（不静默）",
       "判据阈值 0%" in _rep24 and "首选窗原撞语音（占比" in _rep24
       and "已换到非语音窗 @" in _rep24,
       next((l for l in _rep24.splitlines() if "🎙" in l), "")[:150])
-_, _rep24b = CORE.audio_seam_patch(_cur24, _bed24, patch=2.0, tile=1.2, fade=0.25,
-                                   select="tail", bed_jitter=1.2, stage_index=1)
-check("24.11 E5 档报告：首行窗位只出现一次（mode 里不再重复打印错开位置）",
-      _rep24b.splitlines()[0].count("@") == 1
-      and "E5 错开窗（按段号错开）" in _rep24b.splitlines()[0],
-      str(_rep24b.splitlines()[0])[:110])
-
 # 24.12 持续帧滤波（P0）：单帧瞬态不计入，连续台词无损（瓦片档 0% 阈值的瞬态防线）
 _b24t = _mkbed24()                                   # 尾窗 58% 台词（连续块）
 _b24x = _mkbed24(voice=())                           # 纯底噪
@@ -2134,7 +2106,7 @@ _X25 = int(0.25 * _SR25)
 
 # 25.1 头部带台词 ⇒ 收缩 + 台词区逐位保留
 _o25a, _r25a = CORE.audio_seam_patch(_t25, _b25d, patch=2.0, tile=0.0, fade=0.25,
-                                     select="tail", bed_jitter=0.0, stage_index=1)
+                                     select="tail", stage_index=1)
 _on25 = CORE._speech_onset_in_head(CORE._audio_parts(_t25)[0], int(2.0 * _SR25))
 _w25o = CORE._audio_parts(_o25a)[0]
 _w25r = CORE._audio_parts(_t25)[0]
@@ -2146,16 +2118,16 @@ check("25.1 头部台词 @%.2fs ⇒ patch 自动收缩且台词起逐位无损" 
 # 25.2 头部干净 ⇒ 守卫开 == 守卫关（逐位，零副作用）
 _t25q = {"waveform": _mktarget25(onset=99), "sample_rate": _SR25}
 _o25g, _ = CORE.audio_seam_patch(_t25q, _b25d, patch=2.0, tile=0.0, fade=0.25,
-                                 select="tail", bed_jitter=0.0, stage_index=1)
+                                 select="tail", stage_index=1)
 _o25n, _ = CORE.audio_seam_patch(_t25q, _b25d, patch=2.0, tile=0.0, fade=0.25,
-                                 select="tail", bed_jitter=0.0, stage_index=1, patch_guard=False)
+                                 select="tail", stage_index=1, patch_guard=False)
 check("25.2 头部无台词 ⇒ 守卫开与关输出逐位一致（干净素材零行为变化）",
       torch.equal(CORE._audio_parts(_o25g)[0], CORE._audio_parts(_o25n)[0]))
 
 # 25.3 台词太靠前（onset − margin < 0.10s 可用）⇒ patch 关闭 + 原样返回 + report 说明
 _t25e = {"waveform": _mktarget25(onset=0.05), "sample_rate": _SR25}
 _o25e, _r25e = CORE.audio_seam_patch(_t25e, _b25d, patch=2.0, tile=0.0, fade=0.25,
-                                     select="tail", bed_jitter=0.0, stage_index=1)
+                                     select="tail", stage_index=1)
 check("25.3 台词太靠前 ⇒ patch 自动关闭、音频原样返回、report 说明",
       torch.equal(CORE._audio_parts(_o25e)[0], CORE._audio_parts(_t25e)[0])
       and "patch 自动关闭" in _r25e,
@@ -2163,7 +2135,7 @@ check("25.3 台词太靠前 ⇒ patch 自动关闭、音频原样返回、report
 
 # 25.4 守卫关 ⇒ 旧行为（头部确实被替换 ⇒ 可能吞字，这是用户显式选择的语义）
 _o25f, _r25f = CORE.audio_seam_patch(_t25, _b25d, patch=2.0, tile=0.0, fade=0.25,
-                                     select="tail", bed_jitter=0.0, stage_index=1,
+                                     select="tail", stage_index=1,
                                      patch_guard=False)
 _w25f = CORE._audio_parts(_o25f)[0]
 check("25.4 守卫关 ⇒ 旧行为（头部被替换、report 无 🛡）",

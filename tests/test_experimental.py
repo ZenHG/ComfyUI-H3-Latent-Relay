@@ -11,11 +11,13 @@
 覆盖调研文档 ``RESEARCH_seam_frontier.md`` 里四个**尚未投产**的手段
 （``E1``~``E5``，见 relay_core.py 的实验层注释）：
 
-  E1 多尺度历史   build_history_refs / segment 分级抽稀
-  E2 conditioning 参考噪声 sdeedit_noise（原名「SDEdit 软钉入」，2026-09-21 语义更正）
   E3 DTW 残留量   dtw_residual / head_repeat_dtw
   E4 漂移曲线     segment_appearance_stats / drift_curve
-  E5 床声去重复   bed_jitter_start
+
+  （E1 多尺度历史 / E2 conditioning 参考噪声 / E5 床声去重复 已于 2026-09-22
+    连同实现一起删除 —— 三者实测对靶无效：E1 跨段漂移不减反增（单变量 A/B，
+    同 seed 同 latent，|s5−s3| 亮度 ×2.9）；E2 与硬锁互斥（把参考弄脏）；
+    E5 三缝差 0.1–1.3 dB 无可听收益。结项证据见当日交接与 memory。）
 
 纪律（与 test_relay_core.py 同一套）：
   · **默认全关 ⇒ 逐位不变**——每个手段都有一条「默认值原样返回」断言；
@@ -82,97 +84,6 @@ def frames_seq(n, seed=0):
 
 
 # ============================================================================
-print("=" * 78)
-print("E1｜多尺度历史 build_history_refs")
-print("=" * 78)
-
-hist = [make_latent(192, seed=i + 1) for i in range(3)]
-
-check("E1.1 depth=0（默认）⇒ 空列表，不引入任何 ref",
-      CORE.build_history_refs(hist, 22, 0, 4) == [])
-check("E1.2 空历史 ⇒ 空列表（不 raise，首段就是这样）",
-      CORE.build_history_refs([], 22, 2, 4) == [])
-_e1 = CORE.build_history_refs(hist, 22, 2, 4)
-check("E1.3 抽稀真的抽：两级步数不同（22帧→5帧）",
-      len(_e1) == 2 and _e1[0]["latent_t"] > _e1[1]["latent_t"],
-      "latent_t = %s" % [r["latent_t"] for r in _e1])
-check("E1.4 每级都是合法 refs 块（kind/latent_t/latent_h/latent_w 齐备）",
-      all(r["kind"] == "video" and r["latent_t"] > 0 and r["ref_audio_t"] == 0
-          and r["audio_latent"] is None for r in _e1),
-      str([(r["kind"], r["latent_t"]) for r in _e1]))
-check("E1.5 抽稀单调：越远的级越短",
-      [r["latent_t"] for r in CORE.build_history_refs(hist, 90, 3, 4)]
-      == sorted([r["latent_t"] for r in CORE.build_history_refs(hist, 90, 3, 4)],
-                reverse=True),
-      str([r["latent_t"] for r in CORE.build_history_refs(hist, 90, 3, 4)]))
-check("E1.6 第 0 级 = 基准帧数原档（不抽稀）",
-      CORE.build_history_refs(hist, 22, 1, 4)[0]["latent_t"]
-      == CORE.steps_for_frames(22))
-expect_raise("E1.7 基准帧数不在合法网格 ⇒ raise（不夹取到邻近档）",
-             lambda: CORE.build_history_refs(hist, 23, 1, 4), "不在合法网格")
-expect_raise("E1.8 depth 超过历史长度 ⇒ raise（不静默截断）",
-             lambda: CORE.build_history_refs(hist, 22, 4, 4), "只给了")
-expect_raise("E1.9 stride<1 ⇒ raise",
-             lambda: CORE.build_history_refs(hist, 22, 2, 0), "步长必须")
-expect_raise("E1.10 5 帧基准 ⇒ 只有 1 层，depth=2 超出可分层级 ⇒ raise（报错含建议值）",
-             lambda: CORE.build_history_refs(hist, 5, 2, 4), "超出可分层级")
-expect_raise("E1.11 stride=1 ⇒ 每级等长（只有 1 层）⇒ raise，等价于重复同一个锚",
-             lambda: CORE.build_history_refs(hist, 22, 2, 1), "超出可分层级")
-# —— 🆕 2026-09-22 E1 优化：解耦默认值 / 层级上限 / 撞源去重 三条 ——
-check("E1.12 默认基准帧数 = 22，且 22+stride4 ⇒ **2 级可分辨**（默认参数即可用，不再必然 raise）",
-      CORE.EXP_HISTORY_FRAMES_DEFAULT == 22
-      and len({r["latent_t"] for r in CORE.build_history_refs(hist, 22, 2, 4)}) == 2,
-      "默认=%s" % CORE.EXP_HISTORY_FRAMES_DEFAULT)
-check("E1.13 90 帧基准 + stride4 ⇒ 3 级（层级数受 5+17k 档位限制）",
-      len(CORE.build_history_refs(hist, 90, 3, 4)) == 3)
-_k1, _s1 = CORE.filter_history_refs([(3, "a"), (2, "b"), (1, "c"), (0, "d")], 0)
-_k2, _s2 = CORE.filter_history_refs([(3, "a"), (2, "b")], -1)
-check("E1.14 撞源去重：与外观锚同段的级被剔除、并报出被剔除的段号（anchor=-1 时不动）",
-      [i for i, _ in _k1] == [3, 2, 1] and _s1 == [0] and len(_k2) == 2 and _s2 == [],
-      "kept=%s skipped=%s ｜ anchor=-1 kept=%d" % ([i for i, _ in _k1], _s1, len(_k2)))
-
-# ============================================================================
-print()
-print("=" * 78)
-print("E2｜conditioning 参考噪声 sdeedit_noise（原名「SDEdit 式软钉入」，语义更正 2026-09-21）")
-print("=" * 78)
-
-_blk = frames_seq(6, seed=7)
-_out0 = CORE.sdeedit_noise(_blk, 0.0)
-check("E2.1 σ=0（默认）⇒ **逐位返回同一张量**（不是副本）",
-      _out0 is _blk, "is 同一对象：%s" % (_out0 is _blk))
-
-_g = torch.Generator().manual_seed(11)
-_out = CORE.sdeedit_noise(_blk, 0.5, generator=_g)
-check("E2.2 σ>0 ⇒ 形状/ dtype/ 设备不变",
-      _out.shape == _blk.shape and _out.dtype == _blk.dtype)
-_delta = float((_out - _blk).abs().mean())
-_std = float(_blk.std())
-check("E2.3 注入量 ≈ σ×块自身 std（量纲无关，docstring 的承诺）",
-      0.35 * _std < _delta < 0.65 * _std,
-      "注入 %.4f vs σ·std=%.4f" % (_delta, 0.5 * _std))
-
-_out_same = CORE.sdeedit_noise(_blk, 0.5, generator=torch.Generator().manual_seed(11))
-check("E2.4 同 seed ⇒ 可复现（实验要能重跑）",
-      torch.equal(_out, _out_same))
-_out_other = CORE.sdeedit_noise(_blk, 0.5, generator=torch.Generator().manual_seed(12))
-check("E2.5 不同 seed ⇒ 不同实现（否则 σ 是确定性偏移而非噪声）",
-      not torch.equal(_out, _out_other))
-expect_raise("E2.6 σ<0 ⇒ raise（不加噪不是负向旋钮）",
-             lambda: CORE.sdeedit_noise(_blk, -0.1), "不得为负")
-
-# 宿主契约核对（2026-09-20 读 I:/ComfyUI/comfy/ldm/minimax/model.py）：
-#   _cond_video_rows 对每个 cond latent 自己做 aug*r+(1-aug)*noise（默认 aug=0.999）
-#   ⇒ 本函数注入的噪声**几乎无衰减地穿过**宿主那一层 ⇒ 旋钮真实有效。
-#   ⚠ 但 cond 行的时间戳标签恒为 max(t_v, 0.999)（model.py:635-637）
-#   ⇒ 「噪声进了、标签仍是干净」≠ 论文 SDEdit 的「噪声量与 t 匹配」。
-#   这条差异必须在文档里写清（README 实验节已写），否则会按论文预期解读结果。
-print("    ℹ 宿主契约：cond 行过 model.py:_cond_video_rows 时 aug=0.999 "
-      "⇒ 注入噪声基本不被冲淡；但其 t 标签恒为 0.999 ⇒ 与论文 SDEdit "
-      "「噪声量↔时间戳匹配」不同，解读时别套论文结论。")
-
-# ============================================================================
-print()
 print("=" * 78)
 print("E3｜DTW 残留量 dtw_residual / head_repeat_dtw")
 print("=" * 78)
@@ -329,89 +240,6 @@ expect_raise("E4.10 非 [N,H,W,C] ⇒ raise",
              lambda: CORE.segment_appearance_stats(torch.zeros(10)), "[N,H,W,C]")
 
 # ============================================================================
-print()
-print("=" * 78)
-print("E5｜床声去重复 bed_jitter_start")
-print("=" * 78)
-
-_SR = 32000
-check("E5.1 jitter=0（默认）⇒ 与 0.5.0 主干的尾部窗完全一致",
-      CORE.bed_jitter_start(96000, 32000, 3, 0.0, _SR) == 64000,
-      "得到 %d" % CORE.bed_jitter_start(96000, 32000, 3, 0.0, _SR))
-check("E5.2 stage_index=0 ⇒ 平移 0 ⇒ 同默认档起点",
-      CORE.bed_jitter_start(96000, 32000, 0, 0.5, _SR) == 64000)
-check("E5.3 平移量 = stage×jitter×sr",
-      CORE.bed_jitter_start(96000, 32000, 3, 0.5, _SR) == 64000 - int(3 * 0.5 * _SR),
-      "得到 %d（期望 %d）" % (CORE.bed_jitter_start(96000, 32000, 3, 0.5, _SR),
-                              64000 - int(3 * 0.5 * _SR)))
-_wrap = CORE.bed_jitter_start(70000, 32000, 4, 2.0, _SR)
-check("E5.4 回绕（shift > 可平移空间）⇒ 仍落在合法区间",
-      0 <= _wrap and _wrap + 32000 <= 70000, "start=%d" % _wrap)
-check("E5.5 不同段号起点不同（治「各段头部 N 秒完全相同」）",
-      len({CORE.bed_jitter_start(96000, 32000, s, 0.5, _SR) for s in range(4)}) == 4,
-      str([CORE.bed_jitter_start(96000, 32000, s, 0.5, _SR) for s in range(4)]))
-expect_raise("E5.6 床源不长于补丁 ⇒ raise（无可平移空间，不静默取头部）",
-             lambda: CORE.bed_jitter_start(32000, 32000, 3, 0.5, _SR), "没有可平移")
-expect_raise("E5.7 床长 ≤0 ⇒ raise",
-             lambda: CORE.bed_jitter_start(96000, 0, 3, 0.5, _SR), "床声长度必须为正")
-
-# 长度守恒（不变量）：穷举小规模组合，不允许任何越界起点
-import itertools  # noqa: E402
-_bad = []
-for _tot, _n, _st, _j in itertools.product([32000, 32010, 70000, 96000],
-                                           [8000, 16000, 32000], range(5),
-                                           [0.0, 0.25, 0.5, 1.0, 2.0]):
-    if _n > _tot:
-        continue
-    try:
-        _s = CORE.bed_jitter_start(_tot, _n, _st, _j, _SR)
-    except Exception:
-        continue
-    if not (0 <= _s and _s + _n <= _tot):
-        _bad.append((_tot, _n, _st, _j, _s))
-check("E5.8 不变量 0≤start 且 start+n≤total（穷举组合）", not _bad, str(_bad[:3]))
-
-# ============================================================================
-# ---- E5.9~E5.11：🔴 2026-09-21 真渲染阳性 —— 床窗**撞语音**与规避 ----
-# 事故：expE5（jitter=1.2）把床窗挪到 @2.05s，**完整包住**床源段（stage 0）的台词
-#   （该段台词覆盖 3.0–4.0s）⇒ patch 把整句台词搬进本段头部 ⇒ 再叠缝处 crossfade
-#   ⇒ 听感「对白重叠」（成片 4.46–5.66s）。⚠ 产线默认（jitter=0、尾窗 @3.25s）**同样撞**。
-# 覆盖范围：本条走 **audio_seam_patch 的完整调用路径** —— 此前只测 build_bed 内部，
-#   2026-09-21 因此漏掉一个 NameError（日志行引用了 build_bed 的形参名 start_override）。
-_BED_SR = 32000
-# ⚠ 必须带非零底噪：全零波形会让帧 RMS 中位 = 0 ⇒ 判据短路返回 0（真实音频不会这样）
-_g = torch.Generator().manual_seed(7)
-_bed = torch.rand(1, 2, int(4.0 * _BED_SR), generator=_g) * 0.002
-_bn = int(1.2 * _BED_SR)
-_btot = int(_bed.shape[-1])
-_bed[..., _btot - _bn + int(0.1 * _BED_SR): _btot - _bn + int(0.5 * _BED_SR)] = 0.5   # 尾窗内塞"台词"
-_raw = torch.zeros(1, 2, int(3.5 * _BED_SR))
-_raw[..., int(0.5 * _BED_SR): int(1.0 * _BED_SR)] = 0.3
-_BED_D = {"waveform": _bed, "sample_rate": _BED_SR}
-_RAW_D = {"waveform": _raw, "sample_rate": _BED_SR}
-
-_vf_tail = CORE.bed_window_voiced_fraction(_bed, _btot - _bn, _bn)
-check("E5.9 尾部窗撞语音时 voiced_fraction 超阈值（判据有效）",
-      _vf_tail > CORE.AUDIO_SEAM_BED_VOICED_FRAC, "占比=%.2f" % _vf_tail)
-
-_ok, _rep, _o = True, "", None
-try:
-    _o, _rep = CORE.audio_seam_patch(_RAW_D, _BED_D, 1.2, 0.0, 0.25, select="tail",
-                                     target_audio=None, bed_jitter=0.0, stage_index=1)
-except Exception as _e:
-    _ok, _rep = False, "%s: %s" % (type(_e).__name__, _e)
-check("E5.10 audio_seam_patch 尾部窗撞语音 ⇒ 不抛异常、长度守恒、日志含 🎙",
-      _ok and int(_o["waveform"].shape[-1]) == int(_raw.shape[-1]) and "🎙" in _rep,
-      (_rep.splitlines()[0][:120] if _rep else ""))
-
-_lens = []
-for _j in (0.5, 1.2):
-    _o2, _r2 = CORE.audio_seam_patch(_RAW_D, _BED_D, 1.2, 0.0, 0.25, select="tail",
-                                     target_audio=None, bed_jitter=_j, stage_index=1)
-    _lens.append(int(_o2["waveform"].shape[-1]))
-check("E5.11 jitter 撞语音后仍长度守恒（规避不改变时间轴）",
-      _lens == [int(_raw.shape[-1])] * 2, str(_lens))
-
 print()
 print("=" * 78)
 print("结果：通过 %d / 失败 %d" % (len(PASS), len(FAIL)))
