@@ -45,6 +45,33 @@ comfy/model_base.py:2186-2196
 
 原生即支持任意位置的 keyframe 锚，本包不需要修改 ComfyUI。
 
+## 🔍 放大之后：哪条线留在原生域（0.6.8 全流程实测）
+
+产线现役路线是 **一采（原生）→ latent 放大 → 二采（高分辨率）→ 下一段续接**。
+它同时踩到协议里两条**不同**的通道，二者对"分辨率"的态度正好相反：
+
+| 通道 | 谁在用 | 允许与本段目标**异分辨率**吗 | 违反后的表现 |
+|---|---|---|---|
+| `minimax_keyframes`（**钉帧**） | 复合桥 `[3] conditioning` 输出 | 🔴 **不允许** | 炸在模型深处：`shape mismatch [2392,96] vs [3134,96]` |
+| `minimax_refs`（**外观锚**） | `ref_anchor_latent` / 参考图、参考视频 | ✅ 允许 | —— |
+
+**为什么 keyframes 不允许**：打包器 `PackedLayout` 给 keyframe 段算行数时用的是**目标网格**
+（`n = vt × frame_rows(目标 H,W)`，源码注释原话 "sharing the target spatial grid"），
+而 `_cond_video_rows()` 是把**锚自己的 latent** 逐位 patchify。两者只在同网格时数量相等。
+
+2026-09-22 实测的数正好把这条拆开：原生 416×736（latent 46×26）= **299 行/帧**，
+SR 到 480×864（latent 54×30）= **405 行/帧** ⇒ 打包器按 `7×405 + 299(参考图) = 3134` 留位，
+实际锚只有 `7×299 + 299 = 2392` 行 ⇒ `all_video_rows[~img_update] = cond_video_rows` 广播失败。
+
+**结论（写进接线纪律）**：**只有原生域那一采接桥的 `[3] conditioning`**；二采的 guider 接出词节点的
+`positive`。这不等于"二采丢了钉住"——**latent 侧的钉住（拷贝前缀 + 噪声掩码）与网格无关，照常生效**，
+被放弃的只是 conditioning 那半条"取景钉帧"。
+另一条硬线同理：**`🔗 续接 Latent 存` 必须取放大前的一采终态**（契约在原生域），
+否则下一段的桥拷进 SR 域数据、再过一次 SR = 双倍漂移。
+
+> 与 `context_latent` 的「同分辨率」硬约束是同一族问题：**latent 侧那条会明确 raise，
+> conditioning 侧这条炸在模型里**。所以两条都得在接线阶段就避开，别指望报错兜底。
+
 ## 与像素续接的关系
 
 两者写的是**同一个 conditioning 协议**，因此可以互换：

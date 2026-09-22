@@ -675,17 +675,17 @@ RuntimeError: shape mismatch: value tensor of shape [2392, 96]
 
 | 文件 | 内容 |
 |---|---|
-| [`docs/01-mechanism.md`](docs/01-mechanism.md) | 两条续接路线的历史与取舍 · 协议出处 · 时序网格 · 为什么必须裁头 · 裁多少帧怎么量 · 运行时契约 · 音频窗口径 |
-| [`docs/02-parameters.md`](docs/02-parameters.md) | 参数全量手册（桥 / 裁重叠 / 后处理 Post / 音频缝） |
+| [`docs/01-mechanism.md`](docs/01-mechanism.md) | 两条续接路线的历史与取舍 · 协议出处 · **放大之后哪条线留在原生域（keyframes 与 refs 的分辨率态度相反）** · 时序网格 · 为什么必须裁头 · 裁多少帧怎么量 · 运行时契约 · 音频窗口径 |
+| [`docs/02-parameters.md`](docs/02-parameters.md) | 参数全量手册（桥 / 裁重叠 / 后处理 Post / 音频缝 / **🔍 潜空间分块放大**） |
 | [`docs/03-sampling-and-design.md`](docs/03-sampling-and-design.md) | 采样链取舍 · 本包的设计取向（该量的不让用户配） |
 | [`docs/04-canvas-and-widgets.md`](docs/04-canvas-and-widgets.md) | 画布外观 · `advanced` 折叠 · 旧图看不到 `prev_tail` 的处理 |
 | [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md) | 完整排障表 · 工作流文件自检 · API 提交 |
 | [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md) | 出词纪律：段首缓冲 · 台词安全时刻 · 末帧锚链 · 音频缝配套 |
 | [`docs/07-chain.md`](docs/07-chain.md) | Chain 自动连跑 |
-| [`docs/08-testing.md`](docs/08-testing.md) | 离线自测：22 组断言明细 · `tools/` 清单 |
+| [`docs/08-testing.md`](docs/08-testing.md) | 离线自测：27 组断言明细 · `tools/` 清单 |
 | [`docs/09-metrics.md`](docs/09-metrics.md) | 观测量参考区间（DTW 残留 / 外观漂移）· 怎么自校准 |
 | [`CHANGES.md`](CHANGES.md) | 版本史与每次实测证据 |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 开发环境 · 自测纪律 · 许可条款 |
 | [`SECURITY.md`](SECURITY.md) | 密钥 / 依赖 / 网络行为声明 |
-| [`tools/README.md`](tools/README.md) | 五个自检脚本的用途与期望值 |
-| [`examples/README.md`](examples/README.md) | 最小演示工作流与生成器 |
+| [`tools/README.md`](tools/README.md) | 七个脚本的用途与期望值（六个自检/取证 + 一个拼接 CLI） |
+| [`examples/README.md`](examples/README.md) | 两份可直接打开的工作流：**最小续接演示**（18 节点）与**全流程示例**（45 节点，8 个节点全在场）· 生成器 |
