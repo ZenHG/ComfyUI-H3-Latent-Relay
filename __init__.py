@@ -83,6 +83,11 @@ if PromptServer is not None:           # pragma: no branch
     _PCM_RANK = {"H3RelayAudioSeam": 2, "H3RelayTrimAV": 1}
 
     def _abs_of(p):
+        # 优先用节点自报的绝对路径：第三方落盘节点可能存到 ComfyUI output **之外**
+        #   （实测 banzhangVideoCombine 的「自定义保存路径」= I://coffee_short//output，
+        #   而它的 subfolder 是空的）⇒ 用 type+subfolder 拼会拼出一个不存在的路径。
+        if p.get("abs_path"):
+            return str(p["abs_path"])
         base = folder_paths.get_directory_by_type(p["type"]) or folder_paths.get_output_directory()
         return os.path.join(base, p["subfolder"], p["filename"])
 

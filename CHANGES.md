@@ -10,7 +10,7 @@
 > 实测 4 段 29.25s 成片 **0.17 s** 完成（默认档 2.1 s）、帧数 702/702 守恒、A·VΔ = 0.1 ms。
 > **音频代际 2 → 1**：「裁重叠」顺手落无损 **PCM 边车**（`save_pcm`，默认开），拼接直读 ⇒ 不再二次 AAC；
 > Chain 多 `audio_out`（默认 **AAC 256k**，可 192k，或 `pcm_lossless` 母版）与 `video_crf`。
-> 门槛：`test_relay_core` **359/0**（+第 26 组 47 条）· `test_experimental` 60/0 ·
+> 门槛：`test_relay_core` **362/0**（+第 26 组 50 条）· `test_experimental` 60/0 ·
 > `review_050` 80/0 · `smoke_nodes` 15/0 · `tests/test_prompt_dispatch.mjs` **29/0**（node 跑）。
 
 ### 为什么做（开源用户是 UI 用户）
@@ -112,6 +112,19 @@
   （**故意不写"手工复制参数"的 remux 退路** —— 那属"无断言即未验收"，容易产出能播但内容错的片）。
 - **示例图补上 `H3RelayChain` 节点**（默认档）⇒ 别人下载 example 就能看到这个能力存在。
 - 门槛：`test_relay_core` **359/0**（+26.41~26.44：PyAV 兼容两条、CLI 真跑两条）。
+
+### 🔴 真实 4 段跑抓到的集成缺陷：落盘节点**键名不统一** + 文件在 output 之外
+
+2026-09-22 用本包节点跑了一条真实 4 段链（480×864 / 4+1 步 / 192 帧段长，见交接），
+第一次跑到「自动合成」时发现**拼不出来**，根因两条（都只有真跑才暴露）：
+
+| 现象 | 根因 | 修法 |
+|---|---|---|
+| 路由报「一段视频文件都没找到」 | `pick_video_outputs` 只认 `images`/`videos`/`gifs` 三个键，而**第三方落盘节点**（`banzhangVideoCombine`）把文件记录写在 **`painter_output`** 键下 | 改成**按扩展名扫全部键**（新增 `_iter_file_records`）；键名不设白名单 |
+| 就算找到了，路径也是错的 | 该节点用「自定义保存路径」存到 **ComfyUI output 之外**（`I://coffee_short//output`），而它的 `subfolder` 是空的 ⇒ `output_dir/subfolder/filename` 拼出一个不存在的路径 | 条目带 `abs_path` 时**优先用它**（节点自己报的绝对路径最可信） |
+
+> 判据：`26.45`（第三方键名 + png 不误收 + abs_path 带出）、`26.45b`（边车与视频互不串）、
+> `26.46`（路由优先 abs_path、缺了才 join）。**这次是真跑抓到的，不是推演出来的。**
 
 ### 🔴 实测更正：`ffmpeg -f concat -c copy` 不能用来拼 H3 段文件
 

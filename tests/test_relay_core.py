@@ -2358,6 +2358,28 @@ else:
     check("26.13 pick_video_outputs 对畸形输入不炸", CORE.pick_video_outputs(None) == []
           and CORE.pick_video_outputs({"1": {"images": [1, None, "x"]}}) == [])
 
+    # —— 26.45 落盘节点**键名不设白名单**（2026-09-22 真实跑抓到） ——
+    #   宿主 SaveVideo 写 `images`；第三方 `banzhangVideoCombine` 写 **`painter_output`**，
+    #   且它的「自定义保存路径」在 ComfyUI output **之外**（subfolder 为空）⇒ 必须优先用 abs_path。
+    _tp = CORE.pick_video_outputs({
+        "709": {"painter_output": [
+            {"filename": "au4_s1_N709_0001.mp4", "subfolder": "", "type": "output",
+             "abs_path": r"I:/coffee_short/output/au4_s1_N709_0001.mp4"},
+            {"filename": "au4_s1_N709_0001_meta.png", "subfolder": "", "type": "output"}],
+            "detail_info": ["📂 文件名称 : au4_s1_N709_0001.mp4\n📏 物理尺寸 : 480 x 864"]},
+        "905": {"h3relay_pcm": [{"filename": "audio_00000.safetensors",
+                                 "subfolder": "relay_kit\\au4", "type": "output"}]},
+    })
+    check("26.45 第三方落盘键名（painter_output）也能拾取：视频收下、png/文本不误收、abs_path 带出",
+          [x["filename"] for x in _tp] == ["au4_s1_N709_0001.mp4"]
+          and _tp[0]["abs_path"].replace("\\", "/").endswith("coffee_short/output/au4_s1_N709_0001.mp4"),
+          "%s" % ([(x["filename"], x["abs_path"]) for x in _tp],))
+    check("26.45b 同一份 outputs 里，PCM 边车按 .safetensors 走 pick_pcm_outputs（与视频互不串）",
+          [x["filename"] for x in CORE.pick_pcm_outputs({
+              "905": {"h3relay_pcm": [{"filename": "audio_00000.safetensors",
+                                       "subfolder": "relay_kit/au4", "type": "output"}]}})]
+          == ["audio_00000.safetensors"])
+
     # ================================================================
     # 26.19~26.31 音频代际 2 → 1（2026-09-22 二轮）：**PCM 边车**
     # ================================================================
@@ -2695,6 +2717,16 @@ else:
                                           "subfolder": "relay_kit/relay", "type": "output"}]},
             },
         }
+        check("26.46 路由取路径优先用节点自报 abs_path，缺了才按 type+subfolder 拼",
+              _pk._abs_of({"filename": "a.mp4", "subfolder": "", "type": "output",
+                           "abs_path": r"I://coffee_short//output//a.mp4"})
+              == r"I://coffee_short//output//a.mp4"
+              and _pk._abs_of({"filename": "b.mp4", "subfolder": "relay_kit/x",
+                               "type": "output"}).replace("\\", "/")
+              .endswith("/output/relay_kit/x/b.mp4"),
+              "abs=%s" % (_pk._abs_of({"filename": "b.mp4", "subfolder": "relay_kit/x",
+                                       "type": "output"}),))
+
         _cands = _pk._pcm_candidates(_e_multi)
         check("26.40 多候选按音频链排序：音频缝（链后）排在裁重叠之前",
               len(_cands) == 2 and _cands[0].replace("\\", "/").endswith("relay/audio_00001.safetensors")

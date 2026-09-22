@@ -3946,25 +3946,41 @@ def assemble_mp4_segments(paths, out_path, *, video="auto", audio_codec="aac",
     return rep
 
 
+def _iter_file_records(node_out):
+    """遍历一个节点 output dict 里**所有**看起来像"文件记录"的条目（**键名不设白名单**）。
+
+    为什么不做键名白名单：实测（2026-09-22 真实跑）宿主 `SaveVideo` 写 `images`，
+    而第三方落盘节点（`banzhangVideoCombine`）写的是 `painter_output` ——
+    只认白名单会变成"图跑得好好的，拼接却报一段视频都没找到"（本仓踩过）。
+    一条"文件记录" = dict 且带 `filename`；`detail_info`/`text` 这类字符串自动跳过。
+    """
+    for val in (node_out or {}).values():
+        if isinstance(val, list):
+            for item in val:
+                if isinstance(item, dict) and item.get("filename"):
+                    yield item
+
+
 def pick_video_outputs(outputs):
     """从 ComfyUI history 的 ``outputs`` 里挑出**视频类**落盘结果（纯函数，便于单测）。
 
-    宿主 SaveVideo/SaveWEBM 都写进 `images` 键；非视频（png…）与畸形项一律跳过。
-    返回 ``[{"node","filename","subfolder","type"}]``（按 history 里的出现顺序）。
+    **按扩展名扫全部键**（键名不设白名单，见 `_iter_file_records` 的原因）；
+    非视频（png…）与畸形项一律跳过；带 `abs_path` 的一并带出 ——
+    有些落盘节点把文件存到 ComfyUI output **之外**（如自定义保存路径），
+    这时 `type`+`subfolder` 拼出来的路径是错的，必须用节点自己给的绝对路径。
+    返回 ``[{"node","filename","subfolder","type","abs_path"}]``（按 history 里的出现顺序）。
     """
     found = []
     for node_id, node_out in (outputs or {}).items():
         if not isinstance(node_out, dict):
             continue
-        for key in ("images", "videos", "gifs"):
-            for item in (node_out.get(key) or []):
-                if not isinstance(item, dict):
-                    continue
-                fn = str(item.get("filename") or "")
-                if os.path.splitext(fn)[1].lower() in AV_CONCAT_VIDEO_EXTS:
-                    found.append({"node": str(node_id), "filename": fn,
-                                  "subfolder": str(item.get("subfolder") or ""),
-                                  "type": str(item.get("type") or "output")})
+        for item in _iter_file_records(node_out):
+            fn = str(item.get("filename") or "")
+            if os.path.splitext(fn)[1].lower() in AV_CONCAT_VIDEO_EXTS:
+                found.append({"node": str(node_id), "filename": fn,
+                              "subfolder": str(item.get("subfolder") or ""),
+                              "type": str(item.get("type") or "output"),
+                              "abs_path": str(item.get("abs_path") or "")})
     return found
 
 
