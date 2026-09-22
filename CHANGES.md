@@ -10,7 +10,7 @@
 > 实测 4 段 29.25s 成片 **0.17 s** 完成（默认档 2.1 s）、帧数 702/702 守恒、A·VΔ = 0.1 ms。
 > **音频代际 2 → 1**：「裁重叠」顺手落无损 **PCM 边车**（`save_pcm`，默认开），拼接直读 ⇒ 不再二次 AAC；
 > Chain 多 `audio_out`（默认 **AAC 256k**，可 192k，或 `pcm_lossless` 母版）与 `video_crf`。
-> 门槛：`test_relay_core` **364/0**（+第 26 组 52 条）· `test_experimental` 60/0 ·
+> 门槛：`test_relay_core` **365/0**（+第 26 组 53 条）· `test_experimental` 60/0 ·
 > `review_050` 80/0 · `smoke_nodes` 15/0 · `tests/test_prompt_dispatch.mjs` **29/0**（node 跑）。
 
 ### 为什么做（开源用户是 UI 用户）

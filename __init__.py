@@ -188,6 +188,16 @@ if PromptServer is not None:           # pragma: no branch
                          "（跑过一轮再来，或把 Chain 的 segments 填成正数。）")
             return web.json_response({"ok": False, "report": "\n".join(lines), "out": "",
                                       "attempted_out": out_path, "searched": note})
+        # 🔴 拼之前先核对**文件真的在盘上**：缺了立刻报清楚，不进编码阶段
+        #   （路径发现本身是内存里扫 history + isfile，微秒级；这一步只为"别白等"）。
+        _miss = [p for p in segs if not os.path.isfile(p)]
+        if _miss:
+            lines.append("  🔴 %d 个段文件在盘上不存在（路径来自节点回显，已被删/被移？）⇒ 没有拼："
+                         % len(_miss))
+            lines += ["     · " + p for p in _miss]
+            return web.json_response({"ok": False, "report": "\n".join(lines), "out": "",
+                                      "attempted_out": out_path, "missing": _miss,
+                                      "searched": note})
         try:
             rep = CORE.assemble_mp4_segments(segs, out_path, on_log=print,
                                              audio_codec=a_codec, audio_bitrate=a_bitrate,

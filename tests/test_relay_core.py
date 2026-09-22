@@ -2708,6 +2708,15 @@ else:
               and _pk._mp4_paths(_ents[0])[0].endswith("a.mp4"),
               "ids=%s path=%s" % (_ids, _pk._mp4_paths(_ents[0])[:1]))
 
+        # 26.49 段文件不在盘上时，路由必须**立刻报**（不进入编码 ⇒ 不白等）
+        _e_missing = {"prompt": [None, None, {"7": {"class_type": "H3RelayChain"}}],
+                      "outputs": {"31": {"images": [{"filename": "gone.mp4", "subfolder": "",
+                                                     "type": "output"}]}}}
+        _paths = _pk._mp4_paths(_e_missing)
+        check("26.49 路由能取出路径（存在性由拼之前的核对负责，避免「找不到还静默拼半条」）",
+              len(_paths) == 1 and str(_paths[0]).replace("\\", "/").endswith("gone.mp4"),
+              "%s" % (_paths,))
+
         _ids2, _e2, _n2 = _pk._pick_segments(_q, [], "7", 5)
         check("26.16 没给 id 时回扫 history：只认「图里带本 Chain 节点」的提交",
               _ids2 == ["p1", "p2"] and "2 次" in _n2, _n2)
