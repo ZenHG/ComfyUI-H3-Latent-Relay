@@ -634,6 +634,13 @@ class H3RelayChain:
         ⏩ 连跑     按 segments 自动循环：跑完一段 → 段号+1 → 再跑（0 = 无限）
         ⏹ Stop     当前采样跑完后停止推进
         ↺ Reset    段号归 0，从第 1 段重来
+        🧩 拼成一条 把已经跑完的 N 段拼成一条成片（0.6.7）
+
+    0.6.7 加的两件事（**都默认关 = 老图逐位不变**）：
+      · **词分发**（`prompts` + `prompt_target`）：填了 `prompts` 时，跑第 k 段前自动把第 k 块词
+        写进出词节点 —— 连跑不再"反复提交同一份词"。
+      · **自动拼接**（`auto_concat` + `concat_name`）：连跑结束后把 N 段拼成一条成片，
+        画面**流拷贝（无损）**、音频按段去 priming 对齐（秒级）。
 
     使用前提：把 Chain、桥、落盘三个节点拉进**同一个分组框**（框选 → 右键 → 添加分组），
     否则按钮找不到要推进的节点。
@@ -646,7 +653,7 @@ class H3RelayChain:
                 "segments": ("INT", {
                     "default": 5, "min": 0, "max": 9999, "step": 1,
                     "tooltip": "【连跑几段】点「⏩ 连跑」时生效：5 = 连跑 5 段后自动停；0 = 不停，直到点 ⏹ Stop。\n"
-                               "其他按钮不受它影响。",
+                               "其他按钮不受它影响。填了 prompts 时，段数还应 ≤ 词块数。",
                 }),
             },
             "optional": {
@@ -656,8 +663,35 @@ class H3RelayChain:
                 "status": ("STRING", {
                     "default": "",
                     "tooltip": "【不用填，自动显示】前端把连跑状态写在这里：\n"
-                               "当前段号 / 已排队 / ⚠ 分组没放对 / ⚠ 排队失败…\n"
+                               "当前段号 / 已排队 / ⚠ 分组没放对 / ⚠ 排队失败 / 词分发结果 / 拼接结果…\n"
                                "点了按钮没反应时，先看这一格说了什么。",
+                }),
+                # —— 0.6.7：词分发 + 自动拼接。**一律追加在 status 之后**，
+                #    旧工作流少这几格只走默认值，位置不错位。
+                "prompts": ("STRING", {
+                    "default": "", "multiline": True,
+                    "tooltip": "【可选｜多段各自的词】用**单独一行 `---`** 分隔每段的词：\n"
+                               "第 1 块喂第 1 段、第 2 块喂第 2 段……留空 = 老行为（不换词）。\n"
+                               "⚠ 块数不够要跑的段数时**不排队**并报错 —— 免得你以为换了词、其实没有。\n"
+                               "UI 用：把 N 段词一次性粘进来，跑之前不用再手动改画布上的词。",
+                }),
+                "prompt_target": ("STRING", {
+                    "default": "",
+                    "tooltip": "【可选】词写进哪个格子。两种写法：\n"
+                               "  · `683` —— 节点 id，自动挑它的词格；\n"
+                               "  · `683.h3_data` —— 点名到字段（`h3_data` 是 JSON 字符串时会只改里面的 prompt）。\n"
+                               "留空 = 自动探测：优先 `CSGlideCastCS` 的 `h3_data`，其次官方出词节点的 `prompt`；\n"
+                               "**探测到多个就报错**，这时把节点 id 填进来。",
+                }),
+                "auto_concat": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "【可选】⏩ 连跑跑完就**自动把 N 段拼成一条**成片（画面流拷贝无损，秒级）。\n"
+                               "关（默认）= 老行为，跑完只得到 N 个 mp4；想拼时点「🧩 拼成一条」。",
+                }),
+                "concat_name": ("STRING", {
+                    "default": "",
+                    "tooltip": "【可选】成片文件名（不用写扩展名）。留空 = 用落盘的 run_id。\n"
+                               "成片存到 ComfyUI 的 output/ 目录，拼完路径会写进 status 那一格。",
                 }),
             },
         }
@@ -669,12 +703,14 @@ class H3RelayChain:
         "自动连跑控制器：配合桥 + 落盘使用。\n"
         "第一步：把 Chain、桥、落盘放进同一个分组框。\n"
         "第二步：桥和落盘 stage_index 填 0，点 ▶ Run 拍第 1 段。\n"
-        "第三步：点 ⏩ 连跑（或每段点 ✔ Approve），段号自动推进，不用再手改。\n"
+        "第三步：填 prompts（`---` 分块，第 k 块喂第 k 段）⇒ 点 ⏩ 连跑，词自动换、段号自动推进。\n"
+        "第四步（可选）：开 auto_concat 让跑完自动成片，或点「🧩 拼成一条」当场拼。\n"
         "状态显示在 status 格子里（点了没反应就看它）。"
     )
 
     def noop(self, segments=5, **kwargs):
-        # **kwargs 吞掉 status 这类只用于显示的输入
+        # **kwargs 吞掉 status / prompts / prompt_target / auto_concat / concat_name
+        # 这类只给前端读的输入（它们不参与执行）。
         return {}
 
 
@@ -871,6 +907,17 @@ class H3RelayCopyBridge:
                     "min": 1, "max": 16, "step": 1,
                     "tooltip": "🧪【实验】E1 每远一级的时序抽稀步长（帧数按 stride^i 衰减，下限 5 帧）。",
                 }),
+                "exp_history_frames": ("INT", {
+                    "advanced": True, "default": CORE.EXP_HISTORY_FRAMES_DEFAULT,
+                    "min": 5, "max": 124, "step": 1,
+                    "tooltip": "🧪【实验·2026-09-22 新增】E1 每级**基准帧数**（已**独立**于 ref_anchor_frames）。\n"
+                               "为什么要独立：旧实现借用 ref_anchor_frames 当基准 ⇒ 想给 E1 一个够大的基准，\n"
+                               "   就必须把**外观锚**也一起改大 ⇒ 两个机制被迫同步改动、单变量对比不成立。\n"
+                               "🔴 只认合法网格 5/22/39/56/73/90/107/124（非法值 raise，不夹取）。\n"
+                               "   可分层级数：22 + stride4 ⇒ 2 级；90 ⇒ 3 级；107 ⇒ 4 级；\n"
+                               "   5 ⇒ 只有 1 级（**不是多尺度**，等于多加一个锚）。\n"
+                               "默认 22 = 默认参数下就能出 2 级真层次。",
+                }),
                 "exp_cond_noise": ("FLOAT", {
                     "advanced": True, "default": CORE.EXP_COND_NOISE_DEFAULT,
                     "min": 0.0, "max": 1.0, "step": 0.01,
@@ -905,10 +952,15 @@ class H3RelayCopyBridge:
                anchor_latent=None, anchor_blend=1.0,
                conditioning=None, run_id="relay", stage_index=0,
                ref_anchor_latent=None, ref_anchor_stage=-1, ref_anchor_frames=5,
-               exp_history_depth=None, exp_history_stride=None, exp_cond_noise=None):
+               exp_history_depth=None, exp_history_stride=None, exp_history_frames=None,
+               exp_cond_noise=None):
         # 🧪 实验档：None 视为「未接线」⇒ 取默认（全关），保证老图/API 调用零变化
         exp_history_depth = CORE.EXP_HISTORY_DEPTH_DEFAULT if exp_history_depth is None else exp_history_depth
         exp_history_stride = CORE.EXP_HISTORY_STRIDE_DEFAULT if exp_history_stride is None else exp_history_stride
+        # 🆕 2026-09-22（#1/#3）E1 基准帧数**独立**：旧实现借用 ref_anchor_frames ⇒ 两个机制被迫同步改。
+        #   ⚠ 判据用「假值」而非「is None」：API 侧（l1_api）统一传 `or 0` 表示未接线，
+        #   而 0 不是合法帧数（合法档最小 5）⇒ 不会与真实取值冲突。
+        exp_history_frames = CORE.EXP_HISTORY_FRAMES_DEFAULT if not exp_history_frames else exp_history_frames
         exp_cond_noise = CORE.EXP_COND_NOISE_DEFAULT if exp_cond_noise is None else exp_cond_noise
         CONTRACT.enforce()
         # 0.6.0：Latent 桥（H3RelayMotionContext）已删除，本节点成为**唯一桥**。
@@ -979,24 +1031,35 @@ class H3RelayCopyBridge:
                       % (float(exp_cond_noise), len(plan.keyframes)), flush=True)
             # 🧪 E1 多尺度历史：按 stage_index-2, -3… 自动读更早段做分级 refs
             if int(exp_history_depth) > 0 and (run_id or "").strip():
-                hist, miss = [], []
+                # 🆕 2026-09-22（#4）读历史时**同时记下段号**，稍后用来剔除「与外观锚同段」的级。
+                _pairs, miss = [], []
                 for k in range(2, 2 + int(exp_history_depth)):
                     idx = int(stage_index) - k
                     if idx < 0:
                         break
                     try:
-                        hist.append(CORE.load_av_latent(_stage_path(run_id, idx)))
+                        _pairs.append((idx, CORE.load_av_latent(_stage_path(run_id, idx))))
                     except FileNotFoundError:
                         miss.append(idx)
+                # 🆕（#5）旧文案写「已跳过对应级」，但下一行仍按**原始 depth** 校验 ⇒ 紧接 raise，
+                #   日志与行为矛盾（用户以为跳过了，其实崩了）。改成如实说明会 raise。
                 if miss:
-                    print("[H3 Relay] 实验 E1：更早段 %s 未落盘，已跳过对应级" % miss, flush=True)
+                    print("[H3 Relay] 实验 E1：更早段 %s 未落盘 ⇒ 可用历史只剩 %d 级，"
+                          "而 exp_history_depth=%d ⇒ 接下来会 raise（本实现不静默截断）。"
+                          "请把 depth 调到 ≤%d 后重跑。"
+                          % (miss, len(_pairs), int(exp_history_depth), len(_pairs)), flush=True)
+                # 🆕（#4）撞源去重：历史级与**外观锚同段**时剔除，避免白占多模态参考配额
+                _keep, _dupe = CORE.filter_history_refs(_pairs, int(ref_anchor_stage))
+                if _dupe:
+                    print("[H3 Relay] 实验 E1：段 %s 与外观锚同源 ⇒ 已剔除对应级（避免撞源白占配额）"
+                          % _dupe, flush=True)
                 refs = CORE.build_history_refs(
-                    hist, frames=int(ref_anchor_frames),
+                    [lat for _, lat in _keep], frames=int(exp_history_frames),
                     depth=int(exp_history_depth), stride=int(exp_history_stride))
                 if refs:
                     plan.extra_refs = refs
-                    print("[H3 Relay] 实验 E1：多尺度历史 %d 级（stride=%d）"
-                          % (len(refs), int(exp_history_stride)), flush=True)
+                    print("[H3 Relay] 实验 E1：多尺度历史 %d 级（基准 %d 帧 / stride=%d）"
+                          % (len(refs), int(exp_history_frames), int(exp_history_stride)), flush=True)
             cond_out = CORE.apply_relay(conditioning, plan)
             extra = ["[H3 Relay] 复合桥·钉帧路径：" + plan.summary()]
             for n in plan.notes:

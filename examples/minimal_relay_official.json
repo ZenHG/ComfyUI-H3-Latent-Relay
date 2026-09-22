@@ -558,6 +558,14 @@
           }
         },
         {
+          "name": "exp_history_frames",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "exp_history_frames"
+          }
+        },
+        {
           "name": "exp_cond_noise",
           "type": "FLOAT",
           "link": null,
@@ -618,6 +626,7 @@
         5,
         0,
         4,
+        22,
         0.0
       ]
     },

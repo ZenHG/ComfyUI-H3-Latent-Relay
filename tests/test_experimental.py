@@ -114,10 +114,22 @@ expect_raise("E1.8 depth 超过历史长度 ⇒ raise（不静默截断）",
              lambda: CORE.build_history_refs(hist, 22, 4, 4), "只给了")
 expect_raise("E1.9 stride<1 ⇒ raise",
              lambda: CORE.build_history_refs(hist, 22, 2, 0), "步长必须")
-expect_raise("E1.10 抽不出层级（5 帧起抽 ⇒ 两级同为 2 步）⇒ raise，不造假多尺度",
-             lambda: CORE.build_history_refs(hist, 5, 2, 4), "分不出层级")
-expect_raise("E1.11 stride=1 ⇒ 每级等长 ⇒ raise（等价于重复同一个锚）",
-             lambda: CORE.build_history_refs(hist, 22, 2, 1), "分不出层级")
+expect_raise("E1.10 5 帧基准 ⇒ 只有 1 层，depth=2 超出可分层级 ⇒ raise（报错含建议值）",
+             lambda: CORE.build_history_refs(hist, 5, 2, 4), "超出可分层级")
+expect_raise("E1.11 stride=1 ⇒ 每级等长（只有 1 层）⇒ raise，等价于重复同一个锚",
+             lambda: CORE.build_history_refs(hist, 22, 2, 1), "超出可分层级")
+# —— 🆕 2026-09-22 E1 优化：解耦默认值 / 层级上限 / 撞源去重 三条 ——
+check("E1.12 默认基准帧数 = 22，且 22+stride4 ⇒ **2 级可分辨**（默认参数即可用，不再必然 raise）",
+      CORE.EXP_HISTORY_FRAMES_DEFAULT == 22
+      and len({r["latent_t"] for r in CORE.build_history_refs(hist, 22, 2, 4)}) == 2,
+      "默认=%s" % CORE.EXP_HISTORY_FRAMES_DEFAULT)
+check("E1.13 90 帧基准 + stride4 ⇒ 3 级（层级数受 5+17k 档位限制）",
+      len(CORE.build_history_refs(hist, 90, 3, 4)) == 3)
+_k1, _s1 = CORE.filter_history_refs([(3, "a"), (2, "b"), (1, "c"), (0, "d")], 0)
+_k2, _s2 = CORE.filter_history_refs([(3, "a"), (2, "b")], -1)
+check("E1.14 撞源去重：与外观锚同段的级被剔除、并报出被剔除的段号（anchor=-1 时不动）",
+      [i for i, _ in _k1] == [3, 2, 1] and _s1 == [0] and len(_k2) == 2 and _s2 == [],
+      "kept=%s skipped=%s ｜ anchor=-1 kept=%d" % ([i for i, _ in _k1], _s1, len(_k2)))
 
 # ============================================================================
 print()
