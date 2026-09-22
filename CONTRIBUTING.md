@@ -14,7 +14,7 @@ python tests/test_relay_core.py
   `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py` 指定。
   注意：脚本本身需要**能 import 到 ComfyUI**（`comfy.nested_tensor` / `node_helpers` /
   `folder_paths`）——`relay_core` 模块可独立复用，但这份打包测试**不能**脱离 ComfyUI 跑。
-- 覆盖二十六个方面（**实测执行 362 项断言**），是本包正确性的主要保障。
+- 覆盖二十六个方面（**实测执行 363 项断言**），是本包正确性的主要保障。
   报告里请贴实际执行数，不要按源码行数统计（互斥分支不会同时执行）。
 - **改动后必须同步这几处计数与清单**（v0.4.2 起列为纪律，`tools/review_050.py` 会逐项核）：
   `__init__.py` 头注释节点清单 · 本文件的「方面数/断言数」· `tests/test_relay_core.py`

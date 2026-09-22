@@ -2374,6 +2374,21 @@ else:
           [x["filename"] for x in _tp] == ["au4_s1_N709_0001.mp4"]
           and _tp[0]["abs_path"].replace("\\", "/").endswith("coffee_short/output/au4_s1_N709_0001.mp4"),
           "%s" % ([(x["filename"], x["abs_path"]) for x in _tp],))
+    # —— 26.47 落盘路径发现要**通用**（不认节点名 / 键名 / 字段名） ——
+    #   各家节点回显各不相同：字符串路径 / `file` 键 / 相对带目录 / 同一文件多处报 —— 全都要能收下。
+    _gen = CORE.pick_video_outputs({
+        "1": {"videos": ["I:/x/str_path.mp4"]},                       # 只给一个路径字符串
+        "2": {"out": [{"file": "sub/dir/f.mp4"}]},                    # `file` 键 + 相对目录
+        "3": {"a": [{"filename": "dup.mp4", "subfolder": "s", "type": "output"}],
+              "b": [{"filename": "dup.mp4", "subfolder": "s", "type": "output"}]},
+        "4": {"txt": ["不是文件"], "img": [{"filename": "cover.png", "type": "output"}]},
+    })
+    check("26.47 通用归一化：字符串路径 / file 键 / 相对目录 / 去重 / png+文本不误收（共 3 条）",
+          [x["filename"] for x in _gen] == ["str_path.mp4", "f.mp4", "dup.mp4"]
+          and _gen[0]["abs_path"].replace("\\", "/") == "I:/x/str_path.mp4"
+          and _gen[1]["subfolder"].replace("\\", "/") == "sub/dir",
+          "%s" % ([(x["filename"], x["subfolder"], x["abs_path"]) for x in _gen],))
+
     check("26.45b 同一份 outputs 里，PCM 边车按 .safetensors 走 pick_pcm_outputs（与视频互不串）",
           [x["filename"] for x in CORE.pick_pcm_outputs({
               "905": {"h3relay_pcm": [{"filename": "audio_00000.safetensors",

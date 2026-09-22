@@ -10,7 +10,7 @@
 > 实测 4 段 29.25s 成片 **0.17 s** 完成（默认档 2.1 s）、帧数 702/702 守恒、A·VΔ = 0.1 ms。
 > **音频代际 2 → 1**：「裁重叠」顺手落无损 **PCM 边车**（`save_pcm`，默认开），拼接直读 ⇒ 不再二次 AAC；
 > Chain 多 `audio_out`（默认 **AAC 256k**，可 192k，或 `pcm_lossless` 母版）与 `video_crf`。
-> 门槛：`test_relay_core` **362/0**（+第 26 组 50 条）· `test_experimental` 60/0 ·
+> 门槛：`test_relay_core` **363/0**（+第 26 组 51 条）· `test_experimental` 60/0 ·
 > `review_050` 80/0 · `smoke_nodes` 15/0 · `tests/test_prompt_dispatch.mjs` **29/0**（node 跑）。
 
 ### 为什么做（开源用户是 UI 用户）
@@ -122,6 +122,11 @@
 |---|---|---|
 | 路由报「一段视频文件都没找到」 | `pick_video_outputs` 只认 `images`/`videos`/`gifs` 三个键，而**第三方落盘节点**（`banzhangVideoCombine`）把文件记录写在 **`painter_output`** 键下 | 改成**按扩展名扫全部键**（新增 `_iter_file_records`）；键名不设白名单 |
 | 就算找到了，路径也是错的 | 该节点用「自定义保存路径」存到 **ComfyUI output 之外**（`I://coffee_short//output`），而它的 `subfolder` 是空的 ⇒ `output_dir/subfolder/filename` 拼出一个不存在的路径 | 条目带 `abs_path` 时**优先用它**（节点自己报的绝对路径最可信） |
+
+**做法是"通用归一化"，不是给某个节点开白名单**（别人换落盘节点也不该失效）：
+键名不设白名单（扫全部键、按扩展名认）、字段名收 `abs_path`/`path`/`filepath`/`file`/`filename`…
+各种写法、只给一个路径字符串也认、同一个文件被两处回显会去重；我们自己的边车回显也**带上 `abs_path`**。
+⇒ **不认节点名、不认键名、不认字段名**，只判"这条东西里能不能读出一个像视频的路径"。
 
 > 判据：`26.45`（第三方键名 + png 不误收 + abs_path 带出）、`26.45b`（边车与视频互不串）、
 > `26.46`（路由优先 abs_path、缺了才 join）。**这次是真跑抓到的，不是推演出来的。**

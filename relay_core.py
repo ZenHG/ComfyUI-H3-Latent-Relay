@@ -3946,19 +3946,58 @@ def assemble_mp4_segments(paths, out_path, *, video="auto", audio_codec="aac",
     return rep
 
 
+# 各家落盘节点回显"文件在哪"的字段名不统一 —— 全部认，**不认节点名、不认键名**。
+#   实测样本（2026-09-22）：宿主 SaveVideo 给 `filename`+`subfolder`+`type`；
+#   第三方 banzhangVideoCombine 给 `filename`+`type`+**`abs_path`**（且存到 output 之外）。
+#   再宽一点收下"只给一个路径字符串"的写法（`path`/`file`/`filepath`…）。
+_FILE_PATH_KEYS = ("abs_path", "path", "filepath", "file_path", "file", "filename", "file_name")
+
+
+def _file_record(item):
+    """把一条候选归一化成 ``{filename, subfolder, type, abs_path}``；不像文件就返回 None。
+
+    **为什么归一化而不是写死键名**：本包不猜"用户用的是哪个落盘节点"，
+    只判两件事 —— ① 这条东西里能不能读出一个路径；② 像不像文件。
+    有绝对路径就用绝对路径（节点自己报的最可信，且能覆盖"存到 ComfyUI output 之外"的情况）；
+    只有相对名时才退回 `type` + `subfolder` 拼。
+    """
+    if isinstance(item, str):                       # 有的节点直接回显一个路径字符串
+        item = {"path": item}
+    if not isinstance(item, dict):
+        return None
+    raw = None
+    for k in _FILE_PATH_KEYS:
+        v = item.get(k)
+        if isinstance(v, str) and v.strip():
+            raw = v.strip().replace("/", os.sep)
+            break
+    if not raw:
+        return None
+    sub = str(item.get("subfolder") or "").strip()
+    if os.path.isabs(raw):
+        return {"filename": os.path.basename(raw), "subfolder": sub,
+                "type": str(item.get("type") or "output"), "abs_path": raw}
+    # 相对路径：`dir/name.mp4` 这种把目录当 subfolder（有些节点这么给）
+    d, base = os.path.split(raw)
+    if d and not sub:
+        sub = d
+    return {"filename": base or raw, "subfolder": sub,
+            "type": str(item.get("type") or "output"), "abs_path": ""}
+
+
 def _iter_file_records(node_out):
-    """遍历一个节点 output dict 里**所有**看起来像"文件记录"的条目（**键名不设白名单**）。
+    """遍历一个节点 output dict 里**所有**像"文件记录"的条目（**键名不设白名单**）。
 
     为什么不做键名白名单：实测（2026-09-22 真实跑）宿主 `SaveVideo` 写 `images`，
     而第三方落盘节点（`banzhangVideoCombine`）写的是 `painter_output` ——
     只认白名单会变成"图跑得好好的，拼接却报一段视频都没找到"（本仓踩过）。
-    一条"文件记录" = dict 且带 `filename`；`detail_info`/`text` 这类字符串自动跳过。
     """
     for val in (node_out or {}).values():
         if isinstance(val, list):
             for item in val:
-                if isinstance(item, dict) and item.get("filename"):
-                    yield item
+                rec = _file_record(item)
+                if rec:
+                    yield rec
 
 
 def pick_video_outputs(outputs):
@@ -3970,17 +4009,19 @@ def pick_video_outputs(outputs):
     这时 `type`+`subfolder` 拼出来的路径是错的，必须用节点自己给的绝对路径。
     返回 ``[{"node","filename","subfolder","type","abs_path"}]``（按 history 里的出现顺序）。
     """
-    found = []
+    found, seen = [], set()
     for node_id, node_out in (outputs or {}).items():
         if not isinstance(node_out, dict):
             continue
-        for item in _iter_file_records(node_out):
-            fn = str(item.get("filename") or "")
-            if os.path.splitext(fn)[1].lower() in AV_CONCAT_VIDEO_EXTS:
-                found.append({"node": str(node_id), "filename": fn,
-                              "subfolder": str(item.get("subfolder") or ""),
-                              "type": str(item.get("type") or "output"),
-                              "abs_path": str(item.get("abs_path") or "")})
+        for rec in _iter_file_records(node_out):
+            if os.path.splitext(rec["filename"])[1].lower() not in AV_CONCAT_VIDEO_EXTS:
+                continue
+            # 同一个文件被节点在两个键下各报一次时**去重**（否则"第 1 个"可能不稳定）
+            key = rec["abs_path"] or (rec["type"], rec["subfolder"], rec["filename"])
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append({"node": str(node_id), **rec})
     return found
 
 

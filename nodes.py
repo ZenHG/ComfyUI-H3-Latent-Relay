@@ -93,7 +93,9 @@ def _pcm_ui(path: str):
             return None
         rel = os.path.relpath(os.path.dirname(os.path.abspath(path)),
                               folder_paths.get_output_directory())
-        return {"filename": os.path.basename(path), "subfolder": rel, "type": "output"}
+        # 同时带上绝对路径：拼接方**优先用它**（相对路径在不同平台上分隔符/根目录都可能对不上）。
+        return {"filename": os.path.basename(path), "subfolder": rel, "type": "output",
+                "abs_path": os.path.abspath(path)}
     except Exception:      # noqa: BLE001
         return None
 
