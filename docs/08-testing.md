@@ -60,7 +60,7 @@ node tests/test_prompt_dispatch.mjs      # 期望 29/0
 | 工具 | 判什么 | 期望 |
 |---|---|---|
 | `tools/review_050.py` | 文档—代码一致性（节点清单 / 参数表 / 断言数 / 版本号 / 示例图槽位 / **三条铁律**） | **82/0** |
-| `tools/smoke_nodes.py` | 节点层功能冒烟（7 个节点真跑一遍） | **15/0** |
+| `tools/smoke_nodes.py` | 节点层功能冒烟（续接七件真跑一遍；🔍 放大节点要上游权重，不在冒烟内） | **15/0** |
 
 详见 [`tools/README.md`](../tools/README.md)。CI 会跑这三个（`.github/workflows/ci.yml`），
 三者失败时均以非零退出码退出。
