@@ -56,7 +56,7 @@ python tools/check_ui_workflow.py --all
 python tools/check_ui_workflow.py /path/to/ComfyUI/user/default/workflows/xxx.json
 ```
 
-**schema 来自两处**（2026-09-19 起）：**本包的 7 个节点现读包内 `nodes.py`**（代码才是权威），
+**schema 来自两处**（2026-09-19 起）：**本包的 8 个节点现读包内 `nodes.py`**（代码才是权威），
 其余节点才走正在运行的 ComfyUI 的 `/object_info`；顺带会把「服务端加载的定义与代码不一致」
 报出来（提示该重启后端了）。**服务端连不上也不致命**：本包节点照样校验，只是非本包节点那部分标为「未查」。
 ComfyUI 不在默认位置时用 `--comfyui /path/to/ComfyUI` 或环境变量 `COMFYUI_PATH`。
@@ -71,7 +71,7 @@ ComfyUI 不在默认位置时用 `--comfyui /path/to/ComfyUI` 或环境变量 `C
 
 ## 🤖 API 提交（脚本 / 程序化）
 
-本包 7 个节点**全部可经 `/prompt` API 提交**（与 UI 图同一套节点，无 UI-only 逻辑）。三条路：
+本包 8 个节点**全部可经 `/prompt` API 提交**（与 UI 图同一套节点，无 UI-only 逻辑）。三条路：
 
 1. **前端导出**：ComfyUI 菜单「工作流 → 导出（API）」得到 API 格式（每个节点是
    `{"<id>": {"class_type": ..., "inputs": {...}}}`，输入按**命名参数**而非 `widgets_values` 顺序）。

@@ -38,6 +38,23 @@
 > `THIRD-PARTY-NOTICES.md` §一·D（MIT 依赖与数学出处）。门槛：**review_050 全绿** · smoke 15/0 ·
 > test_experimental 60/0 · test_relay_core **385/0**（第 27 组 20 条：数学 15 + 适配层 5）。
 
+> **（同日补）全流程示例入包 + 一条硬纪律**（**不 bump 版本**，纯示例/文档，代码零改动）：
+> `examples/fullflow_second_pass_latent_upscale_ui.json`（45 节点）= 产线现役的
+> **0.3MP 一采 → 🔍 放大 0.4MP → 2 步二采 → 拷贝桥续接** 整图，**本包 8 个节点全在场**。
+> 随图写死的纪律（README §10.9 + 画布注释）：**二采的 guider 不能接桥的 `conditioning`** ——
+> 钉帧走 `minimax_keyframes`，而打包器 `PackedLayout` 假定 keyframe 与本段**目标同网格**；
+> 放大后网格变了 ⇒ `[2392,96] vs [3134,96]` 当场炸（= 7×299+299 对 7×405+299，2026-09-22 实测）。
+> **latent 侧钉住不受影响**（拷贝前缀 + 噪声掩码与网格无关），放弃的只是 conditioning 那半条；
+> 外观锚走另一条通道 `minimax_refs`，**允许**异分辨率 —— 两条别混。
+> 示例图刻意避开两个开源卡点：① 落盘用官方 `CreateVideo + SaveVideo`，不用 VHS —— VHS 带音频时写
+> `X.mp4`(仅画面) + `X-audio.mp4`，拿前者去拼 = **哑片**，而四项断言在无音轨时 `av_delta_ok` 恒真 = **假绿**
+> （自己踩过）；② 四段词直填 Chain 的 `prompts` 格，不靠 `easy positive` 连线 ⇒ 第三方依赖只剩 KJNodes。
+> 实测门槛（本机 12GB，**用示例图本身**跑 2 段）：段1 150s / 158 帧、段2 240s / 136 帧（走桥裁 22 帧）；
+> 成片 294 帧 12.25s **单文件带音轨**，四项断言全绿、A·VΔ = 0.0001s、`pcm_segments = 2`（音频代际 2→1）、
+> 缝点亮度阶跃 0.0013、缝后单帧尖峰 1.3×（阈值 3×）。
+> 示例图过 `tools/check_ui_workflow.py` **0 错**；顺手把散文里残留的「本包 7 个节点」刷成 8
+> （`docs/05` · `examples/README` · `examples/make_minimal_workflow.py` · `tools/check_ui_workflow.py`）。
+
 ## 0.6.7 — 2026-09-22
 
 > **Chain 会换词、也会拼片了**（**不新增节点**；两个能力都默认关 ⇒ 老图行为逐位不变）：

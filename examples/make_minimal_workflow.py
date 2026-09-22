@@ -320,7 +320,7 @@ class Graph:
         d = self.oi.get(node_type)
         if d is None:
             raise SystemExit(
-                "[FAIL] 服务端没有节点 %r（本包的 7 个节点要装在 custom_nodes 下并重启）。\n"
+                "[FAIL] 服务端没有节点 %r（本包的 8 个节点要装在 custom_nodes 下并重启）。\n"
                 "       当前识别到本包节点：%s"
                 % (node_type, sorted(k for k in self.oi if k.startswith("H3Relay")))
             )

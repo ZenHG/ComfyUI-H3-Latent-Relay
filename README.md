@@ -95,7 +95,9 @@ git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git
 - **没装也不影响其他 7 个节点**：整包照常加载，只有在使用本节点时抛一条**写明仓库地址与权重地址**
   的报错（不静默降级、不假成功）。
 
-随包的 [`examples/`](examples/README.md) 有一份可直接打开的最小演示工作流（18 个节点，含 1 个画布注释框）。
+随包的 [`examples/`](examples/README.md) 有两份可直接打开的工作流：**最小续接演示**（18 节点，
+只用官方节点 + 本包）与**全流程示例**（45 节点：0.3MP 一采 → 🔍 潜空间放大 → 2 步二采 → 拷贝桥续接，
+**本包 8 个节点全在场**，含「放大之后哪些线要留在原生域」的接线纪律）。
 
 ---
 
@@ -583,6 +585,23 @@ A·VΔ **0.0011 s**；`pcm_lossless` 档成片音轨与边车**逐位一致**。
 模型在两种运动解读之间逐帧来回选 ⇒ 整幅等幅抖动（幅度恒定、不衰减）。
 **修法**：一段只给**一种**主动运动；给**速度基准**（"与步伐同速"）或**开放端**（"永不到达某位置为止"）；
 背景一律写**结果**（"在身后滑出画框"）不写缩放目标；主体不同向时别写"随某某一起移动"。
+
+### 10.9 一采 → 🔍 放大 → 二采 的链路里，二采的 guider 为什么不能接桥的 `conditioning`？
+**因为钉帧走的是 `minimax_keyframes`，而打包器假定 keyframe 与本段目标同网格。**
+放大之后目标网格变了（例：26×46 → 30×54 latent），桥的锚仍是原生网格 ⇒ 打包时对不上号，
+一采跑完、二采第一步当场炸：
+
+```
+RuntimeError: shape mismatch: value tensor of shape [2392, 96]
+              cannot be broadcast to indexing result of shape [3134, 96]
+（comfy/ldm/minimax/model.py: all_video_rows[~img_update] = cond_video_rows）
+```
+
+**接法**：只有**一采**（原生域）的 `BasicGuider` 接桥的第 4 路；**二采**接出词节点的 `positive`。
+二采照样不会重绘缝区 —— **latent 侧的钉住（拷贝前缀 + 噪声掩码）与网格无关，仍然生效**，
+被放弃的只是 conditioning 侧那半条"取景钉帧"。
+对照：外观锚走的是另一条通道 `minimax_refs`，它**允许**与目标异分辨率（`ref_anchor_latent` 就是靠这个
+跨分辨率当锚的）—— 别把两条通道当成一回事。完整接线见 [`examples/`](examples/README.md) 的全流程示例。
 
 ---
 
