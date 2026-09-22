@@ -29,8 +29,7 @@
 背景与核验方法见 [`THIRD-PARTY-NOTICES.md`](../THIRD-PARTY-NOTICES.md) §一·B。
 
 ⚠️ 跑 `scan_expression_overlap.py` 需要对方仓库路径；**不要把对方代码复制进本仓库**，
-工具只在进程内读取比对。若对方包已从本机移除，可用任意检出的副本路径（Windows 绝对路径，
-例如 `I:/…/ComfyUI-H3-Motion-Context`）。
+工具只在进程内读取比对。若对方包已从本机移除，传任意检出的副本目录路径即可。
 
 ## 判据纪律
 

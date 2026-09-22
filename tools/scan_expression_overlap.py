@@ -16,8 +16,8 @@
 - 输出按重合率降序，先看头部。
 
 用法：
-    I:/python/python.exe tools/scan_expression_overlap.py <对方仓库路径>
-    I:/python/python.exe tools/scan_expression_overlap.py <对方仓库路径> --min-lines 6
+    python tools/scan_expression_overlap.py <对方仓库路径>
+    python tools/scan_expression_overlap.py <对方仓库路径> --min-lines 6
 """
 from __future__ import annotations
 

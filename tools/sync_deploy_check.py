@@ -17,7 +17,7 @@
   3. 只报 `OK / DIFF / MISS`，不改任何文件。
 
 用法：
-    python tools/sync_deploy_check.py "I:/ComfyUI/custom_nodes/ComfyUI-H3-Relay-Kit"
+    python tools/sync_deploy_check.py "<ComfyUI>/custom_nodes/ComfyUI-H3-Relay-Kit"
     python tools/sync_deploy_check.py <副本目录> --rev 7060109
     python tools/sync_deploy_check.py <副本目录> --rev HEAD --verbose
 

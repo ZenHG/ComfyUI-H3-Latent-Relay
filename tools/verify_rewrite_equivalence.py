@@ -23,8 +23,8 @@
 > 正是被这一步揪出来的。别删这一步。
 
 用法：
-    set COMFYUI_PATH=I:/ComfyUI
-    I:/python/python.exe tools/verify_rewrite_equivalence.py [--old-rev HEAD]
+    set COMFYUI_PATH=<你的 ComfyUI 根目录>
+    python tools/verify_rewrite_equivalence.py [--old-rev HEAD]
 """
 from __future__ import annotations
 

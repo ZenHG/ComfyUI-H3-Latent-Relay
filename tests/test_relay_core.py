@@ -2338,7 +2338,7 @@ else:
     _tp = CORE.pick_video_outputs({
         "709": {"painter_output": [
             {"filename": "au4_s1_N709_0001.mp4", "subfolder": "", "type": "output",
-             "abs_path": r"I:/coffee_short/output/au4_s1_N709_0001.mp4"},
+             "abs_path": r"D:/outside_output/au4_s1_N709_0001.mp4"},
             {"filename": "au4_s1_N709_0001_meta.png", "subfolder": "", "type": "output"}],
             "detail_info": ["📂 文件名称 : au4_s1_N709_0001.mp4\n📏 物理尺寸 : 480 x 864"]},
         "905": {"h3relay_pcm": [{"filename": "audio_00000.safetensors",
@@ -2346,12 +2346,12 @@ else:
     })
     check("26.45 第三方落盘键名（painter_output）也能拾取：视频收下、png/文本不误收、abs_path 带出",
           [x["filename"] for x in _tp] == ["au4_s1_N709_0001.mp4"]
-          and _tp[0]["abs_path"].replace("\\", "/").endswith("coffee_short/output/au4_s1_N709_0001.mp4"),
+          and _tp[0]["abs_path"].replace("\\", "/").endswith("outside_output/au4_s1_N709_0001.mp4"),
           "%s" % ([(x["filename"], x["abs_path"]) for x in _tp],))
     # —— 26.47 落盘路径发现要**通用**（不认节点名 / 键名 / 字段名） ——
     #   各家节点回显各不相同：字符串路径 / `file` 键 / 相对带目录 / 同一文件多处报 —— 全都要能收下。
     _gen = CORE.pick_video_outputs({
-        "1": {"videos": ["I:/x/str_path.mp4"]},                       # 只给一个路径字符串
+        "1": {"videos": ["D:/x/str_path.mp4"]},                       # 只给一个路径字符串
         "2": {"out": [{"file": "sub/dir/f.mp4"}]},                    # `file` 键 + 相对目录
         "3": {"a": [{"filename": "dup.mp4", "subfolder": "s", "type": "output"}],
               "b": [{"filename": "dup.mp4", "subfolder": "s", "type": "output"}]},
@@ -2359,20 +2359,20 @@ else:
     })
     check("26.47 通用归一化：字符串路径 / file 键 / 相对目录 / 去重 / png+文本不误收（共 3 条）",
           [x["filename"] for x in _gen] == ["str_path.mp4", "f.mp4", "dup.mp4"]
-          and _gen[0]["abs_path"].replace("\\", "/") == "I:/x/str_path.mp4"
+          and _gen[0]["abs_path"].replace("\\", "/") == "D:/x/str_path.mp4"
           and _gen[1]["subfolder"].replace("\\", "/") == "sub/dir",
           "%s" % ([(x["filename"], x["subfolder"], x["abs_path"]) for x in _gen],))
 
     # —— 26.47b 绝对性判据**不许依赖宿主平台**（Linux CI 抓到：`os.path.isabs` 不认盘符式
     #   ⇒ `abs_path` 丢空、相对分支把整串当目录 ⇒ 拼接拿不到文件）。两种风格在任意宿主都得认。
     check("26.47b 绝对性判据平台中立：盘符式/反斜杠式/斜杠式都判绝对，相对名与 `C:a.mp4` 仍相对",
-          CORE._path_is_abs("I:/x/a.mp4") and CORE._path_is_abs(r"C:\x\a.mp4")
+          CORE._path_is_abs("D:/x/a.mp4") and CORE._path_is_abs(r"C:\x\a.mp4")
           and CORE._path_is_abs("/data/out/a.mp4") and CORE._path_is_abs(r"\\srv\share\a.mp4")
           and not CORE._path_is_abs("sub/dir/a.mp4") and not CORE._path_is_abs("C:a.mp4")
           and CORE._file_record({"abs_path": "/data/out/b.mp4"})["abs_path"] == "/data/out/b.mp4"
           and CORE._file_record({"abs_path": r"D:\out\b.mp4"})["filename"] == "b.mp4",
           "%s" % ([(s, CORE._path_is_abs(s)) for s in
-                   ("I:/x/a.mp4", "/data/out/a.mp4", "sub/dir/a.mp4", "C:a.mp4")],))
+                   ("D:/x/a.mp4", "/data/out/a.mp4", "sub/dir/a.mp4", "C:a.mp4")],))
 
     # —— 26.48 说明文本**不许**被当成文件（预检抓到的假阳性） ——
     #   真实形状：`detail_info` 里是 `📂 文件名称 : au4_s1_N709_0001.mp4\n📏 物理尺寸 : …`
@@ -2380,7 +2380,7 @@ else:
     _trap = CORE.pick_video_outputs({
         "709": {"detail_info": ["📂 文件名称 : au4_s1_N709_0001.mp4\n📏 物理尺寸 : 480 x 864"],
                 "painter_output": [{"filename": "au4_s1_N709_0001.mp4", "subfolder": "",
-                                    "type": "output", "abs_path": r"I:/coffee_short/output/au4_s1_N709_0001.mp4"}]},
+                                    "type": "output", "abs_path": r"D:/outside_output/au4_s1_N709_0001.mp4"}]},
         "710": {"note": ["📂 文件名称 : x.mp4", "带\n换行的 y.mp4"]},
     })
     check("26.48 说明文本/非法文件名不误收（只有真记录那一条，且排第 1）",
@@ -2721,7 +2721,7 @@ else:
               and _pk.AUDIO_OUT["pcm_lossless"][0] in CORE.LOSSLESS_AUDIO_CODECS,
               "AUDIO_OUT=%s" % (_pk.AUDIO_OUT,))
         # 期望路径**按宿主的真实输出目录推**（本文件 26.3/26.4 段同此约定）：
-        #   写死 `I:/ComfyUI/output/...` 会让 Linux CI 必然假红 —— 代码没错，是尺子绑了平台。
+        #   写死**作者机器的输出目录**会让别的用户/Linux CI 必然假红 —— 代码没错，是尺子绑了机器。
         _pcm_expect = os.path.join(_fp26.get_output_directory(),
                                    "relay_kit", "pcm", "a.safetensors").replace("\\", "/")
         check("26.33 路由能从 history 取回**该段的 PCM 边车**候选（不猜文件名）",
@@ -2746,8 +2746,8 @@ else:
         }
         check("26.46 路由取路径优先用节点自报 abs_path，缺了才按 type+subfolder 拼",
               _pk._abs_of({"filename": "a.mp4", "subfolder": "", "type": "output",
-                           "abs_path": r"I://coffee_short//output//a.mp4"})
-              == r"I://coffee_short//output//a.mp4"
+                           "abs_path": r"D://outside_out//a.mp4"})
+              == r"D://outside_out//a.mp4"
               and _pk._abs_of({"filename": "b.mp4", "subfolder": "relay_kit/x",
                                "type": "output"}).replace("\\", "/")
               .endswith("/output/relay_kit/x/b.mp4"),

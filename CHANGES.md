@@ -12,6 +12,17 @@
 > 示例图重生成；门槛：test_relay_core **382/0** · test_experimental **29/0** · review_050 **81/0** ·
 > smoke 15/0 · dispatch 29/0。
 
+> **（同日补 2）修 Linux 侧假红 + 立「开源卫生」机检** —— CI 连红两轮的根因不是网络：
+> ① `_file_record` 用 `os.path.isabs` 判绝对路径 ⇒ 宿主在 Linux 时**不认盘符式**，`abs_path` 丢空、
+> 目录被塞进 `subfolder` ⇒ 拼接拿不到段文件（26.45 / 26.47 红）。改为 `_path_is_abs`
+> （`ntpath.isabs` 或前导斜杠，两种风格都认）+ `_path_split`（两种分隔符都切），分隔符不再按宿主改写；
+> 并新增 **26.47b** 把「判据与宿主平台无关」钉成断言。
+> ② CI 依赖缺 `aiohttp` ⇒ 26.15 那段离线路由测试**整段静默不跑**（总数 373 而非 383 = 十个检查没执行）；
+> 补依赖后露出 26.33 把期望值写成**作者机器的输出目录** ⇒ 改按 `folder_paths.get_output_directory()` 推。
+> ③ 新增机检 **H3e 开源卫生**：受版本控制的文本里不许出现作者本机路径（作者盘符 / Windows 家目录；
+> CHANGES.md 作为历史流水豁免）—— 本包是公开仓库，硬路径会让别的用户误以为必须装在那儿。
+> 门槛：test_relay_core **383/0** · review_050 **82/0** · smoke **15/0** · dispatch **29/0**。
+
 > **新增第 8 个节点 `H3RelayLatentUpscale`（🔍 画质域 · AV latent 分块放大）** —— 它是社区 MIT 节点
 > `MinimaxH3LatentUpscaler3D` 的**适配层**：拆 H3 的 AV 打包 latent → 逐块调放大 → 回包保留原音频。
 > **为什么必须有一层**（2026-09-22 全流程真跑实锤，不是推测）：上游节点 `latent["samples"].dim()`

@@ -3758,7 +3758,7 @@ def _path_is_abs(s: str) -> bool:
     """判"绝对路径"，**与宿主平台无关**。
 
     ⚠ 绝不能用 `os.path.isabs`：宿主跑在 Linux 时它不认 Windows 盘符式
-    （`I:/x/out.mp4` 被判成相对路径 ⇒ `abs_path` 丢空 ⇒ 拼接拿错文件），
+    （`X:/videos/out.mp4` 这类盘符式被判成相对路径 ⇒ `abs_path` 丢空 ⇒ 拼接拿错文件），
     反之在 Windows 时它不认 `/x/out.mp4`。落盘节点回显的是**哪个 OS 的路径**
     由节点决定，不由跑这段代码的机器决定 ⇒ 两种风格都得认。
     """

@@ -481,7 +481,7 @@ curl -s http://127.0.0.1:8188/history/<prompt_id> | \
 ```bash
 python tests/test_relay_core.py         # 期望 383/0
 node   tests/test_prompt_dispatch.mjs   # 期望 29/0（Chain 词分发纯函数，node 跑）
-python tools/review_050.py              # 期望 81/0（文档—代码一致性）
+python tools/review_050.py              # 期望 82/0（文档—代码一致性）
 python tools/smoke_nodes.py             # 期望 15/0（节点层冒烟）
 ```
 

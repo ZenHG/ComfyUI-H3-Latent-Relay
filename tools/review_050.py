@@ -329,6 +329,30 @@ ck("H3d nodes.py 模块头注释的节点数 == 注册数",
    bool(_m_doc) and _zh(len(_reg)) in _m_doc.group(1),
    "头注释=%r，注册 %d 个" % (_m_doc.group(1)[:24] if _m_doc else "?", len(_reg)))
 
+# H3e 开源卫生：本包是**公开仓库**，作者本机的安装路径（作者盘符、Windows 家目录）一旦写进
+#   代码/测试/文档，别的用户会以为必须装在那儿；写进**断言**更糟 —— 尺子绑死机器，
+#   Linux CI 必然假红（2026-09-22 实测：26.33 把期望值写成作者机器的输出目录）。
+#   CHANGES.md 是历史流水（当时确实发生在某台机器上），豁免。
+#   ⚠ 判据本身用拼串构造，免得这个文件因为"写着要禁的字面量"而被自己抓到。
+import subprocess as _sp  # noqa: E402
+_files = (_sp.run(["git", "-C", KIT, "ls-files"], capture_output=True, text=True,
+                  encoding="utf-8", errors="ignore").stdout or "").split()
+_EXT = {"py", "js", "mjs", "md", "json", "yml", "yaml", "txt"}
+_MACHINE = _re.compile(r"(?<![A-Za-z])[%s]:[\\/]|%s" % ("IH", r"C:\\+Users"), _re.I)
+_hits = []
+for _f in _files:
+    if _f == "CHANGES.md" or _f.rsplit(".", 1)[-1].lower() not in _EXT:
+        continue
+    _p = os.path.join(KIT, _f.replace("/", os.sep))
+    if not os.path.isfile(_p):
+        continue
+    with open(_p, encoding="utf-8", errors="ignore") as _fh:
+        for _ln, _line in enumerate(_fh.read().splitlines(), 1):
+            if _MACHINE.search(_line):
+                _hits.append("%s:%d" % (_f, _ln))
+ck("H3e 开源卫生：受版本控制的文本里无作者本机路径（作者盘符 / Windows 家目录；CHANGES.md 豁免）",
+   not _hits, "%d 处：%s" % (len(_hits), _hits[:6]))
+
 # H4 tests 头注释的覆盖清单包含最新几组
 _head = _tst[:_tst.index('"""', _tst.index('"""') + 3) + 3]
 _need = ["18.", "19.", "20.", "21."]

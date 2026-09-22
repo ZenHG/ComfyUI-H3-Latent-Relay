@@ -3,7 +3,7 @@
 # 三个脚本在失败时都会以非零退出码退出（tests/test_relay_core.py:1822、
 # tools/review_050.py:864、tools/smoke_nodes.py:236），所以不需要额外解析输出。
 #
-# 期望值：383/0（算法层）、81/0（文档—代码一致性）、15/0（节点层冒烟）、29/0（Chain 纯函数，node）。
+# 期望值：383/0（算法层）、82/0（文档—代码一致性）、15/0（节点层冒烟）、29/0（Chain 纯函数，node）。
 # 改动后若这些数字变了，请同步 CONTRIBUTING.md「方面数/断言数」与 tests 头注释。
 name: ci
 
@@ -44,7 +44,7 @@ jobs:
           PYTHONPATH: ${{ runner.temp }}/ComfyUI
         run: |
           python tests/test_relay_core.py   # 期望 383/0
-          python tools/review_050.py        # 期望 81/0
+          python tools/review_050.py        # 期望 82/0
           python tools/smoke_nodes.py       # 期望 15/0
 
       # Chain 词分发的纯函数（与浏览器里跑的是同一份 web/relay_kit_prompt.js）

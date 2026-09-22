@@ -19,8 +19,8 @@
 ⚠️ 本工具**不判画面质量**（那要 GPU + 人眼），只判"功能通不通"。
 
 用法：
-    set COMFYUI_PATH=I:/ComfyUI
-    I:/python/python.exe tools/smoke_nodes.py
+    set COMFYUI_PATH=<你的 ComfyUI 根目录>
+    python tools/smoke_nodes.py
 """
 from __future__ import annotations
 

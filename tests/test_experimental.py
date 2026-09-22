@@ -35,7 +35,7 @@ _KIT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _COMFY = os.environ.get("COMFYUI_PATH") or os.path.dirname(os.path.dirname(_KIT_DIR))
 if not os.path.isdir(os.path.join(_COMFY, "comfy")):
     _MSG = ("\n[FAIL] 找不到 ComfyUI 根目录（试过：%s）\n"
-            "       设 COMFYUI_PATH=I:/ComfyUI 后重试\n" % _COMFY)
+            "       设环境变量 COMFYUI_PATH=<你的 ComfyUI 根目录> 后重试\n" % _COMFY)
     if "pytest" in sys.modules:
         import pytest
         pytest.skip("找不到 ComfyUI 根目录（试过：%s）；设 COMFYUI_PATH 后重试" % _COMFY,

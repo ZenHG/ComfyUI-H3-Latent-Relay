@@ -76,7 +76,7 @@ def main(argv=None) -> int:
         # （最常见 = 段文件路径写错 / 某段还是写一半的文件）。
         print("🔴 拼接过程抛错（%s）：%s\n"
               "    先确认每个段文件都存在、且不是正在写入的半成品；"
-              "路径用本机写法（Windows 如 I:\\\\dir\\\\s1.mp4）。" % (type(exc).__name__, exc),
+              "路径用本机写法（Windows 形如 `<盘符>:\\dir\\s1.mp4`）。" % (type(exc).__name__, exc),
               file=sys.stderr)
         return 1
     if a.json:

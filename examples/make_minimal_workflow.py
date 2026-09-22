@@ -248,7 +248,7 @@ def local_kit_defs():
     # 定位顺序（不开源硬编码任何本机路径）：
     #   1) 装在 <ComfyUI>/custom_nodes/<本包>/ 下时，往上两级即 ComfyUI 根（自动）；
     #   2) 装在别处时，用 COMFYUI_PATH 环境变量显式指定（与 review_050.py / 单测同约定）。
-    # ⚠ 不写死作者本机路径（如 I:\ComfyUI）——那会让别的用户误以为必须装在那里。
+    # ⚠ 不写死作者本机路径（某个盘符下的安装目录）——那会让别的用户误以为必须装在那里。
     cands = []
     if os.environ.get("COMFYUI_PATH"):
         cands.append(os.environ["COMFYUI_PATH"])
