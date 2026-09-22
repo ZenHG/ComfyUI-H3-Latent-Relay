@@ -2720,10 +2720,13 @@ else:
               and _pk.AUDIO_OUT["aac_192k"] == ("aac", "192k")
               and _pk.AUDIO_OUT["pcm_lossless"][0] in CORE.LOSSLESS_AUDIO_CODECS,
               "AUDIO_OUT=%s" % (_pk.AUDIO_OUT,))
+        # 期望路径**按宿主的真实输出目录推**（本文件 26.3/26.4 段同此约定）：
+        #   写死 `I:/ComfyUI/output/...` 会让 Linux CI 必然假红 —— 代码没错，是尺子绑了平台。
+        _pcm_expect = os.path.join(_fp26.get_output_directory(),
+                                   "relay_kit", "pcm", "a.safetensors").replace("\\", "/")
         check("26.33 路由能从 history 取回**该段的 PCM 边车**候选（不猜文件名）",
-              [str(x).replace("\\", "/") for x in _pk._pcm_candidates(_e2[0])]
-              == ["I:/ComfyUI/output/relay_kit/pcm/a.safetensors"],
-              "cands=%s" % (_pk._pcm_candidates(_e2[0]),))
+              [str(x).replace("\\", "/") for x in _pk._pcm_candidates(_e2[0])] == [_pcm_expect],
+              "cands=%s 期望=%s" % (_pk._pcm_candidates(_e2[0]), _pcm_expect))
         check("26.34 老提交没有边车 ⇒ 候选为空（拼接自动退回 mp4 解码，不报错）",
               _pk._pcm_candidates(_hist["p9"]) == [] and _pk._pcm_candidates({}) == [])
 
