@@ -48,6 +48,9 @@
 > CONTRIBUTING 与 README 的 **385 项断言 / 二十七个方面** · `tools/review_050.py` 的 K13/L1 节点数 ·
 > `THIRD-PARTY-NOTICES.md` §一·D（MIT 依赖与数学出处）。门槛：**review_050 全绿** · smoke 15/0 ·
 > test_experimental 60/0 · test_relay_core **385/0**（第 27 组 20 条：数学 15 + 适配层 5）。
+> ⚠️ **计数沿革**：上面这组数是 0.6.8 提交当时的快照；随后「取路径判据改平台中立 + CI 补 `aiohttp`」
+> 让原先**静默不跑**的检查真正执行（见上条「同日补 2」），现值 = **test_relay_core 383/0 · review_050 82/0**
+> （README §8 / CONTRIBUTING / `ci.yml` 三处已按现值走）。以 tag **`v0.6.8`** 的 Release 页为准。
 
 > **（同日补）全流程示例入包 + 一条硬纪律**（**不 bump 版本**，纯示例/文档，代码零改动）：
 > `examples/fullflow_second_pass_latent_upscale_ui.json`（45 节点）= 产线现役的
