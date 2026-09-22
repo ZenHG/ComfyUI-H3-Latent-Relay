@@ -1,6 +1,6 @@
 # tools — 自检与合规取证
 
-五个脚本，**零 GPU、秒级**，提 PR 前至少跑前三个。
+七个脚本：**六个自检/取证**（零 GPU、秒级，提 PR 前至少跑前三个）+ **一个拼接 CLI**（给不开画布的用户）。
 
 | 脚本 | 判什么 | 期望 | 怎么跑 |
 |---|---|---|---|
@@ -10,6 +10,14 @@
 | `scan_expression_overlap.py` | 🔍 **合规取证**：与第三方包逐函数「表达层重合」扫描 | 人工判读（**只报数、不定性**） | `python tools/scan_expression_overlap.py <对方仓库路径>` |
 | `verify_rewrite_equivalence.py` | 🔍 **合规取证**：三簇重写前后**逐位等价**差分验证（旧实现从 `git show <rev>` 捞，不手工转录） | **137/0** | `python tools/verify_rewrite_equivalence.py` |
 | `sync_deploy_check.py` | **部署副本同步**：比对 `custom_nodes` 下的副本与指定提交的**提交态**（忽略 CRLF 行尾差异） | 全 `OK` | `python tools/sync_deploy_check.py <副本目录>` |
+
+**拼接 CLI（不是自检工具，给用户用）**
+
+| 脚本 | 干什么 | 怎么跑 |
+|---|---|---|
+| `concat_segments.py` | 把 N 个段文件拼成一条成片（**与画布上 🧩 按钮同一份核心代码**）：画面流拷贝无损 + 音频逐段对齐 + 四项断言 + 退路 | `python tools/concat_segments.py s1.mp4 s2.mp4 -o film.mp4 [--audio aac256\|aac192\|lossless] [--crf 16] [--pcm p1.st - ...] [--json]` |
+
+退出码 0 = 过四项断言。给 **API / 无头 / 批处理** 用户用，见 README §7.4。
 
 前三个失败时会以非零退出码退出（CI 直接可用），见 `.github/workflows/ci.yml`。
 

@@ -151,6 +151,10 @@ def run_node(cls_name, ctx, expect_raise=False):
     n_expect = len(getattr(cls, "RETURN_TYPES", ()))
     # ComfyUI 约定：无输出节点返回 `{}`（或 `()`）—— 那是 **0 路**，不是 1 路。
     # （本工具第一版把 `{}` 数成 1 路，误报 H3RelayChain 路数不符。）
+    # 带 ui 回显的节点返回 `{"ui": {...}, "result": (...)}`：ui 归宿主（进 history.outputs），
+    # result 才是连线数据 —— 0.6.7 起「裁重叠」用它回显 PCM 边车路径，故这里先剥一层。
+    if isinstance(out, dict) and "result" in out:
+        out = out["result"]
     if isinstance(out, dict):
         got = 0
     elif isinstance(out, tuple):

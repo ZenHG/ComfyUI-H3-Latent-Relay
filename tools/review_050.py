@@ -32,6 +32,15 @@ sys.path.insert(0, KIT)
 OK, BAD = [], []
 
 
+def _unwrap(res):
+    """节点返回 {"ui": …, "result": …} 时取 result（宿主把 ui 收进 history.outputs）。
+
+    0.6.7 起「裁重叠」/「音频缝」用 ui 键回显 PCM 边车路径 ⇒ 直接 unpack 节点返回的地方
+    必须过这一层（否则报 "expected 3, got 2"）。
+    """
+    return res["result"] if isinstance(res, dict) and "result" in res else res
+
+
 def ck(name, cond, detail=""):
     (OK if cond else BAD).append(name)
     print("  [%s] %s%s" % ("OK" if cond else "FAIL", name, ("  " + detail) if detail else ""))
@@ -102,10 +111,10 @@ ck("C1 TrimAV：core 项前缀原序保留",
    _trim[:5] == ["audio", "settle_frames", "seam_ghost", "seam_ghost_alpha",
                  "settle_sharpen"],
    "前 5=%s" % _trim[:5])
-ck("C2 TrimAV：新件 match_prev* 在**末位**",
-   _trim[-5:] == ["match_prev", "match_prev_frames", "match_prev_gain_max",
-                  "match_prev_offset_max", "run_id"],
-   "末 5=%s" % _trim[-5:])
+ck("C2 TrimAV：新件一律追加在**末位**（match_prev* → run_id → save_pcm）",
+   _trim[-6:] == ["match_prev", "match_prev_frames", "match_prev_gain_max",
+                  "match_prev_offset_max", "run_id", "save_pcm"],
+   "末 6=%s" % _trim[-6:])
 ck("C3 TrimAV：新增第 4 路输出 prev_tail 在末位",
    N.H3RelayTrimAV.RETURN_NAMES[:3] == ("images", "audio", "report")
    and N.H3RelayTrimAV.RETURN_NAMES[3] == "prev_tail",
@@ -825,8 +834,9 @@ try:
     _bk = CORE.load_audio(_p)
     _rid = "_unit_review_audio"
     _obj = N.H3RelayAudioSeam()
-    _a0, _l0, _j0 = _obj.seam(_ba, _rid, 0)
-    _a1, _l1, _j1 = _obj.seam(_ca, _rid, 1, patch_seconds=2.0)
+    # 音频缝 0.6.7 起返回 {"ui":…, "result":…}（回显 PCM 边车路径）⇒ 先剥一层
+    _a0, _l0, _j0 = _unwrap(_obj.seam(_ba, _rid, 0))
+    _a1, _l1, _j1 = _unwrap(_obj.seam(_ca, _rid, 1, patch_seconds=2.0))
     _want = CORE.load_audio(N._audio_stage_path(_rid, 0))["waveform"]
     _w2 = _want.reshape(-1, _want.shape[-1])
     _tail3 = _w2[..., int(_w2.shape[-1]) - _N2:]

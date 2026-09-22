@@ -3,14 +3,9 @@
 // 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 //
 // H3 Relay Kit · Chain 词分发的**纯函数**（0.6.7）
+// 不依赖 ComfyUI 运行时 ⇒ 离线单测（node）直接跑这一份，浏览器里也跑这一份。
 //
-// 这里只放不依赖 ComfyUI 运行时的逻辑 —— 好让离线单测（node）能直接跑：
-//   · splitPromptBlocks   多行文本按 `---` 分块（第 k 块喂第 k 段）
-//   · detectPromptTargets 在画布上找出词格（CSGlideCastCS 的 h3_data / 官方节点的 prompt…）
-//   · resolveTarget       把用户的 `prompt_target` 写法（空 / `683` / `683.h3_data`）解析成具体目标
-//   · writePrompt         把一段词写进目标格（`h3_data` 是 JSON 字符串 ⇒ 只改里面的 prompt 字段）
-//
-// 行为口径（与 nodes.py 的 tooltip 一字对应）：
+// 口径（与 nodes.py 的 tooltip 一字对应）：
 //   · `prompts` 留空 = 老行为，**一个字都不动**；
 //   · 块数不够要跑的段数 ⇒ 调用方**不排队**并报错（绝不静默复用上一块词）；
 //   · 自动探测**找到多个候选就报错**（让人工指定），不猜。
@@ -112,11 +107,8 @@ export function resolveTarget(nodes, spec) {
     }
     if (!fieldPart) {
         const t = targetInNode(node);
-        if (!t) {
-            return { ok: false, target: null,
-                     message: `节点 ${idPart}（${node.type}）上没有可写的词格。` };
-        }
-        return { ok: true, target: t, message: "" };
+        return t ? { ok: true, target: t, message: "" }
+                 : { ok: false, target: null, message: `节点 ${idPart}（${node.type}）上没有可写的词格。` };
     }
     const w = (node.widgets || []).find((x) => String(x.name) === fieldPart);
     if (!w || typeof w.value !== "string") {
@@ -155,6 +147,24 @@ export function writePrompt(target, text) {
     }
     target.node.setDirtyCanvas?.(true, true);
     return { ok: true, message: `第 ${target.stage ?? "?"} 段词 → ${where}` };
+}
+
+/**
+ * 按**段号**收集本轮的 prompt_id（`stageIds[k]` = 第 k 段那一次的 id）。
+ *
+ * 为什么不是"来一个 push 一个"：同一段重跑（不满意再点一次 ▶）会得到两个 id，
+ * push 会把重跑的段算成**两段** ⇒ 拼出一条带重复片段的成片。按段号存则后一次覆盖前一次。
+ * 返回 `{ids, holes}`：`ids` 按段号升序；`holes` = 没有记录的段号（1 起算，跳段/只跑了后段时出现）。
+ */
+export function collectStageIds(stageIds) {
+    const ids = [];
+    const holes = [];
+    const arr = Array.isArray(stageIds) ? stageIds : [];
+    for (let k = 0; k < arr.length; k += 1) {
+        if (arr[k]) ids.push(arr[k]);
+        else holes.push(k + 1);
+    }
+    return { ids, holes };
 }
 
 /** 给状态栏用的一行目标描述。 */

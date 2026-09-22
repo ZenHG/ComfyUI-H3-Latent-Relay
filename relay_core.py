@@ -73,7 +73,9 @@ EXP_HISTORY_FRAMES_DEFAULT: int = 22   # 每级基准帧数（受 5+17k 网格�
 # 🔴 2026-09-22（#6）：旧默认 5 是**死值**——5 是最小合法档，按 stride 抽稀后各级都退化成 5
 #   ⇒ 只能出 1 级（根本不是「多尺度」），2 级起必然 raise。改为 22：
 #   base=22 + stride=4 ⇒ 第 0 级 22 帧、第 1 级 5 帧 = **两级可分辨**，默认参数即可用。
-#   （5 帧起只能出 1 级；想要 3 级需 base ≥90、4 级需 ≥ 107。）
+#   （5 帧起只能出 1 级；3 级需 base=90；**4 级需 stride=2 且 base=124** —— 2026-09-22 实测更正，
+#     旧注释写「4 级需 ≥107」是错的：107+stride4 只能分 3 级。）
+#   ⚠️ 性能：第 0 级按 base 出 token ⇒ base=22 时新增 token ≈ 本段的 28%，base=90 时 ≈112%（翻倍）。
 
 # —— E2 conditioning 参考噪声（原名「SDEdit 式软钉入」）——
 # 🔴 **2026-09-22 关项归档（GG 拍板「E2 定死」）**：本旋钮**无效且与硬锁互斥** ⇒ 永久保持默认 0。
@@ -3466,188 +3468,211 @@ def bed_jitter_start(total: int, n: int, stage_index: int,
 
 
 # ============================================================================
-# —— 多段拼接成片（0.6.7 立）——
+# —— 多段拼接成片（0.6.7）——
 # ============================================================================
-# 为什么在**包内**做（而不是让用户自己敲 ffmpeg）：见 CONTRIBUTING 铁律一·例外（0.6.7）。
-# 依赖：PyAV（宿主 ComfyUI 自带依赖 `av>=17`）—— **全部延迟 import**，
-#       不用拼接功能的人不受影响（缺库只在真正拼的时候报错）。
+# 为什么在**包内**做（而不是让用户敲 ffmpeg）：见 CONTRIBUTING 铁律一·例外（0.6.7）。
+# 依赖 PyAV（宿主 ComfyUI 自带 av>=17）—— 全部**延迟 import**，不用拼接的人不受影响。
 #
-# 口径**沿用仓内既有定义**，不另立新说：
-#   · 段的有效时长 = **该段视频帧数 / fps**（= `join_audio_segments` 的 `segment_seconds`）；
-#   · 每段音频头部要去掉**编码器 priming**（`AUDIO_ENCODER_PRIME_MS`，AAC @32k ≈ 33 ms；
-#     即 `AudioSeam.join_prime_ms` 的默认值）—— 拼接方去掉它，缝上才不会累积偏移。
-#   ⇒ 拼接 = 逐段「去 priming → 截到本段有效时长」后**首尾相接**（跨段音频不再被提前/推后，
-#     与 0.6.2「joined 默认档不再缩短时间轴」同一守恒语义）。
-#   ⚠ 段文件容器里的音频流比视频**长**（实测 +0.0320s @32k = 1024 样本，连带裁过的段还有
-#     ~661 样本尾部填充），这是**编码器产物**、不是错位数 —— 所以拼接必须显式处理它，
-#     不能指望 `-c copy` 之类的流拷贝替我们校准。
+# 口径全部沿用本包自己的既有定义，不另立新说、也不引外部实现：
+#   · 段有效时长 = 帧数/fps（= `join_audio_segments` 的 segment_seconds）；
+#   · 每段音频头部要去掉**编码器 priming**（`AUDIO_ENCODER_PRIME_MS` = AudioSeam.join_prime_ms 默认）；
+#   · 验收四断言 = 本包 0.5.0 起的口径（帧数守恒 / PTS 无洞 / DTS 递增 / A·VΔ ≤ 1 帧）。
+#   ⚠ demux 序 = DTS 序 ≠ 显示序 ⇒ 判「PTS 无洞」前必须排序。
+#   ⚠ 段文件容器里的音频比视频**长**（实测 +0.0320s@32k = 1024 样本，裁过的段再 +629 尾部填充），
+#     是编码器产物、不是错位 ⇒ 拼接必须显式处理，别指望流拷贝替我们校准。
 AV_CONCAT_VIDEO_EXTS = (".mp4", ".m4v", ".mov", ".mkv", ".webm")
+
+# 「裁重叠」回显 PCM 边车用的 ui 键（宿主把它原样收进 history.outputs[node_id]）。
+#   用回显而不是"按命名约定去翻目录"：段文件的命名是用户定的（SaveVideo 的 filename_prefix），
+#   本包不该猜；而节点自己写的文件由它自己报路径，最不容易错。
+PCM_UI_KEY = "h3relay_pcm"
 
 
 def _av_module():
-    """延迟拿 PyAV。缺库时给**可照做**的报错（而不是裸 ImportError）。"""
+    """延迟拿 PyAV；缺库时给**可照做**的报错。"""
     try:
-        import av  # noqa: F401
+        import av
+        return av
     except Exception as exc:  # pragma: no cover - 取决于运行环境
-        raise RuntimeError(
-            "多段拼接需要 PyAV（宿主 ComfyUI 的依赖 av>=17）。"
-            "装法：`pip install \"av>=17\"`；宿主 ComfyUI 通常已自带。原始错误：%s" % (exc,)
-        ) from exc
-    import av
-    return av
-
-
-def _stream_tb(stream):
-    import fractions
-    return stream.time_base or fractions.Fraction(1, 1000)
+        raise RuntimeError('多段拼接需要 PyAV（宿主 ComfyUI 的依赖 av>=17）：pip install "av>=17"；'
+                           "原始错误：%s" % (exc,)) from exc
 
 
 def _secs(stream):
     """流的容器时长（秒）；拿不到返回 0.0。"""
-    if stream is None or not stream.duration:
-        return 0.0
-    return float(stream.duration * _stream_tb(stream))
+    return (float(stream.duration * stream.time_base)
+            if (stream is not None and stream.duration) else 0.0)
 
 
-def probe_mp4(path: str) -> dict:
-    """读一个段文件的**容器层**事实（不解码视频）。
+def probe_mp4(path):
+    """读段文件的**容器层**事实（不解码画面）。
 
-    返回 dict（键名即 report 里用的名字）：
-        path/frames/fps/v_seconds/a_seconds/a_v_delta/has_audio/width/height/
-        v_codec/a_codec/a_rate/a_layout/a_prime_samples/a_coded_samples
-    ``a_prime_samples`` = 音频比视频**多出来的样本数**（= AAC priming + 尾部填充）。
-    它同时是「这条音频线有没有绕过裁重叠」的判据：绕过时该值 ≈ 裁掉的帧数/fps × 采样率。
+    ``a_prime_samples`` = 音频比视频多出来的样本数（priming + 尾部填充），
+    同时也是「这条音频线有没有绕过裁重叠」的判据（绕过时 ≈ 裁掉帧数/fps × 采样率）。
     """
     av = _av_module()
-    p = str(path)
-    with av.open(p) as c:
+    with av.open(str(path)) as c:
         if not c.streams.video:
-            raise RuntimeError("拼接只认带视频流的段文件；%s 里没有视频流。" % p)
+            raise RuntimeError("拼接只认带视频流的段文件；%s 里没有视频流。" % path)
         v = c.streams.video[0]
         a = c.streams.audio[0] if c.streams.audio else None
         fps = float(v.average_rate) if v.average_rate else 0.0
-        frames = int(v.frames or 0)
-        vd = _secs(v)
-        ad = _secs(a)
+        frames, vd = int(v.frames or 0), _secs(v)
         if not frames:                      # nb_frames 缺失时退回逐包数（快，不解码）
-            frames = sum(1 for pkt in c.demux(v) if pkt.pts is not None)
-            vd = (frames / fps) if fps else vd
+            frames = sum(1 for p in c.demux(v) if p.pts is not None)
+            vd = frames / fps if fps else vd
+        ad = _secs(a)
         rate = int(a.codec_context.sample_rate) if a is not None else 0
-        coded = int(round(ad * rate)) if rate else 0
-        return {
-            "path": p,
-            "frames": frames,
-            "fps": fps,
-            "v_seconds": vd,
-            "a_seconds": ad,
-            "a_v_delta": (ad - vd) if a is not None else 0.0,
-            "has_audio": a is not None,
-            "width": int(v.codec_context.width),
-            "height": int(v.codec_context.height),
-            "v_codec": v.codec_context.name,
-            "a_codec": a.codec_context.name if a is not None else "",
-            "a_rate": rate,
-            "a_layout": str(a.codec_context.layout.name) if a is not None else "",
-            "a_prime_samples": int(round((ad - vd) * rate)) if (a is not None and rate) else 0,
-        }
+        return {"path": str(path), "frames": frames, "fps": fps, "v_seconds": vd,
+                "a_seconds": ad, "a_v_delta": (ad - vd) if a is not None else 0.0,
+                "has_audio": a is not None, "a_codec": a.codec_context.name if a else "",
+                "a_rate": rate, "a_layout": str(a.codec_context.layout.name) if a else "",
+                "width": int(v.codec_context.width), "height": int(v.codec_context.height),
+                "a_prime_samples": int(round((ad - vd) * rate)) if (a and rate) else 0}
 
 
-def assert_segments_joinable(clips) -> dict:
-    """拼接前的**逐段**体检。返回 ``{"ok", "problems", "warnings"}``。
+def assert_segments_joinable(clips):
+    """拼接前的**逐段体检** → ``{"ok","problems","warnings"}``。查三件：
 
-    查三件（都是「拼不成 / 拼完不同步」的根因，且都在**拼接侧**才看得见）：
-      ① 没有视频流 / 帧数为 0                 → 找不到片
-      ② 各段的 分辨率 / fps / 采样率 / 声道 / 编码 不一致 → 拼出来必坏
-      ③ 音频比视频长**超过 1 帧**             → 该段音频很可能是**没走「裁重叠」**的原始音频
-        （画面裁了、音频没裁 ⇒ 每段差 ~0.9s，且逐段累积；README §4 红色警示、§9 排障）
+      ① 没有视频流 / 帧数为 0；② 各段分辨率·fps·音频规格不一致；③ 音频比视频长**超过 1 帧**
+      （= 该段音频很可能**绕过了「裁重叠」**：画面裁了、音频没裁 ⇒ 每段差 ~0.9s 且逐段累积）。
     """
-    problems, warnings = [], []
     clips = list(clips)
     if not clips:
         return {"ok": False, "problems": ["没有任何段文件。"], "warnings": []}
-    ref = clips[0]
+    ref, problems = clips[0], []
     for i, c in enumerate(clips):
+        n = i + 1
         if not c.get("frames"):
-            problems.append("第 %d 段没有可读的视频帧：%s" % (i + 1, c.get("path")))
-        if i and (
-            c["width"] != ref["width"] or c["height"] != ref["height"]
-            or abs(c["fps"] - ref["fps"]) > 1e-6
-        ):
+            problems.append("第 %d 段没有可读的视频帧：%s" % (n, c.get("path")))
+        if i:
+            if (c["width"], c["height"], round(c["fps"], 6)) != (
+                    ref["width"], ref["height"], round(ref["fps"], 6)):
+                problems.append("第 %d 段规格与第 1 段不一致：%dx%d@%.4f vs %dx%d@%.4f —— "
+                                "段文件必须同规格。"
+                                % (n, c["width"], c["height"], c["fps"],
+                                   ref["width"], ref["height"], ref["fps"]))
+            if c.get("has_audio") != ref.get("has_audio"):
+                problems.append("第 %d 段的音频流有无与第 1 段不一致，拼出来必错位。" % n)
+            for k, label in (("a_rate", "采样率"), ("a_layout", "声道"), ("a_codec", "音频编码")):
+                if ref.get("has_audio") and c.get("has_audio") and c.get(k) != ref.get(k):
+                    problems.append("第 %d 段的%s(%s)与第 1 段(%s)不一致。"
+                                    % (n, label, c.get(k), ref.get(k)))
+        if c.get("has_audio") and c.get("fps") and c["a_v_delta"] > 1.0 / c["fps"] + 0.02:
             problems.append(
-                "第 %d 段规格与第 1 段不一致：%dx%d@%.4f vs %dx%d@%.4f —— 段文件必须同规格。"
-                % (i + 1, c["width"], c["height"], c["fps"],
-                   ref["width"], ref["height"], ref["fps"])
-            )
-        if i and c.get("has_audio") != ref.get("has_audio"):
-            problems.append("第 %d 段的音频流有无与第 1 段不一致，拼出来必错位。" % (i + 1,))
-        if ref.get("has_audio") and c.get("has_audio"):
-            for key, label in (("a_rate", "采样率"), ("a_layout", "声道"), ("a_codec", "音频编码")):
-                if c.get(key) != ref.get(key):
-                    problems.append(
-                        "第 %d 段的%s(%s)与第 1 段(%s)不一致。"
-                        % (i + 1, label, c.get(key), ref.get(key)))
-        if c.get("has_audio") and c.get("fps"):
-            limit = 1.0 / c["fps"] + 0.02          # 1 帧 + 20ms 容差
-            if c["a_v_delta"] > limit:
-                problems.append(
-                    "第 %d 段音频比视频长 %.4fs（> 1 帧 %.4fs）——该段的音频线很可能**绕过了「裁重叠」**："
-                    "画面裁掉了头部重叠帧、音频没裁。请把落盘节点的 audio 改接「裁重叠 [1] audio」"
-                    "（或经「音频缝 [0] audio」），见 README §4。"
-                    % (i + 1, c["a_v_delta"], 1.0 / c["fps"]))
-            # 0.001~1 帧之间的差是**编码器 priming**（正常，拼接时按 AUDIO_ENCODER_PRIME_MS 去掉），
-            # 不在这里刷警告 —— 逐段数字已在 report 里逐条打印。
-    return {"ok": not problems, "problems": problems, "warnings": warnings}
+                "第 %d 段音频比视频长 %.4fs（> 1 帧 %.4fs）——该段音频很可能**绕过了「裁重叠」**："
+                "画面裁了头部重叠帧、音频没裁。请把落盘节点的 audio 改接「裁重叠 [1] audio」"
+                "（或经「音频缝 [0] audio」），见 README §4。"
+                % (n, c["a_v_delta"], 1.0 / c["fps"]))
+    # 0.001~1 帧之间的差是**编码器 priming**（正常），不在这里刷警告 —— 逐段数字已在 report 里打印。
+    return {"ok": not problems, "problems": problems, "warnings": []}
 
 
-def _decode_audio_mono_stereo(path, av, rate, layout):
-    """把一个段文件的音频解成 ``(numpy (channels, samples), 实际采样率)``；无音频返回 None。"""
+# 无损音轨编码（拼接用）：加进容器即**不再引入新代际**。`flac` 在 mp4/mov/mkv 里
+#   实测本机 PyAV 17 一律 EINVAL（只能进原生 .flac 容器）⇒ 不进清单；PCM 三种都实测可写。
+LOSSLESS_AUDIO_CODECS = ("pcm_s16le", "pcm_s24le", "pcm_f32le")
+
+
+def _load_pcm_sidecar(path, rate, layout):
+    """读「裁重叠」落的 PCM 边车 → ``numpy (channels, samples) float32``；不可用返回 None。
+
+    **不可用就返回 None、由调用方退回 mp4 解码路**（不 raise）——边车是加速/提质手段，
+    不该因为它被删了/换了采样率就整条链拼不出来。
+    裁剪 vs 校准：采两种输入形状（``[B,C,T]`` / ``[C,T]``）；采样率或声道与成片音轨对不上就弃用。
+    """
+    import numpy as np
+    try:
+        a = load_audio(str(path))
+    except Exception:      # 文件被删 / 不是本工具写的 / safetensors 缺失
+        return None
+    wf = a.get("waveform")
+    if not torch.is_tensor(wf) or int(a.get("sample_rate") or 0) != int(rate):
+        return None
+    if wf.dim() == 1:
+        wf = wf.reshape(1, -1)
+    if wf.dim() < 2:
+        return None
+    w = wf.reshape(-1, int(wf.shape[-2]), int(wf.shape[-1]))[0].to(torch.float32).numpy()
+    want_ch = {"mono": 1, "stereo": 2}.get(str(layout))
+    if want_ch is not None and int(w.shape[0]) != want_ch:
+        return None
+    return w
+
+
+def _decode_pcm(path, av, rate, layout):
+    """把段文件音频解成 ``numpy (channels, samples)``；无音频返回 None。"""
     import numpy as np
     with av.open(str(path)) as c:
         if not c.streams.audio:
             return None
-        a = c.streams.audio[0]
         rs = av.audio.resampler.AudioResampler(format="fltp", layout=layout, rate=rate)
-        chunks = []
-        for frame in c.decode(a):
-            for out in rs.resample(frame):
-                chunks.append(out.to_ndarray())
-        flushed = rs.resample(None)      # 冲刷重采样器尾部残留
-        for out in (flushed or []):
-            chunks.append(out.to_ndarray())
-    if not chunks:
-        return None
-    return np.concatenate(chunks, axis=1)
+        chunks = [o.to_ndarray() for f in c.decode(c.streams.audio[0]) for o in rs.resample(f)]
+        chunks += [o.to_ndarray() for o in (rs.resample(None) or [])]
+    return np.concatenate(chunks, axis=1) if chunks else None
 
 
-def concat_mp4_segments(paths, out_path, *, crf: int = 16, preset: str = "medium",
-                        audio_bitrate: str = "192k", video_mode: str = "copy",
-                        on_log=None) -> dict:
-    """把 N 个段文件拼成一条。``video_mode``：
+def _passthrough_video_stream(out, vin, av):
+    """建一条**与源同规格**的输出视频流（画面流拷贝 = 逐位无损路的入口）。
 
-      · ``"copy"``（默认，无损）：画面**流拷贝**（逐包重定位时间戳，零重编码、秒级完成），
-        音频**重编码**（必须 —— 去 priming + 截到本段有效时长只能在解码侧做）。
-        段文件规格不一致时须退回 ``"encode"``。
-      · ``"encode"``：画面也单遍重编码（libx264 crf / preset）。跨规格段文件唯一可行的路。
-
-    返回 dict：``{"out", "mode", "clips", "audio_alignment", "warnings", "seconds"}``。
-    ⚠ 不做体检、不做产物断言 —— 那两个是 ``assert_segments_joinable`` / ``assert_assembled`` 的事，
-    由 ``assemble_mp4_segments`` 串起来（分层是为了单测能各自调）。
+    用 PyAV 的**模板流**：连 extradata（h264 的 SPS/PPS）一起复制 ⇒ 真 mux 直通、零重编码。
+    ⚠ 老版本 PyAV 没有这个 API。这里**故意不写"手工复制参数"的退路** ——
+    那等于在无法验证的机器上换一条 remux 实现，属"无断言即未验收"（容易产出能播但**内容错了**的片）。
+    改成：给**一句话的修法**，并让 `assemble_mp4_segments` 自动退回重编码路（有断言把关）。
     """
+    maker = getattr(out, "add_stream_from_template", None)
+    if not callable(maker):
+        raise RuntimeError(
+            "本机 PyAV 太旧（缺 add_stream_from_template）⇒ 画面**流拷贝（无损路）**用不了。（PyAV %s）\n"
+            "    修法：pip install -U \"av>=17\"（宿主 ComfyUI 的依赖里就是这个版本）。"
+            % (getattr(av, "__version__", "?"),))
+    return maker(vin)
+
+
+def _video_codec(av):
+    """生产用 libx264；精简 FFmpeg（如 CI 的 av 轮子）没有它时退 mpeg4 —— 只影响离线单测。"""
+    return "libx264" if "libx264" in set(av.codecs_available) else "mpeg4"
+
+
+def concat_mp4_segments(paths, out_path, *, crf=16, preset="medium", audio_bitrate="256k",
+                        audio_codec="aac", video_mode="copy", pcm_paths=None, on_log=None):
+    """把 N 个段文件拼成一条（**不做体检、不做断言** —— 那是另两个函数的事）。
+
+    ``video_mode="copy"``（默认，无损）：画面**流拷贝**（逐包重定位时间戳，零重编码），
+    音频**重编码**（必须 —— 去 priming + 截到本段有效时长只能在解码侧做）；
+    ``"encode"``：画面也单遍重编码（段规格不一致时的唯一可行路）。
+
+    ``audio_codec``：``"aac"``（默认，配 ``audio_bitrate``，如 256k/192k）或
+    无损档 ``"pcm_s16le"`` / ``"pcm_s24le"`` / ``"pcm_f32le"``（不加码率参数）。
+
+    ``video_mode="copy"`` 需要 PyAV 的模板流 API（`add_stream_from_template`，av>=17 有）；
+    ``assemble_mp4_segments`` 会把"本机不支持"变成**自动退回重编码**（有四项断言把关）。
+
+    ``pcm_paths``：**逐段对齐**的 PCM 边车路径（`裁重叠` 落的无损音频）；给了就**直读 PCM**，
+    既不用解 AAC、也不需要去 priming ⇒ 音频代际从 2 降到 1，且无损档下**零新增代际**。
+    缺失/不匹配（采样率、声道、长度）自动退回 mp4 解码路，并在 ``audio_alignment[].source`` 标注。
+
+    返回 ``{"out","mode","clips","audio_alignment","warnings","seconds"}``。
+    """
+    import fractions
     import time as _time
-    av = _av_module()
     import numpy as np
+    av = _av_module()
     log = on_log or (lambda s: None)
-    paths = [str(p) for p in paths]
     if video_mode not in ("copy", "encode"):
         raise ValueError("video_mode 只认 'copy' / 'encode'，得到 %r" % (video_mode,))
-    warnings = []
-    t0 = _time.time()
-    out = av.open(str(out_path), "w", format="mp4")
+    paths = [str(p) for p in paths]
+    # 逐段对齐的 PCM 边车（可缺项）。长度不足时补 None —— 后面按段取，不靠"顺序正好对上"。
+    pcms = list(pcm_paths or [])
+    pcms += [None] * (len(paths) - len(pcms))
+    lossless_a = str(audio_codec).lower() in LOSSLESS_AUDIO_CODECS
+    # 容器：按扩展名选（.mkv → matroska）。**默认 mp4**；PCM 音轨塞进 mp4 实测可写，
+    # 但那是非标准作法（部分播放器会忽略音轨）⇒ 无损档的意义是"给剪辑/归档的母版"，不是预览档。
+    fmt = "matroska" if str(out_path).lower().endswith((".mkv", ".mka")) else "mp4"
+    t0, align, warnings = _time.time(), [], []
+    out = av.open(str(out_path), "w", format=fmt)
     v_out = a_out = None
-    align = []
-    v_pos = 0                      # 成片视频**全局帧序号**（encode 路用；跨段不许归零）
-    v_off = None                   # 成片视频**累计时长**（copy 路用：给每段包加的时间偏移）
-    a_pos = 0                      # 成片音频**累计样本数** —— 直接当 AudioFrame.pts
+    v_pos = a_pos = 0          # 全片帧序号 / 音频累计样本数（跨段**不许归零**）
+    v_off = 0.0                # copy 路：画面累计秒（给每段包加同一偏移）
     try:
         for idx, p in enumerate(paths):
             with av.open(p) as cin:
@@ -3656,99 +3681,142 @@ def concat_mp4_segments(paths, out_path, *, crf: int = 16, preset: str = "medium
                 fr = vin.average_rate
                 if v_out is None:
                     if video_mode == "copy":
-                        v_out = out.add_stream_from_template(vin)
+                        v_out = _passthrough_video_stream(out, vin, av)
                     else:
-                        v_out = out.add_stream("libx264", rate=fr,
-                                               options={"crf": str(int(crf)),
-                                                        "preset": str(preset)})
+                        vc = _video_codec(av)
+                        v_out = out.add_stream(vc, rate=fr, options=(
+                            {"crf": str(int(crf)), "preset": str(preset)} if vc == "libx264"
+                            else {"qscale": str(max(1, int(crf) // 8))}))
                         v_out.width = int(vin.codec_context.width)
                         v_out.height = int(vin.codec_context.height)
                         v_out.pix_fmt = "yuv420p"
-                    v_off = 0                               # 首段时间偏移 = 0（之后逐段累加）
                     if ain is not None:
-                        a_out = out.add_stream("aac", rate=int(ain.codec_context.sample_rate),
-                                               options={"b": str(audio_bitrate)})
+                        a_rate = int(ain.codec_context.sample_rate)
+                        if lossless_a:
+                            a_out = out.add_stream(str(audio_codec), rate=a_rate)
+                        else:
+                            a_out = out.add_stream("aac", rate=a_rate,
+                                                   options={"b": str(audio_bitrate)})
                         a_out.layout = str(ain.codec_context.layout.name)
                 if video_mode == "copy":
-                    # —— 画面：逐包流拷贝，**只重定位时间戳**（pts/dts 同加同一偏移，保持相对顺序）
-                    n_in = 0
-                    base = None
+                    n_in, base = 0, None
                     for pkt in cin.demux(vin):
                         if pkt.pts is None or pkt.dts is None:
                             continue
                         if base is None:
                             base = pkt.pts
-                        # ⚠ 用**包自己的 time_base**换算（copy 路的输出流是模板拷来的，
-                        #   `v_out.time_base` 读出来是 None，拿它换算会写出天文数字的 pts ⇒ 封装报 EINVAL）
-                        tb = pkt.time_base or _stream_tb(vin)
-                        shift = v_off / tb
-                        pkt.pts = int(pkt.pts - base + shift)
-                        pkt.dts = int(pkt.dts - base + shift)
+                        # ⚠ 用**包自己的 time_base** 换算：copy 路的输出流来自模板，
+                        #   `v_out.time_base` 读出来是 None ⇒ 拿它换算会写出天文数字 pts、封装报 EINVAL。
+                        shift = int(fractions.Fraction(v_off) / (pkt.time_base or vin.time_base))
+                        pkt.pts, pkt.dts = int(pkt.pts - base + shift), int(pkt.dts - base + shift)
                         pkt.stream = v_out
                         n_in += 1
                         out.mux(pkt)
-                    v_off = v_off + _one_over(fr) * n_in
+                    v_off += n_in / float(fr)
                 else:
-                    # —— 画面：逐帧重编码，pts = 全片帧序号（CFR 重建，天然无洞且跨段单调）——
                     n_in = 0
+                    tb = fractions.Fraction(1, 1) / fractions.Fraction(fr)
                     for frame in cin.decode(vin):
                         if frame.format.name != "yuv420p":
                             frame = frame.reformat(format="yuv420p")
-                        frame.pts = v_pos
-                        frame.time_base = _one_over(fr)
+                        frame.pts, frame.time_base = v_pos, tb     # CFR 重建：天然无洞且跨段单调
                         v_pos += 1
                         n_in += 1
                         for pkt in v_out.encode(frame):
                             out.mux(pkt)
-                # —— 声音：整段解出 → **去 priming → 截到本段有效时长** → 重编码 ——
-                #    有效时长口径 = 帧数/fps（同 `join_audio_segments` 的 segment_seconds）；
-                #    priming = AUDIO_ENCODER_PRIME_MS（同 AudioSeam.join_prime_ms 默认值）。
-                if ain is not None and a_out is not None:
-                    rate = int(a_out.rate)
-                    layout = str(a_out.layout.name)
-                    want = int(round(n_in * rate / float(fr)))          # 本段有效样本数
+                if ain is None or a_out is None:
+                    align.append({"index": idx, "file": os.path.basename(p), "seg_samples": 0,
+                                  "decoded_samples": 0, "prime_drop": 0, "tail_drop": 0,
+                                  "source": "none"})
+                    continue
+                # 声音：**优先读 PCM 边车**（无损、与画面等长、不需要去 priming）；
+                #       没有才退回 mp4 解码：去 priming → 截到本段有效时长（帧数/fps）。
+                rate, layout = int(a_out.rate), str(a_out.layout.name)
+                want = int(round(n_in * rate / float(fr)))
+                # 容器里那份音频的样本数 —— 用来判「边车与落盘音频同源吗」（护栏，见下）。
+                n_cont = int(round(_secs(ain) * rate)) if ain is not None else 0
+                # 🔴 护栏容差：边车必须与**本段落盘音频同源**。
+                #   为什么必须有：音频链上「裁重叠」之后可能还有本包别的音频节点
+                #   （典型 = 音频缝：patch 长度守恒、**J-cut 会缩短 align 秒**）。
+                #   拿链上更靠前的边车去拼，成片音轨就会**绕过那次处理**（甚至错位）。
+                #   容差怎么定（按容器事实）：段容器音频 = 视频 + priming(~33–53ms) + 尾填充
+                #   ⇒ 100 ms 足够放过正常段；而"链上更靠前的节点"差的是裁量/align（典型 0.9 s）
+                #   ⇒ 100 ms 能干净分开。（同一节点多候选时另按"最接近"挑，见下。）
+                tol_len = max(int(round(0.1 * rate)), int(round(rate / float(fr))))
+                bad = []
+                cands = pcms[idx] if idx < len(pcms) else None
+                if isinstance(cands, str):
+                    cands = [cands]
+                src, head, tail, pick = "aac", 0, 0, ""
+                pcm, pool = None, []
+                for _c in (cands or []):
+                    if not _c:
+                        continue
+                    _w = _load_pcm_sidecar(_c, rate, layout)
+                    pool.append((_w, os.path.basename(str(_c))))
+                _ok = [x for x in pool if x[0] is not None]
+                if _ok:
+                    # 多候选 = 音频链上有多个本包音频节点（如「裁重叠」+「音频缝」）。
+                    # 选**与落盘音频长度最接近**的那个：音频缝的输出才是真进 mp4 的那份。
+                    _w, _n = min(_ok, key=lambda x: abs(int(x[0].shape[1]) - n_cont) if n_cont else 0)
+                    if abs(int(_w.shape[1]) - n_cont) <= tol_len or not n_cont:
+                        pcm, src, pick = _w, "pcm", _n
+                    else:
+                        bad.append("%s: 与 mp4 音频差 %.0f ms"
+                                   % (_n, (int(_w.shape[1]) - n_cont) / rate * 1000.0))
+                for _w, _n in pool:
+                    if _w is None:
+                        bad.append("%s: 读不出 / 采样率或声道不符" % _n)
+                if bad and pcm is None:
+                    warnings.append("第 %d 段的 PCM 边车被拒收（%s）；该段退回 mp4 解码。"
+                                    % (idx + 1, "；".join(bad)))
+                if pcm is not None:
+                    got = int(pcm.shape[1])
+                    if got >= want:                      # 边车比视频长（沉降帧没裁完）⇒ 从尾截
+                        tail = got - want
+                        pcm = pcm[:, :want]
+                        note = "PCM 边车（无损源，零新增代际）｜ 尾截 %d 样本" % tail
+                    else:
+                        note = "⚠ PCM 边车比视频短 %d 样本，已补静音" % (want - got)
+                        warnings.append("第 %d 段 PCM 边车比视频短 %d 样本，已补静音。"
+                                        % (idx + 1, want - got))
+                        pcm = np.concatenate([pcm, np.zeros((pcm.shape[0], want - got),
+                                                            dtype=pcm.dtype)], axis=1)
+                else:
                     prime = int(round(AUDIO_ENCODER_PRIME_MS / 1000.0 * rate))
-                    pcm = _decode_audio_mono_stereo(p, av, rate, layout)
+                    pcm = _decode_pcm(p, av, rate, layout)
                     got = 0 if pcm is None else int(pcm.shape[1])
-                    if got >= want:
+                    if pcm is not None and got >= want:
                         head = min(prime, got - want)
                         tail = got - head - want
-                        if pcm is not None:
-                            pcm = pcm[:, head:head + want]
-                        note = "去 priming %d + 尾丢 %d 样本" % (head, tail)
+                        pcm = pcm[:, head:head + want]
+                        note = "去 priming %d + 尾丢 %d 样本（mp4 解码路）" % (head, tail)
                     else:
                         head = tail = 0
-                        note = "⚠ 不足 %d 样本，已补静音" % (want - got)
-                        warnings.append("第 %d 段音频比视频短 %d 样本，已补静音。"
-                                        % (idx + 1, want - got))
+                        note = "⚠ 不足 %d 样本，已补静音" % max(0, want - got)
+                        warnings.append("第 %d 段音频比视频短 %d 样本，已补静音。" % (idx + 1, want - got))
                         if pcm is not None:
-                            pcm = np.concatenate(
-                                [pcm, np.zeros((pcm.shape[0], want - got), dtype=pcm.dtype)],
-                                axis=1)
-                    align.append({"index": idx, "file": os.path.basename(p),
-                                  "seg_samples": want, "decoded_samples": got,
-                                  "prime_drop": head, "tail_drop": tail})
-                    log("[H3 Relay] 拼接：段 %d 有效时长 %d 帧 = %d 样本，解码 %d 样本 ⇒ %s"
-                        % (idx + 1, n_in, want, got, note))
-                    if pcm is not None:
-                        step = 1024
-                        for s in range(0, pcm.shape[1], step):
-                            af = av.AudioFrame.from_ndarray(
-                                np.ascontiguousarray(pcm[:, s:s + step]), format="fltp",
-                                layout=layout)
-                            af.sample_rate = rate
-                            af.pts = a_pos
-                            af.time_base = _one_over(rate)
-                            a_pos += af.samples
-                            for pkt in a_out.encode(af):
-                                out.mux(pkt)
-                else:
-                    align.append({"index": idx, "file": os.path.basename(p),
-                                  "seg_samples": 0, "decoded_samples": 0,
-                                  "prime_drop": 0, "tail_drop": 0})
-        for s in (v_out, a_out):
-            if s is not None:
-                for pkt in s.encode(None):
+                            pcm = np.concatenate([pcm, np.zeros((pcm.shape[0], want - got),
+                                                                dtype=pcm.dtype)], axis=1)
+                align.append({"index": idx, "file": os.path.basename(p), "seg_samples": want,
+                              "decoded_samples": got, "prime_drop": head, "tail_drop": tail,
+                              "source": src, "pcm_file": pick})
+                log("[H3 Relay] 拼接：段 %d 有效时长 %d 帧 = %d 样本，源 %s%s（%d 样本）⇒ %s"
+                    % (idx + 1, n_in, want, src,
+                       (" " + pick) if pick else "", got, note))
+                if pcm is None:
+                    continue
+                a_tb = fractions.Fraction(1, 1) / fractions.Fraction(rate)
+                for s in range(0, pcm.shape[1], 1024):
+                    af = av.AudioFrame.from_ndarray(np.ascontiguousarray(pcm[:, s:s + 1024]),
+                                                    format="fltp", layout=layout)
+                    af.sample_rate, af.pts, af.time_base = rate, a_pos, a_tb
+                    a_pos += af.samples
+                    for pkt in a_out.encode(af):
+                        out.mux(pkt)
+        for st in (v_out, a_out):
+            if st is not None:
+                for pkt in st.encode(None):
                     out.mux(pkt)
     finally:
         out.close()
@@ -3757,117 +3825,135 @@ def concat_mp4_segments(paths, out_path, *, crf: int = 16, preset: str = "medium
             "seconds": round(_time.time() - t0, 3)}
 
 
-def _one_over(rate):
-    import fractions
-    return fractions.Fraction(1, 1) / fractions.Fraction(rate)
+def assert_assembled(out_path, expected_frames, fps, deep=False):
+    """成片四断言（与包内组装层同口径）。
 
-
-def assert_assembled(out_path, expected_frames: int, fps: float) -> dict:
-    """成片断言（与产线组装器同口径）：帧数守恒 / PTS 无洞 / DTS 递增 / A·VΔ ≤ 1 帧。"""
+    **快路（默认）**：单次 demux 取包级 pts/dts，不整片解码；判「PTS 无洞」前排序到**显示序**
+    （demux 序 = DTS 序 ≠ 显示序，本仓踩过）。``deep=True`` 走逐帧解码计数（慢；单测用它交叉验证）。
+    """
     av = _av_module()
-    res = {"expected_frames": int(expected_frames)}
     with av.open(str(out_path)) as c:
         v = c.streams.video[0]
-        nf, pts_sec = 0, []
-        for f in c.decode(v):
-            nf += 1
-            tb = f.time_base or v.time_base
-            pts_sec.append(float(f.pts) * float(tb))
-        vd = _secs(v)
-        ad = _secs(c.streams.audio[0]) if c.streams.audio else 0.0
-    with av.open(str(out_path)) as c:
-        dts_list = [int(p.dts) for p in c.demux(c.streams.video[0]) if p.dts is not None]
-    holes = [i for i in range(1, len(pts_sec)) if pts_sec[i] - pts_sec[i - 1] > 1.5 / fps]
-    res["frames"] = nf
-    res["frames_conserved"] = nf == int(expected_frames)
-    res["pts_holes"] = holes[:10]
-    res["pts_contiguous"] = not holes
-    res["dts_strictly_increasing"] = all(b > a for a, b in zip(dts_list, dts_list[1:]))
-    res["video_seconds"] = round(vd, 4)
-    res["audio_seconds"] = round(ad, 4)
-    res["av_delta_seconds"] = round(abs(ad - vd), 4) if ad else None
-    res["av_delta_ok"] = (res["av_delta_seconds"] is None
-                          or res["av_delta_seconds"] <= 1.0 / fps + 0.02)
-    res["assembled_ok"] = all([res["frames_conserved"], res["pts_contiguous"],
-                               res["dts_strictly_increasing"], res["av_delta_ok"]])
-    return res
+        vd, ad = _secs(v), (_secs(c.streams.audio[0]) if c.streams.audio else 0.0)
+        if deep:
+            pts = [float(f.pts) * float(f.time_base or v.time_base) for f in c.decode(v)]
+            dts = []
+        else:
+            pk = [(p.pts, p.dts, p.time_base) for p in c.demux(v)
+                  if p.pts is not None and p.dts is not None]
+            pts = sorted(float(p * float(tb or v.time_base)) for p, _, tb in pk)
+            dts = [int(d) for _, d, _ in pk]
+    if deep:
+        with av.open(str(out_path)) as c:
+            dts = [int(p.dts) for p in c.demux(c.streams.video[0]) if p.dts is not None]
+    holes = [i for i in range(1, len(pts)) if pts[i] - pts[i - 1] > 1.5 / fps]
+    dl = (abs(ad - vd) if ad else None)
+    dts_ok = all(b > a for a, b in zip(dts, dts[1:]))
+    av_ok = dl is None or dl <= 1.0 / fps + 0.02
+    return {"expected_frames": int(expected_frames), "frames": len(pts),
+            "frames_conserved": len(pts) == int(expected_frames), "pts_holes": holes[:10],
+            "pts_contiguous": not holes, "dts_strictly_increasing": dts_ok,
+            "video_seconds": round(vd, 4), "audio_seconds": round(ad, 4),
+            "av_delta_seconds": round(dl, 4) if dl is not None else None, "av_delta_ok": av_ok,
+            "assembled_ok": bool(len(pts) == int(expected_frames) and not holes and dts_ok and av_ok)}
 
 
-def assemble_mp4_segments(paths, out_path, *, crf: int = 16, preset: str = "medium",
-                          audio_bitrate: str = "192k", video: str = "auto",
-                          on_log=None) -> dict:
-    """**一步到位**：体检 → 拼接 → 成片断言。返回 dict（含 report 文本与断言明细）。
+def assemble_mp4_segments(paths, out_path, *, video="auto", audio_codec="aac",
+                          audio_bitrate="256k", crf=16, pcm_paths=None, on_log=None, **kw):
+    """**一步到位**：体检 → 拼接 → 四断言。``video="auto"`` = 先流拷贝，断言不过退单遍重编码。
 
-    ``video="auto"``（默认）= 先走**画面无损流拷贝**，成片断言不过才退回**单遍重编码**重拼
-    —— 与 README §7.1 给用户的退路一致（先用最快的路，自检不过再上重编码）。
+    ``audio_codec``/``audio_bitrate`` = 成片音轨档（见 ``concat_mp4_segments``）；
+    ``pcm_paths`` = 逐段的 PCM 边车（有则直读，音频只编码一代）；``crf`` = 重编码路的画质。
 
     ``ok=False`` 时成片**可能已经写出来了**（断言不过就是不过，不悄悄删文件）——
-    调用方按 ``report`` 里的处置建议决定要不要留。这一点是刻意的：坏片留着才能取证。
+    调用方按 ``report`` 里的处置建议决定要不要留：坏片留着才能取证。
     """
+    import time as _time
     _av_module()
     log = on_log or (lambda s: None)
     paths = [str(p) for p in paths]
+    t0 = _time.time()
     clips = [probe_mp4(p) for p in paths]
     fps = clips[0]["fps"] if clips else 0.0
     expected = sum(c["frames"] for c in clips)
     health = assert_segments_joinable(clips)
+    lossless = str(audio_codec).lower() in LOSSLESS_AUDIO_CODECS
+    lines = ["[H3 Relay] 多段拼接：%d 段 → %s" % (len(clips), out_path)] + [
+        "           · %s：%d 帧 %.3fs ｜ 音频 %.3fs（差 %+.4fs / %+d 样本）"
+        % (os.path.basename(c["path"]), c["frames"], c["v_seconds"], c["a_seconds"],
+           c["a_v_delta"], c["a_prime_samples"]) for c in clips]
+    lines.append("           · 音轨档：%s%s ｜ 画面：%s"
+                 % (audio_codec, "" if lossless else " @" + str(audio_bitrate),
+                    "流拷贝（无损）" if video != "encode" else "重编码 crf=%d" % int(crf)))
     rep = {"ok": False, "out": str(out_path), "clips": clips, "health": health,
            "expected_frames": expected, "asserts": None, "report": "", "mode": ""}
-    lines = ["[H3 Relay] 多段拼接：%d 段 → %s" % (len(clips), out_path)]
-    for c in clips:
-        lines.append("           · %s：%d 帧 %.3fs ｜ 音频 %.3fs（差 %+.4fs / %+d 样本）"
-                     % (os.path.basename(c["path"]), c["frames"], c["v_seconds"],
-                        c["a_seconds"], c["a_v_delta"], c["a_prime_samples"]))
-    for w in health["warnings"]:
-        lines.append("           ⚠ " + w)
     if not health["ok"]:
         lines.append("           🔴 体检不过，**没有拼**：")
-        for p in health["problems"]:
-            lines.append("              · " + p)
+        lines += ["              · " + p for p in health["problems"]]
         rep["report"] = "\n".join(lines)
         return rep
     mode = "encode" if video == "encode" else "copy"
-    res = concat_mp4_segments(paths, out_path, crf=crf, preset=preset,
-                              audio_bitrate=audio_bitrate, video_mode=mode, on_log=log)
-    chk = assert_assembled(out_path, expected, fps)
-    if not chk["assembled_ok"] and video == "auto" and mode == "copy":
-        lines.append("           ⚠ 画面流拷贝路的成片断言不过 ⇒ **退回单遍重编码**重拼"
-                     "（时间轴最干净的路，同 README §7.1 的退路）。")
-        mode = "encode"
-        res = concat_mp4_segments(paths, out_path, crf=crf, preset=preset,
-                                  audio_bitrate=audio_bitrate, video_mode=mode, on_log=log)
+    opt = dict(video_mode=mode, audio_codec=audio_codec, audio_bitrate=audio_bitrate,
+               crf=crf, pcm_paths=pcm_paths, on_log=log, **kw)
+    res = None
+    try:
+        res = concat_mp4_segments(paths, out_path, **opt)
         chk = assert_assembled(out_path, expected, fps)
-    rep["asserts"] = chk
-    rep["alignment"] = res["audio_alignment"]
-    rep["mode"] = res["mode"]
-    rep["seconds"] = res["seconds"]
-    for a in res["audio_alignment"]:
-        lines.append("           · 段 %d 对齐：有效 %d 样本 ｜ 去 priming %d / 尾丢 %d"
-                     % (a["index"] + 1, a["seg_samples"], a["prime_drop"], a["tail_drop"]))
+    except Exception as exc:                 # noqa: BLE001
+        if mode != "copy":
+            raise
+        # 流拷贝路炸了（段规格不一致、包时间基怪异…）也要有条**能走通**的路，而不是把异常甩给调用方。
+        lines.append("           ⚠ 画面流拷贝路不可用（%s：%s）⇒ **退回单遍重编码**重拼。"
+                     % (type(exc).__name__, exc))
+        mode = "encode"
+        opt["video_mode"] = mode
+        res = concat_mp4_segments(paths, out_path, **opt)
+        chk = assert_assembled(out_path, expected, fps)
+    if res is not None and not chk["assembled_ok"] and video == "auto" and mode == "copy":
+        lines.append("           ⚠ 画面流拷贝路的成片断言不过 ⇒ **退回单遍重编码**重拼"
+                     "（时间轴最干净的路）。")
+        mode = "encode"
+        opt["video_mode"] = mode
+        res = concat_mp4_segments(paths, out_path, **opt)
+        chk = assert_assembled(out_path, expected, fps)
+    lines += ["           · 段 %d 音频源=%s%s：有效 %d 样本 ｜ 去 priming %d / 尾丢 %d"
+              % (a["index"] + 1, a.get("source", "?").upper(),
+                 ("（%s）" % a["pcm_file"]) if a.get("pcm_file") else "",
+                 a["seg_samples"], a["prime_drop"], a["tail_drop"])
+              for a in res["audio_alignment"]]
+    _via = sum(1 for a in res["audio_alignment"] if a.get("source") == "pcm")
+    lines.append("           · 音频代际：%s"
+                 % ("**零新增**（%d/%d 段直读 PCM 边车%s）"
+                    % (_via, len(res["audio_alignment"]),
+                       "，其余段退回 mp4 解码（该段本身已是 1 代）"
+                       if _via < len(res["audio_alignment"]) else "")
+                    if lossless else
+                    "2 → **1**（%d/%d 段直读 PCM 边车，不再二次 AAC）"
+                    % (_via, len(res["audio_alignment"]))))
     lines.append("           ✅ 画面=%s ｜ 帧数 %d/%d 守恒=%s ｜ PTS 无洞=%s ｜ DTS 递增=%s ｜ "
-                 "A·VΔ=%.4fs ｜ 耗时 %.1fs"
+                 "A·VΔ=%.4fs ｜ 总耗时 %.2fs（拼接 %.2fs）"
                  % ("流拷贝（无损）" if res["mode"] == "copy" else "重编码",
-                    chk["frames"], expected, chk["frames_conserved"],
-                    chk["pts_contiguous"], chk["dts_strictly_increasing"],
+                    chk["frames"], expected, chk["frames_conserved"], chk["pts_contiguous"],
+                    chk["dts_strictly_increasing"],
                     chk["av_delta_seconds"] if chk["av_delta_seconds"] is not None else -1,
-                    rep["seconds"]))
+                    round(_time.time() - t0, 3), res["seconds"]))
     if not chk["assembled_ok"]:
         lines.append("           🔴 成片断言不过 —— 片已写出（留作取证），但**别当成品用**。")
-    rep["ok"] = bool(chk["assembled_ok"])
-    rep["report"] = "\n".join(lines)
+    rep.update({"asserts": chk, "alignment": res["audio_alignment"], "mode": res["mode"],
+                "seconds": round(_time.time() - t0, 3), "concat_seconds": res["seconds"],
+                "warnings": res["warnings"], "ok": bool(chk["assembled_ok"]),
+                "pcm_segments": _via, "report": "\n".join(lines)})
     return rep
 
 
-def pick_video_outputs(outputs) -> list:
+def pick_video_outputs(outputs):
     """从 ComfyUI history 的 ``outputs`` 里挑出**视频类**落盘结果（纯函数，便于单测）。
 
-    返回 ``[{"node": id, "filename", "subfolder", "type"}]``，按 history 里出现的顺序。
-    判据 = 文件名扩展名 ∈ AV_CONCAT_VIDEO_EXTS（宿主 SaveVideo/SaveWEBM 都写进 `images` 键）。
+    宿主 SaveVideo/SaveWEBM 都写进 `images` 键；非视频（png…）与畸形项一律跳过。
+    返回 ``[{"node","filename","subfolder","type"}]``（按 history 里的出现顺序）。
     """
     found = []
-    if not isinstance(outputs, dict):
-        return found
-    for node_id, node_out in outputs.items():
+    for node_id, node_out in (outputs or {}).items():
         if not isinstance(node_out, dict):
             continue
         for key in ("images", "videos", "gifs"):
@@ -3879,4 +3965,26 @@ def pick_video_outputs(outputs) -> list:
                     found.append({"node": str(node_id), "filename": fn,
                                   "subfolder": str(item.get("subfolder") or ""),
                                   "type": str(item.get("type") or "output")})
+    return found
+
+
+def pick_pcm_outputs(outputs):
+    """从 history 的 ``outputs`` 里挑出**「裁重叠」落的 PCM 边车**（纯函数，便于单测）。
+
+    边车靠节点自己回显（ui 键 ``h3relay_pcm``）带出来 —— **不猜文件名**，也不用去翻目录：
+    只要那一段真的是本包节点跑的，路径就在这里；不是（旧版本/被删）就当没有，退回 mp4 解码。
+    返回 ``[{"node","filename","subfolder","type"}]``。
+    """
+    found = []
+    for node_id, node_out in (outputs or {}).items():
+        if not isinstance(node_out, dict):
+            continue
+        for item in (node_out.get(PCM_UI_KEY) or []):
+            if not isinstance(item, dict):
+                continue
+            fn = str(item.get("filename") or "")
+            if fn.lower().endswith(".safetensors"):
+                found.append({"node": str(node_id), "filename": fn,
+                              "subfolder": str(item.get("subfolder") or ""),
+                              "type": str(item.get("type") or "output")})
     return found

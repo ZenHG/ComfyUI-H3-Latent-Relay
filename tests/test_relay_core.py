@@ -45,8 +45,13 @@
      E5 错开不再被静默忽略、rank 约定一致、无解时不 raise、报告不静默、O(T²) 回归锁、
      持续帧滤波（瞬态不计入）、退化输入不炸、前缀和能量选窗 == 参照
  25. 🛡 patch 台词守卫（0.6.5）：patch 不许吃本段台词（收缩/关闭/零副作用/关=旧行为）
+ 26. 多段拼接成片（0.6.7）：探测/体检（含「音频绕过裁重叠」判据）/画面流拷贝无损/
+     音频代际 2 → 1（PCM 边车直读 ⇒ 逐位一致；AAC 默认 256k）；
+     音频逐段去 priming 对齐/退路（重编码）/history 落盘条目筛选/多生产者候选裁决/
+     PyAV 版本兼容/CLI 入口（合成 mp4 + 合成边车，零 GPU）
 """
 
+import importlib.util
 import os
 import sys
 import tempfile
@@ -290,8 +295,18 @@ sys.modules["h3relay_kit.nodes"] = NODES
 _spec.loader.exec_module(NODES)
 
 
+def unwrap(res):
+    """节点返回 `{"ui": …, "result": …}` 时取 result（与宿主行为一致）。
+
+    0.6.7 起「裁重叠」与「音频缝」用 ui 键回显 PCM 边车路径 ⇒ 宿主把 ui 收进
+    history.outputs，连线数据仍是 result。**直接调节点函数的测试必须过这一层**，
+    否则 `a, b, c = node.fn(...)` 会 unpack 到 dict 的键上（踩过：22.13 报 "expected 3, got 2"）。
+    """
+    return res["result"] if isinstance(res, dict) and "result" in res else res
+
+
 def arity(cls, kw):
-    out = getattr(cls(), cls.FUNCTION)(**kw)
+    out = unwrap(getattr(cls(), cls.FUNCTION)(**kw))
     return len(out) == len(cls.RETURN_TYPES), out
 
 
@@ -458,8 +473,12 @@ req = chain_cls.INPUT_TYPES().get("required") or {}
 opt = chain_cls.INPUT_TYPES().get("optional") or {}
 check("11.1 status 作为可选 widget 存在（否则前端提示无处显示）", "status" in opt,
       "optional=%s" % list(opt))
-check("11.2 status 排在最后一个（旧工作流少这一格也不会让前面取值错位）",
-      list(req) == ["segments"] and list(opt)[-1] == "status",
+# ⚠ 2026-09-22 口径更新（0.6.7 加词分发/自动拼接）：原断言是「status 必须是最后一格」，
+#   本意是**槽位安全** —— 新格一律**追加在末尾**，旧工作流少格子时只走默认值、
+#   不会让它前面的取值整体前移（见 CHANGES 0.2.1）。0.6.7 的四个新格**全部追加在 status 之后**
+#   ⇒ 原意完好，断言改为「前缀不动 + 追加只发生在 status 之后」。
+check("11.2 槽位安全：segments 仍居首、status 未被前移、新格只追加在它之后",
+      list(req) == ["segments"] and list(opt)[0] == "status",
       "required=%s optional=%s" % (list(req), list(opt)))
 
 # 11.3 前端会把 status 一起传进来 → noop 必须能吃下
@@ -477,6 +496,48 @@ try:
           'x.name === "status"' in _src, "未在 relay_kit_chain.js 里找到该查找")
 except Exception as e:  # noqa: BLE001
     check("11.4 前端 JS 找的 widget 名与后端一致（status）", False, repr(e))
+
+# 11.5~11.8 0.6.7 词分发 / 自动拼接的**接口契约**（默认关 = 老图逐位不变）
+for _w in ("prompts", "prompt_target", "auto_concat", "concat_name"):
+    check("11.5 %s 作为可选 widget 存在" % _w, _w in opt)
+check("11.6 默认档 = 老行为（prompts 空、auto_concat 关、成片名空）",
+      opt["prompts"][1].get("default") == "" and opt["prompts"][1].get("multiline") is True
+      and opt["auto_concat"][1].get("default") is False
+      and opt["concat_name"][1].get("default") == "",
+      "prompts.default=%r multiline=%r auto_concat.default=%r"
+      % (opt["prompts"][1].get("default"), opt["prompts"][1].get("multiline"),
+         opt["auto_concat"][1].get("default")))
+try:
+    chain_cls().noop(segments=3, status="第 2 段", prompts="a\n---\nb", prompt_target="6.h3_data",
+                     auto_concat=True, concat_name="film")
+    check("11.7 noop 能吃下 0.6.7 的四个新参数（不会 TypeError）", True)
+except Exception as e:  # noqa: BLE001
+    check("11.7 noop 能吃下 0.6.7 的四个新参数（不会 TypeError）", False, repr(e))
+try:
+    _js2 = open(os.path.join(_KIT_DIR, "web", "relay_kit_prompt.js"), encoding="utf-8").read()
+    check("11.8 词分发纯函数模块在位（前端与离线单测共用同一份逻辑）",
+          "export function splitPromptBlocks" in _js2 and "export function writePrompt" in _js2)
+except Exception as e:  # noqa: BLE001
+    check("11.8 词分发纯函数模块在位（前端与离线单测共用同一份逻辑）", False, repr(e))
+
+# 11.9~11.11 成片音轨档 / 画质档（2026-09-22 二轮）：**继续追加在末位**，槽位安全。
+check("11.9 audio_out 作为三选一 widget 存在（aac_256k / aac_192k / pcm_lossless）",
+      "audio_out" in opt and list(opt["audio_out"][0]) == ["aac_256k", "aac_192k", "pcm_lossless"]
+      and opt["audio_out"][1].get("default") == "aac_256k",
+      "audio_out=%r" % (opt.get("audio_out"),))
+check("11.10 video_crf 可调（默认 16，0~51 合法输入）",
+      "video_crf" in opt and opt["video_crf"][1].get("default") == 16
+      and opt["video_crf"][1].get("min") == 0 and opt["video_crf"][1].get("max") == 51,
+      "video_crf=%r" % (opt.get("video_crf"),))
+check("11.11 槽位安全：新格仍在其前面所有格之后（concat_name 之后）",
+      list(opt).index("audio_out") > list(opt).index("concat_name")
+      and list(opt).index("video_crf") > list(opt).index("concat_name"),
+      "optional=%s" % list(opt))
+try:
+    chain_cls().noop(segments=3, audio_out="pcm_lossless", video_crf=23)
+    check("11.12 noop 能吃下音轨/画质两个新参数（**kwargs 兜住）", True)
+except Exception as e:  # noqa: BLE001
+    check("11.12 noop 能吃下音轨/画质两个新参数（**kwargs 兜住）", False, repr(e))
 
 # ---------------------------------------------------------------- 第 12 组：沉降帧
 print()
@@ -1293,12 +1354,13 @@ check("19.6 只对齐统计量（逐通道仿射）⇒ 空间结构不被复制�
 
 # 19.7 节点层：新 widget **追加在 optional 末位**（旧工作流取值不前移）
 # 🔴 2026-09-21：`run_id`（E3/E4 观测用）追加在末位 ⇒ 尾部断言跟着延长一位。
+# 🔴 2026-09-22：`save_pcm`（音频 PCM 边车）再追加一位。
 #   本断言的作用是「**防止有人把新 widget 插到中间**」⇒ 延长尾部列表即可，不是放宽。
 _opt19 = list(NODES.H3RelayTrimAV.INPUT_TYPES()["optional"])
 check("19.7 新 widget 追加在 optional 末位（前缀顺序稳定）",
-      _opt19[-5:] == ["match_prev", "match_prev_frames", "match_prev_gain_max",
-                      "match_prev_offset_max", "run_id"],
-      "尾部=%s" % (_opt19[-5:],))
+      _opt19[-6:] == ["match_prev", "match_prev_frames", "match_prev_gain_max",
+                      "match_prev_offset_max", "run_id", "save_pcm"],
+      "尾部=%s" % (_opt19[-6:],))
 
 # 19.8 节点层：默认全关（不接线时行为与 0.4.x 逐位一致）
 _it19 = NODES.H3RelayTrimAV.INPUT_TYPES()["optional"]
@@ -1459,7 +1521,7 @@ check("20.7 TrimAV 第 4 路输出 prev_tail 追加在末位",
 
 # 20.8 prev_tail 真的等于「钉住区最后一帧 = 上段末帧」
 _seg20 = torch.rand(50, 16, 16, 3)
-_out20 = NODES.H3RelayTrimAV().trim(_seg20, trim_frames=22, fps=24.0, settle_frames=0)
+_out20 = unwrap(NODES.H3RelayTrimAV().trim(_seg20, trim_frames=22, fps=24.0, settle_frames=0))
 check("20.8 prev_tail == 上段末帧（= images[pin-1]）",
       len(_out20) == 4 and int(_out20[3].shape[0]) == 1
       and torch.equal(_out20[3][0], _seg20[21]),
@@ -1674,11 +1736,11 @@ _p0 = NODES._audio_stage_path(_RID22, 0)
 _dir22 = os.path.dirname(_p0)
 try:
     _n22obj = NODES.H3RelayAudioSeam()
-    _a0, _l0, _j0 = _n22obj.seam(_bed_a, _RID22, 0)   # 第 3 路 joined（复合，2026-09-19）
+    _a0, _l0, _j0 = unwrap(_n22obj.seam(_bed_a, _RID22, 0))   # 第 3 路 joined（复合，2026-09-19）
     check("22.13 节点 stage 0 ⇒ 直通，但仍落盘（后段的床源靠它）",
           _a0 is _bed_a and os.path.isfile(_p0) and "第 1 段无缝可补" in _l0,
           _l0[:56])
-    _a1, _l1, _j1 = _n22obj.seam(_cur_a, _RID22, 1, patch_seconds=2.0)
+    _a1, _l1, _j1 = unwrap(_n22obj.seam(_cur_a, _RID22, 1, patch_seconds=2.0))
     _got = _a1["waveform"][..., :_keep22]
     _want = CORE.load_audio(_p0)["waveform"]
     _w2 = _want.reshape(-1, _want.shape[-1])
@@ -1875,8 +1937,8 @@ check("23.4 J-cut 守恒路：输出 == n·段有效时长 − (n−1)·裁量�
       "%d vs %d" % (int(_o23j["waveform"].shape[-1]), _exp23j))
 
 _g23t = torch.rand(30, 8, 8, 3)
-_o23t, _a23t, _r23t, _t23t = NODES.H3RelayTrimAV().trim(
-    _g23t, trim_frames=22, fps=24.0, audio=None)
+_o23t, _a23t, _r23t, _t23t = unwrap(NODES.H3RelayTrimAV().trim(
+    _g23t, trim_frames=22, fps=24.0, audio=None))
 check("23.5 TrimAV 报告**直接算出** join_align_seconds 建议值（= 裁首帧数 ÷ fps）",
       "join_align_seconds" in _r23t and "0.9167" in _r23t,
       [l.strip() for l in _r23t.splitlines() if "join_align_seconds" in l][:1][0][:80])
@@ -2105,6 +2167,547 @@ _w25f = CORE._audio_parts(_o25f)[0]
 check("25.4 守卫关 ⇒ 旧行为（头部被替换、report 无 🛡）",
       "🛡" not in _r25f
       and not torch.equal(_w25f[..., :int(0.5 * _SR25)], _w25r[..., :int(0.5 * _SR25)]))
+
+# ============ 组26：多段拼接成片（0.6.7）——探测/体检/无损拷贝/音频对齐 ============
+# 全部在**合成段文件**上跑（PyAV 现造 mp4），零 GPU；宿主 ComfyUI 自带 av，缺了就整组跳过。
+print()
+print("[26] 多段拼接成片：探测 → 体检 → 拼接（画面流拷贝无损 + 音频逐段对齐）→ 断言")
+
+
+def _concat_env():
+    try:
+        import av
+        import numpy as np
+        return av, np
+    except Exception:  # noqa: BLE001
+        return None, None
+
+
+_av26, _np26 = _concat_env()
+if _av26 is None:
+    check("26.0 PyAV 可用（拼接功能的运行前提；宿主 ComfyUI 自带）", False,
+          "没装 av ⇒ 本组跳过（pip install 'av>=17'）")
+else:
+    import fractions as _fr26
+
+    _TMP26 = tempfile.mkdtemp(prefix="h3relay_concat_")
+    # 合成夹具优先用 libx264（生产默认）；精简 FFmpeg（如 CI 的 av 轮子）上没有它 ⇒ 退 mpeg4。
+    #   本组测的是**拼接逻辑**，与编码器无关；真机跑的是 libx264。
+    _VCODEC26 = "libx264" if "libx264" in set(_av26.codecs_available) else "mpeg4"
+
+    def _mkclip(name, frames=48, fps=24, w=64, h=64, tone=440.0, audio_secs=None,
+                sr=32000, noise_seed=0):
+        """现造一个与真实段文件同构的 mp4：h264 + aac，音频比视频长（编码器 priming）。"""
+        path = os.path.join(_TMP26, name)
+        out = _av26.open(path, "w", format="mp4")
+        vs = out.add_stream(_VCODEC26, rate=fps, options=(
+            {"crf": "28", "preset": "ultrafast"} if _VCODEC26 == "libx264" else {"qscale": "5"}))
+        vs.width, vs.height, vs.pix_fmt = w, h, "yuv420p"
+        as_ = out.add_stream("aac", rate=sr)
+        as_.layout = "stereo"
+        rng = _np26.random.default_rng(noise_seed)
+        for i in range(frames):
+            arr = rng.integers(0, 255, (h, w, 3), dtype=_np26.uint8)
+            fr = _av26.VideoFrame.from_ndarray(arr, format="rgb24").reformat(format="yuv420p")
+            fr.pts = i
+            fr.time_base = _fr26.Fraction(1, fps)
+            for pkt in vs.encode(fr):
+                out.mux(pkt)
+        secs = audio_secs if audio_secs is not None else frames / float(fps)
+        n = int(round(secs * sr))
+        t = _np26.arange(n) / float(sr)
+        sig = (0.3 * _np26.sin(2 * _np26.pi * tone * t)).astype("float32")
+        pcm = _np26.stack([sig, sig])
+        pos = 0
+        for s in range(0, n, 1024):
+            af = _av26.AudioFrame.from_ndarray(
+                _np26.ascontiguousarray(pcm[:, s:s + 1024]), format="fltp", layout="stereo")
+            af.sample_rate = sr
+            af.pts = pos
+            af.time_base = _fr26.Fraction(1, sr)
+            pos += af.samples
+            for pkt in as_.encode(af):
+                out.mux(pkt)
+        for st in (vs, as_):
+            for pkt in st.encode(None):
+                out.mux(pkt)
+        out.close()
+        return path
+
+    _c1 = _mkclip("c1.mp4", tone=440.0, noise_seed=1)
+    _c2 = _mkclip("c2.mp4", tone=880.0, noise_seed=2)
+    _c3 = _mkclip("c3.mp4", tone=1320.0, noise_seed=3)
+
+    # —— 26.1 探测：读出真实容器事实 ——
+    # ⚠ 合成段的音频正好等于视频长（PyAV 封装会按 edit list 把编码器 priming 剪掉）；
+    #   真实段文件比视频**长**（宿主落盘把裁后 PCM 原样写进去）——那种「多出来的样本」
+    #   由 26.3 的 a_prime_samples 判据覆盖。这里只锁"读得准"。
+    _p1 = CORE.probe_mp4(_c1)
+    check("26.1 probe_mp4 读出帧数/fps/时长/音频（合成段）",
+          _p1["frames"] == 48 and abs(_p1["fps"] - 24.0) < 1e-9
+          and abs(_p1["v_seconds"] - 2.0) < 1e-3 and _p1["has_audio"]
+          and abs(_p1["a_seconds"] - _p1["v_seconds"]) <= 1.0 / 24.0,
+          "frames=%d fps=%s v=%.4f a=%.4f 差=%+.4f"
+          % (_p1["frames"], _p1["fps"], _p1["v_seconds"], _p1["a_seconds"], _p1["a_v_delta"]))
+
+    # —— 26.2 体检：priming 量级的差不算问题（否则每张正常图都会红） ——
+    _h_ok = CORE.assert_segments_joinable([_p1, CORE.probe_mp4(_c2)])
+    check("26.2 体检放过 priming 量级的音视频差（默认档不误报）", _h_ok["ok"],
+          "problems=%s" % _h_ok["problems"])
+
+    # —— 26.3 体检：音频**明显**长于视频 ⇒ 判「音频线绕过裁重叠」并拒绝拼 ——
+    _c_long = _mkclip("c_long.mp4", frames=48, tone=440.0, audio_secs=2.0 + 0.5, noise_seed=4)
+    _p_long = CORE.probe_mp4(_c_long)
+    _h_bad = CORE.assert_segments_joinable([_p1, _p_long])
+    check("26.3 体检抓到「音频绕过裁重叠」（> 1 帧）且给出可照做的处置",
+          (not _h_bad["ok"]) and any("绕过" in p and "裁重叠" in p for p in _h_bad["problems"])
+          and _p_long["a_prime_samples"] > 0,
+          "a_prime=%+d samples ｜ problems=%s"
+          % (_p_long["a_prime_samples"], _h_bad["problems"][:1]))
+
+    # —— 26.4 体检：规格不一致（帧率/分辨率）不许拼 ——
+    _c_fps = _mkclip("c_fps.mp4", frames=48, fps=30, noise_seed=5)
+    _h_fps = CORE.assert_segments_joinable([_p1, CORE.probe_mp4(_c_fps)])
+    check("26.4 体检抓到帧率不一致（拼出来必坏）",
+          (not _h_fps["ok"]) and any("规格" in p for p in _h_fps["problems"]))
+
+    # —— 26.5 体检不过 ⇒ 一段都不拼（坏片不许落地） ——
+    _bad_out = os.path.join(_TMP26, "should_not_exist.mp4")
+    _rep_bad = CORE.assemble_mp4_segments([_c1, _c_long], _bad_out)
+    check("26.5 体检不过 ⇒ 不产出成片（不静默拼半条）",
+          (not _rep_bad["ok"]) and (not os.path.exists(_bad_out))
+          and "没有拼" in _rep_bad["report"])
+
+    # —— 26.6 端到端：画面流拷贝（无损）+ 音频逐段对齐 + 四项断言 ——
+    _out26 = os.path.join(_TMP26, "film.mp4")
+    _rep26 = CORE.assemble_mp4_segments([_c1, _c2, _c3], _out26)
+    _a26 = _rep26["asserts"] or {}
+    check("26.6 三段端到端：帧数守恒 + PTS 无洞 + DTS 递增 + A·VΔ ≤ 1 帧",
+          _rep26["ok"] and _a26.get("frames") == 144
+          and _a26.get("frames_conserved") and _a26.get("pts_contiguous")
+          and _a26.get("dts_strictly_increasing") and _a26.get("av_delta_ok"),
+          "mode=%s asserts=%s" % (_rep26.get("mode"), _a26))
+    check("26.7 默认走画面**流拷贝**（无损，不重编码）", _rep26.get("mode") == "copy")
+
+    # —— 26.8 无损性：成片第 k 段首帧 与源段首帧**逐位相同** ——
+    def _first_frames(path, wanted):
+        got = {}
+        with _av26.open(path) as c:
+            v = c.streams.video[0]
+            for i, f in enumerate(c.decode(v)):
+                if i in wanted:
+                    got[i] = f.to_ndarray()
+                if i > max(wanted):
+                    break
+        return got
+
+    _of = _first_frames(_out26, {0, 48, 96})
+    _sf1 = _first_frames(_c1, {0})[0]
+    _sf2 = _first_frames(_c2, {0})[0]
+    _sf3 = _first_frames(_c3, {0})[0]
+    check("26.8 流拷贝无损：三段首帧在成片里逐位一致",
+          _np26.array_equal(_of[0], _sf1) and _np26.array_equal(_of[48], _sf2)
+          and _np26.array_equal(_of[96], _sf3))
+
+    # —— 26.9 音频对齐：段边界两侧的主频就是各自源段的音（错位/留洞都会破坏） ——
+    def _dom_freq(path, start_s, dur_s=0.2, sr=32000):
+        with _av26.open(path) as c:
+            a = c.streams.audio[0]
+            rs = _av26.audio.resampler.AudioResampler(format="fltp", layout="stereo", rate=sr)
+            chunks = [o.to_ndarray() for f in c.decode(a) for o in rs.resample(f)]
+        wav = _np26.concatenate(chunks, axis=1)
+        i0 = int(start_s * sr)
+        seg = wav[0, i0:i0 + int(dur_s * sr)]
+        if seg.size < 64:
+            return 0.0
+        spec = _np26.abs(_np26.fft.rfft(seg * _np26.hanning(seg.size)))
+        return float(_np26.fft.rfftfreq(seg.size, 1.0 / sr)[int(_np26.argmax(spec))])
+
+    _pm = int(round(CORE.AUDIO_ENCODER_PRIME_MS / 1000.0 * 32000))
+    _f_before = _dom_freq(_out26, (96 / 24.0) - 0.4 + _pm / 32000.0)   # 第三段边界前 0.4s
+    _f_after = _dom_freq(_out26, (96 / 24.0) + _pm / 32000.0)          # 第三段开头 0.2s
+    check("26.9 音频逐段对齐：边界前 = 第 2 段音(880Hz)、边界后 = 第 3 段音(1320Hz)",
+          abs(_f_before - 880.0) < 40.0 and abs(_f_after - 1320.0) < 40.0,
+          "before=%.1fHz after=%.1fHz（期望 880 / 1320）" % (_f_before, _f_after))
+
+    # —— 26.10 退路：显式强制重编码路，同样要过四项断言 ——
+    _out26e = os.path.join(_TMP26, "film_encode.mp4")
+    _rep26e = CORE.assemble_mp4_segments([_c1, _c2], _out26e, video="encode")
+    _ae = _rep26e["asserts"] or {}
+    check("26.10 退路（video=\"encode\"）也过断言：帧数守恒 + A·VΔ ok",
+          _rep26e["ok"] and _rep26e.get("mode") == "encode"
+          and _ae.get("frames_conserved") and _ae.get("av_delta_ok"),
+          "mode=%s asserts=%s" % (_rep26e.get("mode"), _ae))
+
+    # —— 26.11 空输入不炸：报「没有任何段文件」，不写出东西 ——
+    _rep_empty = CORE.assemble_mp4_segments([], os.path.join(_TMP26, "empty.mp4"))
+    check("26.11 空段列表 ⇒ 明确报错、不产出", (not _rep_empty["ok"])
+          and "没有任何段文件" in _rep_empty["report"])
+
+    # —— 26.12 history 落盘条目筛选（纯函数；宿主 SaveVideo 写进 images 键） ——
+    _picked = CORE.pick_video_outputs({
+        "31": {"images": [{"filename": "a.mp4", "subfolder": "relay_kit/x", "type": "output"},
+                          {"filename": "a.png", "subfolder": "relay_kit/x", "type": "output"}]},
+        "32": {"text": ["noise"]},
+        "33": {"images": [{"filename": "b.webm", "subfolder": "", "type": "output"}]},
+    })
+    check("26.12 pick_video_outputs 只挑视频类落盘（png 与无关键不误收）",
+          [p["filename"] for p in _picked] == ["a.mp4", "b.webm"]
+          and _picked[0]["subfolder"] == "relay_kit/x",
+          "%s" % [p["filename"] for p in _picked])
+    check("26.13 pick_video_outputs 对畸形输入不炸", CORE.pick_video_outputs(None) == []
+          and CORE.pick_video_outputs({"1": {"images": [1, None, "x"]}}) == [])
+
+    # ================================================================
+    # 26.19~26.31 音频代际 2 → 1（2026-09-22 二轮）：**PCM 边车**
+    # ================================================================
+    # 动机：段文件的音轨是 AAC（用户落盘那一代）。拼成片若从 mp4 解码再编 = **第二代数损**。
+    # 「裁重叠」手里那份音频**既与画面等长、又还没经过有损编码** ⇒ 它顺手存一份 PCM 边车，
+    # 拼接直读 ⇒ 音频只编码一代；配无损档则**零新增代际**。
+    import inspect as _ins26
+    import folder_paths as _fp26
+
+    _side_a = os.path.join(_TMP26, "pcm_a.safetensors")
+    _side_b = os.path.join(_TMP26, "pcm_b.safetensors")
+    _side_16k = os.path.join(_TMP26, "pcm_16k.safetensors")
+    _side_short = os.path.join(_TMP26, "pcm_short.safetensors")
+    _TMP26_SR = 32000
+    _mk_n = 64000
+
+    def _mk_side(path, tone, n=_mk_n, sr=_TMP26_SR):
+        tt = _np26.arange(n) / float(sr)
+        sig = (0.3 * _np26.sin(2 * _np26.pi * tone * tt)).astype("float32")
+        CORE.save_audio({"waveform": torch.from_numpy(_np26.stack([sig, sig])).unsqueeze(0),
+                         "sample_rate": sr}, path, note="unit")
+        return path
+
+    def _audio_of(path, sr=_TMP26_SR):
+        with _av26.open(path) as c:
+            a = c.streams.audio[0]
+            rs = _av26.audio.resampler.AudioResampler(format="fltp", layout="stereo", rate=sr)
+            ch = [o.to_ndarray() for f in c.decode(a) for o in rs.resample(f)]
+            ch += [o.to_ndarray() for o in (rs.resample(None) or [])]
+        return _np26.concatenate(ch, axis=1)
+
+    _mk_side(_side_a, 300.0)
+    _mk_side(_side_b, 900.0)
+
+    # —— 26.19 默认档：AAC 256k（用户口径：默认 256K、192K 可覆盖） ——
+    check("26.19 成片音轨默认档 = AAC **256k**（可显式覆盖）",
+          _ins26.signature(CORE.concat_mp4_segments).parameters["audio_bitrate"].default == "256k",
+          "default=%r" % _ins26.signature(CORE.concat_mp4_segments).parameters["audio_bitrate"].default)
+
+    # —— 26.20 无损档 + 边车：成片音轨与边车**逐位一致**（零新增代际） ——
+    _out_ll = os.path.join(_TMP26, "film_lossless.mp4")
+    _rep_ll = CORE.assemble_mp4_segments([_c1, _c2], _out_ll, audio_codec="pcm_f32le",
+                                         pcm_paths=[_side_a, _side_b])
+    _ref = CORE.load_audio(_side_a)["waveform"].reshape(-1, 2, _mk_n)[0].to(torch.float32).numpy()
+    _film = _audio_of(_out_ll)
+    _delta = float(_np26.max(_np26.abs(_film[:, :_ref.shape[1]] - _ref)))
+    check("26.20 无损档 + 边车 ⇒ 成片第 1 段音轨与边车**逐位一致**（音频零新增代际）",
+          _rep_ll["ok"] and _rep_ll.get("pcm_segments") == 2 and _delta < 1e-6,
+          "ok=%s pcm段=%s max|Δ|=%.3e" % (_rep_ll["ok"], _rep_ll.get("pcm_segments"), _delta))
+
+    # —— 26.21 边车直读时**不做**去 priming 的位移（对齐记录要如实） ——
+    check("26.21 走边车的段：prime_drop=0、tail_drop=0（边车本身已与画面等长）",
+          all(a["source"] == "pcm" and a["prime_drop"] == 0 and a["tail_drop"] == 0
+              for a in _rep_ll["alignment"]),
+          "%s" % [(a["source"], a["prime_drop"], a["tail_drop"]) for a in _rep_ll["alignment"]])
+    # 同一批段走 mp4 解码路时，第 1 段必须真的去掉了 priming（否则 26.20 的对比没意义）
+    check("26.22 对照：不接边车时该段走 mp4 解码路（source=aac）",
+          all(a["source"] == "aac" for a in _rep26["alignment"]),
+          "%s" % [a["source"] for a in _rep26["alignment"]])
+
+    # —— 26.23 编码码率可覆盖（192k）；仍出片、仍过四项断言 ——
+    _out_192 = os.path.join(_TMP26, "film_192k.mp4")
+    _rep_192 = CORE.assemble_mp4_segments([_c1, _c2], _out_192, audio_bitrate="192k")
+    check("26.23 AAC 192k 档可覆盖且成片过断言",
+          _rep_192["ok"] and (CORE.probe_mp4(_out_192)["has_audio"]),
+          "ok=%s" % _rep_192["ok"])
+
+    # —— 26.24 混档：只有部分段有边车 ⇒ 逐段标注来源，缺的自动退回解码（不静默） ——
+    _out_mix = os.path.join(_TMP26, "film_mix.mp4")
+    _rep_mix = CORE.assemble_mp4_segments([_c1, _c2], _out_mix, pcm_paths=[_side_a, None])
+    _src = {a["index"]: a["source"] for a in _rep_mix["alignment"]}
+    check("26.24 边车缺失的段自动退回 mp4 解码，且逐段如实标注来源",
+          _rep_mix["ok"] and _src == {0: "pcm", 1: "aac"} and _rep_mix.get("pcm_segments") == 1,
+          "sources=%s pcm段=%s" % (_src, _rep_mix.get("pcm_segments")))
+
+    # —— 26.25 边车对不上（采样率不同）⇒ 弃用该段边车，不 raise、不炸 ——
+    CORE.save_audio({"waveform": torch.zeros(1, 2, 1000), "sample_rate": 44100}, _side_16k,
+                    note="unit")
+    _out_mm = os.path.join(_TMP26, "film_mismatch.mp4")
+    _rep_mm = CORE.assemble_mp4_segments([_c1, _c2], _out_mm, pcm_paths=[_side_16k, _side_b])
+    check("26.25 边车采样率对不上 ⇒ 弃用该段边车（退回解码），不抛异常",
+          _rep_mm["ok"] and _rep_mm["alignment"][0]["source"] == "aac"
+          and _rep_mm["alignment"][1]["source"] == "pcm",
+          "%s" % [a["source"] for a in _rep_mm["alignment"]])
+
+    # —— 26.26 边车**轻微**偏短（容差内）⇒ 补静音并出警告（不假装无损） ——
+    #   ⚠ 差太多（>100ms）由护栏直接**拒收**、不是补静音 —— 那才是安全行为（见 26.35）。
+    _mk_side(_side_short, 700.0, n=_mk_n - 1000)
+    _rep_sh = CORE.assemble_mp4_segments([_c1, _c2], os.path.join(_TMP26, "film_short.mp4"),
+                                         pcm_paths=[_side_short, None])
+    check("26.26 边车比视频短 ⇒ 补静音 + 出警告（缺多少就说多少）",
+          _rep_sh["ok"] and any("补静音" in w for w in _rep_sh["warnings"]),
+          "warnings=%s" % _rep_sh["warnings"])
+
+    # —— 26.27 段规格不一致时，流拷贝路炸了也要有条走得通的路（退重编码） ——
+    _out_spec = os.path.join(_TMP26, "film_spec.mp4")
+    _rep_spec = CORE.assemble_mp4_segments([_c1, _c_fps], _out_spec, video="auto")
+    check("26.27 规格不一致 ⇒ 体检就拦下（不拼），避免「拷贝不了又硬拼」",
+          (not _rep_spec["ok"]) and any("规格" in p for p in _rep_spec["health"]["problems"]),
+          "problems=%s" % _rep_spec["health"]["problems"][:1])
+
+    # —— 26.28~26.31 边车的**生产者**：「裁重叠」回的 ui 键 + 纯函数取回 ——
+    _opt_t = NODES.H3RelayTrimAV.INPUT_TYPES()["optional"]
+    check("26.28 裁重叠新增 save_pcm（默认**开**：只多写一个文件，节点输出与成片逐位不变）",
+          "save_pcm" in _opt_t and _opt_t["save_pcm"][1].get("default") is True,
+          "save_pcm=%r" % (_opt_t.get("save_pcm"),))
+    _img73b = torch.zeros(73, 2, 2, 3)
+    _aud73 = {"waveform": torch.zeros(1, 2, 68000), "sample_rate": 32000}
+    _r_on = NODES.H3RelayTrimAV().trim(images=_img73b, trim_frames=22, fps=24.0, audio=_aud73,
+                                       save_pcm=True)
+    _ent = (_r_on.get("ui") or {}).get(CORE.PCM_UI_KEY) if isinstance(_r_on, dict) else None
+    # ⚠ subfolder 用宿主自己的分隔符（Windows 上是 `relay_kit\pcm`，与 SaveImage/SaveVideo 一致）
+    #   ⇒ 断言前统一成 `/` 再比，免得测试被平台差异卡住。
+    check("26.29 裁重叠把 PCM 边车路径回显进 ui（拼接方靠它取回，不猜文件名）",
+          bool(_ent) and str(_ent[0]["filename"]).endswith(".safetensors")
+          and str(_ent[0]["subfolder"]).replace("\\", "/") == "relay_kit/pcm",
+          "ui=%s" % (_ent,))
+    _made = os.path.join(_fp26.get_output_directory(), _ent[0]["subfolder"],
+                         _ent[0]["filename"]) if _ent else ""
+    try:
+        if _made and os.path.isfile(_made):
+            os.remove(_made)      # 单测不留垃圾在 output 里（删不掉也不该红，见 26.38）
+    except OSError:
+        pass
+    check("26.30 pick_pcm_outputs：从 history.outputs 取回边车；视频/无关项不误收",
+          [p["filename"] for p in CORE.pick_pcm_outputs({"7": {CORE.PCM_UI_KEY: _ent}})]
+          == [_ent[0]["filename"]]
+          and CORE.pick_pcm_outputs({"7": {"images": [{"filename": "a.mp4", "type": "output"}]}}) == []
+          and CORE.pick_pcm_outputs(None) == [])
+    _r_off = NODES.H3RelayTrimAV().trim(images=_img73b, trim_frames=22, fps=24.0, audio=_aud73,
+                                        save_pcm=False)
+    check("26.31 save_pcm=False ⇒ 不写边车，返回退化成老的四元组（旧图行为不变）",
+          not isinstance(_r_off, dict) and len(_r_off) == 4,
+          "%r" % (type(_r_off),))
+
+    # —— 26.35~26.37 护栏：边车必须与**本段落盘音频同源**（音频链上还有别的处理时） ——
+    #   为什么必须锁：产线接线是「裁重叠 → **音频缝** → 落盘」。音频缝若开 patch / J-cut，
+    #   真进 mp4 的是**它的**输出；拿裁重叠那份边车去拼 = 绕过音频缝（J-cut 下还会错位）。
+    #   护栏靠**长度**判同源，不靠接线假设。
+    _side_short2 = os.path.join(_TMP26, "pcm_jcut.safetensors")
+    _mk_side(_side_short2, 500.0, n=64000 - 28800)          # 模拟 J-cut：短 align(0.9s)
+    _rep_jc = CORE.assemble_mp4_segments([_c1, _c2], os.path.join(_TMP26, "film_jcut.mp4"),
+                                         pcm_paths=[_side_short2, None])
+    check("26.35 边车比 mp4 音频短 ~0.9s（J-cut 型）⇒ 拒收、退回解码并出警告",
+          _rep_jc["ok"] and _rep_jc["alignment"][0]["source"] == "aac"
+          and any("拒收" in w for w in _rep_jc["warnings"]),
+          "src=%s warns=%s" % (_rep_jc["alignment"][0]["source"], _rep_jc["warnings"][:1]))
+
+    _side_good = os.path.join(_TMP26, "pcm_ok.safetensors")
+    _mk_side(_side_good, 321.0)
+    _rep_2c = CORE.assemble_mp4_segments([_c1, _c2], os.path.join(_TMP26, "film_2cand.mp4"),
+                                         pcm_paths=[[_side_short2, _side_good], None])
+    check("26.36 多候选 ⇒ 选**与落盘音频最接近**的那个（不是「先来先用」）",
+          _rep_2c["ok"] and _rep_2c["alignment"][0]["source"] == "pcm"
+          and _rep_2c["alignment"][0]["pcm_file"] == os.path.basename(_side_good),
+          "pick=%s" % (_rep_2c["alignment"][0]["pcm_file"],))
+    check("26.37 单字符串形式仍受支持（旧调用方兼容）",
+          CORE.assemble_mp4_segments([_c1, _c2], os.path.join(_TMP26, "film_str.mp4"),
+                                     pcm_paths=[_side_good, None])["alignment"][0]["source"]
+          == "pcm")
+
+    # —— 26.38~26.39 音频缝也落边车（它输出才是真进 mp4 的那份） ——
+    _seam_cls = NODES.H3RelayAudioSeam
+    _seam_aud = {"waveform": torch.zeros(1, 2, 64000), "sample_rate": 32000}
+    _sr_ret = _seam_cls().seam(_seam_aud, "relay", 0, 0.0)
+    _sr_ent = (_sr_ret.get("ui") or {}).get(CORE.PCM_UI_KEY) if isinstance(_sr_ret, dict) else None
+    check("26.38 音频缝也回显 PCM 边车（它落的那份 = 送进 mp4 的同一份音频）",
+          bool(_sr_ent) and str(_sr_ent[0]["filename"]).startswith("audio_")
+          and str(_sr_ent[0]["subfolder"]).replace("\\", "/").endswith("relay"),
+          "ui=%s" % (_sr_ent,))
+    # ⚠ 清理要**容错**：Windows 上刚写完的文件偶发被索引/杀软短暂占用（PermissionError）。
+    #   单测不该因为"删不掉临时文件"而红 —— 这不是被测行为。
+    for _f in (_sr_ent or []):
+        _pp = os.path.join(_fp26.get_output_directory(), _f["subfolder"], _f["filename"])
+        try:
+            if os.path.isfile(_pp):
+                os.remove(_pp)
+        except OSError:
+            pass
+    _raw_dump = os.path.join(_fp26.get_output_directory(), "relay_kit", "relay",
+                             "audio_raw_00000.safetensors")
+    try:
+        if os.path.isfile(_raw_dump):
+            os.remove(_raw_dump)
+    except OSError:
+        pass
+    check("26.39 音频缝边车路径能被 pick_pcm_outputs 取回",
+          [p["filename"] for p in CORE.pick_pcm_outputs({"18": {CORE.PCM_UI_KEY: _sr_ent}})]
+          == [_sr_ent[0]["filename"]])
+
+    # —— 26.41~26.42 PyAV 版本兼容（开源用户环境差异）：缺模板流 ⇒ 明确报错 + 自动退重编码 ——
+    #   为什么在意：画面流拷贝靠 `add_stream_from_template`（av>=17）。别的用户机器上 av 可能更老；
+    #   我们不写"手工复制参数"的未验证退路（那会产出能播但内容错的片），而是**报错 + 退回重编码**，
+    #   并让四项断言把关 —— 用户看到的是"能出片 + 一句为什么"，不是崩。
+    class _NoTemplateOut:
+        def add_stream(self, *a, **k):      # 老 API 上没有模板流，只有这个
+            raise AssertionError("不该走到 add_stream（这里只验报错分支）")
+
+    try:
+        CORE._passthrough_video_stream(_NoTemplateOut(), None, _av26)
+        check("26.41 老 PyAV 缺模板流 ⇒ 抛可照做的错（指明 pip 修法）", False, "没抛")
+    except RuntimeError as _e41:            # noqa: PERF203
+        check("26.41 老 PyAV 缺模板流 ⇒ 抛可照做的错（指明 pip 修法）",
+              "add_stream_from_template" in str(_e41) and "pip install -U" in str(_e41),
+              str(_e41).splitlines()[0][:64])
+
+    _orig_pass26 = CORE._passthrough_video_stream
+    CORE._passthrough_video_stream = lambda *a, **k: (_ for _ in ()).throw(
+        RuntimeError("模拟：本机 PyAV 太旧（缺 add_stream_from_template）"))
+    try:
+        _rep_fb = CORE.assemble_mp4_segments([_c1, _c2], os.path.join(_TMP26, "film_fb.mp4"),
+                                             video="auto")
+    finally:
+        CORE._passthrough_video_stream = _orig_pass26
+    check("26.42 拷贝路不可用 ⇒ 自动退单遍重编码（仍过四项断言 + 报告写明原因）",
+          _rep_fb["ok"] and _rep_fb.get("mode") == "encode"
+          and any("退回单遍重编码" in ln for ln in _rep_fb["report"].splitlines()),
+          "mode=%s ok=%s" % (_rep_fb.get("mode"), _rep_fb.get("ok")))
+
+    # —— 26.43~26.44 CLI 入口（API / 无头用户的非画布路径）**真跑** ——
+    #   为什么放在核心单测里：CI 只跑本文件 ⇒ 不必再给 CI 加一步；而且它与画布按钮共用同一份核心，
+    #   一起跑才能保证"两条路永远一样"。CLI 是用户入口，不是内部包，**必须冒烟**。
+    _spec_cli = importlib.util.spec_from_file_location(
+        "concat_cli26", os.path.join(_KIT_DIR, "tools", "concat_segments.py"))
+    _cli = importlib.util.module_from_spec(_spec_cli)
+    _spec_cli.loader.exec_module(_cli)
+    _out_cli = os.path.join(_TMP26, "cli.mp4")
+    _rc_ok = _cli.main([_c1, _c2, "-o", _out_cli, "--json", "--audio", "aac192"])
+    check("26.43 CLI（tools/concat_segments.py）真能出片：退出码 0 + 文件存在",
+          _rc_ok == 0 and os.path.isfile(_out_cli) and os.path.getsize(_out_cli) > 1000,
+          "rc=%s exists=%s" % (_rc_ok, os.path.exists(_out_cli)))
+    _rc_bad = _cli.main([os.path.join(_TMP26, "nope_a.mp4"), os.path.join(_TMP26, "nope_b.mp4"),
+                         "-o", os.path.join(_TMP26, "cli_bad.mp4"), "--json"])
+    check("26.44 CLI 对坏输入 **非零退出**（脚本能据此判失败，不会误当成功）",
+          _rc_bad == 1, "rc=%s" % (_rc_bad,))
+
+    # —— 26.14 断言快路（包级 demux + 排序）不许说谎：与深路（逐帧解码）结论必须一致 ——
+    _fast14 = CORE.assert_assembled(_out26, 144, 24.0, deep=False)
+    _deep14 = CORE.assert_assembled(_out26, 144, 24.0, deep=True)
+    # —— 26.15~26.17 后端拼接路由的**段发现逻辑**（纯函数级：stub 掉 server，不启 ComfyUI） ——
+    #   这是整条自动拼接链里最容易悄悄错的一环（"到底拼了哪几段"），必须锁住。
+    try:
+        import types as _types
+
+        class _Routes:
+            def post(self, _path):
+                def _deco(fn):
+                    return fn
+                return _deco
+
+        class _FakePS:
+            routes = _Routes()
+            instance = None
+            prompt_queue = None
+
+        _FakePS.instance = _FakePS()
+        _srvmod = _types.ModuleType("server")
+        _srvmod.PromptServer = _FakePS
+        sys.modules["server"] = _srvmod
+
+        _spec = importlib.util.spec_from_file_location(
+            "h3relay_kit_pkg", os.path.join(_KIT_DIR, "__init__.py"),
+            submodule_search_locations=[_KIT_DIR])
+        _pk = importlib.util.module_from_spec(_spec)
+        sys.modules["h3relay_kit_pkg"] = _pk
+        _spec.loader.exec_module(_pk)
+
+        class _FakeQueue:
+            def __init__(self, hist):
+                self.hist = hist
+
+            def get_history(self, prompt_id=None, max_items=None):
+                if prompt_id is not None:
+                    return {prompt_id: self.hist[prompt_id]} if prompt_id in self.hist else {}
+                return dict(self.hist)
+
+        def _entry(name):
+            return {"prompt": [None, None, {"7": {"class_type": "H3RelayChain"}}],
+                    "outputs": {
+                        "31": {"images": [{"filename": name, "subfolder": "relay_kit/x",
+                                           "type": "output"}]},
+                        # 「裁重叠」回显的 PCM 边车（拼接路由靠它取回无损音频）
+                        "18": {CORE.PCM_UI_KEY: [{"filename": name.replace(".mp4", ".safetensors"),
+                                                  "subfolder": "relay_kit/pcm",
+                                                  "type": "output"}]},
+                    }}
+
+        _hist = {"p1": _entry("a.mp4"), "p2": _entry("b.mp4"),
+                 "p9": {"prompt": [None, None, {"5": {"class_type": "KSampler"}}],
+                        "outputs": {}}}
+        _q = _FakeQueue(_hist)
+
+        _ids, _ents, _ = _pk._pick_segments(_q, ["p1", "p2"], "7", 0)
+        check("26.15 按 prompt_id 精确取段（顺序保持、能落到文件路径）",
+              _ids == ["p1", "p2"]
+              and _pk._mp4_paths(_ents[0])[0].endswith("a.mp4"),
+              "ids=%s path=%s" % (_ids, _pk._mp4_paths(_ents[0])[:1]))
+
+        _ids2, _e2, _n2 = _pk._pick_segments(_q, [], "7", 5)
+        check("26.16 没给 id 时回扫 history：只认「图里带本 Chain 节点」的提交",
+              _ids2 == ["p1", "p2"] and "2 次" in _n2, _n2)
+
+        _ids3, _e3, _n3 = _pk._pick_segments(_q, [], "7", 0)
+        check("26.17 既没 id、count 也 ≤ 0 ⇒ 明确说「不知道该拼哪几段」（不瞎拼）",
+              _ids3 == [] and _e3 == [] and "不知道该拼哪几段" in _n3, _n3)
+
+        _ids4, _e4, _n4 = _pk._pick_segments(_q, ["nope"], "7", 0)
+        check("26.18 给了不存在的 prompt_id ⇒ 命中 0 并说明（重启过后端）",
+              _ids4 == [] and "0/1 段命中" in _n4, _n4)
+
+        # 26.32~26.34 音轨档映射与「每段边车」的取回（纯函数级）
+        check("26.32 音轨档映射：默认 aac 256k；192k 可覆盖；无损档 = PCM f32（无码率参数）",
+              _pk.AUDIO_OUT[_pk._DEFAULT_AUDIO_OUT] == ("aac", "256k")
+              and _pk.AUDIO_OUT["aac_192k"] == ("aac", "192k")
+              and _pk.AUDIO_OUT["pcm_lossless"][0] in CORE.LOSSLESS_AUDIO_CODECS,
+              "AUDIO_OUT=%s" % (_pk.AUDIO_OUT,))
+        check("26.33 路由能从 history 取回**该段的 PCM 边车**候选（不猜文件名）",
+              [str(x).replace("\\", "/") for x in _pk._pcm_candidates(_e2[0])]
+              == ["I:/ComfyUI/output/relay_kit/pcm/a.safetensors"],
+              "cands=%s" % (_pk._pcm_candidates(_e2[0]),))
+        check("26.34 老提交没有边车 ⇒ 候选为空（拼接自动退回 mp4 解码，不报错）",
+              _pk._pcm_candidates(_hist["p9"]) == [] and _pk._pcm_candidates({}) == [])
+
+        # 26.40 音频链上有**多个**本包音频节点时：候选要按「谁更靠近落盘」排
+        #   （产线接线 = 裁重叠 → 音频缝 → 落盘 ⇒ 音频缝的输出优先）
+        _e_multi = {
+            "prompt": [None, None, {
+                "13": {"class_type": "H3RelayTrimAV"},
+                "18": {"class_type": "H3RelayAudioSeam"},
+            }],
+            "outputs": {
+                "13": {CORE.PCM_UI_KEY: [{"filename": "seg_00001_.safetensors",
+                                          "subfolder": "relay_kit/pcm", "type": "output"}]},
+                "18": {CORE.PCM_UI_KEY: [{"filename": "audio_00001.safetensors",
+                                          "subfolder": "relay_kit/relay", "type": "output"}]},
+            },
+        }
+        _cands = _pk._pcm_candidates(_e_multi)
+        check("26.40 多候选按音频链排序：音频缝（链后）排在裁重叠之前",
+              len(_cands) == 2 and _cands[0].replace("\\", "/").endswith("relay/audio_00001.safetensors")
+              and _cands[1].replace("\\", "/").endswith("pcm/seg_00001_.safetensors"),
+              "cands=%s" % (_cands,))
+    except Exception as _e26:  # noqa: BLE001
+        check("26.15 路由发现逻辑可离线加载（stub server）", False, repr(_e26))
+
+    check("26.14 断言快路（包级）与深路（逐帧解码）结论一致",
+          _fast14["frames"] == _deep14["frames"] == 144
+          and _fast14["pts_contiguous"] and _deep14["pts_contiguous"]
+          and _fast14["dts_strictly_increasing"] and _deep14["dts_strictly_increasing"],
+          "fast=%d deep=%d" % (_fast14["frames"], _deep14["frames"]))
 
 print()
 print("=" * 78)

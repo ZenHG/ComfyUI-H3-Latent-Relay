@@ -21,7 +21,10 @@ ComfyUI 前端的 widget 列表 ≠ 节点 ``INPUT_TYPES`` 里声明的 widget �
 ``w_max`` 收到 ``"xxx.safetensors"``、``upscaler_model`` 收到 ``false``。
 
 【判据】
-按前端槽位顺序**逐位**把取值喂给节点 schema 做类型 / 范围 / 候选项校验。
+1. 按前端槽位顺序**逐位**把取值喂给节点 schema 做类型 / 范围 / 候选项校验；
+2. **A/V 同步接线**（2026-09-21）：落盘节点的 `audio` 不许接未裁的原始音频（`check_av_link`）；
+3. **Chain 词分发/拼接**（2026-09-22）：`prompts` 块数 < `segments` / `prompt_target` 指向不存在的节点 /
+   开了 `auto_concat` 却无视频落盘节点 —— 三样都只在"跑到第 N 段"才暴露（`check_chain_prompts`）。
 错位必然留下硬伤。**不要**拿 ``widgets_values_named`` 当槽位映射依据 ——
 它是第三方 UI 扩展写的，某些节点类型下本身就是坏的。
 
@@ -358,6 +361,61 @@ def check_av_link(wf):
     return out
 
 
+# ── Chain 词分发/拼接自检（2026-09-22，0.6.7）──────────────────────────────
+#   视频**落盘**类：`auto_concat` 要靠它们的回显取回每段文件 ⇒ 图里一个都没有就拼不成
+VIDEO_SAVE_LIKE = ("SaveVideo", "SaveWEBM", "SaveAnimatedWEBP", "VHS_VideoCombine",
+                   "banzhangVideoCombine")
+
+
+def prompt_blocks(text):
+    """按「单独一行、三个及以上短横线」分块（与前端 `splitPromptBlocks` 同一口径）。"""
+    blocks, cur = [], []
+    for line in str(text or "").splitlines():
+        if len(line.strip()) >= 3 and set(line.strip()) == {"-"}:
+            blocks.append("\n".join(cur))
+            cur = []
+        else:
+            cur.append(line)
+    blocks.append("\n".join(cur))
+    return [b.strip() for b in blocks if b.strip()]
+
+
+def check_chain_prompts(wf, oi):
+    """Chain 词分发 / 自动拼接自检（0.6.7）。
+
+    这三样错法**都只在"跑到第 N 段"或"连跑结束时"才暴露**，节点自己看不见（那几个格子只给前端读）：
+      · `prompts` 块数 < `segments` ⇒ 跑到第 k 段拒绝排队；
+      · `prompt_target` 写了具体节点 id、但该 id 不在这张图里；
+      · 开了 `auto_concat`，图里却没有视频落盘节点（拼的时候一段都找不到）。
+    """
+    nodes = wf.get("nodes") or []
+    defn = (oi or {}).get("H3RelayChain")
+    chains = [n for n in nodes if n.get("type") == "H3RelayChain" and n.get("mode") != 4
+              and isinstance(n.get("widgets_values"), list)]
+    if not chains or not defn:
+        return []
+    slots = frontend_slots(defn)
+    has_save = any(any(t in str(n.get("type") or "") for t in VIDEO_SAVE_LIKE) for n in nodes)
+    out = []
+    for n in chains:
+        v = dict(zip(slots, n["widgets_values"]))
+        seg = v.get("segments")
+        seg = int(seg) if isinstance(seg, (int, float)) and not isinstance(seg, bool) else 0
+        blocks = prompt_blocks(v.get("prompts"))
+        if blocks and seg > 0 and len(blocks) < seg:
+            out.append("node %s H3RelayChain: `prompts` 只有 %d 块词、`segments`=%d ⇒ 跑到第 %d 段会"
+                       "**拒绝排队**（补齐第 %d 块，或把 segments 改成 ≤ %d）"
+                       % (n["id"], len(blocks), seg, len(blocks) + 1, len(blocks) + 1, len(blocks)))
+        tgt = str(v.get("prompt_target") or "").strip()
+        if tgt and not any(str(x.get("id")) == tgt.split(".")[0].strip() for x in nodes):
+            out.append("node %s H3RelayChain: `prompt_target=%s` 指向的节点不在这张图上 "
+                       "⇒ 每段都会报错、不会排队" % (n["id"], tgt))
+        if v.get("auto_concat") and not has_save:
+            out.append("node %s H3RelayChain: 开了 `auto_concat`，但图里没有视频落盘节点"
+                       "（SaveVideo / SaveWEBM / VHS_VideoCombine…）⇒ 拼接时一段都找不到" % n["id"])
+    return out
+
+
 def check_file(path: str, oi: dict, verbose: bool = True) -> int:
     name = os.path.basename(path)
     try:
@@ -371,6 +429,7 @@ def check_file(path: str, oi: dict, verbose: bool = True) -> int:
 
     problems, warns = [], []
     problems.extend(check_av_link(wf))
+    problems.extend(check_chain_prompts(wf, oi))
     for n in wf.get("nodes") or []:
         if n.get("mode") == 4:      # bypass
             continue

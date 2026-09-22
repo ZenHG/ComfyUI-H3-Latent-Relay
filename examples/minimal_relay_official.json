@@ -1,7 +1,7 @@
 {
   "id": "h3-relay-minimal",
   "revision": 0,
-  "last_node_id": 18,
+  "last_node_id": 19,
   "last_link_id": 25,
   "nodes": [
     {
@@ -1083,6 +1083,14 @@
           "widget": {
             "name": "run_id"
           }
+        },
+        {
+          "name": "save_pcm",
+          "type": "BOOLEAN",
+          "link": null,
+          "widget": {
+            "name": "save_pcm"
+          }
         }
       ],
       "outputs": [
@@ -1138,7 +1146,8 @@
         12,
         1.15,
         0.06,
-        ""
+        "",
+        true
       ]
     },
     {
@@ -1728,6 +1737,102 @@
       "title": "怎么用",
       "widgets_values": [
         "【最小续接演示 · 官方节点 + ComfyUI-H3-Relay-Kit】\n\n第 1 段：\n  ① 段号 = 0，填好 prompt → 点 Queue。\n  日志会打印「无 context_latent → 直通（独立段，不续接）」，裁重叠不裁。\n\n第 2 段：\n  只改两处：\n  ① 段号 = 1（桥与落盘会自动跟着走，不用手改第二处）\n  ② prompt 换成第 2 段要拍的内容（开头直接接住上一段的动作/机位）\n  再点 Queue。\n  日志应出现：\n    [H3 Relay] latent 桥续接：钉住 22 帧 / 7 步 …\n    [H3 Relay] 裁首 22 帧 = 钉住 22 + 沉降 0 ｜ 手动指定\n    [H3 Relay] 后处理：全部关闭（直通）\n    [H3 Relay] 音频缝：第 1 段无缝可补 → 直通｜本段音频已落盘 …\n    [H3 Relay] 接缝自检：前 40 帧无突变 … → 起点干净。\n\n只看这三件事就算跑通：\n  · 「钉住 22 帧」= 上一段尾部已接进来\n  · 「裁首 N 帧 = 钉住 22 + 沉降 0」= 接缝处理已生效（0.5.0 起默认不裁沉降）\n  · 「起点干净」= 没有跳变，可以拼\n\n后处理 Post（0.5.0 新增，整节点可以删掉）：\n  20 个旋钮**全部默认关 = 逐位直通**，不接它行为与 0.4.x 一致。\n  最省的一档试法：match_prev = 0.5（段头色档/曝光对齐上段末帧，治缝上亮度阶跃）。\n\n音频缝（0.5.0 新增，整节点也可以删掉）：\n  patch_seconds 默认 0 = 逐位直通。缝处音频「抽一下 / 静音一瞬」就调 2.0：\n  把本段头 2 秒换成上一段最静窗环境声（长度守恒，不动时间轴）。\n  ⚠ 第 1 段也要接（要它把第 1 段音频落盘，第 2 段的床源就是它）；段号顺序跑。\n\n没接对的两个典型症状：\n  · 日志写「静默直通」→ 段号填了 ≥1，但 run_id 与上一段不一致 / 文件不在\n  · 画面从第 1 帧就开始重播上一段 → 裁重叠节点没接上，或 trim_frames 没接桥的第 3 路\n\n模型文件：把上面 4 个加载器的下拉改成你本机的文件即可。"
+      ]
+    },
+    {
+      "id": 19,
+      "type": "H3RelayChain",
+      "pos": [
+        2600,
+        40
+      ],
+      "size": [
+        340,
+        100
+      ],
+      "flags": {},
+      "order": 18,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "segments",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "segments"
+          }
+        },
+        {
+          "name": "status",
+          "type": "STRING",
+          "link": null,
+          "widget": {
+            "name": "status"
+          }
+        },
+        {
+          "name": "prompts",
+          "type": "STRING",
+          "link": null,
+          "widget": {
+            "name": "prompts"
+          }
+        },
+        {
+          "name": "prompt_target",
+          "type": "STRING",
+          "link": null,
+          "widget": {
+            "name": "prompt_target"
+          }
+        },
+        {
+          "name": "auto_concat",
+          "type": "BOOLEAN",
+          "link": null,
+          "widget": {
+            "name": "auto_concat"
+          }
+        },
+        {
+          "name": "concat_name",
+          "type": "STRING",
+          "link": null,
+          "widget": {
+            "name": "concat_name"
+          }
+        },
+        {
+          "name": "audio_out",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "audio_out"
+          }
+        },
+        {
+          "name": "video_crf",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "video_crf"
+          }
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "H3RelayChain"
+      },
+      "title": "🔗 连跑 Chain（可选：词分发 + 🧩 一键拼成片；全部默认关 = 老图行为）",
+      "widgets_values": [
+        5,
+        "",
+        "",
+        "",
+        false,
+        "",
+        "aac_256k",
+        16
       ]
     }
   ],

@@ -81,6 +81,50 @@ def _audio_stage_path(run_id: str, stage_index: int) -> str:
     return os.path.join(os.path.dirname(p), "audio_%05d.safetensors" % int(stage_index))
 
 
+def _pcm_ui(path: str):
+    """把一份 PCM 边车文件变成 **ui 回显条目**（路径相对 output 目录），供拼成片时取回。
+
+    靠**回显**而不是"按命名约定去翻目录"：段文件名是用户定的（SaveVideo 的 filename_prefix），
+    本包不该猜；节点自己写的文件由它自己报路径，最不容易错。
+    拼接方拿到后用 `os.path.join(output_dir, subfolder, filename)` 还原。
+    """
+    try:
+        if not os.path.isfile(path):
+            return None
+        rel = os.path.relpath(os.path.dirname(os.path.abspath(path)),
+                              folder_paths.get_output_directory())
+        return {"filename": os.path.basename(path), "subfolder": rel, "type": "output"}
+    except Exception:      # noqa: BLE001
+        return None
+
+
+def _pcm_sidecar(audio, enabled: bool):
+    """把本段（裁后）音频落一份 **PCM 边车**，供拼成片时直读（无损、音频只编码一代）。
+
+    为什么落在「裁重叠」上：整条链上只有它手里那份音频**既与画面等长、又还没经过任何有损编码**
+    （它是"音视频同裁"的产物）。落到这里，任何用户的图只要接了这个必备节点就自动受益。
+
+    路径用宿主同款计数器命名（`get_save_image_path`）⇒ 同名不撞车；**不依赖 run_id/段号**
+    （那个由拼接方从 history 的节点回显里取回，见 `relay_core.pick_pcm_outputs`）。
+    失败一律吞掉并写进 report —— 边车是提质手段，**不该因为它写不成就让整段渲染失败**。
+    返回 ``(ui 条目 或 None, 追加到 report 的一行)``。
+    """
+    if not enabled or audio is None:
+        return None, ""
+    try:
+        folder, filename, counter, subfolder, _ = folder_paths.get_save_image_path(
+            "relay_kit/pcm/seg", folder_paths.get_output_directory(), 1, 1)
+        path = os.path.join(folder, "%s_%05d_.safetensors" % (filename, counter))
+        CORE.save_audio(audio, path, note="pcm_sidecar")
+        mb = os.path.getsize(path) / 1024 ** 2
+        return (_pcm_ui(path),
+                "\n           ♪ **PCM 边车**：%s（%.1f MB）—— 拼成片时直读它，"
+                "音频不再二次编码（代际 2 → 1）。" % (path, mb))
+    except Exception as exc:      # noqa: BLE001
+        return None, ("\n           ⚠ PCM 边车写入失败（**不影响本段产物**，拼成片会自动"
+                      "退回 mp4 解码）：%r" % (exc,))
+
+
 class H3RelayLatentSave:
     """把本段采样器输出的 AV latent 落盘。"""
 
@@ -376,6 +420,20 @@ class H3RelayTrimAV:
                     "tooltip": "【观测用，可留空】续接 run 标识（与「续接 Latent 存」的 run_id 一致）。\n"
                                "填了才会把每段外观统计写入 <run>/appearance_log.jsonl 并算漂移曲线（E4）。",
                 }),
+                # 🔴 2026-09-22 新增（音频代际 2 → 1）：本段音频的 **PCM 边车**。
+                #    默认**开**：它只多写一个文件，节点输出与成片**逐位不变**（不是"改行为"），
+                #    所以不受"新功能默认关"的约束 —— 关掉它只是让拼接退回逐段解 mp4 音频。
+                "save_pcm": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "【建议保持开】把本段（裁后）音频额外存一份 **PCM 边车**。\n"
+                               "为什么需要它：段文件的音轨是 AAC 有损的（用户在落盘节点编的），\n"
+                               "拼成片时若从 mp4 解码再编，就是**第二次有损**（代际 2）。\n"
+                               "存了边车 ⇒ 拼接直读无损 PCM ⇒ **音频只编码一代**；\n"
+                               "再配 Chain 的「无损母版」音轨档，则成片音轨**零新增代际**。\n"
+                               "  · 开（默认）= 多写一个 ~2 MB/段 的文件到 output/relay_kit/pcm/\n"
+                               "  · 关 = 不写（老行为），拼接时该段退回 mp4 解码并如实报出\n"
+                               "⚠ 写失败只会在日志里提示，**不影响本段渲染**（拼接自动退路）。",
+                }),
             },
         }
 
@@ -397,7 +455,7 @@ class H3RelayTrimAV:
              hist_match=0.0, wb_match=0.0,
              match_prev=0.0, match_prev_frames=12,
              match_prev_gain_max=1.15, match_prev_offset_max=0.06,
-             run_id=""):
+             run_id="", save_pcm=True):
         CONTRACT.enforce()   # 裁帧算术同样依赖上游网格，先过契约
         # 服务端防线：widget 的 min=1.0 只挡 UI，API 提交 fps=0/NaN 会一路除到底
         try:
@@ -415,7 +473,12 @@ class H3RelayTrimAV:
         if pin <= 0:
             msg = "[H3 Relay] 裁 0 帧 → 不裁（独立段或纯首段）。"
             print(msg)
-            return (images, audio, msg, images[:1])
+            # 第 1 段（也是本段音频最完整的一段）同样要落边车 —— 否则成片第一段白丢一代。
+            _u, _n = _pcm_sidecar(audio, save_pcm)
+            if _n:
+                print(msg + _n)
+            _r = (images, audio, msg, images[:1])
+            return {"ui": {CORE.PCM_UI_KEY: [_u]}, "result": _r} if _u else _r
 
         # 沉降帧：钉住区之后模型还会先复现上一段若干帧才切到本段 prompt。
         # 切换点是**逐段不同的量**，所以默认让它自己量（-1），而不是让用户猜。
@@ -620,7 +683,11 @@ class H3RelayTrimAV:
         #     比要修的缝阶跃 0.0007 还大 8 倍）。故这条路线（仅接第 4 路不接第 0 路）上别拿它当参照去对齐。
         #   用途：喂给 `H3RelayPost` 的 `guide`，让跨段统计匹配 / 低频残差传递有"缝的另一侧"可对齐。
         tail = images[pin - 1: pin] if pin >= 1 else images[:1]
-        return (out, audio_out, line + "\n" + check, tail)
+        _u, _n = _pcm_sidecar(audio_out, save_pcm)
+        if _n:
+            print(_n.strip("\n"))
+        _r = (out, audio_out, line + "\n" + check + _n, tail)
+        return {"ui": {CORE.PCM_UI_KEY: [_u]}, "result": _r} if _u else _r
 
 
 class H3RelayChain:
@@ -693,6 +760,29 @@ class H3RelayChain:
                     "tooltip": "【可选】成片文件名（不用写扩展名）。留空 = 用落盘的 run_id。\n"
                                "成片存到 ComfyUI 的 output/ 目录，拼完路径会写进 status 那一格。",
                 }),
+                # —— 2026-09-22 追加（成片音轨档 / 画质档）：**继续追加在末位**，槽位安全同上。
+                "audio_out": (["aac_256k", "aac_192k", "pcm_lossless"], {
+                    "default": "aac_256k",
+                    "tooltip": "【成片音轨档】拼成片时音轨怎么编：\n"
+                               "  · `aac_256k`（默认）— mp4 + AAC 256k。**兼容第一**，浏览器能放。\n"
+                               "      （实测 SNR ≈ 48 dB，已经比画面那一代的 44.6 dB 还高 ⇒ 听感透明）\n"
+                               "  · `aac_192k` — 同上，省 ~25% 体积，SNR ≈ 40 dB。\n"
+                               "  · `pcm_lossless` — **无损母版**：音轨不再做任何有损编码。\n"
+                               "      ⚠ 代价：文件约 4.4 MB/秒（44.1k 立体声 f32），且**浏览器预览没声音**\n"
+                               "      （PCM 音轨浏览器不放）⇒ 这是给剪辑/归档的档，不是预览档。\n"
+                               "前提：拼接时能读到各段的 **PCM 边车**（「裁重叠」的 save_pcm 开着）。\n"
+                               "  读不到就退回 mp4 解码 —— 此时 `pcm_lossless` 仍是「零新增有损」（1 代）。",
+                }),
+                "video_crf": ("INT", {
+                    "default": 16, "min": 0, "max": 51, "step": 1,
+                    "tooltip": "【画面重编码质量】crf 越小越清晰、文件越大。默认 16。\n"
+                               "⚠ **默认走画面流拷贝（无损），这一格根本用不到** —— 它只在两种时候生效：\n"
+                               "  · 各段**规格不一致**（分辨率/帧率/像素格式对不上）⇒ 拷贝不可行，只能重编码；\n"
+                               "  · 流拷贝路的成片断言不过 ⇒ 自动退回重编码。\n"
+                               "参考（本仓实测，416×736 段）：crf 16 ≈ 720 kbps；crf 0 仍**不是**无损\n"
+                               "（RGB→YUV 4:2:0 先丢，天花板 46.5 dB）⇒ 想要真无损请从**落盘节点**下手，\n"
+                               "不是把这里调到 0。",
+                }),
             },
         }
 
@@ -705,6 +795,7 @@ class H3RelayChain:
         "第二步：桥和落盘 stage_index 填 0，点 ▶ Run 拍第 1 段。\n"
         "第三步：填 prompts（`---` 分块，第 k 块喂第 k 段）⇒ 点 ⏩ 连跑，词自动换、段号自动推进。\n"
         "第四步（可选）：开 auto_concat 让跑完自动成片，或点「🧩 拼成一条」当场拼。\n"
+        "         成片音轨默认 AAC 256k（`audio_out` 可换 192k 或无损母版）；画面一律流拷贝（无损）。\n"
         "状态显示在 status 格子里（点了没反应就看它）。"
     )
 
@@ -914,9 +1005,11 @@ class H3RelayCopyBridge:
                                "为什么要独立：旧实现借用 ref_anchor_frames 当基准 ⇒ 想给 E1 一个够大的基准，\n"
                                "   就必须把**外观锚**也一起改大 ⇒ 两个机制被迫同步改动、单变量对比不成立。\n"
                                "🔴 只认合法网格 5/22/39/56/73/90/107/124（非法值 raise，不夹取）。\n"
-                               "   可分层级数：22 + stride4 ⇒ 2 级；90 ⇒ 3 级；107 ⇒ 4 级；\n"
-                               "   5 ⇒ 只有 1 级（**不是多尺度**，等于多加一个锚）。\n"
-                               "默认 22 = 默认参数下就能出 2 级真层次。",
+                               "   可分层级数（受档位数量限制，2026-09-22 实测）：22+stride4 ⇒ 2 级；90 ⇒ 3 级；\n"
+                               "   **4 级需 stride=2 且基准 124**；5 ⇒ 只有 1 级（**不是多尺度**，等于多加一个锚）。\n"
+                               "⚠️ 性能：第 0 级按基准帧数出 token，基准越大越贵 —— 22 帧 ⇒ latent_t 7\n"
+                               "   （新增 token ≈ 本段的 28%）；90 帧 ⇒ latent_t 27（≈ 112%，翻倍）。\n"
+                               "   故 **2 级请用 22**（最省）；要 3 级才用 90，且知悉代价。",
                 }),
                 "exp_cond_noise": ("FLOAT", {
                     "advanced": True, "default": CORE.EXP_COND_NOISE_DEFAULT,
@@ -1032,8 +1125,12 @@ class H3RelayCopyBridge:
             # 🧪 E1 多尺度历史：按 stage_index-2, -3… 自动读更早段做分级 refs
             if int(exp_history_depth) > 0 and (run_id or "").strip():
                 # 🆕 2026-09-22（#4）读历史时**同时记下段号**，稍后用来剔除「与外观锚同段」的级。
+                # 🔴 补正：候选要**多取 1 个**（range 上界 +1）。去重会剔掉与外观锚同段的那级，
+                #   不多取 ⇒ kept < depth ⇒ 撞 build_history_refs 的缺级校验**直接崩**
+                #   —— 等于把「白占配额」换成「崩」，比不修还差。2026-09-22 自查实测到。
+                _want = int(exp_history_depth)
                 _pairs, miss = [], []
-                for k in range(2, 2 + int(exp_history_depth)):
+                for k in range(2, 3 + _want):
                     idx = int(stage_index) - k
                     if idx < 0:
                         break
@@ -1041,21 +1138,21 @@ class H3RelayCopyBridge:
                         _pairs.append((idx, CORE.load_av_latent(_stage_path(run_id, idx))))
                     except FileNotFoundError:
                         miss.append(idx)
-                # 🆕（#5）旧文案写「已跳过对应级」，但下一行仍按**原始 depth** 校验 ⇒ 紧接 raise，
-                #   日志与行为矛盾（用户以为跳过了，其实崩了）。改成如实说明会 raise。
-                if miss:
-                    print("[H3 Relay] 实验 E1：更早段 %s 未落盘 ⇒ 可用历史只剩 %d 级，"
-                          "而 exp_history_depth=%d ⇒ 接下来会 raise（本实现不静默截断）。"
-                          "请把 depth 调到 ≤%d 后重跑。"
-                          % (miss, len(_pairs), int(exp_history_depth), len(_pairs)), flush=True)
                 # 🆕（#4）撞源去重：历史级与**外观锚同段**时剔除，避免白占多模态参考配额
                 _keep, _dupe = CORE.filter_history_refs(_pairs, int(ref_anchor_stage))
                 if _dupe:
                     print("[H3 Relay] 实验 E1：段 %s 与外观锚同源 ⇒ 已剔除对应级（避免撞源白占配额）"
                           % _dupe, flush=True)
+                _keep = _keep[:_want]                     # 去重后按「由近到远」取前 depth 级
+                # 🆕（#5）旧文案写「已跳过对应级」，但下一行仍按**原始 depth** 校验 ⇒ 紧接 raise，
+                #   日志与行为矛盾（用户以为跳过了，其实崩了）。改成如实说明会 raise。
+                if len(_keep) < _want:
+                    print("[H3 Relay] 实验 E1：可用历史只剩 %d 级（请求 %d 级；缺段落 %s、去重剔除 %s）"
+                          " ⇒ 接下来会 raise（本实现不静默截断）。请把 exp_history_depth 调到 ≤%d 后重跑。"
+                          % (len(_keep), _want, miss, _dupe, len(_keep)), flush=True)
                 refs = CORE.build_history_refs(
                     [lat for _, lat in _keep], frames=int(exp_history_frames),
-                    depth=int(exp_history_depth), stride=int(exp_history_stride))
+                    depth=_want, stride=int(exp_history_stride))
                 if refs:
                     plan.extra_refs = refs
                     print("[H3 Relay] 实验 E1：多尺度历史 %d 级（基准 %d 帧 / stride=%d）"
@@ -1647,7 +1744,11 @@ class H3RelayAudioSeam:
             else:
                 line += "｜ " + _jn.splitlines()[0]
             print(line)
-            return (audio, line, _j if _j is not None else audio)
+            # ♪ 边车回显：本节点刚落的那份 `me` **就是送进落盘节点的同一份音频**
+            #   （直通档也是它）⇒ 拼接直读它，既无损又不会绕过任何音频缝处理。
+            _u = _pcm_ui(me)
+            _r = (audio, line, _j if _j is not None else audio)
+            return {"ui": {CORE.PCM_UI_KEY: [_u]}, "result": _r} if _u else _r
 
         b_idx = int(bed_stage)
         if b_idx >= idx:
@@ -1691,7 +1792,10 @@ class H3RelayAudioSeam:
         else:
             line += "｜ " + _jn.splitlines()[0]
         print(line)
-        return (out, line, _j if _j is not None else out)
+        # ♪ 边车回显（同上）：`me` = 本节点输出 `out` = 落盘节点拿到的音频。
+        _u = _pcm_ui(me)
+        _r = (out, line, _j if _j is not None else out)
+        return {"ui": {CORE.PCM_UI_KEY: [_u]}, "result": _r} if _u else _r
 
 NODE_CLASS_MAPPINGS = {
     "H3RelayLatentSave": H3RelayLatentSave,

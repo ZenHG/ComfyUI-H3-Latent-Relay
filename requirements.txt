@@ -8,6 +8,11 @@
 #     ComfyUI 里看不到任何 H3 Relay 节点（宿主 ComfyUI 必带 torch，正常安装无需操心）。
 #   · safetensors 只在落盘/读回时**函数内延迟 import**（relay_core.save_av_latent /
 #     load_av_latent）——缺少它时节点仍能注册，用到落盘那一步才报错。
+#   · av / numpy 只在「多段拼接成片」（Chain 的 🧩 / auto_concat）里**延迟 import**——
+#     不用拼接功能的人**完全不受影响**；宿主 ComfyUI 本来就自带（其 requirements 里有 av>=17）。
+#     缺它们时只有点拼接那一下会报「装法」明确的错，不会影响节点注册与跑链。
 
 safetensors>=0.4
 torch>=2.0
+av>=17
+numpy

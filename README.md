@@ -5,7 +5,7 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 
 | 项 | 值 |
 |---|---|
-| 版本 | **0.6.6**（7 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
+| 版本 | **0.6.7**（7 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
 | 许可 | **MIT**（第三方出处见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)） |
 | 宿主 | 需要**带 MiniMax-H3 支持的 ComfyUI**（其自身为 GPL-3.0，见「11. 许可与出处」） |
 
@@ -26,7 +26,7 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 | [4](#4-接线唯一桥) | 接线（唯一桥） | 每次搭图 |
 | [5](#5-节点速览) | 节点速览（7 个） | 找节点时 |
 | [6](#6-参数主旋钮) | 参数（主旋钮） | 要调参时 |
-| [7](#7-音频缝) | 音频缝 · **多段拼接** | 出片有咔哒声 / 段接不起来 |
+| [7](#7-音频缝) | 音频缝 · **多段拼接** · **API/脚本用户怎么用**（§7.4） | 出片有咔哒声 / 段接不起来 / 不开画布 |
 | [8](#8-离线自测) | 离线自测 | 改完代码 / 提 PR |
 | [9](#9-排障) | 排障 | 跑不通时 |
 | [10](#10-原理与机制) | 原理与机制（概述） | 想搞懂为什么 |
@@ -122,8 +122,9 @@ ComfyUI 上，节点能注册但**续接静默无效**——用前先确认 Comf
 | 画面从第 1 帧就开始重播上一段 | 「裁重叠」没接上，或它的 `trim_frames` 没接桥的 `[2]` 输出 | 按「4. 接线」检查 |
 | 换新片子却接了旧片尾巴 | 没换 `run_id`（同名会覆盖同段号文件） | 换新名字 |
 
-> **跑完 N 段之后**：每段各出一个 mp4（`H3RelayChain` 连跑也只负责跑、**不负责拼**）。
-> 怎么接成一条、以及**拼完怎么自检**，见 [§7.1 多段拼接](#71-多段拼接n-个-mp4-怎么接成一条)。
+> **跑完 N 段之后**：每段各出一个 mp4。0.6.7 起 Chain 能顺手把 N 段拼成一条
+> （填了 `prompts` 还能一段一个词；开 `auto_concat` 或点 **🧩 拼成一条**），
+> 详见 [§7.1 多段拼接](#71-多段拼接n-个-mp4-怎么接成一条)。
 
 ---
 
@@ -222,9 +223,14 @@ ComfyUI 上，节点能注册但**续接静默无效**——用前先确认 Comf
 | 🔗 **H3 续接裁重叠** | 裁掉本段头部的重生成帧（音画同裁）——不裁就会在拼接处重播/跳变；`[3]` 输出 `prev_tail` = 上一段末帧 |
 | 🔗 **H3 续接后处理 Post** | **画质域**：跨段统计匹配 / 低频残差 / 色调 / 反卷积 / 高频迁移 / 糊区锐化，全部默认关 |
 | 🔗 **H3 续接音频缝** | **音频域**：把上一段环境声补进本段头部，**长度守恒**（零 A/V 位移），默认关 |
-| 🔗 **H3 续接连跑 Chain** | 自动连跑控制器：同分组框内自动推进「桥 + 落盘」段号并排队。**本身不拼片** —— 它只把 N 段各自跑完，N 个 mp4 怎么接成一条见 §7.1 |
+| 🔗 **H3 续接连跑 Chain** | 自动连跑控制器：同分组框内自动推进「桥 + 落盘」段号并排队。**0.6.7 起还会换词、还会拼片**：填 `prompts`（`---` 分块，第 k 块喂第 k 段）⇒ 连跑自动换词；开 `auto_concat` 或点 **🧩 拼成一条** ⇒ 跑完直接得到成片（包内实现，不需外部 ffmpeg）。留空/关 = 老行为逐位不变 |
 
 > **三个域，别混挂**：时间轴 = `H3RelayTrimAV`（冻结）／画质域 = `H3RelayPost`／音频域 = `H3RelayAudioSeam`。
+>
+> **♪ 音频边车（0.6.7）**：`H3RelayTrimAV` 与 `H3RelayAudioSeam` 都会把**自己的音频输出**另存一份
+> 无损 PCM 边车（各约 2 MB/段），让「拼成一条」能**直读无损音频**（音频不再二次编码）。
+> 音频链上有两个时，拼接按「**与 mp4 音频长度最接近**」挑 ⇒ 拿到的是**真进 mp4 的那份**。
+> 想省磁盘：`H3RelayTrimAV.save_pcm` 关掉即可（拼接自动退回解码，并在报告里写明）。
 > 节点数不是复杂度，**"哪些线必须接对"**才是。
 
 ---
@@ -268,28 +274,65 @@ ComfyUI 上，节点能注册但**续接静默无效**——用前先确认 Comf
 ⇒ **每个段文件的音频长度 = 视频长度**，段与段之间**没有任何重叠**。
 所以正确拼法就是**纯粹的首尾相接**，不需要任何"聪明的拼接器"。
 
-> ⚠️ **【连跑 ≠ 成片】** `H3RelayChain` 只负责"把 N 段跑完"，**不拼片**；跑完你会得到 N 个 mp4。
+> ⚠️ **【连跑 ≠ 成片】** 跑完你会得到 N 个 mp4。0.6.7 起 `H3RelayChain` 能顺手拼（见下），
+> 但**必须点它**（开 `auto_concat` 或按 🧩）—— 它不会偷偷帮你拼。
 
-| 别这么拼 | 症状 | 为什么 |
-|---|---|---|
-| `ffmpeg -f concat`（demuxer，最常见） | 每缝 ~0.87s **静止画**（PTS 洞） | 段间时间戳不连续时会插空 |
-| `acrossfade`（看着最专业） | **每缝偷 0.25s** ⇒ 第 3 段起音画错位、**逐段累积** | crossfade 是 overlap-add，而视频**没有**对应的重叠可裁 |
+**① 首选：包内一键（0.6.7）**
 
-**推荐做法**（`list.txt` 里按段号顺序写绝对路径，每行 `file '/abs/path/s0.mp4'`）：
+Chain 节点上：开 `auto_concat` ⇒ 连跑结束自动拼；或随时点 **🧩 拼成一条**（把已经跑过的段拼起来）。
+画面**流拷贝（无损）**、音频逐段去 priming 对齐、拼完立刻自检四项
+（帧数守恒 / PTS 无洞 / DTS 递增 / A·VΔ ≤ 1 帧），实测 4 段 29 s 成片 **1.3 秒**出片。
+自检不过会把片留着取证，并在状态里写明**别当成品用**。
+
+**①.5 音轨档：默认 AAC 256k，另有无损母版（0.6.7）**
+
+Chain 上的 `audio_out` 三档（只影响**成片音轨**，画面一律流拷贝）：
+
+| 档位 | 容器/编码 | 实测 SNR（vs 无损源，真实 H3 段） | 说明 |
+|---|---|---|---|
+| `aac_256k`（默认） | mp4 + AAC 256k | **40.5 ~ 50.0 dB** | 兼容第一，浏览器能放 |
+| `aac_192k` | mp4 + AAC 192k | 38.4 ~ 44.6 dB | 省约 25% 体积 |
+| `pcm_lossless` | mp4 + PCM f32 | **逐位一致（∞）** | 母版档；**浏览器预览没声音**，文件 ≈4.4 MB/s |
+
+**为什么默认档就能从"两代"降到"一代"**：段文件的音轨是用户落盘时编的 AAC（第 1 代）。
+拼接若从 mp4 解码再编 = 第 2 代。0.6.7 起「裁重叠」顺手把本段音频另存一份**无损 PCM 边车**
+（`save_pcm`，默认开）；拼成片直接读边车 ⇒ **不再解 AAC、也不再摸 priming** ⇒ 音频只编一代；
+选 `pcm_lossless` 则**一代都不新增**（成片音轨与边车逐位相同，实测 max|Δ| = 0）。
+
+> 边车缺失（旧图、关掉 `save_pcm`、或那次提交没跑「裁重叠」）⇒ 该段自动退回 mp4 解码，
+> 并在拼接报告里**逐段写明音频源**（`PCM` / `AAC`）。代价：该段仍是"二代"。
+>
+> **⚠ 音频链上「裁重叠」之后还有别的音频节点怎么办**（典型 = 本包的 **音频缝**；产线接线就是
+> `裁重叠 → 音频缝 → 落盘`）：真进 mp4 的是**链上最后那个**的输出。所以：
+> ① 「音频缝」也落自己的边车（就是它送进落盘的那份音频，见 §5 节点表）；
+> ② 拼接在多个候选里按「**与 mp4 音频长度最接近**」挑（数据说话，不靠接线假设）；
+> ③ 挑不出同源的（如 J-cut 让音频缝输出短了 0.9 s）⇒ **拒收边车、退回解码**并在报告里说明。
+>
+> 边车落盘（约 2 MB/段）失败**不影响本段渲染**，只在日志里提示。
+
+**参数：`video_crf`（默认 16）** 只在画面**必须重编码**时生效（各段规格不一致、或流拷贝路断言不过）；
+默认的流拷贝路是无损的，这一格用不到。⚠ `crf 0` **不是无损**（RGB→YUV 4:2:0 先丢，天花板 46.5 dB）。
+
+**② 不想要这一步发生在 ComfyUI 里**（要走外部工具）：用 concat filter 单遍重编码 ——
+N 个输入按顺序列举（`list.txt` 里按段号顺序写绝对路径，每行 `file '/abs/path/s0.mp4'`）：
 
 ```bash
-# ① 先试无损重封装（秒级；段文件的 A==V 时通常成立）
-ffmpeg -y -f concat -safe 0 -i list.txt -c copy out_copy.mp4
+# 自检：帧数应 = 各段帧数之和，且 A/V 时长差 ≤ 1 帧
+ffprobe -v error -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -of csv=p=0 out.mp4
+ffprobe -v error -select_streams a:0 -show_entries stream=duration -of csv=p=0 out.mp4
 
-# ② 拼完立刻自检 —— 帧数应 = 各段帧数之和，且 A/V 时长差 ≤ 1 帧
-ffprobe -v error -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -of csv=p=0 out_copy.mp4
-ffprobe -v error -select_streams a:0 -show_entries stream=duration -of csv=p=0 out_copy.mp4
-
-# ③ 自检不过 ⇒ 退回 concat filter 单遍重编码（时间轴最干净；N 个输入按顺序列举）
+# 拼（时间轴最干净；N 个输入按顺序列举）
 ffmpeg -y -i s0.mp4 -i s1.mp4 -i s2.mp4 -i s3.mp4 \
   -filter_complex "[0:v][0:a][1:v][1:a][2:v][2:a][3:v][3:a]concat=n=4:v=1:a=1[v][a]" \
   -map "[v]" -map "[a]" -c:v libx264 -crf 16 -pix_fmt yuv420p -c:a aac -b:a 192k out.mp4
 ```
+
+| 别这么拼 | 症状（2026-09-22 实测） | 为什么 |
+|---|---|---|
+| `ffmpeg -f concat -c copy`（最省事） | 4 段：视频时长 **29.346 s**（应 29.250，虚增 96 ms）、音频逐段落点 +64 / −25 / −33 ms（NCC 掉到 0.2） | 段文件音频流比视频长（AAC 编码器 priming，每段 +0.032 s）；流拷贝没法在样本级校准 |
+| `acrossfade`（看着最专业） | **每缝偷 0.25s** ⇒ 第 3 段起音画错位、**逐段累积** | crossfade 是 overlap-add，而视频**没有**对应的重叠可裁 |
+
+> 拼完**一定要自检**（上面那两条 ffprobe）：帧数守恒 + A/V 时长差 ≤ 1 帧。不过就换 ① 或换素材。
 
 ### 7.2 床窗语音规避：判据能抓什么、抓不住什么（务必先读）
 
@@ -345,24 +388,93 @@ ffmpeg -y -i s0.mp4 -i s1.mp4 -i s2.mp4 -i s3.mp4 \
 
 ---
 
+### 7.4 API / 脚本用户：不开画布怎么用（⚠ 先看"哪些是 UI 特性"）
+
+本包有一半新能力是**前端 JS 实现**的（画布按钮）。用 `/prompt` 提交 JSON 的脚本，先看这张表：
+
+| 能力 | UI 用户 | API / 脚本用户 |
+|---|---|---|
+| 续接本体（桥 / 裁重叠 / 后处理 / 音频缝） | ✅ 连线 | ✅ **一样能用**（纯节点） |
+| 音频 PCM 边车（`save_pcm`，音频代际 2→1） | ✅ 默认开 | ✅ **一样能用**（节点落盘 + 把路径回显进 history） |
+| 词分发（第 k 段喂第 k 块词） | ✅ 填 `prompts` | ❌ **`prompts` 不生效**（前端实现）——脚本里自己逐段改词再排队 |
+| 连跑 / 自动成片（⏩ / `auto_concat` / 🧩） | ✅ 点按钮 | ❌ 同上（按钮与 `auto_concat` 都是前端实现） |
+| **把 N 段拼成一条成片** | ✅ 🧩 按钮 | ✅ **三条非 UI 路径**（见下） |
+
+> ⚠️ `status` / `prompts` / `prompt_target` / `auto_concat` / `concat_name` / `audio_out` / `video_crf`
+> 这几格**只在画布里有用**（前两者供显示与前端分发，后五者由前端读出来再发给后端）。
+> 脚本提交 JSON 时它们会被忽略（不报错），**不要靠它们**。
+
+**拼接的三条非 UI 路径**（都走同一份核心代码 `relay_core.assemble_mp4_segments`，行为完全一致）：
+
+① **命令行**（最省事；用装了 torch+av 的 python，通常就是 ComfyUI 的解释器）：
+
+```bash
+python tools/concat_segments.py s1.mp4 s2.mp4 s3.mp4 -o film.mp4 --audio aac256
+# 可选：--audio aac192|lossless   --crf 16   --json
+#        --pcm p1.safetensors p2.safetensors - -     ← 逐段 PCM 边车，顺序=段序，`-` 表示该段没有
+```
+退出码 **0 = 过四项断言**，1 = 没过（片可能已写出，留作取证）。
+
+② **库调用**（嵌进你自己的流水线）：
+
+```python
+import sys; sys.path.insert(0, "<ComfyUI>/custom_nodes/ComfyUI-H3-Relay-Kit")
+from relay_core import assemble_mp4_segments
+rep = assemble_mp4_segments(["s1.mp4", "s2.mp4"], "film.mp4",
+                            audio_codec="aac", audio_bitrate="256k",
+                            pcm_paths=["p1.safetensors", None])   # 边车可选，缺项填 None
+print(rep["ok"], rep["asserts"], rep["report"])
+```
+
+③ **后端路由**（你已经在跑 ComfyUI，想让**服务端**自己从 history 取段）：
+
+```bash
+curl -X POST http://127.0.0.1:8188/h3relay/concat -H "Content-Type: application/json" \
+  -d '{"prompt_ids":["<id1>","<id2>"],"count":0,"out_name":"film","audio_out":"aac_256k","video_crf":16}'
+```
+`prompt_ids` 不给时回扫 history（取最近 `count` 次「图里带该 Chain 节点」的提交）；
+`audio_out` 三档 = `aac_256k`（默认）/ `aac_192k` / `pcm_lossless`。
+
+**边车（PCM）路径怎么拿**：脚本里两条路 —— 按段序自己传给 `--pcm`；
+或从 history 取（与路由同一判据，键名固定 `h3relay_pcm`）：
+
+```bash
+curl -s http://127.0.0.1:8188/history/<prompt_id> | \
+  python -c "import json,sys;d=json.load(sys.stdin);\
+  print([o for n in d.values() for o in ((n[\"outputs\"].get(\"18\") or {}).get(\"h3relay_pcm\") or [])])"
+```
+（`18` 换成你图里「裁重叠」/「音频缝」的节点 id；两个都有时优先「音频缝」那份。）
+
+**依赖**：拼接需要 `av`（宿主 ComfyUI 自带；缺了 `pip install "av>=17"`）；
+其余功能只依赖 torch + safetensors。**边车是纯增量**：它不改变段文件的任何一个字节，
+外部工具（ffmpeg 等）照旧读段文件即可。
+
 ## 8. 离线自测
 
 ```bash
-python tests/test_relay_core.py     # 期望 304/0
-python tools/review_050.py          # 期望 80/0（文档—代码一致性）
-python tools/smoke_nodes.py         # 期望 15/0（节点层冒烟）
+python tests/test_relay_core.py         # 期望 359/0
+node   tests/test_prompt_dispatch.mjs   # 期望 29/0（Chain 词分发纯函数，node 跑）
+python tools/review_050.py              # 期望 80/0（文档—代码一致性）
+python tools/smoke_nodes.py             # 期望 15/0（节点层冒烟）
+```
+
+命令行拼接入口（**给不开画布的用户**，见 §7.4）也在同一份单测里冒烟（26.43/26.44）：
+
+```bash
+python tools/concat_segments.py s1.mp4 s2.mp4 -o film.mp4 --json   # 退出码 0 = 过四项断言
 ```
 
 脚本会自动上溯定位 ComfyUI 根目录；装在别处时用
 `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。
 
-**304 项断言，零 GPU、不加载模型**，覆盖二十五个方面 —— 例如：
+**359 项断言，零 GPU、不加载模型**，覆盖二十六个方面 —— 例如：
 
 | 组 | 覆盖 |
 |---|---|
 | 21 | 重叠区双向融合 blend：窗形权重（smoothstep / hann），两端导数为 0 |
+| 26 | **多段拼接成片（0.6.7）**：探测 / 体检（「音频绕过裁重叠」判据）/ 画面流拷贝无损 / 音频逐段去 priming 对齐 / 退路 / history 条目筛选 |
 
-22 组明细与 `tools/` 清单见 [`docs/08-testing.md`](docs/08-testing.md)。
+26 组明细与 `tools/` 清单见 [`docs/08-testing.md`](docs/08-testing.md)。
 
 ---
 
@@ -375,8 +487,12 @@ python tools/smoke_nodes.py         # 期望 15/0（节点层冒烟）
 | 续接"看起来没生效" | ComfyUI 版本不含 H3 支持 | 确认 `comfy_extras/nodes_minimax_h3.py` 存在 |
 | 成片接缝处重播上一段 | 裁重叠的 `trim_frames` 没接桥 `[2]` | 按「4. 接线」补线 |
 | **音画越到后面越不同步**（第 3 段起口型明显对不上） | **音频线没走「裁重叠」**：`VAEDecodeAudio` 直连了落盘节点，画面裁了音频没裁 ⇒ 每缝差 ~0.9s 且累积 | 把落盘节点的 `audio` 改接 `裁重叠 [1] audio`（或经 `音频缝 [0] audio`）——见 §4 |
-| **连跑好几段，每段台词却一模一样** | `H3RelayChain` 的「连跑」是**反复提交同一张图**、只改段号 ⇒ **词不换** | 连跑前手动改 prompt；或按段分批跑（当前版本不做词分发） |
+| **连跑好几段，每段台词却一模一样** | 没填 `prompts`（连跑的默认行为就是**反复提交同一张图**、只改段号 ⇒ 词不换） | 在 Chain 上填 `prompts`（`---` 分块，第 k 块喂第 k 段）再点 ⏩ 连跑；只跑一段时手改 prompt 也行 |
 | 拼成一条后每缝有 ~0.87s 静止画 / 声音整体前移 | 用了 `ffmpeg -f concat` 或 `acrossfade` 拼 | 见 §7.1 的拼法 + 自检 |
+| 拼接报「第 k 段音频比视频长 0.X s ⇒ 很可能是音频线绕过了裁重叠」 | 落盘节点的 `audio` 接的是 `VAEDecodeAudio`（未裁原始音频） | 改接「裁重叠 `[1] audio`」（或经「音频缝 `[0] audio`」）后重跑该段，再拼 |
+| 拼接报告说某段「音频源=AAC」 | 该段没有 PCM 边车（旧图 / `save_pcm` 关了 / 这次提交没跑「裁重叠」） | 想拿满音频质量：确认图中「裁重叠」的 `save_pcm` 开着、且音频从它出线，重跑该段再拼 |
+| 选了 `pcm_lossless` 后**浏览器里放不出声音** | 成片音轨是 PCM f32，浏览器不放 PCM | 这是**母版档**的预期行为：拿给剪辑/归档。要能预览就用默认的 `aac_256k` |
+| 日志有「⚠ PCM 边车写入失败」 | 磁盘满 / 目录不可写 / safetensors 缺失 | **不影响本段产物**；拼接会自动退回解码。清出空间或 `pip install safetensors` 即可 |
 
 完整排障表、工作流文件自检工具、API 提交方式见
 [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md)。
