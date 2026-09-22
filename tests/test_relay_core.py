@@ -2389,6 +2389,21 @@ else:
           and _gen[1]["subfolder"].replace("\\", "/") == "sub/dir",
           "%s" % ([(x["filename"], x["subfolder"], x["abs_path"]) for x in _gen],))
 
+    # —— 26.48 说明文本**不许**被当成文件（预检抓到的假阳性） ——
+    #   真实形状：`detail_info` 里是 `📂 文件名称 : au4_s1_N709_0001.mp4\n📏 物理尺寸 : …`
+    #   —— 末尾也是 .mp4，若被当成记录且排在真记录前面，就会拿错路径（白跑一轮）。
+    _trap = CORE.pick_video_outputs({
+        "709": {"detail_info": ["📂 文件名称 : au4_s1_N709_0001.mp4\n📏 物理尺寸 : 480 x 864"],
+                "painter_output": [{"filename": "au4_s1_N709_0001.mp4", "subfolder": "",
+                                    "type": "output", "abs_path": r"I:/coffee_short/output/au4_s1_N709_0001.mp4"}]},
+        "710": {"note": ["📂 文件名称 : x.mp4", "带\n换行的 y.mp4"]},
+    })
+    check("26.48 说明文本/非法文件名不误收（只有真记录那一条，且排第 1）",
+          [x["filename"] for x in _trap][:1] == ["au4_s1_N709_0001.mp4"]
+          and "x.mp4" not in [x["filename"] for x in _trap]
+          and len(_trap) == 1,
+          "%s" % ([x["filename"] for x in _trap],))
+
     check("26.45b 同一份 outputs 里，PCM 边车按 .safetensors 走 pick_pcm_outputs（与视频互不串）",
           [x["filename"] for x in CORE.pick_pcm_outputs({
               "905": {"h3relay_pcm": [{"filename": "audio_00000.safetensors",

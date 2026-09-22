@@ -3951,6 +3951,25 @@ def assemble_mp4_segments(paths, out_path, *, video="auto", audio_codec="aac",
 #   第三方 banzhangVideoCombine 给 `filename`+`type`+**`abs_path`**（且存到 output 之外）。
 #   再宽一点收下"只给一个路径字符串"的写法（`path`/`file`/`filepath`…）。
 _FILE_PATH_KEYS = ("abs_path", "path", "filepath", "file_path", "file", "filename", "file_name")
+# 文件名字符集之外的符号（Windows 非法）——用来把"**看着像文件名的说明文本**"挡掉。
+#   实测坑：第三方节点把状态文本写在 `detail_info` 里
+#   （`📂 文件名称 : au4_s1_N709_0001.mp4\n📏 物理尺寸 : …`），末尾也是 `.mp4`
+#   ⇒ 若不加这道判据，会被当成一条"文件记录"，而且**可能排在真记录前面**（拿错路径 ⇒ 白跑一轮）。
+_ILLEGAL_IN_NAME = set(':<>"|?*')
+
+
+def _looks_like_path(s: str) -> bool:
+    """这像不像一个**文件路径**：路径里不会有换行，也不会有文件名字符集之外的符号。
+
+    ⚠ 判据必须落在**整串**上（不是 basename）—— 实测反例：
+    `📂 文件名称 : au4_s1_N709_0001.mp4` 是**单行**说明文本，
+    可它的 basename 恰好是 `au4_s1_N709_0001.mp4` ⇒ 只看 basename 会放行。
+    唯一放行的冒号 = **盘符**（`X:` 在第 2 个字符），其余冒号一律视为标签文本。
+    """
+    if not s or "\n" in s or "\r" in s or len(s) > 1024:
+        return False
+    rest = s[2:] if (len(s) > 1 and s[1] == ":") else s
+    return not (_ILLEGAL_IN_NAME & set(rest))
 
 
 def _file_record(item):
@@ -3968,7 +3987,7 @@ def _file_record(item):
     raw = None
     for k in _FILE_PATH_KEYS:
         v = item.get(k)
-        if isinstance(v, str) and v.strip():
+        if isinstance(v, str) and v.strip() and _looks_like_path(v.strip()):
             raw = v.strip().replace("/", os.sep)
             break
     if not raw:
