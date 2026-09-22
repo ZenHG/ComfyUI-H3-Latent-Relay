@@ -69,8 +69,31 @@ git clone https://github.com/ZenHG/ComfyUI-H3-Relay-Kit.git
 与消费 `minimax_keyframes` / `minimax_refs` 的 `comfy/model_base.py`）。装到不含 H3 的旧版
 ComfyUI 上，节点能注册但**续接静默无效**——用前先确认 ComfyUI 版本。
 
-**不依赖任何第三方 H3 节点包**：`minimax_keyframes` / `minimax_refs` / `resolved_frame_index`
-全是 ComfyUI **原生**协议，零 monkey patch。
+**除一个可选节点外，不依赖任何第三方 H3 节点包**：`minimax_keyframes` / `minimax_refs` /
+`resolved_frame_index` 全是 ComfyUI **原生**协议，零 monkey patch、**零 patch 别人的包**。
+
+### 2.1 用 🔍 潜空间分块放大才需要装的东西（可选）
+
+`H3RelayLatentUpscale` 是社区节点 **`MinimaxH3LatentUpscaler3D`**（作者 `LBH-123-AI`，**MIT**）的
+**AV 打包 latent 适配层**——本包**不复制**它的模型结构与代码，运行时从 ComfyUI 注册表取它的类来调。
+所以要用这个节点，两样东西都从**作者处**拿：
+
+```bash
+# ① 节点包（作者仓库）
+cd ComfyUI/custom_nodes
+git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git
+```
+
+② **放大权重**：从作者的 HuggingFace 仓库下载
+**<https://huggingface.co/LBH-123-AI/Minimax_h3_latent_upscaler>**，
+放进 `ComfyUI/models/latent_upscale_models/`（`.safetensors` / `.pth` 均可），然后重启后端。
+
+- **权重目录与清单直接沿用作者的 `scan_models()`** ⇒ 装了上游节点就**共用同一目录同一份文件**，
+  本包不另立目录、不复制第二份权重。
+- ⚠️ 这里要的是 **H3 潜空间放大权重**（24 通道 latent 专用），**不是** ESRGAN 那类像素放大模型——
+  架构不匹配，选了会报错。
+- **没装也不影响其他 7 个节点**：整包照常加载，只有在使用本节点时抛一条**写明仓库地址与权重地址**
+  的报错（不静默降级、不假成功）。
 
 随包的 [`examples/`](examples/README.md) 有一份可直接打开的最小演示工作流（18 个节点，含 1 个画布注释框）。
 
@@ -224,6 +247,7 @@ ComfyUI 上，节点能注册但**续接静默无效**——用前先确认 Comf
 | 🔗 **H3 续接裁重叠** | 裁掉本段头部的重生成帧（音画同裁）——不裁就会在拼接处重播/跳变；`[3]` 输出 `prev_tail` = 上一段末帧 |
 | 🔗 **H3 续接后处理 Post** | **画质域**：跨段统计匹配 / 低频残差 / 色调 / 反卷积 / 高频迁移 / 糊区锐化，全部默认关 |
 | 🔗 **H3 续接音频缝** | **音频域**：把上一段环境声补进本段头部，**长度守恒**（零 A/V 位移），默认关 |
+| 🔍 **H3 潜空间分块放大** | **画质域 · latent 层**：拆 H3 的 AV 打包 latent → 逐块调学习式 3D 放大器 → 回包。**零去噪**（不重采样、不改表演与口型）、**时间维一帧不动**（帧网格与 `裁重叠` 裁量不受影响）、**音频流原样带回**。`chunks` 是显存旋钮（1 = 整段一次过），`mode` 支持 ×倍数 / 目标尺寸 / 兆像素。⚠️ 需装可选依赖见 §2.1；⚠️ `chunks>1` 会改画面见 §9 |
 | 🔗 **H3 续接连跑 Chain** | 自动连跑控制器：同分组框内自动推进「桥 + 落盘」段号并排队。**0.6.7 起还会换词、还会拼片**：填 `prompts`（`---` 分块，第 k 块喂第 k 段）⇒ 连跑自动换词；开 `auto_concat` 或点 **🧩 拼成一条** ⇒ 跑完直接得到成片（包内实现，不需外部 ffmpeg）。留空/关 = 老行为逐位不变 |
 
 > **三个域，别混挂**：时间轴 = `H3RelayTrimAV`（冻结）／画质域 = `H3RelayPost`／音频域 = `H3RelayAudioSeam`。
@@ -474,7 +498,7 @@ python tools/concat_segments.py s1.mp4 s2.mp4 -o film.mp4 --json   # 退出码 0
 |---|---|
 | 21 | 重叠区双向融合 blend：窗形权重（smoothstep / hann），两端导数为 0 |
 | 26 | **多段拼接成片（0.6.7）**：探测 / 体检（「音频绕过裁重叠」判据）/ 画面流拷贝无损 / 音频逐段去 priming 对齐 / 退路 / history 条目筛选 |
-| 27 | **潜空间分块放大（0.6.8）**：块数自选的合规边界（每块 ≥ 2·overlap+1）/ 单块恒等 / 分块==整段 / 时间维不许动 / 上游口径常量锁 |
+| 27 | **潜空间分块放大（0.6.8）**：块数自选的合规边界（每块 ≥ 2·overlap+1）/ 单块恒等 / **逐帧独立算子下分块==整段**（替身 nearest×2）/ 时间维不许动 / 上游口径常量锁 —— ⚠️ 真模型含 3D 体积注意力 ⇒ **分块会改画面**（实测见 §9）；本组只锁拼接数学，不宣称「分块无损」 |
 
 26 组明细与 `tools/` 清单见 [`docs/08-testing.md`](docs/08-testing.md)。
 
@@ -493,6 +517,9 @@ python tools/concat_segments.py s1.mp4 s2.mp4 -o film.mp4 --json   # 退出码 0
 | 拼成一条后每缝有 ~0.87s 静止画 / 声音整体前移 | 用了 `ffmpeg -f concat` 或 `acrossfade` 拼 | 见 §7.1 的拼法 + 自检 |
 | 拼接报「第 k 段音频比视频长 0.X s ⇒ 很可能是音频线绕过了裁重叠」 | 落盘节点的 `audio` 接的是 `VAEDecodeAudio`（未裁原始音频） | 改接「裁重叠 `[1] audio`」（或经「音频缝 `[0] audio`」）后重跑该段，再拼 |
 | 拼接报告说某段「音频源=AAC」 | 该段没有 PCM 边车（旧图 / `save_pcm` 关了 / 这次提交没跑「裁重叠」） | 想拿满音频质量：确认图中「裁重叠」的 `save_pcm` 开着、且音频从它出线，重跑该段再拼 |
+| 🔍 放大节点报「需要先装作者的节点包（MIT）」 | 没装 `Comfyui_Minimax_h3_latent_Upscaler`（本包只是它的适配层，不复制其代码） | 按 §2.1 装包 + 从作者 HF 仓库下权重，重启后端 |
+| 🔍 `model_name` 下拉里没有权重 | 权重没进 `ComfyUI/models/latent_upscale_models/`，或放进去了没重启 | 从 <https://huggingface.co/LBH-123-AI/Minimax_h3_latent_upscaler> 下载后**重启后端**（清单在加载时扫一次） |
+| 🔍 把 `chunks` 调大以后**画面变了**（不只是显存降了） | 放大模型含 **3D 体积注意力**：分块切断跨块时间上下文，`overlap` 渐变只能缓解不能抵消。实测同 seed 同参 `chunks=1` vs `4`：逐帧 MAE **5.62/255**、0/192 帧相同（峰值 1483→1120 MB） | **`chunks=1` 才是与上游「整段推理」一致的唯一路径**；只在 OOM 时才加大，并当作「画质换显存」重新目检 |
 | 选了 `pcm_lossless` 后**浏览器里放不出声音** | 成片音轨是 PCM f32，浏览器不放 PCM | 这是**母版档**的预期行为：拿给剪辑/归档。要能预览就用默认的 `aac_256k` |
 | 日志有「⚠ PCM 边车写入失败」 | 磁盘满 / 目录不可写 / safetensors 缺失 | **不影响本段产物**；拼接会自动退回解码。清出空间或 `pip install safetensors` 即可 |
 
@@ -588,6 +615,10 @@ A·VΔ **0.0011 s**；`pcm_lossless` 档成片音轨与边车**逐位一致**。
   在 **v0.2.1–v0.5.0 的公开历史**里曾与该包构成**表达层重合**，已于 2026-09-19 **整体重写**，
   当前版本不含其派生表达。历史提交**未改写**，可检出复核（NOTICES §一·B）。
   ⇒ **严格合规请使用 ≥ 0.6.0。**
+- ⚠️ **可选运行时依赖 `Comfyui_Minimax_h3_latent_Upscaler`（MIT，作者 `LBH-123-AI`）**：
+  `H3RelayLatentUpscale` 运行时调用其节点类并**沿用其权重目录**（`models/latent_upscale_models/`）；
+  本包**不复制其代码**，但分块拼接的**数学口径**与其一致 ⇒ 出处与署名见
+  [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) **§一·D**。权重请从作者处下载（§2.1）。
 - **模型权重不含在本包内**：MiniMax-H3 等权重需自备，其许可与商用条件由提供方决定。
 - **使用合规**：本包是通用视频生成工具，使用者须自行遵守当地法律与所用模型/素材的许可；
   不得用于伪造他人肖像、传播虚假信息或侵犯他人权利。MIT 不含任何用途担保。
