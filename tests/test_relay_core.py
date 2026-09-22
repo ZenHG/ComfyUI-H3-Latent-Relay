@@ -2363,6 +2363,17 @@ else:
           and _gen[1]["subfolder"].replace("\\", "/") == "sub/dir",
           "%s" % ([(x["filename"], x["subfolder"], x["abs_path"]) for x in _gen],))
 
+    # —— 26.47b 绝对性判据**不许依赖宿主平台**（Linux CI 抓到：`os.path.isabs` 不认盘符式
+    #   ⇒ `abs_path` 丢空、相对分支把整串当目录 ⇒ 拼接拿不到文件）。两种风格在任意宿主都得认。
+    check("26.47b 绝对性判据平台中立：盘符式/反斜杠式/斜杠式都判绝对，相对名与 `C:a.mp4` 仍相对",
+          CORE._path_is_abs("I:/x/a.mp4") and CORE._path_is_abs(r"C:\x\a.mp4")
+          and CORE._path_is_abs("/data/out/a.mp4") and CORE._path_is_abs(r"\\srv\share\a.mp4")
+          and not CORE._path_is_abs("sub/dir/a.mp4") and not CORE._path_is_abs("C:a.mp4")
+          and CORE._file_record({"abs_path": "/data/out/b.mp4"})["abs_path"] == "/data/out/b.mp4"
+          and CORE._file_record({"abs_path": r"D:\out\b.mp4"})["filename"] == "b.mp4",
+          "%s" % ([(s, CORE._path_is_abs(s)) for s in
+                   ("I:/x/a.mp4", "/data/out/a.mp4", "sub/dir/a.mp4", "C:a.mp4")],))
+
     # —— 26.48 说明文本**不许**被当成文件（预检抓到的假阳性） ——
     #   真实形状：`detail_info` 里是 `📂 文件名称 : au4_s1_N709_0001.mp4\n📏 物理尺寸 : …`
     #   —— 末尾也是 .mp4，若被当成记录且排在真记录前面，就会拿错路径（白跑一轮）。

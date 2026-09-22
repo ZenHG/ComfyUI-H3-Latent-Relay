@@ -39,6 +39,7 @@ from __future__ import annotations
 import itertools
 import json
 import math
+import ntpath                                      # 只当"Windows 路径判据"用，与宿主平台无关
 import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -3753,6 +3754,26 @@ def _looks_like_path(s: str) -> bool:
     return not (_ILLEGAL_IN_NAME & set(rest))
 
 
+def _path_is_abs(s: str) -> bool:
+    """判"绝对路径"，**与宿主平台无关**。
+
+    ⚠ 绝不能用 `os.path.isabs`：宿主跑在 Linux 时它不认 Windows 盘符式
+    （`I:/x/out.mp4` 被判成相对路径 ⇒ `abs_path` 丢空 ⇒ 拼接拿错文件），
+    反之在 Windows 时它不认 `/x/out.mp4`。落盘节点回显的是**哪个 OS 的路径**
+    由节点决定，不由跑这段代码的机器决定 ⇒ 两种风格都得认。
+    """
+    return s.startswith(("/", "\\")) or ntpath.isabs(s)
+
+
+def _path_split(s: str):
+    r"""按 `\` 与 `/` 两种分隔符切 (目录, 文件名)；目录取**原串前缀**（不改写分隔符）。"""
+    norm = s.replace("\\", "/")
+    i = norm.rfind("/")
+    if i < 0:
+        return "", s
+    return s[:i], s[i + 1:]
+
+
 def _file_record(item):
     """把一条候选归一化成 ``{filename, subfolder, type, abs_path}``；不像文件就返回 None。
 
@@ -3769,16 +3790,16 @@ def _file_record(item):
     for k in _FILE_PATH_KEYS:
         v = item.get(k)
         if isinstance(v, str) and v.strip() and _looks_like_path(v.strip()):
-            raw = v.strip().replace("/", os.sep)
+            raw = v.strip()                         # 分隔符原样带出：路径属于哪个 OS 由节点决定
             break
     if not raw:
         return None
     sub = str(item.get("subfolder") or "").strip()
-    if os.path.isabs(raw):
-        return {"filename": os.path.basename(raw), "subfolder": sub,
+    if _path_is_abs(raw):
+        return {"filename": _path_split(raw)[1], "subfolder": sub,
                 "type": str(item.get("type") or "output"), "abs_path": raw}
     # 相对路径：`dir/name.mp4` 这种把目录当 subfolder（有些节点这么给）
-    d, base = os.path.split(raw)
+    d, base = _path_split(raw)
     if d and not sub:
         sub = d
     return {"filename": base or raw, "subfolder": sub,

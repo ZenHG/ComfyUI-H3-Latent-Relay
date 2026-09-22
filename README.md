@@ -477,9 +477,9 @@ curl -s http://127.0.0.1:8188/history/<prompt_id> | \
 ## 8. 离线自测
 
 ```bash
-python tests/test_relay_core.py         # 期望 365/0
+python tests/test_relay_core.py         # 期望 383/0
 node   tests/test_prompt_dispatch.mjs   # 期望 29/0（Chain 词分发纯函数，node 跑）
-python tools/review_050.py              # 期望 80/0（文档—代码一致性）
+python tools/review_050.py              # 期望 81/0（文档—代码一致性）
 python tools/smoke_nodes.py             # 期望 15/0（节点层冒烟）
 ```
 
@@ -492,7 +492,7 @@ python tools/concat_segments.py s1.mp4 s2.mp4 -o film.mp4 --json   # 退出码 0
 脚本会自动上溯定位 ComfyUI 根目录；装在别处时用
 `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。
 
-**382 项断言，零 GPU、不加载模型**，覆盖二十七个方面 —— 例如：
+**383 项断言，零 GPU、不加载模型**，覆盖二十七个方面 —— 例如：
 
 | 组 | 覆盖 |
 |---|---|

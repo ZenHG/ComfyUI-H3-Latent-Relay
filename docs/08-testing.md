@@ -13,7 +13,7 @@ python tests/test_relay_core.py
 `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。也支持 `pytest tests/`
 （找不到 ComfyUI 根目录时自动 skip，不会崩）。
 
-**365 项断言，零 GPU、不加载模型**，覆盖二十六个方面：
+**383 项断言，零 GPU、不加载模型**，覆盖二十七个方面：
 
 | 组 | 覆盖 |
 |---|---|
@@ -59,7 +59,7 @@ node tests/test_prompt_dispatch.mjs      # 期望 29/0
 
 | 工具 | 判什么 | 期望 |
 |---|---|---|
-| `tools/review_050.py` | 文档—代码一致性（节点清单 / 参数表 / 断言数 / 版本号 / 示例图槽位 / **三条铁律**） | **80/0** |
+| `tools/review_050.py` | 文档—代码一致性（节点清单 / 参数表 / 断言数 / 版本号 / 示例图槽位 / **三条铁律**） | **81/0** |
 | `tools/smoke_nodes.py` | 节点层功能冒烟（7 个节点真跑一遍） | **15/0** |
 
 详见 [`tools/README.md`](../tools/README.md)。CI 会跑这三个（`.github/workflows/ci.yml`），
