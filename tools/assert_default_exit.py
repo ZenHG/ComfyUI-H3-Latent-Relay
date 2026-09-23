@@ -83,10 +83,25 @@ def main():
 
     fails = []
 
+    # —— ① 契约层（与环境无关，必须硬过）：我们的默认值就是 v3 ——
+    # `NODE_API` 在 V3 加载失败时会被兜底回改成 "v1"，所以不能只看它；
+    # `NODE_API_DEFAULT` 才是「我们写的默认值」这个事实。
+    default = getattr(pkg, "NODE_API_DEFAULT", "ATTR_MISSING")
+    ok0 = default == "v3"
+    print("  [%s] NODE_API_DEFAULT == 'v3'（源码里的默认值）    → %r"
+          % ("OK" if ok0 else "FAIL", default))
+    if not ok0:
+        fails.append("NODE_API_DEFAULT")
+
+    # —— ② 行为层：无环境变量时实际选中的出口 ——
+    api = getattr(pkg, "NODE_API", "ATTR_MISSING")
+    fell_back = (api == "v1" and default == "v3")
     ncm = getattr(pkg, "NODE_CLASS_MAPPINGS", "ATTR_MISSING")
     ok1 = ncm is None
-    print("  [%s] NODE_CLASS_MAPPINGS is None（V1 分支会被跳过）  → %r"
-          % ("OK" if ok1 else "FAIL", ncm))
+    print("  [%s] NODE_CLASS_MAPPINGS is None（V1 分支会被跳过）  → %s"
+          % ("OK" if ok1 else "FAIL",
+             "None" if ok1 else ("返回的是 V1 的 %d 个节点字典" % len(ncm)
+                                 if isinstance(ncm, dict) else repr(ncm))))
     if not ok1:
         fails.append("NODE_CLASS_MAPPINGS")
 
@@ -106,10 +121,18 @@ def main():
 
     print()
     if fails:
-        print("❌ 默认出口**不是** V3（缺 %s）。检查 __init__.py 的 H3RELAY_NODE_API 默认值，"
-              "以及 V3 出口是否因 comfy_api / packaging 缺失而回退。" % "、".join(fails))
+        if fell_back:
+            reason = getattr(pkg, "NODE_API_FALLBACK_REASON", None)
+            print("❌ 默认值是对的（v3），但**本环境加载不了 V3 出口** ⇒ 已回退 V1。")
+            print("   回退原因：%s" % reason)
+            print("   这不是本包的默认值问题，是**宿主依赖不全**：V3 要 import `comfy_api`，"
+                  "它的传递闭包需要")
+            print("   宿主自己的全部 Python 依赖（实测缺过 packaging / comfy-aimdo / tqdm）。")
+            print("   修法：把 ComfyUI 的 requirements.txt 装上（去掉 torch 与前端包即可）。")
+        else:
+            print("❌ 默认出口不是 V3（缺 %s）。检查 __init__.py 的 NODE_API_DEFAULT。" % "、".join(fails))
         return 1
-    print("✅ 默认出口 = V3（3/3）")
+    print("✅ 默认出口 = V3（4/4：契约 1 + 行为 3）")
     return 0
 
 

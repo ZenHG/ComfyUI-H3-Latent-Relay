@@ -53,19 +53,26 @@ import os as _os
 # 的顺序·取值·组合项全序与 V1 一致）＋ 2 段真实链验证（362/362 帧守恒 · 流拷贝无损 ·
 # PCM 边车被拼接路由取到）。
 # ⚠️ 回退到 V1：设 H3RELAY_NODE_API=v1 后重启 —— 两条出口的代码都还在，只是默认换了。
-NODE_API = _os.environ.get("H3RELAY_NODE_API", "v3").strip().lower()
+#
+# `NODE_API_DEFAULT` 单独留一个常量，给 tools/assert_default_exit.py 断言用：
+# `NODE_API` 在 V3 加载失败时会被**回改成 "v1"**（兜底），所以单看 NODE_API 分不清
+# 「默认本来就是 v1」与「默认是 v3 但本环境加载不了 V3」—— 这两件事的处置完全不同。
+NODE_API_DEFAULT = "v3"
+NODE_API = _os.environ.get("H3RELAY_NODE_API", NODE_API_DEFAULT).strip().lower()
+# 兜底原因留档（None = 没回退）。给 tools/assert_default_exit.py 打印诊断用。
+NODE_API_FALLBACK_REASON = None
 
 if NODE_API == "v3":
     try:
         from .v3.entrypoint import comfy_entrypoint          # noqa: F401
     except Exception as _v3_err:                             # noqa: BLE001
-        # V3 出口依赖宿主的 `comfy_api`，而 `comfy_api.internal.api_registry` 会
-        # `from packaging import version` ⇒ **宿主缺 packaging 时这里会炸**
-        # （2026-09-24 GitHub Actions 实测：26.15 报 ModuleNotFoundError: packaging）。
+        # V3 出口依赖宿主的 `comfy_api`，而它的传递闭包要宿主自己的整套 Python 依赖
+        # （实测缺过 packaging / comfy-aimdo / tqdm，2026-09-24 GitHub Actions 三次实测）。
         # 原则：**一个可选出口不许把整包搞挂** —— 退回 V1 并**大声说明**（不静默降级）。
-        print("[H3 Relay] ⚠️ V3 出口加载失败，已回退到 V1：%s: %s"
-              % (type(_v3_err).__name__, _v3_err))
-        print("[H3 Relay]    修 V3：确认宿主 ComfyUI 完整（含 comfy_api）且已装 packaging；"
+        NODE_API_FALLBACK_REASON = "%s: %s" % (type(_v3_err).__name__, _v3_err)
+        print("[H3 Relay] ⚠️ V3 出口加载失败，已回退到 V1：%s" % NODE_API_FALLBACK_REASON)
+        print("[H3 Relay]    修 V3：把宿主 ComfyUI 的 requirements.txt 装上"
+              "（V3 要 import comfy_api，其依赖闭包含 packaging / comfy-aimdo / tqdm 等）；"
               "要显式用 V1：设 H3RELAY_NODE_API=v1 后重启")
         NODE_API = "v1"
 
