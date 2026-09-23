@@ -1,6 +1,6 @@
 # 第三方出处与许可声明（THIRD-PARTY NOTICES）
 
-本包（ComfyUI-H3-Relay-Kit）以 **MIT** 发布（见 [`LICENSE`](LICENSE)）。
+本包（ComfyUI-H3-Latent-Relay）以 **MIT** 发布（见 [`LICENSE`](LICENSE)）。
 下列第三方作品在**设计阶段被阅读、参考或对照**，按「机制 / 契约 / 论文」三类分别说明。
 **当前版本（≥ 0.6.0）不包含任何 GPL / AGPL / LGPL 代码**（历史版本见 §一·B）。
 ⚠️ 但本包的**运行时宿主 ComfyUI 是 GPL-3.0**，且本包在进程内 import 其模块 —— 见 **§一·C**，

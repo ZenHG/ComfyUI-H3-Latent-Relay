@@ -6,7 +6,7 @@
 #    （`comfy_config/config_parser.py` 读的是 project 段）⇒ 依赖声明与平台标签**从未生效**，从 v0.1 起。
 #    新增字段时请勿再放到 [project.urls] 后面。
 [project]
-name = "comfyui-h3-relay-kit"
+name = "comfyui-h3-latent-relay"
 version = "0.6.8"
 description = "MiniMax-H3 多段续接的 latent 桥：上一段 AV latent 直接切尾段钉进本段 conditioning，零重编码。"
 readme = "README.md"
@@ -25,8 +25,8 @@ dependencies = [
 # 第三方署名：THIRD-PARTY-NOTICES.md；随包分发的许可全文：LICENSE、licenses/Apache-2.0.txt
 # ⚠️ 运行时宿主 ComfyUI 是 GPL-3.0（不复制其代码，但进程内 import），见 THIRD-PARTY-NOTICES.md §一·C
 [project.urls]
-Homepage = "https://github.com/ZenHG/ComfyUI-H3-Relay-Kit"
-Issues = "https://github.com/ZenHG/ComfyUI-H3-Relay-Kit/issues"
+Homepage = "https://github.com/ZenHG/ComfyUI-H3-Latent-Relay"
+Issues = "https://github.com/ZenHG/ComfyUI-H3-Latent-Relay/issues"
 
 [tool.ruff]
 line-length = 120

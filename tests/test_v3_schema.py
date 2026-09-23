@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 ComfyUI-H3-Relay-Kit contributors
+# Copyright (c) 2026 ComfyUI-H3-Latent-Relay contributors
 # 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 """V3 外壳与 V1 的**逐字段一致性**机检（零 GPU、零模型）。
 
@@ -83,13 +83,13 @@ def check(name, cond, detail=""):
 
 # 目录名含 "-" ⇒ 不能直接 import，用包方式按文件位置加载
 _spec = importlib.util.spec_from_file_location(
-    "h3relay_kit", os.path.join(_KIT, "__init__.py"),
+    "h3latentrelay", os.path.join(_KIT, "__init__.py"),
     submodule_search_locations=[_KIT])
 KIT = importlib.util.module_from_spec(_spec)
-sys.modules["h3relay_kit"] = KIT
+sys.modules["h3latentrelay"] = KIT
 _spec.loader.exec_module(KIT)
 
-V1 = sys.modules["h3relay_kit.nodes"]
+V1 = sys.modules["h3latentrelay.nodes"]
 
 print("[1] 出口互斥（宿主加载器是 if V1 … return True / elif comfy_entrypoint）")
 check("1.1 V3 模式下 NODE_CLASS_MAPPINGS 为 None（宿主才会走 V3 分支）",
@@ -197,7 +197,7 @@ check("4.2 外壳未覆盖 V1 的方法名（业务逻辑仍在 nodes.py）",
 
 print()
 print("[5] ui 回显形状（拼接路由靠 history.outputs[node_id]['h3relay_pcm'] 取 PCM 边车）")
-from h3relay_kit.v3 import _compat as C                  # noqa: E402
+from h3latentrelay.v3 import _compat as C                  # noqa: E402
 _ui_out = C.node_output({"ui": {C.V1.CORE.PCM_UI_KEY: [{"filename": "x", "subfolder": "s", "type": "output"}]},
                          "result": ("a", "b")})
 check("5.1 V1 的 {'ui','result'} → io.NodeOutput(*result, ui={...})",

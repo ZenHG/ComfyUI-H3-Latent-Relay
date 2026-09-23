@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 ComfyUI-H3-Relay-Kit contributors
+# Copyright (c) 2026 ComfyUI-H3-Latent-Relay contributors
 """差分等价测试：`relay_core` 若干函数**重写前后是否行为逐位一致**。
 
 【为什么需要它】

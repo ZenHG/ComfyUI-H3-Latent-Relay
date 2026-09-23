@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 ComfyUI-H3-Relay-Kit contributors
+# Copyright (c) 2026 ComfyUI-H3-Latent-Relay contributors
 # 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 """8 个节点的 V3 外壳。
 

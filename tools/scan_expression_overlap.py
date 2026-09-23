@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 ComfyUI-H3-Relay-Kit contributors
+# Copyright (c) 2026 ComfyUI-H3-Latent-Relay contributors
 """逐函数「表达层重合度」扫描 —— 与第三方 GPL 包比对。
 
 【为什么需要它】

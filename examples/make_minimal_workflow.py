@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 ComfyUI-H3-Relay-Kit contributors
+# Copyright (c) 2026 ComfyUI-H3-Latent-Relay contributors
 # 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 """make_minimal_workflow.py — 生成「最小官方节点 + 本包」的续接演示工作流。
 
@@ -266,13 +266,13 @@ def local_kit_defs():
             "[FAIL] 找不到 ComfyUI 根目录（folder_paths.py）。\n"
             "       本包装在 <ComfyUI>/custom_nodes/ 下可自动定位；否则请设\n"
             "       COMFYUI_PATH=/path/to/ComfyUI 再跑。")
-    pkg = types.ModuleType("h3relay_kit_local")
+    pkg = types.ModuleType("h3latentrelay_local")
     pkg.__path__ = [kit]
-    sys.modules["h3relay_kit_local"] = pkg
-    spec = importlib.util.spec_from_file_location("h3relay_kit_local.nodes",
+    sys.modules["h3latentrelay_local"] = pkg
+    spec = importlib.util.spec_from_file_location("h3latentrelay_local.nodes",
                                                   os.path.join(kit, "nodes.py"))
     mod = importlib.util.module_from_spec(spec)
-    sys.modules["h3relay_kit_local.nodes"] = mod
+    sys.modules["h3latentrelay_local.nodes"] = mod
     spec.loader.exec_module(mod)
     out = {}
     for name, cls in mod.NODE_CLASS_MAPPINGS.items():
@@ -547,7 +547,7 @@ def build(oi, length=73, width=448, height=768):
     n_post = len(widget_slots(g.defn("H3RelayPost")))
 
     g.add("Note", pos=[420, 700], title="怎么用", values={"text":
-        "【最小续接演示 · 官方节点 + ComfyUI-H3-Relay-Kit】\n"
+        "【最小续接演示 · 官方节点 + ComfyUI-H3-Latent-Relay】\n"
         "\n"
         "第 1 段：\n"
         "  ① 段号 = 0，填好 prompt → 点 Queue。\n"

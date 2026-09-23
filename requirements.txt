@@ -1,4 +1,4 @@
-# ComfyUI-H3-Relay-Kit 运行时依赖
+# ComfyUI-H3-Latent-Relay 运行时依赖
 #
 # 只列「本包直接 import 的第三方库」。
 # ComfyUI 本身（comfy.* / folder_paths / node_helpers）由宿主提供，不在此列。

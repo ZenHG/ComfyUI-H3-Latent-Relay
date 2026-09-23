@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 ComfyUI-H3-Relay-Kit contributors
+# Copyright (c) 2026 ComfyUI-H3-Latent-Relay contributors
 # 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 """部署副本同步校验 —— 副本是不是就是「那个提交」的内容。
 
@@ -17,7 +17,7 @@
   3. 只报 `OK / DIFF / MISS`，不改任何文件。
 
 用法：
-    python tools/sync_deploy_check.py "<ComfyUI>/custom_nodes/ComfyUI-H3-Relay-Kit"
+    python tools/sync_deploy_check.py "<ComfyUI>/custom_nodes/ComfyUI-H3-Latent-Relay"
     python tools/sync_deploy_check.py <副本目录> --rev 7060109
     python tools/sync_deploy_check.py <副本目录> --rev HEAD --verbose
 

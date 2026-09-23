@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 ComfyUI-H3-Relay-Kit contributors
+# Copyright (c) 2026 ComfyUI-H3-Latent-Relay contributors
 # 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 """H3 Relay Kit 离线单测（零 GPU、零模型、秒级）
 
@@ -288,12 +288,12 @@ import types  # noqa: E402
 
 # 目录名含连字符，不能直接当包名 → 伪造一个包壳再按文件加载 nodes.py
 _KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_pkg = types.ModuleType("h3relay_kit")
+_pkg = types.ModuleType("h3latentrelay")
 _pkg.__path__ = [_KIT]
-sys.modules["h3relay_kit"] = _pkg
-_spec = importlib.util.spec_from_file_location("h3relay_kit.nodes", os.path.join(_KIT, "nodes.py"))
+sys.modules["h3latentrelay"] = _pkg
+_spec = importlib.util.spec_from_file_location("h3latentrelay.nodes", os.path.join(_KIT, "nodes.py"))
 NODES = importlib.util.module_from_spec(_spec)
-sys.modules["h3relay_kit.nodes"] = NODES
+sys.modules["h3latentrelay.nodes"] = NODES
 _spec.loader.exec_module(NODES)
 
 
@@ -2673,10 +2673,10 @@ else:
         sys.modules["server"] = _srvmod
 
         _spec = importlib.util.spec_from_file_location(
-            "h3relay_kit_pkg", os.path.join(_KIT_DIR, "__init__.py"),
+            "h3latentrelay_pkg", os.path.join(_KIT_DIR, "__init__.py"),
             submodule_search_locations=[_KIT_DIR])
         _pk = importlib.util.module_from_spec(_spec)
-        sys.modules["h3relay_kit_pkg"] = _pk
+        sys.modules["h3latentrelay_pkg"] = _pk
         _spec.loader.exec_module(_pk)
 
         class _FakeQueue:

@@ -1,4 +1,4 @@
-# ComfyUI-H3-Relay-Kit
+# ComfyUI-H3-Latent-Relay
 
 MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独立使用、**零第三方节点包依赖**的 ComfyUI 节点包。
 只依赖 ComfyUI 自带的 `torch` 与 `safetensors`，不与任何第三方 H3 节点包耦合。
@@ -55,10 +55,10 @@ H3 分段生成时，"续接"要回答一件事：**新的一段怎么知道上�
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/ZenHG/ComfyUI-H3-Relay-Kit.git
+git clone https://github.com/ZenHG/ComfyUI-H3-Latent-Relay.git
 ```
 
-或下载 ZIP → 解压 → 文件夹改名为 `ComfyUI-H3-Relay-Kit` → 放进 `custom_nodes/`。
+或下载 ZIP → 解压 → 文件夹改名为 `ComfyUI-H3-Latent-Relay` → 放进 `custom_nodes/`。
 
 装好后**重启 ComfyUI 后端**（ComfyUI-Manager 点 *Restart*；没装就重启 Python 进程）——
 仅刷新浏览器不会加载新节点。节点列表里搜 `🔗 H3 续接`（7 个）+ `🔍 H3 潜空间分块放大` 即可看到全部 8 个节点。
@@ -504,7 +504,7 @@ python tools/concat_segments.py s1.mp4 s2.mp4 s3.mp4 -o film.mp4 --audio aac256
 ② **库调用**（嵌进你自己的流水线）：
 
 ```python
-import sys; sys.path.insert(0, "<ComfyUI>/custom_nodes/ComfyUI-H3-Relay-Kit")
+import sys; sys.path.insert(0, "<ComfyUI>/custom_nodes/ComfyUI-H3-Latent-Relay")
 from relay_core import assemble_mp4_segments
 rep = assemble_mp4_segments(["s1.mp4", "s2.mp4"], "film.mp4",
                             audio_codec="aac", audio_bitrate="256k",

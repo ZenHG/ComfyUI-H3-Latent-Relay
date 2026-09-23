@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 ComfyUI-H3-Relay-Kit contributors
+# Copyright (c) 2026 ComfyUI-H3-Latent-Relay contributors
 # 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 r"""审查脚本：确认 0.5.0 改造全部生效、无遗漏、无回归。
 
@@ -50,13 +50,13 @@ import importlib.util  # noqa: E402
 import types  # noqa: E402
 
 # 目录名含连字符，不能直接当包名 → 伪造一个包壳再按文件加载 nodes.py（与单测同法）
-_pkg = types.ModuleType("h3relay_kit")
+_pkg = types.ModuleType("h3latentrelay")
 _pkg.__path__ = [KIT]
-sys.modules["h3relay_kit"] = _pkg
-_spec = importlib.util.spec_from_file_location("h3relay_kit.nodes",
+sys.modules["h3latentrelay"] = _pkg
+_spec = importlib.util.spec_from_file_location("h3latentrelay.nodes",
                                               os.path.join(KIT, "nodes.py"))
 N = importlib.util.module_from_spec(_spec)
-sys.modules["h3relay_kit.nodes"] = N
+sys.modules["h3latentrelay.nodes"] = N
 _spec.loader.exec_module(N)
 
 import relay_core as CORE  # noqa: E402
@@ -497,7 +497,7 @@ else:
 ck("J1 存量工作流无『输出数组过期』的节点", not _stale, "计数=%d" % len(_stale))
 
 # J3 —— 部署地「同包第二份副本」扫描。
-# 🔴 2026-09-17 实盘事故：custom_nodes 里留了 `ComfyUI-H3-Relay-Kit.bak-<日期>`（v0.4.3 旧副本，
+# 🔴 2026-09-17 实盘事故：custom_nodes 里留了 `ComfyUI-H3-Latent-Relay.bak-<日期>`（v0.4.3 旧副本，
 #   带 __init__.py）⇒ ComfyUI **两份都加载**，节点定义被后加载的那份**覆盖** ⇒
 #   服务端 /object_info 报的 `H3RelayTrimAV` 只有 3 路输出（没有 prev_tail），
 #   而 l1_api 已经引用 `["903", 3]` ⇒ 真渲染第一段就炸。

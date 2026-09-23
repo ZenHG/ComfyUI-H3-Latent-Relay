@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2026 ComfyUI-H3-Relay-Kit contributors
+# Copyright (c) 2026 ComfyUI-H3-Latent-Relay contributors
 """节点层功能冒烟：**真调用** 7 个节点的方法，逐个断言。
 
 【补的是哪一层】
@@ -41,13 +41,13 @@ import torch  # noqa: E402
 import comfy.nested_tensor as NT  # noqa: E402
 
 # 目录名含连字符，不能直接当包名 → 伪造包壳再按文件加载（与 review_050 同法）
-_pkg = types.ModuleType("h3relay_kit")
+_pkg = types.ModuleType("h3latentrelay")
 _pkg.__path__ = [KIT]
-sys.modules["h3relay_kit"] = _pkg
-_spec = importlib.util.spec_from_file_location("h3relay_kit.nodes",
+sys.modules["h3latentrelay"] = _pkg
+_spec = importlib.util.spec_from_file_location("h3latentrelay.nodes",
                                                os.path.join(KIT, "nodes.py"))
 N = importlib.util.module_from_spec(_spec)
-sys.modules["h3relay_kit.nodes"] = N
+sys.modules["h3latentrelay.nodes"] = N
 _spec.loader.exec_module(N)
 
 import relay_core as CORE  # noqa: E402
