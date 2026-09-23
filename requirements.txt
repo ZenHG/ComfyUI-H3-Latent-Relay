@@ -11,14 +11,18 @@
 #   · av / numpy 只在「多段拼接成片」（Chain 的 🧩 / auto_concat）里**延迟 import**——
 #     不用拼接功能的人**完全不受影响**；宿主 ComfyUI 本来就自带（其 requirements 里有 av>=17）。
 #     缺它们时只有点拼接那一下会报「装法」明确的错，不会影响节点注册与跑链。
-#   · packaging **不是本包直接 import 的**，而是 V3 出口的传递依赖：V3 走
-#     `comfy_api.latest` → `comfy_api.internal.api_registry` → `from packaging import version`。
-#     实测（2026-09-24 GitHub Actions）宿主缺它时 V3 出口会 ModuleNotFoundError。
-#     本包已加「V3 加载失败 ⇒ 回退 V1 + 警告」的兜底，所以缺它不会让整包挂，
-#     但**默认出口就会静默变成 V1** —— 想用 V3 就必须有它，故在此显式声明。
+#   · packaging / comfy-aimdo **都不是本包直接 import 的**，而是 V3 出口的传递依赖：
+#     V3 走 `comfy_api.latest`，它的链上会拉
+#       `comfy_api.internal.api_registry` → `from packaging import version`
+#       `comfy.memory_management` / `comfy.storage` → `import comfy_aimdo`
+#     实测（2026-09-24 GitHub Actions）宿主缺任一个，V3 出口就 ModuleNotFoundError。
+#     本包已加「V3 加载失败 ⇒ 回退 V1 + 警告」的兜底，所以缺它们不会让整包挂，
+#     但**默认出口就会静默变成 V1** —— 想用 V3 就必须有它们，故在此显式声明。
+#     （`comfy-aimdo` 零依赖、纯 Python 命名空间包，装它无负担。）
 
 safetensors>=0.4
 torch>=2.0
 av>=17
 numpy
 packaging
+comfy-aimdo
