@@ -56,13 +56,25 @@ import os as _os
 NODE_API = _os.environ.get("H3RELAY_NODE_API", "v3").strip().lower()
 
 if NODE_API == "v3":
-    from .v3.entrypoint import comfy_entrypoint          # noqa: F401
+    try:
+        from .v3.entrypoint import comfy_entrypoint          # noqa: F401
+    except Exception as _v3_err:                             # noqa: BLE001
+        # V3 出口依赖宿主的 `comfy_api`，而 `comfy_api.internal.api_registry` 会
+        # `from packaging import version` ⇒ **宿主缺 packaging 时这里会炸**
+        # （2026-09-24 GitHub Actions 实测：26.15 报 ModuleNotFoundError: packaging）。
+        # 原则：**一个可选出口不许把整包搞挂** —— 退回 V1 并**大声说明**（不静默降级）。
+        print("[H3 Relay] ⚠️ V3 出口加载失败，已回退到 V1：%s: %s"
+              % (type(_v3_err).__name__, _v3_err))
+        print("[H3 Relay]    修 V3：确认宿主 ComfyUI 完整（含 comfy_api）且已装 packaging；"
+              "要显式用 V1：设 H3RELAY_NODE_API=v1 后重启")
+        NODE_API = "v1"
 
+if NODE_API == "v3":
     NODE_CLASS_MAPPINGS = None
     NODE_DISPLAY_NAME_MAPPINGS = None
     __all__ = ["comfy_entrypoint", "WEB_DIRECTORY"]
 else:
-    from .nodes import (                                 # noqa: F401
+    from .nodes import (                                     # noqa: F401
         NODE_CLASS_MAPPINGS,
         NODE_DISPLAY_NAME_MAPPINGS,
     )

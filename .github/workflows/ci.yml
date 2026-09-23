@@ -1,9 +1,16 @@
-# 回归三件套（CPU-only、零 GPU、秒级）
+# 回归五件套（CPU-only、零 GPU、秒级）
 #
-# 三个脚本在失败时都会以非零退出码退出（tests/test_relay_core.py:1822、
-# tools/review_050.py:864、tools/smoke_nodes.py:236），所以不需要额外解析输出。
+# 失败时都会以非零退出码退出（tests/test_relay_core.py:1822、tools/review_050.py:864、
+# tools/smoke_nodes.py:236、tools/assert_default_exit.py、tests/test_v3_schema.py），
+# 所以不需要额外解析输出。
 #
-# 期望值：384/0（算法层）、82/0（文档—代码一致性）、15/0（节点层冒烟）、29/0（Chain 纯函数，node）。
+# 期望值：
+#   · 384/0  tests/test_relay_core.py      算法层
+#   ·  82/0  tools/review_050.py           文档—代码一致性
+#   ·  15/0  tools/smoke_nodes.py          节点层冒烟
+#   ·   3/3  tools/assert_default_exit.py  默认出口 = V3（必须单进程、不设环境变量）
+#   ·  65/0  tests/test_v3_schema.py       V3 与 V1 逐字段一致（8 节点 / 111 input）
+#   ·  29/0  tests/test_prompt_dispatch.mjs  Chain 词分发纯函数（node）
 # 改动后若这些数字变了，请同步 CONTRIBUTING.md「方面数/断言数」与 tests 头注释。
 name: ci
 
@@ -31,12 +38,16 @@ jobs:
       # ComfyUI 的 node_helpers 会 import PIL（Pillow），comfy.* 要 numpy；
       # aiohttp 是宿主自带的 Web 框架（`__init__.py` 注册 /h3relay/concat 路由要它），
       # 回归 26.15 会离线加载这段路由逻辑 ⇒ 缺它就直接 ModuleNotFoundError（Linux CI 实测）。
+      # packaging 同理：默认出口自 2026-09-24 起是 V3，而 V3 走 comfy_api.latest →
+      # comfy_api.internal.api_registry → `from packaging import version` ⇒ 缺它 26.15 会红
+      # （2026-09-24 Linux CI 实测）。本包已加「V3 失败 ⇒ 回退 V1」兜底，但那样 CI 就只在测 V1，
+      # 所以这里**必须**装上，让 CI 真的测到默认出口。
       # 这里不装 ComfyUI 的完整 requirements（那会拖来 CUDA 版的 torch），只补最小集。
       - name: Install runtime deps
         run: |
           python -m pip install --upgrade pip
           pip install --index-url https://download.pytorch.org/whl/cpu torch
-          pip install "safetensors>=0.4" pillow numpy "av>=17" aiohttp
+          pip install "safetensors>=0.4" pillow numpy "av>=17" aiohttp packaging
 
       - name: Regression trio
         env:
@@ -46,6 +57,22 @@ jobs:
           python tests/test_relay_core.py   # 期望 384/0
           python tools/review_050.py        # 期望 82/0
           python tools/smoke_nodes.py       # 期望 15/0
+
+      # 默认出口 = V3（2026-09-24 从 v1 切过来）。**必须单跑一个进程**：
+      # test_v3_schema 会把 H3RELAY_NODE_API 写死成 v3，同进程里验不出"默认"。
+      - name: Assert default exit is v3
+        env:
+          COMFYUI_PATH: ${{ runner.temp }}/ComfyUI
+          PYTHONPATH: ${{ runner.temp }}/ComfyUI
+        run: python tools/assert_default_exit.py   # 期望 3/3
+
+      # V3 外壳与 V1 的逐字段一致性（8 节点 / 111 个 input，零 GPU）。
+      # 默认出口现在是 V3 ⇒ 它必须被 CI 覆盖，否则默认出口坏了没人知道。
+      - name: V3 schema parity (vs V1)
+        env:
+          COMFYUI_PATH: ${{ runner.temp }}/ComfyUI
+          PYTHONPATH: ${{ runner.temp }}/ComfyUI
+        run: python tests/test_v3_schema.py       # 期望 65/0
 
       # Chain 词分发的纯函数（与浏览器里跑的是同一份 web/relay_kit_prompt.js）
       - name: Chain prompt dispatch (node)

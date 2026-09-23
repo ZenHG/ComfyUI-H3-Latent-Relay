@@ -56,12 +56,36 @@ node tests/test_prompt_dispatch.mjs      # 期望 29/0
 `prompt_target` 三种写法、JSON 格**只改 prompt 字段**、畸形输入一律**拒写**，
 以及「同一段重跑不许在成片里算成两段」（`collectStageIds` 按段号存 id）。
 
-## tools/ 下的另两个
+## V3 外壳与默认出口（零 GPU、秒级）
+
+```bash
+COMFYUI_PATH=<根> python tests/test_v3_schema.py        # 期望 65/0
+COMFYUI_PATH=<根> python tools/assert_default_exit.py   # 期望 3/3
+```
+
+`test_v3_schema.py` 验的是 **V3 与 V1 的逐字段一致**：8 个节点、111 个 input 的
+**id 序列与顺序** / 取值 / `optional` / Combo `options` **全序** / outputs 路数与显示名 /
+`is_output_node` / 显示名 / category。为什么必须机检：老工作流的 `widgets_values` 是**按位置**存的，
+参数表错一位就是**用户参数静默错位**（不报错）。
+
+`assert_default_exit.py` 锁的是**"默认出口 = V3"这件事本身**。它必须**单跑一个进程**且
+**不设任何环境变量** —— `test_v3_schema.py` 会把 `H3RELAY_NODE_API` 写死成 `v3`，
+同进程里验不出"默认"。补它的理由：2026-09-24 把默认从 v1 切到 v3 时，
+**转移前的所有测试要么在验 v1、要么强制 v3，没有一条断言锁住"默认"**。
+
+> ⚠️ V3 出口依赖宿主 `comfy_api`，而 `comfy_api.internal.api_registry` 会
+> `from packaging import version`。宿主缺 `packaging` 时 V3 出口会 `ModuleNotFoundError`
+> （2026-09-24 Linux CI 实测）⇒ 本包已加「**V3 加载失败 ⇒ 回退 V1 + 大声警告**」的兜底
+> （一个可选出口不许把整包搞挂），并把 `packaging` 写进 `requirements.txt` 与 CI 依赖。
+
+## tools/ 下的另四个
 
 | 工具 | 判什么 | 期望 |
 |---|---|---|
 | `tools/review_050.py` | 文档—代码一致性（节点清单 / 参数表 / 断言数 / 版本号 / 示例图槽位 / **三条铁律**） | **82/0** |
 | `tools/smoke_nodes.py` | 节点层功能冒烟（续接七件真跑一遍；🔍 放大节点要上游权重，不在冒烟内） | **15/0** |
+| `tools/assert_default_exit.py` | 默认出口 = V3（3 条） | **3/3** |
+| `tools/sync_deploy_check.py` | 部署副本与指定提交的提交态一致 | 全 `OK` |
 
-详见 [`tools/README.md`](../tools/README.md)。CI 会跑这三个（`.github/workflows/ci.yml`），
-三者失败时均以非零退出码退出。
+详见 [`tools/README.md`](../tools/README.md)。CI 会跑**五项**（`.github/workflows/ci.yml`）：
+回归三件套 + 默认出口断言 + V3 逐字段机检，失败时均以非零退出码退出。
