@@ -114,15 +114,19 @@ git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git
 
 | 出口 | 怎么开 | 说明 |
 |---|---|---|
-| **V1**（默认） | 不设该变量，或 `H3RELAY_NODE_API=v1` | 传统 `NODE_CLASS_MAPPINGS`。与 0.6.x **逐位一致** |
-| **V3** | `H3RELAY_NODE_API=v3` | 新版 `io.ComfyNode` + `comfy_entrypoint()`（官方 schema） |
+| **V3**（**默认**，2026-09-24 起） | 不设该变量，或 `H3RELAY_NODE_API=v3` | 新版 `io.ComfyNode` + `comfy_entrypoint()`（官方 schema） |
+| **V1**（回退用） | `H3RELAY_NODE_API=v1` | 传统 `NODE_CLASS_MAPPINGS`。与 0.6.x **逐位一致** |
 
 **节点名、输入输出的顺序与取值、默认值、组合项、显示名全部相同**
 （8 个节点、111 个 input 逐项机检一致，见 `tests/test_v3_schema.py`）⇒ 已有工作流、脚本、API 图
 **两条出口都能直接跑**，切换**不需要改图**。
 
+**为什么默认切到 V3**：官方明确「今后节点功能的扩展也只会添加到 V3 架构中」，V1 拿不到新能力；
+且本包 V3 出口已过两道实测闸门 —— 65 项逐字段机检 ＋ 2 段真实链（362/362 帧守恒、流拷贝无损、
+PCM 边车被拼接路由取到）。
+
 ```bash
-H3RELAY_NODE_API=v3 python main.py     # 试 V3 出口
+H3RELAY_NODE_API=v1 python main.py     # 万一 V3 有问题，一行回退到 V1（两条出口代码都在）
 ```
 
 ⚠️ **为什么必须"二选一"而不是同时导出**：宿主加载器是

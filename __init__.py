@@ -49,8 +49,11 @@ import os as _os
 #     `elif hasattr(module,"comfy_entrypoint"): ...`
 #   （ComfyUI/nodes.py:2295-2337）—— V1 分支命中即 return ⇒ 同时导出两者时 **V3 永不生效**。
 #   所以 V3 模式下把 NODE_CLASS_MAPPINGS **显式设为 None**（宿主的判据含 "is not None"）。
-# 默认保持 v1 ⇒ 与 0.6.8 逐位一致；要试 V3 就设环境变量 H3RELAY_NODE_API=v3 后重启。
-NODE_API = _os.environ.get("H3RELAY_NODE_API", "v1").strip().lower()
+# 默认 **v3**（2026-09-24 切换）：V3 出口已过 65 项逐字段机检（8 节点 / 111 个 input
+# 的顺序·取值·组合项全序与 V1 一致）＋ 2 段真实链验证（362/362 帧守恒 · 流拷贝无损 ·
+# PCM 边车被拼接路由取到）。
+# ⚠️ 回退到 V1：设 H3RELAY_NODE_API=v1 后重启 —— 两条出口的代码都还在，只是默认换了。
+NODE_API = _os.environ.get("H3RELAY_NODE_API", "v3").strip().lower()
 
 if NODE_API == "v3":
     from .v3.entrypoint import comfy_entrypoint          # noqa: F401
