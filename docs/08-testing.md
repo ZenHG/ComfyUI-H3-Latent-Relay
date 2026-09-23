@@ -96,3 +96,34 @@ Combo `options` **全序** / outputs 路数与显示名 / `is_output_node` / 显
 
 详见 [`tools/README.md`](../tools/README.md)。CI 会跑**五项**（`.github/workflows/ci.yml`）：
 回归三件套 + 默认出口断言 + V3 逐字段机检，失败时均以非零退出码退出。
+
+## 最小可运行分发集（给用户/分发用，不是开发件）
+
+```bash
+python tools/make_minimal_bundle.py --zip     # → dist/ComfyUI-H3-Latent-Relay(.zip)
+```
+
+**19 文件 / 626 KB**（zip 213 KB），只带：
+
+| 组 | 文件 |
+|---|---|
+| 运行必需（8） | `__init__.py` · `relay_core.py` · `nodes.py` · `layout_contract.py` · `v3/`×4 |
+| 前端（2） | `web/relay_kit_chain.js` · `web/relay_kit_prompt.js` |
+| 示例（3） | `examples/` 的两个工作流 + 其 README |
+| 元数据/法律/必读（6） | `requirements.txt` · `pyproject.toml` · `LICENSE` · `licenses/Apache-2.0.txt` · `THIRD-PARTY-NOTICES.md` · `README.md` |
+
+**不带**：`docs/`(9) · `tests/`(4) · `tools/`(10) · `.github/`(4) · `CHANGES.md` ·
+`CONTRIBUTING.md` · `CODE_OF_CONDUCT.md` · `SECURITY.md` · `.gitattributes` · `.gitignore`。
+
+**这个脚本做三件事，缺一不可**：
+1. **清单与静态 import 推导交叉校验** —— 从 `__init__.py` 递归找出真正会被 import 的本包文件
+   （含各级父包的 `__init__.py` 这种隐式依赖），**必须与清单逐一相等**
+   ⇒ 将来有人新增模块却忘了改清单，会**当场报错**，而不是让用户先撞到 `ImportError`；
+2. 写出 `dist/`（幂等；`--force` 才覆盖，且只删自己产出的目录）；
+3. **自验**：把产出目录当**独立包**加载，断言 8 个节点齐全、默认出口 `v3`（未回退）、
+   `WEB_DIRECTORY` 有前端文件、节点层异常上下文仍在，
+   并断言 **没有一个本包模块来自原仓**（证明这份副本自足）。
+   `--verify-only <目录>` 可只跑自验。
+
+> 实测：把 zip 解压到**仓外**（另一块盘）加载，8 节点 / 槽位 / 默认出口 / 前端 / 异常上下文
+> 全部通过，来自原仓的模块数 = **0**。

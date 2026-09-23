@@ -22,6 +22,9 @@ Thumbs.db
 .idea/
 *.swp
 
+# ---- 构建产物：最小分发集（make_minimal_bundle.py 产出）----
+dist/
+
 # ---- 日志 / 本地缓存 / 测试产物 ----
 *.log
 .coverage
