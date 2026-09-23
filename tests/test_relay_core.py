@@ -423,6 +423,23 @@ except RuntimeError as e:
 except Exception as e:  # noqa: BLE001
     check("9.5 run_id 有值但无文件 → FileNotFoundError", False, "抛的是 %s" % type(e).__name__)
 
+# 9.6 异常上下文（#3）：**非本节点**抛的裸异常必须被补上「节点名 + 段号」。
+#     本包节点层自己写的错误文案是给用户看的操作指引（含"二选一"做法）；但 relay_core /
+#     上游库冒上来的异常是裸的（FileNotFoundError、KeyError…），用户看不出是哪个节点、哪一段。
+#     判据：走 LatentLoad —— 它有 stage_index，且缺文件时抛的是 **relay_core** 的 FileNotFoundError
+#     （属于「该包装」的那一类；节点自己 raise 的那类按约束 B 会被原样放行）。
+#     ⚠️ expect_raise 只吃一个 needle，装不下「两个都要在」⇒ 这一条自己写 try/except。
+try:
+    NODES.H3RelayLatentLoad().load(run_id="unittest_errctx", stage_index=5)
+    check("9.6 异常上下文含节点名与段号（不是只判『抛异常』）", False, "竟然没报错")
+except RuntimeError as e:
+    _m = str(e)
+    check("9.6 异常上下文含节点名与段号（不是只判『抛异常』）",
+          "H3RelayLatentLoad" in _m and "第 5 段" in _m, _m.splitlines()[0][:90])
+except Exception as e:  # noqa: BLE001
+    check("9.6 异常上下文含节点名与段号（不是只判『抛异常』）",
+          False, "抛的是 %s（应当被包成 RuntimeError）" % type(e).__name__)
+
 # ---------------------------------------------------------------- 第 10 组：latent 取流对非 NestedTensor 的健壮性
 print()
 print("[10] streams_from_latent：不能把普通张量当 NestedTensor 拆 batch 维")

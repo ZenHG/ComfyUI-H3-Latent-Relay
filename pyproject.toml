@@ -1,18 +1,18 @@
 # 仅用于元数据（ComfyUI-Manager / Comfy Registry 会读）。
 # 不声明 [build-system]：本包是 ComfyUI 自定义节点，不做 pip 打包安装。
+#
+# ⚠️ 表归属纪律（2026-09-23 修 #11）：`keywords` / `classifiers` / `dependencies` **必须在 [project]
+#    段内**。它们曾排在 [project.urls] 之后 ⇒ 按 TOML 规则归属 urls 表 ⇒ 宿主解析器读不到
+#    （`comfy_config/config_parser.py` 读的是 project 段）⇒ 依赖声明与平台标签**从未生效**，从 v0.1 起。
+#    新增字段时请勿再放到 [project.urls] 后面。
 [project]
 name = "comfyui-h3-relay-kit"
 version = "0.6.8"
 description = "MiniMax-H3 多段续接的 latent 桥：上一段 AV latent 直接切尾段钉进本段 conditioning，零重编码。"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "ZenHG" }]
-# 第三方署名：THIRD-PARTY-NOTICES.md；随包分发的许可全文：LICENSE、licenses/Apache-2.0.txt
-# ⚠️ 运行时宿主 ComfyUI 是 GPL-3.0（不复制其代码，但进程内 import），见 THIRD-PARTY-NOTICES.md §一·C
-[project.urls]
-Homepage = "https://github.com/ZenHG/ComfyUI-H3-Relay-Kit"
-Issues = "https://github.com/ZenHG/ComfyUI-H3-Relay-Kit/issues"
 keywords = ["comfyui", "minimax", "h3", "video", "continuation", "latent"]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -22,6 +22,11 @@ classifiers = [
 dependencies = [
     "safetensors>=0.4",
 ]
+# 第三方署名：THIRD-PARTY-NOTICES.md；随包分发的许可全文：LICENSE、licenses/Apache-2.0.txt
+# ⚠️ 运行时宿主 ComfyUI 是 GPL-3.0（不复制其代码，但进程内 import），见 THIRD-PARTY-NOTICES.md §一·C
+[project.urls]
+Homepage = "https://github.com/ZenHG/ComfyUI-H3-Relay-Kit"
+Issues = "https://github.com/ZenHG/ComfyUI-H3-Relay-Kit/issues"
 
 [tool.ruff]
 line-length = 120
@@ -32,8 +37,12 @@ exclude = ["__pycache__", ".git"]
 select = ["E", "F", "W"]
 ignore = ["E501"]
 
-# 若要发布到 Comfy Registry，取消注释并填上你自己的 PublisherId（在 registry.comfy.org 注册后获得）
-# [tool.comfy]
+# 宿主版本下限：用**官方字段**（宿主 `comfy_config/config_parser.py` 读 comfy_data["requires-comfyui"]）。
+# ComfyUI 启动时真的会读它 —— 比只写在注释或 README 里强。
+[tool.comfy]
+requires-comfyui = ">=0.37.0"
+
+# 若要发布到 Comfy Registry，再取消注释并填上 PublisherId（在 registry.comfy.org 注册后获得）
 # PublisherId = "your-publisher-id"
 # DisplayName = "H3 Relay Kit"
 # Icon = ""

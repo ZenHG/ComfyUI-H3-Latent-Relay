@@ -38,6 +38,8 @@
 
 from __future__ import annotations
 
+import functools
+import inspect
 import json
 import math
 import os
@@ -46,6 +48,95 @@ import folder_paths
 
 from . import relay_core as CORE
 from . import layout_contract as CONTRACT
+
+
+# ============================================================================
+# 节点层异常上下文（#3）
+# ============================================================================
+# 节点抛错时，用户只看到 relay_core 内部的一句话（如「list index out of range」），
+# 不知道是哪个节点、哪一段、什么入参 ⇒ 排查困难。这里包一层，把
+# 「节点名 + 段号 + 关键入参实值」拼到消息前，**原始错误全文原样带上**。
+#
+# 两条硬约束（照做，否则门槛红）：
+#   A. **保留原始异常的完整文本**（不许只取第一行）—— 有断言的 needle 落在异常文本第 2 行。
+#   B. **节点自己 raise 的中文错误一律原样放行** —— 判据 = 异常的**最深来源帧**是否在本文件。
+#      本包节点层的错误文案是精心写的（含操作指引），再包一层只会把好信息变成噪音。
+_ERRCTX_VAL_MAX = 60
+# 本文件绝对路径（模块加载时算一次）：约束 B 靠它判断异常来源是不是「本节点自己」
+_THIS_FILE = os.path.abspath(__file__)
+
+
+def _errctx_val(v):
+    """入参实值 → 短字符串。只放标量；张量/路径一律只印类型，免得把消息灌爆。"""
+    if v is None or isinstance(v, (int, float, bool)):
+        return str(v)
+    if isinstance(v, str):
+        return v if len(v) <= _ERRCTX_VAL_MAX else v[:_ERRCTX_VAL_MAX] + "…"
+    return "<%s>" % type(v).__name__
+
+
+def _errctx_origin_is_self(exc) -> bool:
+    """异常**最深来源帧**是否在本文件 ⇒ 是本节点自己 raise 的（约束 B 的机器判据）。"""
+    tb = exc.__traceback__
+    if tb is None:
+        return False
+    while tb.tb_next is not None:
+        tb = tb.tb_next
+    return os.path.abspath(tb.tb_frame.f_code.co_filename) == _THIS_FILE
+
+
+def _node_errors(*keys):
+    """节点方法装饰器：异常时补「节点名 + 段号 + 关键入参」，并原样带上原始错误全文。
+
+    签名与返回形状**零变化**：functools.wraps 保留 __wrapped__ ⇒ 宿主按 FUNCTION
+    取到的方法、以及 inspect.signature 看到的签名，都跟没装饰时一样。
+    """
+    def deco(fn):
+        # 装饰时把默认值算好（运行期不再反射），免得每段执行都付一次参数表成本
+        try:
+            _defaults = {k: p.default for k, p in inspect.signature(fn).parameters.items()
+                         if k != "self" and p.default is not inspect.Parameter.empty}
+        except (TypeError, ValueError):
+            _defaults = {}
+
+        @functools.wraps(fn)
+        def wrapper(self, *args, **kwargs):
+            try:
+                return fn(self, *args, **kwargs)
+            except Exception as exc:       # noqa: BLE001
+                if _errctx_origin_is_self(exc):
+                    raise                  # 约束 B：本节点自己的中文错误 → 原样放行
+                try:
+                    bound = inspect.signature(fn).bind_partial(self, *args, **kwargs).arguments
+                except Exception:          # noqa: BLE001
+                    bound = {}
+                # 段号：能取到就写「第 N 段」，取不到就明说没有 —— **不伪造**（本仓纪律）
+                stage = bound.get("stage_index")
+                if stage is None:
+                    seg = "段号未提供（本节点无 stage_index 入参）"
+                else:
+                    try:
+                        seg = "第 %d 段" % int(stage)
+                    except (TypeError, ValueError):
+                        seg = "段号=%r" % (stage,)
+                vals = []
+                for k in keys:
+                    if k in bound:
+                        vals.append("%s=%s" % (k, _errctx_val(bound[k])))
+                    elif k in _defaults:
+                        vals.append("%s=%s" % (k, _errctx_val(_defaults[k])))
+                # 约束 A：str(exc) **全文**嵌进去（不许 splitlines()[0]）
+                raise RuntimeError(
+                    "【%s】处理失败：%s；入参 %s。\n"
+                    "原因：%s\n"
+                    "（原始异常：%s）"
+                    % (type(self).__name__, seg, "、".join(vals) or "无",
+                       exc, type(exc).__name__)
+                ) from exc
+
+        return wrapper
+
+    return deco
 
 
 CATEGORY = "H3 Relay Kit"
@@ -312,6 +403,7 @@ class H3RelayLatentUpscale:
     DESCRIPTION = ("H3 AV latent 分块放大：拆包→逐块调上游学习式 3D 放大器（零去噪、只放大空间、时间维不动）"
                    "→回包保留原音频；块数自选，分块与整段结果等价。")
 
+    @_node_errors("chunks", "overlap", "align")
     def upscale(self, latent, model_name, mode, scale, width, height, megapixels,
                 chunks, overlap, align, precision, device, force_unload):
         import time
@@ -430,6 +522,7 @@ class H3RelayLatentSave:
     OUTPUT_NODE = True
     DESCRIPTION = "把本段 AV latent 落盘，供下一段做 latent 续接（零重编码）。"
 
+    @_node_errors("run_id")
     def save(self, latent, run_id, stage_index, note=""):
         path = _stage_path(run_id, stage_index)
         CORE.save_av_latent(latent, path, note=note)
@@ -474,6 +567,7 @@ class H3RelayLatentLoad:
     CATEGORY = CATEGORY
     DESCRIPTION = "读回上一段的 AV latent；第 1 段（stage_index=0）没有上一段时会明确报错。"
 
+    @_node_errors("run_id", "explicit_path")
     def load(self, run_id, stage_index, explicit_path=""):
         idx = int(stage_index) - 1
         explicit = (explicit_path or "").strip()
@@ -712,6 +806,7 @@ class H3RelayTrimAV:
         "（默认 settle_frames=0，只裁钉住区）；视频与音频同裁，避免重播与音画失步。"
     )
 
+    @_node_errors("trim_frames", "fps", "settle_frames", "save_pcm")
     def trim(self, images, trim_frames=0, fps=24.0, audio=None, settle_frames=0,
              seam_ghost=0, seam_ghost_alpha=0.5,
              settle_sharpen=0.0, settle_sharpen_frames=24,
@@ -1065,6 +1160,7 @@ class H3RelayChain:
         "状态显示在 status 格子里（点了没反应就看它）。"
     )
 
+    @_node_errors("segments")
     def noop(self, segments=5, **kwargs):
         # **kwargs 吞掉 status / prompts / prompt_target / auto_concat / concat_name
         # 这类只给前端读的输入（它们不参与执行）。
@@ -1256,6 +1352,7 @@ class H3RelayCopyBridge:
         "⚠️ 与「Latent 桥」（conditioning 钉帧经第 4 路折叠进复合桥，不另设节点）。"
     )
 
+    @_node_errors("context_frames", "mask_mode", "run_id")
     def bridge(self, latent, context_latent, context_frames,
                mask_mode="hard", taper_tokens=4, seam_min=0.10, pin_audio=True,
                ramp_top=0.25, ramp_tokens=0,
@@ -1530,6 +1627,7 @@ class H3RelayPost:
         "全部默认关闭；guide 接裁重叠节点的 prev_tail 才有「缝的另一侧」可对齐。"
     )
 
+    @_node_errors("match_prev", "hist_match", "wb_match")
     def apply(self, images, guide=None,
               match_prev=0.0, match_prev_frames=12,
               match_prev_gain_max=1.15, match_prev_offset_max=0.06,
@@ -1847,6 +1945,7 @@ class H3RelayAudioSeam:
             return None, "（joined 失败：%r）" % (e,)
         return j, rep
 
+    @_node_errors("patch_seconds", "tile_seconds", "bed_stage")
     def seam(self, audio, run_id, stage_index, patch_seconds=0.0, tile_seconds=0.0,
              fade_seconds=0.25, bed_stage=0, note="",
              bed_select=CORE.AUDIO_SEAM_BED_SELECT,

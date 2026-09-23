@@ -13,7 +13,7 @@ python tests/test_relay_core.py
 `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。也支持 `pytest tests/`
 （找不到 ComfyUI 根目录时自动 skip，不会崩）。
 
-**383 项断言，零 GPU、不加载模型**，覆盖二十七个方面：
+**384 项断言，零 GPU、不加载模型**，覆盖二十七个方面：
 
 | 组 | 覆盖 |
 |---|---|

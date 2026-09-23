@@ -65,9 +65,16 @@ git clone https://github.com/ZenHG/ComfyUI-H3-Relay-Kit.git
 
 依赖只用 `torch`（**顶层 import**，缺了整包注册失败）与 `safetensors`（延迟 import，缺了只在落盘那步报错）。
 
-**宿主要求**：本包硬依赖带 MiniMax-H3 支持的 ComfyUI（需要 `comfy_extras/nodes_minimax_h3.py`
+**宿主要求**：**ComfyUI ≥ 0.37.0**（已在 `pyproject.toml` 的 `[tool.comfy] requires-comfyui` 用
+**官方字段**声明 —— 宿主 `comfy_config/config_parser.py` 启动时真的会读它，比只写在这里强）。
+本包硬依赖带 MiniMax-H3 支持的 ComfyUI（需要 `comfy_extras/nodes_minimax_h3.py`
 与消费 `minimax_keyframes` / `minimax_refs` 的 `comfy/model_base.py`）。装到不含 H3 的旧版
 ComfyUI 上，节点能注册但**续接静默无效**——用前先确认 ComfyUI 版本。
+
+> 版本下限的依据（不是拍脑袋）：本包的 `web/` 前端靠宿主 `WEB_DIRECTORY` 机制挂载、
+> 元数据靠 `comfy_config` 解析 `pyproject.toml` —— 这两条在 **0.37.0 上实测通过**（零 GPU 探针）。
+> Python 侧写的是 `requires-python = ">=3.10"`，但本包**未使用** 3.10+ 独有语法
+> （无 `match`、无新式联合类型），真要放宽到 3.9 亦无语法障碍 —— `>=3.10` 是刻意取的保守下限。
 
 **除一个可选节点外，不依赖任何第三方 H3 节点包**：`minimax_keyframes` / `minimax_refs` /
 `resolved_frame_index` 全是 ComfyUI **原生**协议，零 monkey patch、**零 patch 别人的包**。
@@ -504,7 +511,7 @@ curl -s http://127.0.0.1:8188/history/<prompt_id> | \
 ## 8. 离线自测
 
 ```bash
-python tests/test_relay_core.py         # 期望 383/0
+python tests/test_relay_core.py         # 期望 384/0
 node   tests/test_prompt_dispatch.mjs   # 期望 29/0（Chain 词分发纯函数，node 跑）
 python tools/review_050.py              # 期望 82/0（文档—代码一致性）
 python tools/smoke_nodes.py             # 期望 15/0（节点层冒烟）
@@ -519,7 +526,7 @@ python tools/concat_segments.py s1.mp4 s2.mp4 -o film.mp4 --json   # 退出码 0
 脚本会自动上溯定位 ComfyUI 根目录；装在别处时用
 `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。
 
-**383 项断言，零 GPU、不加载模型**，覆盖二十七个方面 —— 例如：
+**384 项断言，零 GPU、不加载模型**，覆盖二十七个方面 —— 例如：
 
 | 组 | 覆盖 |
 |---|---|
