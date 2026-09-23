@@ -8,8 +8,9 @@
 #   · 384/0  tests/test_relay_core.py      算法层
 #   ·  82/0  tools/review_050.py           文档—代码一致性
 #   ·  15/0  tools/smoke_nodes.py          节点层冒烟
-#   ·   3/3  tools/assert_default_exit.py  默认出口 = V3（必须单进程、不设环境变量）
-#   ·  65/0  tests/test_v3_schema.py       V3 与 V1 逐字段一致（8 节点 / 111 input）
+#   ·   4/4  tools/assert_default_exit.py  默认出口 = V3（契约 1 + 行为 3；必须单进程、不设环境变量）
+#   ·  58/0  tests/test_v3_schema.py       V3 与 V1 逐字段一致（**CI 里 7 节点 / 98 input**；
+#                                          本机装齐上游超分节点包时 65/0 / 8 节点 / 111 input）
 #   ·  29/0  tests/test_prompt_dispatch.mjs  Chain 词分发纯函数（node）
 # 改动后若这些数字变了，请同步 CONTRIBUTING.md「方面数/断言数」与 tests 头注释。
 name: ci
@@ -73,13 +74,16 @@ jobs:
           PYTHONPATH: ${{ runner.temp }}/ComfyUI
         run: python tools/assert_default_exit.py   # 期望 3/3
 
-      # V3 外壳与 V1 的逐字段一致性（8 节点 / 111 个 input，零 GPU）。
-      # 默认出口现在是 V3 ⇒ 它必须被 CI 覆盖，否则默认出口坏了没人知道。
+      # V3 外壳与 V1 的逐字段一致性（零 GPU）。默认出口现在是 V3 ⇒ 它必须被 CI 覆盖。
+      # ⚠️ CI 期望数是 **58/0（7 节点 / 98 input）**，不是本机的 65/0：
+      #    `H3RelayLatentUpscale` 要上游节点包 `MinimaxH3LatentUpscaler3D`，CI 里没装 ⇒
+      #    该节点诚实降级被跳过（不是失败；脚本会把实际节点数与 input 数打在结果行里）。
+      #    本机装齐上游包时为 65/0（8 节点 / 111 input）。
       - name: V3 schema parity (vs V1)
         env:
           COMFYUI_PATH: ${{ runner.temp }}/ComfyUI
           PYTHONPATH: ${{ runner.temp }}/ComfyUI
-        run: python tests/test_v3_schema.py       # 期望 65/0
+        run: python tests/test_v3_schema.py       # CI 期望 58/0（7 节点）
 
       # Chain 词分发的纯函数（与浏览器里跑的是同一份 web/relay_kit_prompt.js）
       - name: Chain prompt dispatch (node)

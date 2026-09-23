@@ -59,24 +59,31 @@ node tests/test_prompt_dispatch.mjs      # 期望 29/0
 ## V3 外壳与默认出口（零 GPU、秒级）
 
 ```bash
-COMFYUI_PATH=<根> python tests/test_v3_schema.py        # 期望 65/0
-COMFYUI_PATH=<根> python tools/assert_default_exit.py   # 期望 3/3
+COMFYUI_PATH=<根> python tests/test_v3_schema.py        # 本机 65/0（8 节点 / 111 input）
+COMFYUI_PATH=<根> python tools/assert_default_exit.py   # 期望 4/4
 ```
 
-`test_v3_schema.py` 验的是 **V3 与 V1 的逐字段一致**：8 个节点、111 个 input 的
-**id 序列与顺序** / 取值 / `optional` / Combo `options` **全序** / outputs 路数与显示名 /
-`is_output_node` / 显示名 / category。为什么必须机检：老工作流的 `widgets_values` 是**按位置**存的，
-参数表错一位就是**用户参数静默错位**（不报错）。
+`test_v3_schema.py` 验的是 **V3 与 V1 的逐字段一致**：节点 id 序列与顺序 / 取值 / `optional` /
+Combo `options` **全序** / outputs 路数与显示名 / `is_output_node` / 显示名 / category。
+为什么必须机检：老工作流的 `widgets_values` 是**按位置**存的，参数表错一位就是**用户参数静默错位**（不报错）。
 
-`assert_default_exit.py` 锁的是**"默认出口 = V3"这件事本身**。它必须**单跑一个进程**且
-**不设任何环境变量** —— `test_v3_schema.py` 会把 `H3RELAY_NODE_API` 写死成 `v3`，
-同进程里验不出"默认"。补它的理由：2026-09-24 把默认从 v1 切到 v3 时，
-**转移前的所有测试要么在验 v1、要么强制 v3，没有一条断言锁住"默认"**。
+> ⚠️ **CI 里是 58/0（7 节点 / 98 input），不是 65/0**：`H3RelayLatentUpscale` 需要上游节点包
+> `MinimaxH3LatentUpscaler3D`，CI 没装 ⇒ 该节点**诚实降级被跳过**（脚本会把实际节点数与 input 数
+> 打印在结果行上，不会假绿）。本机装齐上游包时才是 65/0（8 节点 / 111 input）。
 
-> ⚠️ V3 出口依赖宿主 `comfy_api`，而 `comfy_api.internal.api_registry` 会
-> `from packaging import version`。宿主缺 `packaging` 时 V3 出口会 `ModuleNotFoundError`
-> （2026-09-24 Linux CI 实测）⇒ 本包已加「**V3 加载失败 ⇒ 回退 V1 + 大声警告**」的兜底
-> （一个可选出口不许把整包搞挂），并把 `packaging` 写进 `requirements.txt` 与 CI 依赖。
+`assert_default_exit.py` 锁的是**"默认出口 = V3"这件事本身**（4 条：**契约层 1 条** =
+`NODE_API_DEFAULT == "v3"`，与环境无关；**行为层 3 条** = `NODE_CLASS_MAPPINGS is None` /
+`comfy_entrypoint` 可调用 / `WEB_DIRECTORY` 在）。它必须**单跑一个进程**且**不设任何环境变量**
+—— `test_v3_schema.py` 会把 `H3RELAY_NODE_API` 写死成 `v3`，同进程里验不出"默认"。
+
+补它的理由：2026-09-24 把默认从 v1 切到 v3 时，**转移前的所有测试要么在验 v1、要么强制 v3，
+没有一条断言锁住"默认"**。而它**第一次跑就抓到真问题**（CI 里 V3 出口其实加载不了）。
+
+> ⚠️ V3 出口要 `import comfy_api`，其传递闭包 = **宿主自己的整套 Python 依赖**
+> （2026-09-24 一天内连缺三个：`packaging` → `comfy-aimdo` → `tqdm`）。
+> 本包已加「**V3 加载失败 ⇒ 回退 V1 + 大声警告 + 留档原因**」的兜底
+> （一个可选出口不许把整包搞挂），并把 `packaging` / `comfy-aimdo` 写进 `requirements.txt`；
+> CI 侧改为**直接装宿主的 `requirements.txt`**（只排除 torch 与前端件），从此不再逐个补漏。
 
 ## tools/ 下的另四个
 
