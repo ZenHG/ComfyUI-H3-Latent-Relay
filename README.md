@@ -108,6 +108,33 @@ git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git
 
 ---
 
+### 2.2 节点 API 版本：V1（默认）/ V3
+
+本包同时提供两套节点定义，**同一时间只启用一套**（用环境变量切换，**改后需重启 ComfyUI**）：
+
+| 出口 | 怎么开 | 说明 |
+|---|---|---|
+| **V1**（默认） | 不设该变量，或 `H3RELAY_NODE_API=v1` | 传统 `NODE_CLASS_MAPPINGS`。与 0.6.x **逐位一致** |
+| **V3** | `H3RELAY_NODE_API=v3` | 新版 `io.ComfyNode` + `comfy_entrypoint()`（官方 schema） |
+
+**节点名、输入输出的顺序与取值、默认值、组合项、显示名全部相同**
+（8 个节点、111 个 input 逐项机检一致，见 `tests/test_v3_schema.py`）⇒ 已有工作流、脚本、API 图
+**两条出口都能直接跑**，切换**不需要改图**。
+
+```bash
+H3RELAY_NODE_API=v3 python main.py     # 试 V3 出口
+```
+
+⚠️ **为什么必须"二选一"而不是同时导出**：宿主加载器是
+`if 模块有 NODE_CLASS_MAPPINGS … return True` / `elif 模块有 comfy_entrypoint` ——
+V1 分支命中即返回，两套一起导出时 **V3 永不生效**。所以 V3 模式下本包把
+`NODE_CLASS_MAPPINGS` 显式置 `None`。
+
+> **V3 出口的已知差异（如实说明）**
+> * schema 在**包加载时**构造（V1 是惰性的，按需才调）⇒ 某个节点的参数表构造失败时，
+>   只会**跳过那一个节点**并打日志，其余节点照常加载（不会整包失效）。
+> * 前端 `web/` 与后端拼接路由 `POST /h3relay/concat` 在**两条出口下都照常工作**（已零 GPU 实测）。
+
 ## 3. 5 分钟跑通
 
 > 懒人路线：打开 `examples/minimal_relay_official.json`，把 4 个加载器的下拉改成你本机的模型文件，

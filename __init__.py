@@ -39,14 +39,34 @@ AV 打包 latent 适配器）：**未装那个包时本包照常加载**，只�
        （音轨默认 AAC 256k；要母版就把 `audio_out` 换成 `pcm_lossless`）
 """
 
-from .nodes import (
-    NODE_CLASS_MAPPINGS,
-    NODE_DISPLAY_NAME_MAPPINGS,
-)
+import os as _os
+
+# ============================================================================
+# 节点 API 出口开关（0.7.0）：v1（默认）｜v3
+# ============================================================================
+# ⚠️ 两条出口**必须互斥**：宿主加载器是
+#     `if hasattr(module,"NODE_CLASS_MAPPINGS") and ... is not None: ... return True`
+#     `elif hasattr(module,"comfy_entrypoint"): ...`
+#   （ComfyUI/nodes.py:2295-2337）—— V1 分支命中即 return ⇒ 同时导出两者时 **V3 永不生效**。
+#   所以 V3 模式下把 NODE_CLASS_MAPPINGS **显式设为 None**（宿主的判据含 "is not None"）。
+# 默认保持 v1 ⇒ 与 0.6.8 逐位一致；要试 V3 就设环境变量 H3RELAY_NODE_API=v3 后重启。
+NODE_API = _os.environ.get("H3RELAY_NODE_API", "v1").strip().lower()
+
+if NODE_API == "v3":
+    from .v3.entrypoint import comfy_entrypoint          # noqa: F401
+
+    NODE_CLASS_MAPPINGS = None
+    NODE_DISPLAY_NAME_MAPPINGS = None
+    __all__ = ["comfy_entrypoint", "WEB_DIRECTORY"]
+else:
+    from .nodes import (                                 # noqa: F401
+        NODE_CLASS_MAPPINGS,
+        NODE_DISPLAY_NAME_MAPPINGS,
+    )
+
+    __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
 
 WEB_DIRECTORY = "./web"
-
-__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
 
 __version__ = "0.6.8"
 
