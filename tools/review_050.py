@@ -958,30 +958,44 @@ _v3_input = int(_m_v3.group(4)) if _m_v3 else -1
 print("      实跑：test_v3_schema 通过 %s（失败 %s）／%s 节点 · %s input"
       % (_v3_pass, _m_v3.group(2) if _m_v3 else "?", _v3_nodes, _v3_input))
 
+# ⚠️ **语义是「当前环境的真值 ∈ 文档声明集合」**，不是「所有声明都等于真值」——
+#   本包有**两种合法环境**：宿主 `nodes` 可导入（本机 8 节点 / 112 input）与不可导入
+#   （CI 7 节点 / 99 input，Upscale 被逐节点容错跳过）。**两个数并排写是正确形态，不是漂移。**
+#   🔴 我 2026-09-25 曾把它写成「节点数恒为 8、两边一致」⇒ **被 CI 打回**（run 36116073154）：
+#      真实机制是 `_comfy_registry()` 抛 `ModuleNotFoundError` 而 `_upscaler_module()`
+#      只 `except RuntimeError` ⇒ 异常穿透 ⇒ INPUT_TYPES 抛 ⇒ 节点被跳过。
+#      复现法：`sys.modules["nodes"] = None` 后跑 test_v3_schema。
 _v3_docs = {
     "ci.yml": _ci,
     "docs/08-testing.md": open(os.path.join(KIT, "docs", "08-testing.md"), encoding="utf-8").read(),
     "README.md": _rd,
     "__init__.py": open(os.path.join(KIT, "__init__.py"), encoding="utf-8").read(),
 }
-_bad_v3 = []
+_decl_in, _decl_nd, _decl_ps = set(), set(), set()
 for _fn, _txt in _v3_docs.items():
-    for _val in _re.findall(r"(\d+)\s*个?\s*input", _txt):
-        if int(_val) != _v3_input:
-            _bad_v3.append("%s: input=%s（应 %d）" % (_fn, _val, _v3_input))
-    for _val in _re.findall(r"(\d+)\s*项逐字段", _txt):
-        if int(_val) != _v3_pass:
-            _bad_v3.append("%s: 项数=%s（应 %d）" % (_fn, _val, _v3_pass))
+    _decl_in.update(int(_v) for _v in _re.findall(r"(\d+)\s*个?\s*input", _txt))
+    _decl_ps.update(int(_v) for _v in _re.findall(r"(\d+)\s*项逐字段", _txt))
     for _ln in _txt.splitlines():
         if "input" in _ln:                       # 节点数只认"与 input 同行"的那种写法
-            for _val in _re.findall(r"(\d+)\s*个?\s*节点", _ln):
-                if int(_val) != _v3_nodes:
-                    _bad_v3.append("%s: 节点=%s（应 %d）" % (_fn, _val, _v3_nodes))
+            _decl_nd.update(int(_v) for _v in _re.findall(r"(\d+)\s*个?\s*节点", _ln))
         if "test_v3_schema.py" in _ln:           # `N/0` 双向认（数字在文件名前后都抓）
-            for _val in _re.findall(r"(\d+)/0", _ln):
-                if int(_val) != _v3_pass:
-                    _bad_v3.append("%s: %s/0（应 %d/0）" % (_fn, _val, _v3_pass))
-ck("H3h V3 机检的节点数 / input 数 / 项数在 ci.yml·docs/08·README·__init__ 与实跑一致",
+            _decl_ps.update(int(_v) for _v in _re.findall(r"(\d+)/0", _ln))
+print("      声明集合：input %s ｜ 节点 %s ｜ 项数 %s"
+      % (sorted(_decl_in), sorted(_decl_nd), sorted(_decl_ps)))
+
+_bad_v3 = []
+if _v3_input not in _decl_in:
+    _bad_v3.append("input 真值 %d 不在声明 %s 里" % (_v3_input, sorted(_decl_in)))
+if _v3_nodes not in _decl_nd:
+    _bad_v3.append("节点数真值 %d 不在声明 %s 里" % (_v3_nodes, sorted(_decl_nd)))
+if _v3_pass not in _decl_ps:
+    _bad_v3.append("项数真值 %d 不在声明 %s 里" % (_v3_pass, sorted(_decl_ps)))
+for _nm, _st in (("input", _decl_in), ("节点数", _decl_nd), ("项数", _decl_ps)):
+    if len(_st) > 2:                             # 只有两种环境 ⇒ 每个数最多两种取值
+        _bad_v3.append("%s 声明了 %d 种取值 %s（本包只有两种环境 ⇒ 最多 2 种）"
+                       % (_nm, len(_st), sorted(_st)))
+ck("H3h V3 机检的真值出现在 ci.yml·docs/08·README·`__init__` 的声明里"
+   "（两种环境各一个数，每种最多 2 个取值）",
    not _bad_v3 and _v3_pass > 0, "%d 处：%s" % (len(_bad_v3), _bad_v3[:6]))
 
 # ============================================================================

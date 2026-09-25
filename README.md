@@ -124,7 +124,8 @@ git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git
 | **V1**（回退用） | `H3RELAY_NODE_API=v1` | 传统 `NODE_CLASS_MAPPINGS`。与 0.6.x **逐位一致** |
 
 **节点名、输入输出的顺序与取值、默认值、组合项、显示名全部相同**
-（8 个节点、112 个 input 逐项机检一致，见 `tests/test_v3_schema.py`）⇒ 已有工作流、脚本、API 图
+（8 个节点、112 个 input 逐项机检一致，见 `tests/test_v3_schema.py`；CI 里因宿主 `nodes`
+导不进来会少一个 `H3RelayLatentUpscale` ⇒ 那边是 7 节点 / 99 input，属**设计内降级**）⇒ 已有工作流、脚本、API 图
 **两条出口都能直接跑**，切换**不需要改图**。
 
 **为什么默认切到 V3**：官方明确「今后节点功能的扩展也只会添加到 V3 架构中」，V1 拿不到新能力；

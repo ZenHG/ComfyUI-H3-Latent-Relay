@@ -59,7 +59,7 @@ node tests/test_prompt_dispatch.mjs      # 期望 29/0
 ## V3 外壳与默认出口（零 GPU、秒级）
 
 ```bash
-COMFYUI_PATH=<根> python tests/test_v3_schema.py        # 69/0（8 节点 / 112 个 input）
+COMFYUI_PATH=<根> python tests/test_v3_schema.py        # 本机 69/0（8 节点 / 112 个 input）；CI 62/0（7 节点 / 99 input）
 COMFYUI_PATH=<根> python tools/assert_default_exit.py   # 期望 4/4
 ```
 
@@ -67,14 +67,21 @@ COMFYUI_PATH=<根> python tools/assert_default_exit.py   # 期望 4/4
 Combo `options` **全序** / outputs 路数与显示名 / `is_output_node` / 显示名 / category。
 为什么必须机检：老工作流的 `widgets_values` 是**按位置**存的，参数表错一位就是**用户参数静默错位**（不报错）。
 
-> 🔴 **2026-09-25 更正一个错误前提**：这里原先写「CI 的节点数 / input 数比本机少」
-> （前提 = CI 没装上游超分节点包）。**实测不成立** —— 宿主 ComfyUI **自带**注册
-> `latent_upscale_models` 目录（`folder_paths.py:43`），所以 `H3RelayLatentUpscale` 的
-> `INPUT_TYPES()` **永不抛错**，也就**永不会被 V3 entrypoint 的逐节点容错跳过**
-> ⇒ **CI 与本机恒为 8 节点 / 112 个 input**。
-> （验证手法：把上游节点从宿主注册表里摘掉，`get_node_list()` 仍是 8 个。）
-> 那组偏小的数字只活在注释里、无人断言 ⇒ CI 一直绿着而文档一直是错的。
-> 现在两边一致 ⇒ 这组数字已由 `tools/review_050.py` 的 **H3h** 机检盯着。
+> 🔴 **为什么这台机与 CI 的数是两个**（2026-09-25 实测钉死）：差的那一个节点是
+> `H3RelayLatentUpscale`，它的 `INPUT_TYPES()` 会走到 `_comfy_registry()`，而后者**第一步就
+> `import nodes`**。
+> · 宿主 `nodes` **可导入**（本机）⇒ 上游节点不在注册表 ⇒ `_upscaler_cls()` 抛 **RuntimeError**
+>   ⇒ `_upscaler_module()` 捕获它（**只** `except RuntimeError`）⇒ 退回 `get_filename_list`
+>   （宿主自带注册 `latent_upscale_models`）⇒ 不抛 ⇒ **8 节点 / 112 input**。
+> · 宿主 `nodes` **导不进来**（CI：只 clone 宿主、不装上游包）⇒ 抛的是 **ModuleNotFoundError**
+>   （ImportError 子类）⇒ **穿透**（没被捕获）⇒ INPUT_TYPES 抛 ⇒ V3 entrypoint 的逐节点容错
+>   跳过它 ⇒ **7 节点 / 99 input**。**这是设计内的降级，不是失败。**
+>
+> ⇒ 判据跟着环境走（`_HOST_REGISTRY_OK`），**两个数并排写才是正确形态**。
+> ⚠️ **别用"只把上游节点从注册表摘掉"来模拟 CI** —— 那复现的是「装了宿主、没装上游包」，
+> 那种情况**仍是 8 节点**。正确复现：`sys.modules["nodes"] = None` 后跑该测试。
+> 这组数字已由 `tools/review_050.py` 的 **H3h** 机检（语义 = 「当前环境的真值必须出现在
+> 声明集合里」，并限制每个数最多两种取值）。
 
 `assert_default_exit.py` 锁的是**"默认出口 = V3"这件事本身**（4 条：**契约层 1 条** =
 `NODE_API_DEFAULT == "v3"`，与环境无关；**行为层 3 条** = `NODE_CLASS_MAPPINGS is None` /

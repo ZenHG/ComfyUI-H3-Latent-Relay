@@ -116,20 +116,33 @@ print("[2] 扩展与节点清单")
 _ep = KIT.comfy_entrypoint
 _ext = asyncio.run(_ep()) if asyncio.iscoroutinefunction(_ep) else _ep()
 V3_NODES = asyncio.run(_ext.get_node_list())
-# 🔴 2026-09-25 修：原判据是 `len(V3_NODES) == (8 if _HOST_REGISTRY_OK else 7)`，**前提是错的**。
-#   它假设「宿主注册表不可用 ⇒ H3RelayLatentUpscale 会被跳过」。实测**不成立**：
-#     · 宿主 ComfyUI **自带**注册 `latent_upscale_models` 目录（`folder_paths.py:43`），
-#       不是上游超分包注册的 ⇒ `_upscale_model_names()` 走 `get_filename_list` 正常返回
-#       （最多给一个占位串），**永不抛错** ⇒ `INPUT_TYPES()` 不抛
-#       ⇒ V3 entrypoint 的逐节点容错**根本不会触发**。
-#     · 实测（把上游节点从宿主注册表摘掉，等价于"没装那个包"）：`get_node_list()` **仍是 8 个**。
-#   ⇒ **本包的节点数恒为 8**（8 个外壳的 schema 全部可构造），与环境无关。
-#     连带更正：`ci.yml` / `docs/08` 里"CI 是 7 节点 / 98 input"的说法，是**同一个错误前提**
-#     的产物 —— CI 与本机一样是 **8 节点 / 112 input**。数字已同步，且现在**两边一致
-#     ⇒ 这组数字终于可以被机检盯着了**（`tools/review_050.py` 的 H3h）。
-check("2.1 get_node_list() 返回 8 个节点（8 个外壳的 schema 全部可构造，与环境无关）",
-      len(V3_NODES) == 8,
-      "实际 %d ｜ 宿主注册表 %s" % (len(V3_NODES), "可用" if _HOST_REGISTRY_OK else "不可用"))
+# 🔴 为什么是 **8 或 7**（2026-09-25 实测钉死，别再猜 —— 我当天猜错过一次，被 CI 打回）：
+#
+#   `H3RelayLatentUpscale.INPUT_TYPES()` 要 `_upscale_model_names()` → `_upscaler_module()`
+#   → `_upscaler_cls()` → `_comfy_registry()`，而后者**第一步就 `import nodes`**。
+#
+#   · **宿主 `nodes` 可导入**（本机）⇒ 注册表里没有上游节点 ⇒ `_upscaler_cls()` 抛
+#     **RuntimeError** ⇒ `_upscaler_module()` **捕获它**（它只 `except RuntimeError`）
+#     ⇒ 退回 `folder_paths.get_filename_list("latent_upscale_models")`
+#     （**宿主自带注册该目录**，`folder_paths.py:43`）⇒ 正常返回（最多给一个占位串）
+#     ⇒ INPUT_TYPES 不抛 ⇒ **8 节点**。
+#   · **宿主 `nodes` 导不进来**（CI：只 clone 宿主、不装上游包，`import nodes` 失败）
+#     ⇒ `_comfy_registry()` 抛的是 **`ModuleNotFoundError`**（ImportError 子类）
+#     ⇒ `_upscaler_module()` **只 except RuntimeError ⇒ 异常穿透** ⇒ INPUT_TYPES 抛
+#     ⇒ V3 entrypoint 的逐节点容错跳过它 ⇒ **7 节点**。
+#
+#   ⇒ 判据**必须跟着环境走**，这正是 `_HOST_REGISTRY_OK` 的用途。
+#
+#   ⚠️ **别用"只把上游节点从注册表里摘掉"来模拟 CI** —— 那复现的是「装了宿主、没装上游包」，
+#      那种情况**仍然是 8 节点**。CI 的条件是「宿主 `nodes` 根本导不进来」。
+#      正确复现法：`sys.modules["nodes"] = None` 后跑本文件
+#      ⇒ 实测 `通过 59（失败 3）／7 节点 · 99 input`，与 CI 日志（run 36116073154）**一字不差**。
+#      探针留档在**本机临时目录**（不入库；路径见本地维护规范文档，公开仓库不放本机路径）。
+_EXPECT_NODES = 8 if _HOST_REGISTRY_OK else 7
+check("2.1 get_node_list() 返回 %d 个节点（宿主注册表 %s）"
+      % (_EXPECT_NODES, "可用 ⇒ 8 个外壳全在场" if _HOST_REGISTRY_OK
+         else "不可用 ⇒ Upscale 因拿不到宿主注册表而缺席"),
+      len(V3_NODES) == _EXPECT_NODES, "实际 %d" % len(V3_NODES))
 
 V3_BY_ID = {}
 for _n in V3_NODES:
@@ -138,8 +151,9 @@ for _n in V3_NODES:
 
 _missing = sorted(set(V1.NODE_CLASS_MAPPINGS) - set(V3_BY_ID))
 _extra = sorted(set(V3_BY_ID) - set(V1.NODE_CLASS_MAPPINGS))
-check("2.2 node_id 集合 == V1 键集合（8 个，一个都不能少）",
-      not _extra and not _missing,
+check("2.2 node_id 集合 == V1 键集合（仅允许 Upscale 因宿主注册表缺席被跳过）",
+      not _extra and (not _missing
+                      or (_missing == ["H3RelayLatentUpscale"] and not _HOST_REGISTRY_OK)),
       "多出 %s ／ 少了 %s" % (_extra, _missing))
 
 print()
@@ -258,9 +272,10 @@ print("[7] 计数自洽（这两个数会被写进 ci.yml / docs / README ⇒ �
 #   过去它们只靠人工同步 ⇒ 实测漂过：`ci.yml` 写着"CI 7 节点 / 98 input"，
 #   真值却是 **8 节点 / 112 input**（那个 7 来自一个**错误前提**，见 2.1 的注释）。
 #   ⇒ 现在：① 计数自身先自洽；② `tools/review_050.py` 的 H3h 再去核那 4 个文件的声明。
-check("7.1 参与比对的节点数 == V1 注册的节点数（恒为 8）",
-      _N_TOTAL == len(V1.NODE_CLASS_MAPPINGS) == 8,
-      "比对 %d ／ V1 注册 %d" % (_N_TOTAL, len(V1.NODE_CLASS_MAPPINGS)))
+check("7.1 参与比对的节点数 == get_node_list() 实际返回的节点数（与环境无关的自洽）",
+      _N_TOTAL == len(V3_NODES) == len(V3_BY_ID),
+      "比对 %d ／ 清单 %d ／ V1 注册 %d"
+      % (_N_TOTAL, len(V3_BY_ID), len(V1.NODE_CLASS_MAPPINGS)))
 check("7.2 逐项比对的 input 数 == V1 声明的 input 数（缺失必须报红，不许静默改小计数）",
       _N_INPUT == _N_DECL and _N_INPUT > 0,
       "V3 比对 %d ／ V1 声明 %d" % (_N_INPUT, _N_DECL))
