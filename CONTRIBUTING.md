@@ -14,7 +14,7 @@ python tests/test_relay_core.py
   `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py` 指定。
   注意：脚本本身需要**能 import 到 ComfyUI**（`comfy.nested_tensor` / `node_helpers` /
   `folder_paths`）——`relay_core` 模块可独立复用，但这份打包测试**不能**脱离 ComfyUI 跑。
-- 覆盖二十七个方面（**实测执行 384 项断言**），是本包正确性的主要保障。
+- 覆盖二十七个方面（**实测执行 392 项断言**），是本包正确性的主要保障。
   报告里请贴实际执行数，不要按源码行数统计（互斥分支不会同时执行）。
 - **改动后必须同步这几处计数与清单**（v0.4.2 起列为纪律，`tools/review_050.py` 会逐项核）：
   `__init__.py` 头注释节点清单 · 本文件的「方面数/断言数」· `tests/test_relay_core.py`
@@ -78,6 +78,10 @@ python tests/test_relay_core.py
   ⇒ **判定法：「只说收益」或「只报风险」的回复，一律视为未完成，必须重写。**
 
 - 🗓 **已知缺口登记（2026-09-21）→ ✅ 已根修（同日 0.6.4，第 24 组 11 条断言锁定）**
+
+  > ⚠️ **2026-09-25 补注**：本块提到的 **E5（`exp_bed_jitter`）已在 2026-09-22 的 `1c87aff` 中移除**
+  > （实验层 E1/E2/E5 实测对靶无效，一并删除）⇒ 下文凡提到 E5 处**均为当时的历史记录**，
+  > 现在**没有**这个参数。**缺口本身的根修（所有取床源路径统一走 `pick_bed_window`）仍然有效。**
 
   `build_bed` 的 `tile_samples <= 0` 分支已过 `bed_window_voiced_fraction`；
   **`tile > 0` 分支未过**，而 `tile > 0` 恰恰是 `chain_auto.sh` 的**默认档**（`TILE_W=1.2`）。

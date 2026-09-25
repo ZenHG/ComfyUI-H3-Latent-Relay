@@ -4,13 +4,13 @@
 
 | 脚本 | 判什么 | 期望 | 怎么跑 |
 |---|---|---|---|
-| `review_050.py` | **文档—代码一致性**：节点清单 / 参数表 / 断言数 / 版本号 / 示例图槽位 | **82/0** | `python tools/review_050.py` |
+| `review_050.py` | **文档—代码一致性**：节点清单 / 参数表 / 断言数 / 版本号 / 示例图槽位 | **86/0** | `python tools/review_050.py` |
 | `smoke_nodes.py` | **节点层功能冒烟**：续接七件真跑一遍（不是只看 INPUT_TYPES；🔍 放大节点要上游权重，不在冒烟内） | **15/0** | `python tools/smoke_nodes.py` |
 | `check_ui_workflow.py` | **UI 格式工作流 JSON**：槽位下标、连线两端、类型相容、widgets_values 项数、**音画接线**（落盘节点的 `audio` 是否走了「裁重叠/音频缝」的裁后输出） | 问题合计 **0** 条 | `python tools/check_ui_workflow.py examples/minimal_relay_official.json` |
 | `scan_expression_overlap.py` | 🔍 **合规取证**：与第三方包逐函数「表达层重合」扫描 | 人工判读（**只报数、不定性**） | `python tools/scan_expression_overlap.py <对方仓库路径>` |
 | `verify_rewrite_equivalence.py` | 🔍 **合规取证**：三簇重写前后**逐位等价**差分验证（旧实现从 `git show <rev>` 捞，不手工转录） | **137/0** | `python tools/verify_rewrite_equivalence.py` |
 | `sync_deploy_check.py` | **部署副本同步**：比对 `custom_nodes` 下的副本与指定提交的**提交态**（忽略 CRLF 行尾差异） | 全 `OK` | `python tools/sync_deploy_check.py <副本目录>` |
-| `assert_default_exit.py` | **默认出口断言**：不设 `H3RELAY_NODE_API` 时必须走 V3（`NODE_CLASS_MAPPINGS is None` + `comfy_entrypoint` 可调用 + `WEB_DIRECTORY` 在）。为什么需要：2026-09-24 默认从 v1 切到 v3，而**转移前那套测试全都在验 v1 或强制 v3，没有任何一条断言锁住"默认"** | **3/3** | `COMFYUI_PATH=<根> python tools/assert_default_exit.py` |
+| `assert_default_exit.py` | **默认出口断言**：不设 `H3RELAY_NODE_API` 时必须走 V3（`NODE_CLASS_MAPPINGS is None` + `comfy_entrypoint` 可调用 + `WEB_DIRECTORY` 在）。为什么需要：2026-09-24 默认从 v1 切到 v3，而**转移前那套测试全都在验 v1 或强制 v3，没有任何一条断言锁住"默认"** | **4/4** | `COMFYUI_PATH=<根> python tools/assert_default_exit.py` |
 
 **拼接 CLI（不是自检工具，给用户用）**
 
@@ -24,7 +24,7 @@
 
 | 脚本 | 干什么 | 怎么跑 |
 |---|---|---|
-| `make_minimal_bundle.py` | **产出最小可运行分发集**（19 文件 / 626 KB，zip 213 KB）：只带运行期 8 文件 + 前端 2 + 示例 3 + 元数据/法律/readme 6，**不带** `docs/` `tests/` `tools/` `.github/`。三件事一起做：① 清单与**静态 import 推导**交叉校验（防加了模块忘改清单）② 写出 `dist/` ③ **自验**把产出当独立包加载（8 节点 / 默认 V3 / 前端在 / 异常上下文 / **零模块来自原仓**） | `python tools/make_minimal_bundle.py --zip` |
+| `make_minimal_bundle.py` | **产出最小可运行分发集**（19 文件 / 646 KB，zip 221 KB）：只带运行期 8 文件 + 前端 2 + 示例 3 + 元数据/法律/readme 6，**不带** `docs/` `tests/` `tools/` `.github/`。三件事一起做：① 清单与**静态 import 推导**交叉校验（防加了模块忘改清单）② 写出 `dist/` ③ **自验**把产出当独立包加载（8 节点 / 默认 V3 / 前端在 / 异常上下文 / **零模块来自原仓**） | `python tools/make_minimal_bundle.py --zip` |
 
 前四个失败时会以非零退出码退出（CI 直接可用），见 `.github/workflows/ci.yml`。
 

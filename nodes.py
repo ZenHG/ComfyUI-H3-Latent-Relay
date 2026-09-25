@@ -328,7 +328,10 @@ class H3RelayLatentUpscale:
       · 分块只是**显存/时间**的取舍：块内是模型的全部工作集 ⇒ 峰值显存 = 一块。
         `chunks=1` = 整段一次过（最快、最省计算，最吃显存）。
       · 拼接数学与上游同口径（两侧 replicate 填充 + 线性渐变权重 + 按累计权重归一），
-        并有单测锁「分块结果 == 整段结果」（见 tests 第 27 组）⇒ **换块数不换画面**。
+        并有单测锁「分块结果 == 整段结果」（见 tests 第 27 组）。
+        🔴 **那锁的是拼接数学，不是画面**：上游内部是 3D 体积注意力，切块 = 换跨块时间上下文
+        ⇒ `chunks>1` **会改画面**（实测逐帧 MAE 5.62/255，见 README §9 与 docs/02）。
+        默认锁 1；只在显存真放不下时才升，**升完必须重看缝**。
 
     ⚠ 域纪律：本节点属**画质域**（与 `H3RelayPost` 同域，一个动 latent 一个动像素）；
       时间轴（裁重叠）仍归 `H3RelayTrimAV`，音频仍归 `H3RelayAudioSeam`。
@@ -368,8 +371,11 @@ class H3RelayLatentUpscale:
                 "chunks": ("INT", {
                     "default": 1, "min": 1, "max": 64, "step": 1,
                     "tooltip": "【显存旋钮】沿时间维分几块跑。**1 = 整段一次过**（最快，最吃显存）。\n"
-                               "显存不足就加大它，画面上与 1 块等价（有单测锁这条）。\n"
-                               f"上限受重叠约束：每块至少 2×overlap+1 帧 ⇒ 最大合法块数会写进输出 report，超了直接报错不偷改。",
+                               "🔴 **显存不足才加大它——`chunks>1` 会改画面**：上游是 3D 体积注意力，\n"
+                               "切块 = 换跨块时间上下文，overlap 渐变只能缓解不能抵消\n"
+                               "（实测逐帧 MAE 5.62/255，见 README §9）。单测锁的只是**拼接数学**，\n"
+                               "不是「换块数不换画面」——升完必须重看缝。\n"
+                               "上限受重叠约束：每块至少 2×overlap+1 帧 ⇒ 最大合法块数会写进输出 report，超了直接报错不偷改。",
                 }),
                 "overlap": ("INT", {
                     "default": CORE.UPSCALE_OVERLAP_DEFAULT, "min": 0, "max": 16, "step": 1,
@@ -401,7 +407,7 @@ class H3RelayLatentUpscale:
     FUNCTION = "upscale"
     CATEGORY = CATEGORY
     DESCRIPTION = ("H3 AV latent 分块放大：拆包→逐块调上游学习式 3D 放大器（零去噪、只放大空间、时间维不动）"
-                   "→回包保留原音频；块数自选，分块与整段结果等价。")
+                   "→回包保留原音频；块数自选（⚠ 它是显存旋钮：chunks>1 会改画面，见 README §9）。")
 
     @_node_errors("chunks", "overlap", "align")
     def upscale(self, latent, model_name, mode, scale, width, height, megapixels,
@@ -648,7 +654,7 @@ class H3RelayTrimAV:
                 #    🔴 默认 0（关）：数值上能压平最大单帧跳，但**观感实测更差**——
                 #    总位移守恒（只 −7%）、异常帧数 1→2（一跳变两跳 = 卡两下），
                 #    且重影帧本身是「鬼影」（内容不属于任何一段）。详见 relay_core 注释。
-                "seam_ghost": ("INT", {"advanced": True, 
+                "seam_ghost": ("INT", {"advanced": True,
                     "default": 0, "min": 0, "max": 6, "step": 1,
                     "tooltip": "【保持 0】缝帧重影（极短交叉溶）：把裁后首帧换成"
                                "「上段末帧 ⊕ 本段首帧」的加权混合。\n"
@@ -659,14 +665,14 @@ class H3RelayTrimAV:
                                "（裁切才是跳的源头），或在画质域修复糊区。\n"
                                "  · >0 = 开启（仅在确知本段有收益时用，需目检确认）。",
                 }),
-                "seam_ghost_alpha": ("FLOAT", {"advanced": True, 
+                "seam_ghost_alpha": ("FLOAT", {"advanced": True,
                     "default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05,
                     "tooltip": "仅重影档用：上段末帧的权重（0.5 = 对半）。默认档下无效。",
                 }),
                 # ⚠ 继续追加在**最后**（同上铁律）：画质域修复，2026-09-16 新增。
                 #    背景：settle_frames 默认改 0（不裁沉降）后，成片段头会保留几帧「重绘糊」。
                 #    裁它 → 引入跳帧；不裁 → 留糊。**第三条路 = 画质域修**（不裁、不动时间轴）。
-                "settle_sharpen": ("FLOAT", {"advanced": True, 
+                "settle_sharpen": ("FLOAT", {"advanced": True,
                     "default": 0.0, "min": 0.0, "max": 1.5, "step": 0.05,
                     "tooltip": "【先保持 0，按需开】糊区锐化（画质域修复）：对裁后**开头若干帧**\n"
                                "做 unsharp mask，强度从缝端最强线性衰减到 0。\n"
@@ -676,7 +682,7 @@ class H3RelayTrimAV:
                                "⚠ 诚实边界：锐化只能恢复**对比度**，不能恢复**已丢失的真实细节**。\n"
                                "   对「结构还在、只是软」的重绘糊有效；细节彻底丢了就救不回来。",
                 }),
-                "settle_sharpen_frames": ("INT", {"advanced": True, 
+                "settle_sharpen_frames": ("INT", {"advanced": True,
                     "default": 24, "min": 0, "max": 64, "step": 1,
                     "tooltip": "糊区锐化作用帧数（从裁后首帧起，强度线性衰减到 0）。\n"
                                "默认 24 帧 ≈ 1 秒；实测糊区约 16–20 帧内恢复到基准，故 24 有余量。",
@@ -684,7 +690,7 @@ class H3RelayTrimAV:
                 # ⚠ 继续追加在**最后**（同上铁律）：低频残差传递，2026-09-16 新增。
                 #    借鉴 ComfyUI_MiniMaxH3_Director 的 `match_export_opening_grade`
                 #    （`_lowfreq_appearance_pull`）：只吸收上段的低频色档/布光，保留本段细节。
-                "lowfreq_pull": ("FLOAT", {"advanced": True, 
+                "lowfreq_pull": ("FLOAT", {"advanced": True,
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
                     "tooltip": "【按需开，默认 0】低频残差传递：把裁后**开头若干帧**的低频\n"
                                "（色档/亮度/布光）拉向**上段末帧**，但**保留本段自己的细节与姿态**。\n"
@@ -696,12 +702,12 @@ class H3RelayTrimAV:
                                "   而「全 RGB 混合」（交叉溶/重影）实测会把锐度砍掉 49%（画面花）。\n"
                                "帧数守恒、不动音频、零采样开销。",
                 }),
-                "lowfreq_frames": ("INT", {"advanced": True, 
+                "lowfreq_frames": ("INT", {"advanced": True,
                     "default": 12, "min": 0, "max": 48, "step": 1,
                     "tooltip": "低频对齐作用帧数（从裁后首帧起，权重线性衰减到 0）。\n"
                                "上游同款用 12 帧；实测缝区影响就在前 12 帧内。",
                 }),
-                "lowfreq_blur": ("INT", {"advanced": True, 
+                "lowfreq_blur": ("INT", {"advanced": True,
                     "default": 64, "min": 8, "max": 128, "step": 8,
                     "tooltip": "低频尺度（盒式模糊核）。越大越只对齐大尺度色档/布光；\n"
                                "上游用 64。实测 32/64 差异很小（阶跃 0.0011 vs 0.0024）。",
@@ -709,36 +715,36 @@ class H3RelayTrimAV:
                 # ⚠ 继续追加在**最后**（同上铁律）：后处理层补全，2026-09-16。
                 #    以下四个都是**画质域修复**：帧数守恒、不动音频、不动时间轴
                 #    ⇒ 结构上不可能引入跳帧。默认全 0（关），旧行为逐位不变。
-                "deconv_strength": ("FLOAT", {"advanced": True, 
+                "deconv_strength": ("FLOAT", {"advanced": True,
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
                     "tooltip": "【按需开，默认 0】段头**反卷积去模糊**（Wiener 逆滤波）。\n"
                                "与「糊区锐化」的区别：锐化只是**放大高频**（噪声一起放大），\n"
                                "反卷积是按假设的 PSF **逆推原始信号**，理论上能真正还原细节。\n"
                                "0=关；0.5~1.0 = 混合比。糊得越重，radius 要越大。",
                 }),
-                "deconv_radius": ("FLOAT", {"advanced": True, 
+                "deconv_radius": ("FLOAT", {"advanced": True,
                     "default": 1.5, "min": 0.5, "max": 6.0, "step": 0.5,
                     "tooltip": "反卷积假设的模糊半径（像素）。段头糊得越重越大；\n"
                                "太大易出振铃（此时把 deconv_strength 降下来）。",
                 }),
-                "detail_borrow": ("FLOAT", {"advanced": True, 
+                "detail_borrow": ("FLOAT", {"advanced": True,
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
                     "tooltip": "【按需开，默认 0】**段体高频迁移**：段头保留自己的低频（内容/构图），\n"
                                "高频换成段体的高频结构（同一场景/光照下 ⇒ 不会引入异质内容）。\n"
                                "与「低频残差」互补：那个补低频，这个补高频。\n"
                                "⚠ 若段头与段体内容差异大（人物位移大），会带出纹理错位。",
                 }),
-                "detail_blur": ("INT", {"advanced": True, 
+                "detail_blur": ("INT", {"advanced": True,
                     "default": 9, "min": 3, "max": 64, "step": 2,
                     "tooltip": "高频迁移的分界尺度（盒式模糊核）：越大则被搬走的高频越粗。",
                 }),
-                "hist_match": ("FLOAT", {"advanced": True, 
+                "hist_match": ("FLOAT", {"advanced": True,
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
                     "tooltip": "【按需开，默认 0】**直方图匹配**：把段头的色阶分布对齐到段体。\n"
                                "比「低频残差」更强 —— 那个只对齐**均值**，这个对齐**整条分布**\n"
                                "（亮部/暗部的比例也一致）。0=关；1=完全对齐。",
                 }),
-                "wb_match": ("FLOAT", {"advanced": True, 
+                "wb_match": ("FLOAT", {"advanced": True,
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
                     "tooltip": "【按需开，默认 0】**灰世界白平衡校正**：把段头的 R:G:B 比例（色温/色调）\n"
                                "对齐到段体。与「低频残差」正交 —— 那个管亮度总量，这个管色温。\n"
@@ -749,7 +755,7 @@ class H3RelayTrimAV:
                 #   「段头 ↔ **本段段体**」（段内）；本组是「段头 ↔ **上段末帧**」（**段间**），
                 #   治的正是成片缝上那个亮度阶跃（copy 桥实测 0.0402）。
                 #   ⚠ 铁律：新 widget 一律**追加在 optional 末位**（旧工作流取值不前移）。
-                "match_prev": ("FLOAT", {"advanced": True, 
+                "match_prev": ("FLOAT", {"advanced": True,
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
                     "tooltip": "【按需开，默认 0】**跨段统计匹配**：把段头的色档/曝光分布\n"
                                "（逐通道均值 + 标准差）对齐到**上段末帧**——即缝的另一侧。\n"
@@ -757,17 +763,17 @@ class H3RelayTrimAV:
                                "这个补上**二阶（对比度）+ 逐通道色度**（Reinhard 式）。\n"
                                "**只对齐统计量，不复制姿态 ⇒ 无重影。**建议从 0.5 起试。",
                 }),
-                "match_prev_frames": ("INT", {"advanced": True, 
+                "match_prev_frames": ("INT", {"advanced": True,
                     "default": 12, "min": 1, "max": 96, "step": 1,
                     "tooltip": "【配合 match_prev 用】作用帧数：从裁后首帧起算，\n"
                                "权重从 match_prev 线性衰减到 0（缝端最强 → 尾端不动）。",
                 }),
-                "match_prev_gain_max": ("FLOAT", {"advanced": True, 
+                "match_prev_gain_max": ("FLOAT", {"advanced": True,
                     "default": 1.15, "min": 1.0, "max": 2.0, "step": 0.05,
                     "tooltip": "【护栏，一般不用动】逐通道对比度增益上限（σ目标/σ源 的截断）。\n"
                                "调大 = 允许更猛的对比度对齐，但可能把已通过的内容改坏。",
                 }),
-                "match_prev_offset_max": ("FLOAT", {"advanced": True, 
+                "match_prev_offset_max": ("FLOAT", {"advanced": True,
                     "default": 0.06, "min": 0.0, "max": 0.3, "step": 0.01,
                     "tooltip": "【护栏，一般不用动】逐通道亮度/色度偏移上限（μ目标−μ源 的截断）。\n"
                                "调大 = 允许更大的色档修正，但过大易见「整段换色」。",
@@ -794,6 +800,20 @@ class H3RelayTrimAV:
                                "  · 关 = 不写（老行为），拼接时该段退回 mp4 解码并如实报出\n"
                                "⚠ 写失败只会在日志里提示，**不影响本段渲染**（拼接自动退路）。",
                 }),
+                # 🔴 2026-09-25 新增（GG 拍板）：只读观测的总闸。**默认关**。
+                #    本地跑批要常看这几行 ⇒ 入口显式传 True（l1_api / chain_auto.sh）。
+                "diagnostics": ("BOOLEAN", {
+                    "default": False,
+                    "label_on": "🧪 诊断开（+3 路观测）", "label_off": "诊断关（默认）",
+                    "tooltip": "【默认关，本地产线才开】三路**只读观测**——都**不参与任何裁量**，\n"
+                               "关掉不改变任何帧 / latent / 音频（纯打印）：\n"
+                               "  · 🧪 DTW 对齐代价（E3）：整段对齐下来平均每步多贵；\n"
+                               "  · 裁量→跳跃曲线：各 settle 档位对应的缝处跳跃倍数（裁之前就能权衡）；\n"
+                               "  · 🧪 外观三元组 + 漂移曲线（E4，需同时填 `run_id`）：跨段亮度/对比度/锐度漂移。\n"
+                               "开 = 多约 **0.4 s/段 CPU**（0.8MP；2MP 约 0.5–1.5 s），**零 GPU**。\n"
+                               "⚠ 本地产线要常看这几行 ⇒ 跑批入口（l1_api / chain_auto.sh）显式传 True；\n"
+                               "   对外默认关：多数用户不看，纯开销。",
+                }),
             },
         }
 
@@ -816,7 +836,7 @@ class H3RelayTrimAV:
              hist_match=0.0, wb_match=0.0,
              match_prev=0.0, match_prev_frames=12,
              match_prev_gain_max=1.15, match_prev_offset_max=0.06,
-             run_id="", save_pcm=True):
+             run_id="", save_pcm=True, diagnostics=False):
         CONTRACT.enforce()   # 裁帧算术同样依赖上游网格，先过契约
         # 服务端防线：widget 的 min=1.0 只挡 UI，API 提交 fps=0/NaN 会一路除到底
         try:
@@ -892,7 +912,13 @@ class H3RelayTrimAV:
         #   平均每步多贵」⇒ 能看出残留强度与不连续形态。
         #   ⚠ 故意不喂给 detect_settle：DTW 路把「运动中的相似姿态」
         #     也给低代价，单独当裁量会多吃内容（2026-09-20 定）。
-        _dtw = CORE.head_repeat_dtw(images, pin)
+        # 🔴 2026-09-25 GG 拍板：三路只读观测**默认关**（`diagnostics=False`）。
+        #   实测三路合计 **0.361 s/段**（0.796MP/90 帧）—— 对外是纯开销；本地要常看 ⇒ 入口传 True。
+        #   注意它们**不参与任何裁量**（纯打印）⇒ 关掉不改变任何帧/latent/音频。
+        #   （`want<0` 分支里的 detect_settle / boundary_jump_ratio / observation_profile
+        #    属**裁量链路**，不受本开关影响。）
+        _diag = bool(diagnostics)
+        _dtw = CORE.head_repeat_dtw(images, pin) if _diag else None
         if _dtw:
             bj_note += (
                 "\n           🧪 DTW 对齐代价（只读观测，不改裁量）："
@@ -901,7 +927,7 @@ class H3RelayTrimAV:
                    _dtw["frames"][0], _dtw["frames"][1]))
         # 裁量→跳跃曲线：成片缝 = raw[pin-1] → raw[pin+settle]（相隔 settle+1 帧），
         # **裁得越多、跳得越大**（GG：裁切=时间跳跃=跳切）。裁之前就把它算出来供权衡。
-        curve = CORE.trim_jump_curve(images, pin)
+        curve = CORE.trim_jump_curve(images, pin) if _diag else None
         if curve:
             bj_note += ("\n           裁量→跳跃曲线（settle : 归一跳跃）：%s"
                         % "  ".join("%d:%.1f×" % (s, r) for s, r in curve[:13]))
@@ -909,31 +935,32 @@ class H3RelayTrimAV:
         #   🔴 2026-09-21 接进产线路径（此前 `nodes.py` 零引用 = 死代码）。
         #   run_id 空（默认）⇒ 只算本段三元组、不写盘；填了 ⇒ 追加 <run>/appearance_log.jsonl
         #   并读全部历史算 drift_curve。**同一把尺子逐段量**（segment_appearance_stats 统一口径）。
-        try:
-            _st = CORE.segment_appearance_stats(images)
-            bj_note += ("\n           🧪 外观三元组（E4 只读）：mean %.5f ｜ std %.5f ｜ 锐度 %.5f"
-                        % (float(_st[0]), float(_st[1]), float(_st[2])))
-            if run_id:
-                _rd = os.path.join(_RELAY_ROOT, str(run_id))
-                os.makedirs(_rd, exist_ok=True)
-                _lg = os.path.join(_rd, "appearance_log.jsonl")
-                _hist = []
-                if os.path.isfile(_lg):
-                    with open(_lg, "r", encoding="utf-8") as _fh:
-                        for _ln in _fh:
-                            if _ln.strip():
-                                _hist.append(tuple(json.loads(_ln)["stats"]))
-                _hist.append(tuple(float(v) for v in _st))
-                with open(_lg, "a", encoding="utf-8") as _fh:
-                    _fh.write(json.dumps({"stats": [float(v) for v in _st]},
-                                         ensure_ascii=False) + "\n")
-                if len(_hist) >= 2:
-                    _dc = CORE.drift_curve(_hist)
-                    bj_note += ("\n           🧪 漂移曲线（E4，累计 %d 段）：亮度斜率 %+.5f ｜ "
-                                "对比度 %+.5f ｜ 锐度 %+.5f（后两项无量纲、可跨片比）"
-                                % (len(_hist), _dc["slope"], _dc["std_slope"], _dc["sharp_slope"]))
-        except Exception as _e:      # 观测失败**绝不阻断渲染**，但必须可见（不静默）
-            bj_note += "\n           🧪 E4 观测失败（不影响裁切）：%r" % (_e,)
+        if _diag:
+            try:
+                _st = CORE.segment_appearance_stats(images)
+                bj_note += ("\n           🧪 外观三元组（E4 只读）：mean %.5f ｜ std %.5f ｜ 锐度 %.5f"
+                            % (float(_st[0]), float(_st[1]), float(_st[2])))
+                if run_id:
+                    _rd = os.path.join(_RELAY_ROOT, str(run_id))
+                    os.makedirs(_rd, exist_ok=True)
+                    _lg = os.path.join(_rd, "appearance_log.jsonl")
+                    _hist = []
+                    if os.path.isfile(_lg):
+                        with open(_lg, "r", encoding="utf-8") as _fh:
+                            for _ln in _fh:
+                                if _ln.strip():
+                                    _hist.append(tuple(json.loads(_ln)["stats"]))
+                    _hist.append(tuple(float(v) for v in _st))
+                    with open(_lg, "a", encoding="utf-8") as _fh:
+                        _fh.write(json.dumps({"stats": [float(v) for v in _st]},
+                                             ensure_ascii=False) + "\n")
+                    if len(_hist) >= 2:
+                        _dc = CORE.drift_curve(_hist)
+                        bj_note += ("\n           🧪 漂移曲线（E4，累计 %d 段）：亮度斜率 %+.5f ｜ "
+                                    "对比度 %+.5f ｜ 锐度 %+.5f（后两项无量纲、可跨片比）"
+                                    % (len(_hist), _dc["slope"], _dc["std_slope"], _dc["sharp_slope"]))
+            except Exception as _e:      # 观测失败**绝不阻断渲染**，但必须可见（不静默）
+                bj_note += "\n           🧪 E4 观测失败（不影响裁切）：%r" % (_e,)
         if pin + settle >= before:
             settle = max(0, before - 1 - pin)
             why += "（已夹到本段长度上限）"
@@ -1222,11 +1249,11 @@ class H3RelayCopyBridge:
                                "     ⇒ 「钉住」与「释放」在单机制内对立，**单靠掩码调参治不好**。\n"
                                "     详见 CHANGES.md 0.6.0「掩码档实测」一节（判据与口径同步记在那里）。",
                 }),
-                "taper_tokens": ("INT", {"advanced": True, 
+                "taper_tokens": ("INT", {"advanced": True,
                     "default": 4, "min": 1, "max": 12, "step": 1,
                     "tooltip": "【🔴 实验档 taper 专属】缝端前多少个 token 参与线性过渡。",
                 }),
-                "seam_min": ("FLOAT", {"advanced": True, 
+                "seam_min": ("FLOAT", {"advanced": True,
                     "default": 0.10, "min": 0.0, "max": 1.0, "step": 0.05,
                     "tooltip": "【🔴 实验档 taper 专属】缝端掩码下限（m 值）。\n"
                                "0 = 缝端完全硬锁；>0 表示缝端仍留同等比例的重绘自由度\n"
@@ -1237,7 +1264,7 @@ class H3RelayCopyBridge:
                     "tooltip": "把上一段音频尾也拷进本段音频 latent 开头（采样上下文用）。\n"
                                "掩码只做视频流；可见的声画拼接仍归「裁重叠」与组装层。",
                 }),
-                "ramp_top": ("FLOAT", {"advanced": True, 
+                "ramp_top": ("FLOAT", {"advanced": True,
                     "default": 0.25, "min": 0.0, "max": 1.0, "step": 0.05,
                     "tooltip": "【🟡 对照档 ramp 专属】缝端最大 m（= 该 token 参与去噪的 sigma 比例）。\n"
                                "0 = 退化为 hard；0.25 默认 = 缝端 25% 强度 harmonize。\n"
@@ -1253,7 +1280,7 @@ class H3RelayCopyBridge:
                                "    台阶越大缝处阶跃越大（hard 0.0076 < 0.50 档 0.0281 < 0.95 档 0.1040）\n"
                                "    ⇒ 想在 ramp_top 大时仍不恶化，**必须同时加长窗口**（RELAY_FRAMES）。",
                 }),
-                "ramp_tokens": ("INT", {"advanced": True, 
+                "ramp_tokens": ("INT", {"advanced": True,
                     "default": 0, "min": 0, "max": 12, "step": 1,
                     "tooltip": "【🟡 对照档 ramp 专属】参与斜坡的缝端 token 数；0 = 整个拷贝窗铺开。\n"
                                "小值（如 2~3）= 「只松缝、锁运动」的窄斜坡。",
@@ -1277,17 +1304,17 @@ class H3RelayCopyBridge:
                 #   依据 FlowLong / Unified Long Video Inpainting 的滑窗 Hamming 混合
                 #   （arXiv:2511.03272）：重叠区由两个独立估计加权平均，权重取窗函数。
                 #   ⚠ 本节点**无存量 UI 工作流**引用（已核），故新 widget 可紧邻同族项放。
-                "blend_top": ("FLOAT", {"advanced": True, 
+                "blend_top": ("FLOAT", {"advanced": True,
                     "default": 0.50, "min": 0.0, "max": 1.0, "step": 0.05,
                     "tooltip": "【🔴 实验档 blend 专属】缝端**模型占比**上限（对应 ramp 的 ramp_top）。\n"
                                "0 = 退化成 hard；越大越信任本段自己的预测。建议 0.5 起试。",
                 }),
-                "blend_tokens": ("INT", {"advanced": True, 
+                "blend_tokens": ("INT", {"advanced": True,
                     "default": 0, "min": 0, "max": 12, "step": 1,
                     "tooltip": "【🔴 实验档 blend 专属】参与融合的缝端 token 数；0 = 整个拷贝窗铺开。\n"
                                "小值（2~3）= 「只融缝、锁运动」。",
                 }),
-                "blend_shape": (list(CORE.BLEND_SHAPES), {"advanced": True, 
+                "blend_shape": (list(CORE.BLEND_SHAPES), {"advanced": True,
                     "default": CORE.BLEND_SHAPE_DEFAULT,
                     "tooltip": "【仅 blend 模式】窗形：\n"
                                " · smoothstep = x²(3−2x)，多项式 S 曲线（默认）\n"
@@ -1491,15 +1518,15 @@ class H3RelayPost:
                                "（阶跃 0.0007 → 0.0039，旧口径更差 → 0.0088）。真正的用武之地是\n"
                                "**拷贝桥**（那里 prev_tail 才是真·上段末帧）。详见 CHANGES 0.5.0。",
                 }),
-                "match_prev_frames": ("INT", {"advanced": True, 
+                "match_prev_frames": ("INT", {"advanced": True,
                     "default": 12, "min": 1, "max": 96, "step": 1,
                     "tooltip": "【配合 match_prev】作用帧数：从首帧起算，权重线性衰减到 0。",
                 }),
-                "match_prev_gain_max": ("FLOAT", {"advanced": True, 
+                "match_prev_gain_max": ("FLOAT", {"advanced": True,
                     "default": 1.15, "min": 1.0, "max": 2.0, "step": 0.05,
                     "tooltip": "【护栏】逐通道对比度增益上限（防把已通过的内容改坏）。",
                 }),
-                "match_prev_offset_max": ("FLOAT", {"advanced": True, 
+                "match_prev_offset_max": ("FLOAT", {"advanced": True,
                     "default": 0.06, "min": 0.0, "max": 0.3, "step": 0.01,
                     "tooltip": "【护栏】逐通道亮度/色度偏移上限（防「整段换色」）。",
                 }),
@@ -1536,7 +1563,10 @@ class H3RelayPost:
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
                     "tooltip": "【组 2 · 段内】**直方图匹配**：把段头的色阶**分布**对齐到本段段体。\n"
                                "治「段头↔段体」的色阶漂移（段**内**，不需要 guide）。\n"
-                               "作用帧数 =「组 2+3 共用」的 `head_zone_frames`（默认 24）。",
+                               "作用帧数 =「组 2+3 共用」的 `head_zone_frames`（默认 24）。\n"
+                               "⚠ 高分辨率下自动**等间隔子采样**求分位（超 2^24 点时）——\n"
+                               "   0.3MP 及以下不触发（走精确分位）；0.8MP 起触发，\n"
+                               "   耗时约 2 s/段且**与分辨率无关**（2MP/4MP 同级）。",
                 }),
                 "wb_match": ("FLOAT", {
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
@@ -1583,7 +1613,7 @@ class H3RelayPost:
                                                              "⚠ **只管「糊区锐化」这一项**——组 2/组 3 的作用帧数\n"
                                                              "是上面「组 2+3 共用」的 `head_zone_frames`（0.5.0 期内曾共用本项，现已分开）。"}),
                 # ⚠ 继续追加在**最后**（同上铁律）。
-                "match_prev_stats_frames": ("INT", {"advanced": True, 
+                "match_prev_stats_frames": ("INT", {"advanced": True,
                     "default": 1, "min": 0, "max": 24, "step": 1,
                     "tooltip": "【配合 match_prev】**统计量取几帧**——本条最容易写错：\n"
                                "  · 1（默认）= 只取**紧贴缝的那一帧** ⇔ 与 guide（单帧）同口径 ⇒\n"
@@ -1799,7 +1829,7 @@ class H3RelayAudioSeam:
                                "⚠ 前提是段首本来就不该有台词（前 1.2s 无词是产线纪律）——\n"
                                "补丁会把这 N 秒的内容换成环境声。",
                 }),
-                "tile_seconds": ("FLOAT", {"advanced": True, 
+                "tile_seconds": ("FLOAT", {"advanced": True,
                     "default": 0.0, "min": 0.0, "max": 4.0, "step": 0.05,
                     "tooltip": "【组 2 · 床环铺】床源改取这么长的瓦片，自叠化环铺满补丁长度。\n"
                                "0 = 整窗直取最静 N 秒（默认）。\n"
@@ -1810,13 +1840,13 @@ class H3RelayAudioSeam:
                     "tooltip": "【组 3】补丁边界（第 N 秒处）的交叉淡变宽度。\n"
                                "0 = 硬切（会有可闻的接点）；0.25 是产线实测值。",
                 }),
-                "bed_stage": ("INT", {"advanced": True, 
+                "bed_stage": ("INT", {"advanced": True,
                     "default": 0, "min": 0, "max": 9999, "step": 1,
                     "tooltip": "【填什么】用第几段的音频当床源（默认 0 = 第 1 段）。\n"
                                "同场景环境声是 stationary 的，取第 1 段最稳；\n"
                                "⚠ 必须小于本段段号（床源得是已经渲染完的段）。",
                 }),
-                "note": ("STRING", {"advanced": True, 
+                "note": ("STRING", {"advanced": True,
                     "default": "",
                     "tooltip": "【可留空】备注，存进落盘文件的元数据里方便事后分辨版本。",
                 }),

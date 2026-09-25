@@ -42,7 +42,7 @@ import math
 import ntpath                                      # 只当"Windows 路径判据"用，与宿主平台无关
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 
@@ -1966,6 +1966,58 @@ def borrow_detail_from_body(images: torch.Tensor, frames: int = 12,
     return torch.cat([out, images[k:]], dim=0)
 
 
+# —— 分位统计的安全上限（2026-09-25 实测钉死）——
+# 🔴 `torch.quantile` 有 **numel 硬上限 = 2^24（16,777,216）**，超过即抛
+#    `RuntimeError: quantile() input tensor is too large`。
+# 段体/段头是**整帧像素** flatten ⇒ 高分辨率下极易撞上：
+#    0.796MP(672×1184) 每通道只能容 21.1 帧、1.03MP(768×1344) 只有 16.3 帧；
+#    而 90 帧段的段体有 50 帧（`robust_body` 筛后 ~25 帧 = 19.9M）⇒ **必然超限**。
+# ⚠ 0.3MP 时代测不出来（那里每通道能容 54.6 帧）—— 那是**分辨率红利**，不是设计。
+QUANTILE_MAX_ELEMS: int = 1 << 24
+# 子采样的**目标点数** —— 让工作量与分辨率**脱钩**（这是关键，不是"采到刚好不崩"）。
+# 🔴 实测（2026-09-25，16 线程 CPU，256 个分位点）：
+#      2^21 = 2.1M 点 → 378 ms     2^24 = 16.7M 点 → 3501 ms
+#    而 `match_hist_head_to_body` 是**逐通道 ×(段体+段头)** ⇒ 3×2 = **6 次** quantile：
+#      · 若采到刚好 ≤2^24：2.0MP 段（段体 51.8M）→ 13M 点 ⇒ 单段 **~18 s**（不崩，但等于卡住）
+#      · 采到 2^21：单段 **~2.3 s**，且**与分辨率无关**（2MP / 4MP / 8MP 都一样）
+# 精度代价：2^21 点估计分位，标准误 ~sqrt(0.25/2^21) = 3.5e-4 ——
+#   在 0–1 色阶上 ≈ **0.09/255**，仍**比 256 桶的桶宽（3.9e-3）小一个量级** ⇒ 肉眼不可见。
+QUANTILE_SAMPLE_ELEMS: int = 1 << 21
+
+
+def _quantile_capped(t: torch.Tensor, qs: torch.Tensor, tag: str = "") -> torch.Tensor:
+    """``torch.quantile`` 的安全包装：超限时**等间隔子采样**到 ``QUANTILE_SAMPLE_ELEMS`` 再求分位。
+
+    为什么是子采样而不是分桶直方图：分位估计的误差量级是 O(1/√n)，子采样到 2^21 点时
+    标准误 3.5e-4 —— **比 256 桶的桶宽（~3.9e-3）还小一个量级**。用更小的改动拿到更准的
+    结果，且**不动 `torch.quantile` 自身的算法**（只是输入变稀疏）。
+    等间隔（而非随机）采样 ⇒ 结果**可复现**，不引入随机种子依赖。
+
+    超限时打印一行（``tag`` 非空时）—— 包内纪律「近似要打标、不静默」。
+    """
+    n = int(t.numel())
+    # 🔴 门槛用 SAMPLE 而不是 MAX —— 2026-09-25 自我审核抓到的**耗时非单调**：
+    #   若按 MAX(2^24) 判，2.1M~16.7M 这一段会走**精确**路径，而实测 15.4M 点要 **3.1 s/次**；
+    #   本函数一次调用共 6 次 quantile ⇒ **单段 19 s** —— 反倒比"超限后采样"（0.38 s/次）**慢 8 倍**。
+    #   0.3MP 的段体（15.4M）正好落在这段里 ⇒ **低分辨率比高分辨率还慢**，反直觉但真实。
+    #   按 SAMPLE(2^21) 判 ⇒ 耗时上界恒 ~0.38 s/次、**与点数无关**；代价是 2.1M 点以上的输入
+    #   都走近似（标准误 3.5e-4 ≈ 0.09/255，仍比 256 桶的桶宽小一个量级 ⇒ 不可见）。
+    if n <= QUANTILE_SAMPLE_ELEMS:
+        return torch.quantile(t, qs)                      # 够小 ⇒ 精确，且耗时上界 ~0.4 s
+    step = -(-n // QUANTILE_SAMPLE_ELEMS)                 # ceil：采到 ~2^21 点，与分辨率无关
+    sel = t[::step]
+    if tag:
+        # ⚠️ 文案必须说清「触发的是**采样门槛**，不是 quantile 的硬上限」—— 2026-09-25 修：
+        #   原来写的是「超出 torch.quantile 上限 2^24」，而 n=3M（离 2^24 还远）也会走到这里
+        #   ⇒ **标签本身说错了**。在一个把「近似要打标、不静默」当纪律的包里，
+        #   标错的标签比不打标更糟（用户会以为"没到上限就不该采样"）。
+        #   同时这一行让 `QUANTILE_MAX_ELEMS` 真正被引用（此前它是**死常量**，只在注释里出现）。
+        print("[H3 Relay] 分位统计子采样（%s）：%d 点超过采样门槛 %d（torch.quantile 硬上限为 %d）⇒ "
+              "每 %d 点取 1（实际用 %d 点，色阶统计误差 ~1/√n）"
+              % (tag, n, QUANTILE_SAMPLE_ELEMS, QUANTILE_MAX_ELEMS, step, int(sel.numel())))
+    return torch.quantile(sel, qs)
+
+
 # —— P6 直方图匹配（段头 → 段体）—— 2026-09-16 补齐后处理层方案
 def match_hist_head_to_body(images: torch.Tensor, frames: int = 12,
                             strength: float = 0.0, body_start: int = 40,
@@ -1992,9 +2044,12 @@ def match_hist_head_to_body(images: torch.Tensor, frames: int = 12,
         ref = body[:, :, :, c].flatten()
         # 段体的分位点
         qs = torch.linspace(0.0, 1.0, int(bins), device=x.device)
-        ref_q = torch.quantile(ref, qs)
+        # ⚠ 必须走 _quantile_capped：整帧 flatten 在高分辨率下会撞 torch.quantile 的
+        #   2^24 上限（90 帧 / 0.796MP 的段体筛后 ~25 帧 = 19.9M ⇒ 直接抛），
+        #   而 0.3MP 下不会 —— 2026-09-25 实测钉死。
+        ref_q = _quantile_capped(ref, qs, "段体" if c == 0 else "")
         # 把段头像素按其在段头分布中的分位，映射到段体同分位的值
-        src_q = torch.quantile(src, qs)
+        src_q = _quantile_capped(src, qs, "段头" if c == 0 else "")
         idx = torch.searchsorted(src_q, src.clamp(src_q[0], src_q[-1]))
         idx = idx.clamp(1, int(bins) - 1)
         lo, hi = src_q[idx - 1], src_q[idx]
@@ -3362,7 +3417,6 @@ def _load_pcm_sidecar(path, rate, layout):
     不该因为它被删了/换了采样率就整条链拼不出来。
     裁剪 vs 校准：采两种输入形状（``[B,C,T]`` / ``[C,T]``）；采样率或声道与成片音轨对不上就弃用。
     """
-    import numpy as np
     try:
         a = load_audio(str(path))
     except Exception:      # 文件被删 / 不是本工具写的 / safetensors 缺失

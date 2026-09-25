@@ -44,10 +44,22 @@ import types as _types                                 # noqa: E402
 
 
 class _Routes:
-    def post(self, _path):
-        def _deco(fn):
-            return fn
-        return _deco
+    """装饰器透传 stub：注册路由时用哪个 HTTP 方法都认。
+
+    ⚠️ 别写死方法名 —— 2026-09-25 踩过**两次**：新增 `GET /h3relay/health` 后，
+    本文件（还有 test_relay_core）的 stub 只实现 `post` ⇒ 导入本包即
+    `AttributeError: '_Routes' object has no attribute 'get'`。
+    `tools/assert_default_exit.py` 与 `tools/make_minimal_bundle.py` 的同类桩**本来就有 get**，
+    所以当时只改了报错的那一个 ⇒ **本文件漏了**，而它恰好不在一键校验套件里 ⇒ 假绿。
+    ⇒ 用 `__getattr__` 兜底，以后加任何方法（get/put/delete…）都不用回来改这里。
+    """
+
+    def __getattr__(self, _name):
+        def _reg(_path):
+            def _deco(fn):
+                return fn
+            return _deco
+        return _reg
 
 
 class _FakePS:
@@ -104,9 +116,20 @@ print("[2] 扩展与节点清单")
 _ep = KIT.comfy_entrypoint
 _ext = asyncio.run(_ep()) if asyncio.iscoroutinefunction(_ep) else _ep()
 V3_NODES = asyncio.run(_ext.get_node_list())
-check("2.1 get_node_list() 返回 8 个节点（%s）"
-      % ("宿主注册表可用" if _HOST_REGISTRY_OK else "宿主注册表不可用 ⇒ 允许 Upscale 缺席"),
-      len(V3_NODES) == (8 if _HOST_REGISTRY_OK else 7), "实际 %d" % len(V3_NODES))
+# 🔴 2026-09-25 修：原判据是 `len(V3_NODES) == (8 if _HOST_REGISTRY_OK else 7)`，**前提是错的**。
+#   它假设「宿主注册表不可用 ⇒ H3RelayLatentUpscale 会被跳过」。实测**不成立**：
+#     · 宿主 ComfyUI **自带**注册 `latent_upscale_models` 目录（`folder_paths.py:43`），
+#       不是上游超分包注册的 ⇒ `_upscale_model_names()` 走 `get_filename_list` 正常返回
+#       （最多给一个占位串），**永不抛错** ⇒ `INPUT_TYPES()` 不抛
+#       ⇒ V3 entrypoint 的逐节点容错**根本不会触发**。
+#     · 实测（把上游节点从宿主注册表摘掉，等价于"没装那个包"）：`get_node_list()` **仍是 8 个**。
+#   ⇒ **本包的节点数恒为 8**（8 个外壳的 schema 全部可构造），与环境无关。
+#     连带更正：`ci.yml` / `docs/08` 里"CI 是 7 节点 / 98 input"的说法，是**同一个错误前提**
+#     的产物 —— CI 与本机一样是 **8 节点 / 112 input**。数字已同步，且现在**两边一致
+#     ⇒ 这组数字终于可以被机检盯着了**（`tools/review_050.py` 的 H3h）。
+check("2.1 get_node_list() 返回 8 个节点（8 个外壳的 schema 全部可构造，与环境无关）",
+      len(V3_NODES) == 8,
+      "实际 %d ｜ 宿主注册表 %s" % (len(V3_NODES), "可用" if _HOST_REGISTRY_OK else "不可用"))
 
 V3_BY_ID = {}
 for _n in V3_NODES:
@@ -115,14 +138,13 @@ for _n in V3_NODES:
 
 _missing = sorted(set(V1.NODE_CLASS_MAPPINGS) - set(V3_BY_ID))
 _extra = sorted(set(V3_BY_ID) - set(V1.NODE_CLASS_MAPPINGS))
-check("2.2 node_id 集合 == V1 键集合（仅允许 Upscale 因宿主注册表缺席被跳过）",
-      not _extra and (not _missing
-                      or (_missing == ["H3RelayLatentUpscale"] and not _HOST_REGISTRY_OK)),
+check("2.2 node_id 集合 == V1 键集合（8 个，一个都不能少）",
+      not _extra and not _missing,
       "多出 %s ／ 少了 %s" % (_extra, _missing))
 
 print()
 print("[3] 逐字段对齐（顺序错 = 用户参数静默错位）")
-_N_TOTAL, _N_INPUT = 0, 0
+_N_TOTAL, _N_INPUT, _N_DECL = 0, 0, 0
 for _name in sorted(V1.NODE_CLASS_MAPPINGS):
     if _name not in V3_BY_ID:
         continue
@@ -135,6 +157,11 @@ for _name in sorted(V1.NODE_CLASS_MAPPINGS):
             _pairs.append((_k, _spec, _opt))
     _want_ids = [p[0] for p in _pairs]
     _got_ids = [x.id for x in _sch.inputs]
+    # 🔴 2026-09-25：`_N_DECL` = **V1 声明**的 input 数；`_N_INPUT` = V3 里**真比对到**的。
+    #   原来只统计后者 ⇒ 一旦某个 input 在 V3 缺席，**总数静默变小**（少 1 就少 1），
+    #   而结果行照样打印"逐项比对的 input N 个" —— 数字变小了却看不出是"缺失"还是"本来就这么少"。
+    #   现在两者都算，并在 [7] 里断言相等 ⇒ 缺失会让它**报红**，而不是悄悄改小计数。
+    _N_DECL += len(_want_ids)
     _N_TOTAL += 1
     check("3.%d %s input id 序列与顺序" % (_N_TOTAL, _name), _got_ids == _want_ids,
           "V3=%s｜V1=%s" % (_got_ids, _want_ids))
@@ -207,9 +234,41 @@ check("5.2 裸 tuple → io.NodeOutput(*raw)", tuple(C.node_output(("a", "b")).r
 check("5.3 {} （无输出节点）→ io.NodeOutput()", C.node_output({}).result is None)
 
 print()
+print("[6] 加载摘要 / health 用的节点清单（`__init__._node_names`）")
+# 🔴 2026-09-25 新增。这里判的是「**从哪条分支取的**」，不是「取到几个」。
+#   背景：该函数原先写 `from .v3 import nodes`（真实文件是 `v3/nodes_v3.py`）⇒ 每次都抛
+#   ModuleNotFoundError、被 `except: pass` 吞掉 ⇒ **一直静默退回 V1 映射**。当时看不出来，
+#   因为两套清单 1:1、退回去算出来还是 8 个、名字也对（**结果正确 ≠ 代码正确**）。
+#   判据 = **顺序**：V3 分支给 NODES 序（Upscale→Save→Load→TrimAV→…），V1 兜底给**字典序**。
+#   两者一致 ⇒ 才说明真走了 V3 分支，而不是"碰巧算对了"。
+from h3latentrelay.v3.nodes_v3 import NODES as _V3_NODES_SRC        # noqa: E402
+_expect_order = [c.__name__ for c in _V3_NODES_SRC]
+_got_order = KIT._node_names()
+check("6.1 `_node_names()` 真走 V3 分支（判据 = 返回 **NODES 序**，而非 V1 兜底的**字典序**）",
+      _got_order == _expect_order,
+      "得 %s ｜ 期望 %s" % (_got_order, _expect_order))
+check("6.2 清单非空且与 `v3.nodes_v3.NODES` 等长（banner 的节点数由此而来）",
+      len(_got_order) == len(_V3_NODES_SRC) > 0,
+      "%d vs %d" % (len(_got_order), len(_V3_NODES_SRC)))
+
+print()
+print("[7] 计数自洽（这两个数会被写进 ci.yml / docs / README ⇒ 必须与实跑严格一致）")
+# 🔴 2026-09-25 新增。为什么单列一节：结果行会打印「节点 N 个，逐项比对的 input M 个」，
+#   而**这两个数被抄进了 4 个文件**（`ci.yml` · `docs/08-testing.md` · `README.md` · `__init__.py`）。
+#   过去它们只靠人工同步 ⇒ 实测漂过：`ci.yml` 写着"CI 7 节点 / 98 input"，
+#   真值却是 **8 节点 / 112 input**（那个 7 来自一个**错误前提**，见 2.1 的注释）。
+#   ⇒ 现在：① 计数自身先自洽；② `tools/review_050.py` 的 H3h 再去核那 4 个文件的声明。
+check("7.1 参与比对的节点数 == V1 注册的节点数（恒为 8）",
+      _N_TOTAL == len(V1.NODE_CLASS_MAPPINGS) == 8,
+      "比对 %d ／ V1 注册 %d" % (_N_TOTAL, len(V1.NODE_CLASS_MAPPINGS)))
+check("7.2 逐项比对的 input 数 == V1 声明的 input 数（缺失必须报红，不许静默改小计数）",
+      _N_INPUT == _N_DECL and _N_INPUT > 0,
+      "V3 比对 %d ／ V1 声明 %d" % (_N_INPUT, _N_DECL))
+
+print()
 print("=" * 78)
 print("结果：通过 %d / 失败 %d   （节点 %d 个，逐项比对的 input %d 个）"
-      % (len(PASS), len(FAIL), len(V3_NODE_IDS := V3_BY_ID), _N_INPUT))
+      % (len(PASS), len(FAIL), len(V3_BY_ID), _N_INPUT))
 print("=" * 78)
 if FAIL:
     print("失败项：")

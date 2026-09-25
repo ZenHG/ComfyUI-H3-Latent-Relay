@@ -90,7 +90,7 @@ MANIFEST = MANIFEST_RUNTIME + MANIFEST_FRONTEND + MANIFEST_EXAMPLES + MANIFEST_M
 # 明确排除（写出来是为了让「为什么不带」有据可查，也便于将来有人问）
 EXCLUDED_NOTE = {
     "docs/": "9 篇深度文档（机制/参数/画布/troubleshooting）——开发与排查用，非运行必需",
-    "tests/": "4 套离线自测（384+82+15+65 项）——开发用",
+    "tests/": "4 套离线自测（392+86+15+69 项）——开发用",
     "tools/": "10 个自检/取证/CLI ——开发用（含本脚本自身）",
     ".github/": "CI 工作流与 issue 模板",
     "CHANGES.md": "版本流水（历史，含旧机路径，已豁免开源卫生扫描）",
@@ -247,9 +247,12 @@ def _stub_server():
             return d
 
     class _PS:
-        routes = _R(); instance = None; prompt_queue = None
+        routes = _R()
+        instance = None
+        prompt_queue = None
     _PS.instance = _PS()
-    m = types.ModuleType("server"); m.PromptServer = _PS
+    m = types.ModuleType("server")
+    m.PromptServer = _PS
     sys.modules["server"] = m
 
 

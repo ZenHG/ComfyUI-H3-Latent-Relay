@@ -59,7 +59,7 @@ node tests/test_prompt_dispatch.mjs      # 期望 29/0
 ## V3 外壳与默认出口（零 GPU、秒级）
 
 ```bash
-COMFYUI_PATH=<根> python tests/test_v3_schema.py        # 本机 65/0（8 节点 / 111 input）
+COMFYUI_PATH=<根> python tests/test_v3_schema.py        # 69/0（8 节点 / 112 个 input）
 COMFYUI_PATH=<根> python tools/assert_default_exit.py   # 期望 4/4
 ```
 
@@ -67,9 +67,14 @@ COMFYUI_PATH=<根> python tools/assert_default_exit.py   # 期望 4/4
 Combo `options` **全序** / outputs 路数与显示名 / `is_output_node` / 显示名 / category。
 为什么必须机检：老工作流的 `widgets_values` 是**按位置**存的，参数表错一位就是**用户参数静默错位**（不报错）。
 
-> ⚠️ **CI 里是 58/0（7 节点 / 98 input），不是 65/0**：`H3RelayLatentUpscale` 需要上游节点包
-> `MinimaxH3LatentUpscaler3D`，CI 没装 ⇒ 该节点**诚实降级被跳过**（脚本会把实际节点数与 input 数
-> 打印在结果行上，不会假绿）。本机装齐上游包时才是 65/0（8 节点 / 111 input）。
+> 🔴 **2026-09-25 更正一个错误前提**：这里原先写「CI 的节点数 / input 数比本机少」
+> （前提 = CI 没装上游超分节点包）。**实测不成立** —— 宿主 ComfyUI **自带**注册
+> `latent_upscale_models` 目录（`folder_paths.py:43`），所以 `H3RelayLatentUpscale` 的
+> `INPUT_TYPES()` **永不抛错**，也就**永不会被 V3 entrypoint 的逐节点容错跳过**
+> ⇒ **CI 与本机恒为 8 节点 / 112 个 input**。
+> （验证手法：把上游节点从宿主注册表里摘掉，`get_node_list()` 仍是 8 个。）
+> 那组偏小的数字只活在注释里、无人断言 ⇒ CI 一直绿着而文档一直是错的。
+> 现在两边一致 ⇒ 这组数字已由 `tools/review_050.py` 的 **H3h** 机检盯着。
 
 `assert_default_exit.py` 锁的是**"默认出口 = V3"这件事本身**（4 条：**契约层 1 条** =
 `NODE_API_DEFAULT == "v3"`，与环境无关；**行为层 3 条** = `NODE_CLASS_MAPPINGS is None` /
@@ -89,9 +94,9 @@ Combo `options` **全序** / outputs 路数与显示名 / `is_output_node` / 显
 
 | 工具 | 判什么 | 期望 |
 |---|---|---|
-| `tools/review_050.py` | 文档—代码一致性（节点清单 / 参数表 / 断言数 / 版本号 / 示例图槽位 / **三条铁律**） | **82/0** |
+| `tools/review_050.py` | 文档—代码一致性（节点清单 / 参数表 / 断言数 / 版本号 / 示例图槽位 / **三条铁律**） | **86/0** |
 | `tools/smoke_nodes.py` | 节点层功能冒烟（续接七件真跑一遍；🔍 放大节点要上游权重，不在冒烟内） | **15/0** |
-| `tools/assert_default_exit.py` | 默认出口 = V3（3 条） | **3/3** |
+| `tools/assert_default_exit.py` | 默认出口 = V3（契约 1 + 行为 3） | **4/4** |
 | `tools/sync_deploy_check.py` | 部署副本与指定提交的提交态一致 | 全 `OK` |
 
 详见 [`tools/README.md`](../tools/README.md)。CI 会跑**五项**（`.github/workflows/ci.yml`）：

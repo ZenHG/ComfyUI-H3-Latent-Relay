@@ -505,10 +505,10 @@ def build(oi, length=73, width=448, height=768):
                             "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0},
                     title="② 采样：seed / steps 在这里")
 
-    save = g.add("H3RelayLatentSave", pos=[1180, 400],
-                 links_in={"latent": (sampler, "LATENT"), "stage_index": (stage, "INT")},
-                 values={"run_id": "relay_demo", "note": ""},
-                 title="🔗 落盘本段 latent（下一段的接力棒）")
+    g.add("H3RelayLatentSave", pos=[1180, 400],
+          links_in={"latent": (sampler, "LATENT"), "stage_index": (stage, "INT")},
+          values={"run_id": "relay_demo", "note": ""},
+          title="🔗 落盘本段 latent（下一段的接力棒）")
 
     dec_v = g.add("VAEDecode", pos=[1540, 40],
                   links_in={"samples": (sampler, "LATENT"), "vae": (vae_v, "VAE")})

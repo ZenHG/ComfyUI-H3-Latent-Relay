@@ -111,9 +111,9 @@ ck("C1 TrimAV：core 项前缀原序保留",
    _trim[:5] == ["audio", "settle_frames", "seam_ghost", "seam_ghost_alpha",
                  "settle_sharpen"],
    "前 5=%s" % _trim[:5])
-ck("C2 TrimAV：新件一律追加在**末位**（match_prev* → run_id → save_pcm）",
-   _trim[-6:] == ["match_prev", "match_prev_frames", "match_prev_gain_max",
-                  "match_prev_offset_max", "run_id", "save_pcm"],
+ck("C2 TrimAV：新件一律追加在**末位**（match_prev* → run_id → save_pcm → diagnostics）",
+   _trim[-7:] == ["match_prev", "match_prev_frames", "match_prev_gain_max",
+                  "match_prev_offset_max", "run_id", "save_pcm", "diagnostics"],
    "末 6=%s" % _trim[-6:])
 ck("C3 TrimAV：新增第 4 路输出 prev_tail 在末位",
    N.H3RelayTrimAV.RETURN_NAMES[:3] == ("images", "audio", "report")
@@ -356,6 +356,36 @@ ck("H3e 开源卫生：受版本控制的文本里无作者本机路径（作者
 # H4 tests 头注释的覆盖清单包含最新几组
 _head = _tst[:_tst.index('"""', _tst.index('"""') + 3) + 3]
 _need = ["18.", "19.", "20.", "21."]
+# H3f CI 工作流里的期望值（2026-09-25 自我审核新增）
+#   为什么单列：`ci.yml` 头部注释写着「改动后若这些数字变了，请同步 CONTRIBUTING / tests 头注释」
+#   —— 却**没提它自己**，于是它自己漂移了（停在 384；且 `assert_default_exit` 的期望值
+#   与同文件第 11 行自相矛盾：3/3 vs 4/4）。凡"多处声明同一个数字"，就必须有机检盯着，
+#   否则漏掉的永远是**没被盯的那一处**。
+_ci = open(os.path.join(KIT, ".github", "workflows", "ci.yml"), encoding="utf-8").read()
+
+
+def _ci_numbers(script):
+    """`ci.yml` 里**凡提到该脚本的行**，把该行上所有 `N/0` 抓出来。
+
+    🔴 2026-09-25 加固：原来只有 `re.search(r"(\\d+)/0\\s+tests/test_relay_core\\.py")` ——
+      它要求**数字在文件名之前**，所以只匹配得到头部注释行，**匹配不到执行行**
+      `python tests/test_relay_core.py   # 期望 392/0`（数字在后面）。
+      实测后果：`ci.yml` 头注释写 83、执行行写 82、真值 83 —— **同文件自相矛盾一整天没人发现**。
+      ⇒ 改成"逐行扫、双向认"。
+    """
+    got = []
+    for _ln in _ci.splitlines():
+        if script in _ln:
+            got += [int(_x) for _x in _re.findall(r"(\d+)/0", _ln)]
+    return got
+
+
+_ci_rc = _ci_numbers("tests/test_relay_core.py")
+print("      ci.yml：test_relay_core 期望 = %s" % (_ci_rc or "?"))
+ck("H3f ci.yml 里 test_relay_core 的**每一处**期望数（头注释 + 执行行）== 实跑真值",
+   bool(_ci_rc) and all(_v == _n_assert for _v in _ci_rc),
+   "ci.yml=%s ｜ 实跑=%d" % (_ci_rc, _n_assert))
+
 ck("H4 tests 头注释覆盖清单含 18/19/20/21 组",
    all((" %s" % n) in _head for n in _need),
    "缺=%s" % [n for n in _need if (" %s" % n) not in _head])
@@ -905,6 +935,106 @@ ck("L11 铁律三在位（给建议必须写好/坏两面）+ tile 缺口已**�
 ck("L12 README §7.2 判据能力边界与兜底措施在位（能量型边界 + 两条漏检 + 兜底链）",
    "判据能抓什么、抓不住什么" in _rd and "低电平人声" in _rd and "语音当底噪" in _rd
    and "兜底措施" in _rd and "最终判定是人耳" in _rd)
+
+# ============================================================================
+# H3h V3 机检的「节点数 / input 数 / 项数」在 4 个文件里的一致（2026-09-25 新增）
+# ============================================================================
+# 🔴 为什么现在才能加：过去 CI 与本机被当成"节点数不同"（一处数字表达不了两种环境）
+#   ⇒ 只能人工维持 ⇒ 实测漂成一组偏小的数字（真值是 8 节点 / 112 个 input）。
+#   实测那个前提**是错的**：宿主 ComfyUI 自带注册 `latent_upscale_models`（`folder_paths.py:43`）
+#   ⇒ `H3RelayLatentUpscale.INPUT_TYPES()` 永不抛错 ⇒ 永不被 V3 entrypoint 的逐节点容错跳过
+#   ⇒ 两边恒等 ⇒ 这组数字终于可机检。
+# ⚠️ 正则刻意收窄，避免误伤：
+#   · 节点数**只在"同一行还有 input"时**才认（README 里"3 节点/18 节点/45 节点"是别的意思）
+#   · 更正说明里**不许复述旧数字**（历史留在 CHANGES.md 与本地审核文档里）
+_v3out = (subprocess.run([sys.executable, os.path.join(KIT, "tests", "test_v3_schema.py")],
+                         capture_output=True, text=True, encoding="utf-8", errors="replace",
+                         env=dict(os.environ, COMFYUI_PATH=COMFY)).stdout or "")
+_m_v3 = _re.search(r"通过\s*(\d+)\s*/\s*失败\s*(\d+)\s*（节点\s*(\d+)\s*个，逐项比对的 input\s*(\d+)\s*个）",
+                   _v3out)
+_v3_pass = int(_m_v3.group(1)) if _m_v3 else -1
+_v3_nodes = int(_m_v3.group(3)) if _m_v3 else -1
+_v3_input = int(_m_v3.group(4)) if _m_v3 else -1
+print("      实跑：test_v3_schema 通过 %s（失败 %s）／%s 节点 · %s input"
+      % (_v3_pass, _m_v3.group(2) if _m_v3 else "?", _v3_nodes, _v3_input))
+
+_v3_docs = {
+    "ci.yml": _ci,
+    "docs/08-testing.md": open(os.path.join(KIT, "docs", "08-testing.md"), encoding="utf-8").read(),
+    "README.md": _rd,
+    "__init__.py": open(os.path.join(KIT, "__init__.py"), encoding="utf-8").read(),
+}
+_bad_v3 = []
+for _fn, _txt in _v3_docs.items():
+    for _val in _re.findall(r"(\d+)\s*个?\s*input", _txt):
+        if int(_val) != _v3_input:
+            _bad_v3.append("%s: input=%s（应 %d）" % (_fn, _val, _v3_input))
+    for _val in _re.findall(r"(\d+)\s*项逐字段", _txt):
+        if int(_val) != _v3_pass:
+            _bad_v3.append("%s: 项数=%s（应 %d）" % (_fn, _val, _v3_pass))
+    for _ln in _txt.splitlines():
+        if "input" in _ln:                       # 节点数只认"与 input 同行"的那种写法
+            for _val in _re.findall(r"(\d+)\s*个?\s*节点", _ln):
+                if int(_val) != _v3_nodes:
+                    _bad_v3.append("%s: 节点=%s（应 %d）" % (_fn, _val, _v3_nodes))
+        if "test_v3_schema.py" in _ln:           # `N/0` 双向认（数字在文件名前后都抓）
+            for _val in _re.findall(r"(\d+)/0", _ln):
+                if int(_val) != _v3_pass:
+                    _bad_v3.append("%s: %s/0（应 %d/0）" % (_fn, _val, _v3_pass))
+ck("H3h V3 机检的节点数 / input 数 / 项数在 ci.yml·docs/08·README·__init__ 与实跑一致",
+   not _bad_v3 and _v3_pass > 0, "%d 处：%s" % (len(_bad_v3), _bad_v3[:6]))
+
+# ============================================================================
+# H3i 默认出口断言的期望数（2026-09-25 新增）
+# ============================================================================
+# 🔴 为什么单列：`assert_default_exit` 的 `N/N` 写在 **3 个文件、5 处**（ci.yml 两处 ·
+#   docs/08 两处 · tools/README 一处），过去**没有一处**有机检 —— 实测它一直停在 `3/3`，
+#   而真值是 `4/4`（2026-09-24 加了"默认出口"那条断言后**忘了回刷**，同 H3f/H3g 一个病）。
+_aex = subprocess.run([sys.executable, os.path.join(KIT, "tools", "assert_default_exit.py")],
+                      capture_output=True, text=True, encoding="utf-8", errors="replace",
+                      env=dict(os.environ, COMFYUI_PATH=COMFY))
+_m_aex = _re.search(r"（(\d+)/(\d+)：", _aex.stdout or "")
+_aex_n, _aex_d = (int(_m_aex.group(1)), int(_m_aex.group(2))) if _m_aex else (-1, -1)
+print("      实跑：assert_default_exit %s/%s" % (_aex_n, _aex_d))
+
+# 四处"声明数字"的文档 —— H3i 与 H3g 共用（H3h 另有自己的子集）
+_doc_txt = {
+    "ci.yml": _ci,
+    "docs/08-testing.md": open(os.path.join(KIT, "docs", "08-testing.md"), encoding="utf-8").read(),
+    "tools/README.md": open(os.path.join(KIT, "tools", "README.md"), encoding="utf-8").read(),
+    "README.md": _rd,
+}
+_bad_aex = []
+for _fn, _txt in _doc_txt.items():
+    for _ln in _txt.splitlines():
+        if "assert_default_exit" in _ln:          # 只认"与脚本名同行"的 N/N
+            for _a, _b in _re.findall(r"(\d+)/(\d+)", _ln):
+                if (int(_a), int(_b)) != (_aex_n, _aex_d):
+                    _bad_aex.append("%s: %s/%s（应 %d/%d）" % (_fn, _a, _b, _aex_n, _aex_d))
+ck("H3i `assert_default_exit` 的期望数在 ci.yml·docs/08·tools/README 与实跑一致",
+   not _bad_aex and _aex_n > 0, "%d 处：%s" % (len(_bad_aex), _bad_aex[:6]))
+
+# ============================================================================
+# H3g 本文件**自己的**期望数（2026-09-25 新增）
+# ============================================================================
+# 🔴 **必须是本文件最后一个 ck()**：它算的是「本文件的总检查数」= 此刻已跑数 + 自己这 1 条。
+#   以后若在它后面再加 ck()，它会**立刻报红** —— 这正是设计意图（提醒你把 H3g 挪回最后）。
+# 为什么值得自引用：`ci.yml` 的执行行原先写错、与头注释打架 —— 就是"**没人盯的那个数**"在漂。
+#   本文件的总数过去只写在 ci.yml 一处，无人机检 ⇒ 每加一条检查就漂一次。
+#   2026-09-25 扩到 **4 个文件**（ci.yml · docs/08 · tools/README · README）：
+#   实测 `docs/08` 与 `tools/README` 里的期望数**长期没跟上**，而它们一个都没被扫过。
+_self_total = len(OK) + len(BAD) + 1
+_bad_r50 = []
+for _fn, _txt in _doc_txt.items():
+    for _ln in _txt.splitlines():
+        if "review_050" in _ln:
+            for _val in _re.findall(r"(\d+)/0", _ln):
+                if int(_val) != _self_total:
+                    _bad_r50.append("%s: %s/0（应 %d/0）" % (_fn, _val, _self_total))
+print("      review_050 期望：本文件实跑 = %d ｜ 扫了 %d 个文件" % (_self_total, len(_doc_txt)))
+ck("H3g review_050 的期望数在 ci.yml·docs/08·tools/README·README 与**本文件实跑**一致"
+   "（自引用 ⇒ 必须排在最后）",
+   not _bad_r50 and _self_total > 0, "%d 处：%s" % (len(_bad_r50), _bad_r50[:6]))
 
 print("=" * 78)
 print("结果：通过 %d / 失败 %d" % (len(OK), len(BAD)))

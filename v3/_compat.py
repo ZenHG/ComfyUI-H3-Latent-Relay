@@ -91,7 +91,20 @@ def v1_inputs(input_types):
 
     **保序**：required 全部在前、optional 随后 —— 与 V1 的 dict 遍历顺序一致
     （``widgets_values`` 按位置存，顺序错 = 参数静默错位）。
+
+    ⚠️ **不支持 V1 的 ``hidden`` 段，且显式拦下而不是静默忽略**（2026-09-25）：
+    V1 用 ``INPUT_TYPES()["hidden"] = {"unique_id": "UNIQUE_ID", ...}`` 声明隐藏输入，
+    V3 那边对应 ``io.Hidden.unique_id / prompt / extra_pnginfo``（在 Schema 里声明，
+    ``execute`` 里从 ``cls.hidden`` 取，**不是**从 kwargs）。本包 8 个节点目前
+    **一处都没用**（已 grep 确认）；但若将来有人加了 hidden 而这里悄悄丢掉，
+    表现会是「V3 出口下该输入永远拿不到值」—— 不报错、只是行为不对，
+    正是本包最忌讳的静默失效。要支持：改本文件 + ``v3/nodes_v3.py`` 的 ``execute``。
     """
+    if input_types.get("hidden"):
+        raise RuntimeError(
+            "V3 外壳不支持 hidden 输入（发现 %s）。V3 要用 io.Hidden.* 在 Schema 里声明、"
+            "从 cls.hidden 取；要加请先改 v3/_compat.py 与 v3/nodes_v3.py。"
+            % sorted(input_types["hidden"]))
     out = []
     for section, optional in (("required", False), ("optional", True)):
         for name, spec in (input_types.get(section) or {}).items():

@@ -114,8 +114,6 @@ def local_pack_defs(comfyui_root: str = "") -> dict:
 
     取不到就返回 ``{}``（服务端仍可独立工作），不抛异常——这是**体检**工具，不该因环境缺件而中断。
     """
-    import importlib.util
-    import types
 
     kit = pack_root()
     cands = []

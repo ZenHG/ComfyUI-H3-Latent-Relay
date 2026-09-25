@@ -35,7 +35,13 @@ exclude = ["__pycache__", ".git"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W"]
-ignore = ["E501"]
+ignore = [
+    "E501",   # 行长度由 line-length 管；中文 tooltip 本来就有长行
+    # —— 以下三条是**刻意保留**的（2026-09-25 接进 CI 时逐条看过，不是懒得改）——
+    "E402",   # tools/review_050.py 是**线性脚本**：检查分段写，import 就近放（它的组织方式）
+    "E731",   # 测试/工具里的 lambda 简写（`f = lambda: ...`），改 def 只是更长
+    "E741",   # 测试/工具里的局部变量 `l`（length/list），改名要动测试代码、收益低
+]
 
 # 宿主版本下限：用**官方字段**（宿主 `comfy_config/config_parser.py` 读 comfy_data["requires-comfyui"]）。
 # ComfyUI 启动时真的会读它 —— 比只写在注释或 README 里强。

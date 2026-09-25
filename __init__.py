@@ -39,17 +39,26 @@ AV 打包 latent 适配器）：**未装那个包时本包照常加载**，只�
        （音轨默认 AAC 256k；要母版就把 `audio_out` 换成 `pcm_lossless`）
 """
 
+import asyncio
 import os as _os
 
+# 🔴 2026-09-25：拼接**串行锁**。路由把 `assemble_mp4_segments` 丢线程池后（见 `/h3relay/concat`），
+#   两个并发请求会**同时**进去 ⇒ ① 都走 `while os.path.exists(out_path)` 可能**撞同一个输出名**
+#   同时写同一文件；② PyAV/ffmpeg 并发编码。改之前它们在事件循环里被同步调用 ⇒ **天然串行**，
+#   丢线程池后这个隐含保证没了 ⇒ 显式补回来。
+#   ⚠ 必须是 `asyncio.Lock`：`threading.Lock` 的 `with` 是**同步**的，等锁时会**再次堵住事件循环**。
+#   （Python 3.10+ 的 `asyncio.Lock()` 不再绑定 loop，可安全地建在模块级。）
+_CONCAT_LOCK = asyncio.Lock()
+
 # ============================================================================
-# 节点 API 出口开关（0.7.0）：v1（默认）｜v3
+# 节点 API 出口开关：**v3（默认，2026-09-24 起）**｜v1（一行回退）
 # ============================================================================
 # ⚠️ 两条出口**必须互斥**：宿主加载器是
 #     `if hasattr(module,"NODE_CLASS_MAPPINGS") and ... is not None: ... return True`
 #     `elif hasattr(module,"comfy_entrypoint"): ...`
 #   （ComfyUI/nodes.py:2295-2337）—— V1 分支命中即 return ⇒ 同时导出两者时 **V3 永不生效**。
 #   所以 V3 模式下把 NODE_CLASS_MAPPINGS **显式设为 None**（宿主的判据含 "is not None"）。
-# 默认 **v3**（2026-09-24 切换）：V3 出口已过 65 项逐字段机检（8 节点 / 111 个 input
+# 默认 **v3**（2026-09-24 切换）：V3 出口已过 69 项逐字段机检（8 节点 / 112 个 input
 # 的顺序·取值·组合项全序与 V1 一致）＋ 2 段真实链验证（362/362 帧守恒 · 流拷贝无损 ·
 # PCM 边车被拼接路由取到）。
 # ⚠️ 回退到 V1：设 H3RELAY_NODE_API=v1 后重启 —— 两条出口的代码都还在，只是默认换了。
@@ -223,39 +232,173 @@ if PromptServer is not None:           # pragma: no branch
         crf = max(0, min(51, crf))
         lines.append("  · 音轨档 %s%s ｜ 画面重编码 crf=%d（流拷贝路用不到）"
                      % (a_codec, "" if not a_bitrate else " @" + a_bitrate, crf))
-        out_dir = folder_paths.get_output_directory()
-        out_path, n = os.path.join(out_dir, name + ".mp4"), 2
-        while os.path.exists(out_path):                 # 不覆盖已有成片，换个序号
-            out_path = os.path.join(out_dir, "%s-%d.mp4" % (name, n))
-            n += 1
-        if not segs:
-            lines.append("  🔴 一段视频文件都没找到 ⇒ 没有拼。"
-                         "（跑过一轮再来，或把 Chain 的 segments 填成正数。）")
-            return web.json_response({"ok": False, "report": "\n".join(lines), "out": "",
-                                      "attempted_out": out_path, "searched": note})
-        # 🔴 拼之前先核对**文件真的在盘上**：缺了立刻报清楚，不进编码阶段
-        #   （路径发现本身是内存里扫 history + isfile，微秒级；这一步只为"别白等"）。
-        _miss = [p for p in segs if not os.path.isfile(p)]
-        if _miss:
-            lines.append("  🔴 %d 个段文件在盘上不存在（路径来自节点回显，已被删/被移？）⇒ 没有拼："
-                         % len(_miss))
-            lines += ["     · " + p for p in _miss]
-            return web.json_response({"ok": False, "report": "\n".join(lines), "out": "",
-                                      "attempted_out": out_path, "missing": _miss,
+        async with _CONCAT_LOCK:
+            out_dir = folder_paths.get_output_directory()
+            out_path, n = os.path.join(out_dir, name + ".mp4"), 2
+            while os.path.exists(out_path):             # 不覆盖已有成片，换个序号
+                out_path = os.path.join(out_dir, "%s-%d.mp4" % (name, n))
+                n += 1
+            if not segs:
+                lines.append("  🔴 一段视频文件都没找到 ⇒ 没有拼。"
+                             "（跑过一轮再来，或把 Chain 的 segments 填成正数。）")
+                return web.json_response({"ok": False, "report": "\n".join(lines), "out": "",
+                                          "attempted_out": out_path, "searched": note})
+            # 🔴 拼之前先核对**文件真的在盘上**：缺了立刻报清楚，不进编码阶段
+            #   （路径发现本身是内存里扫 history + isfile，微秒级；这一步只为"别白等"）。
+            _miss = [p for p in segs if not os.path.isfile(p)]
+            if _miss:
+                lines.append("  🔴 %d 个段文件在盘上不存在（路径来自节点回显，已被删/被移？）⇒ 没有拼："
+                             % len(_miss))
+                lines += ["     · " + p for p in _miss]
+                return web.json_response({"ok": False, "report": "\n".join(lines), "out": "",
+                                          "attempted_out": out_path, "missing": _miss,
+                                          "searched": note})
+            # 🔴 2026-09-25：**必须丢线程池**。本路由是 `async def`（跑在 aiohttp 事件循环里），
+            #   而 `assemble_mp4_segments` 是同步的 ffmpeg 编码（几十秒级）——直接调会把事件循环
+            #   整个堵住，期间 UI 的**所有**请求（队列轮询 / `/queue` / `/history`）全部无响应
+            #   ⇒ 用户看到的就是"点了没反应 / 卡死了"。
+            #   实测对照（1.5 s 重活）：同步调用下事件循环被占满 **1.502 s**；
+            #   `run_in_executor` 下 0.155 s 照常返回。
+            #   ⚠ **不要用 `asyncio.wait_for` 包** —— 它超时能抛，但**挡不住阻塞**（同步调用仍占着循环）。
+            try:
+                rep = await asyncio.get_running_loop().run_in_executor(
+                    None, lambda: CORE.assemble_mp4_segments(
+                        segs, out_path, on_log=print, audio_codec=a_codec,
+                        audio_bitrate=a_bitrate, crf=crf, pcm_paths=pcms))
+            except Exception as exc:            # noqa: BLE001
+                # 拼接内部抛错（缺库 / 文件被占用 / 编码器缺失…）也必须变成画布上看得懂的提示，
+                # 不然前端只看到 500、status 格子里什么都没有。
+                lines.append("  🔴 拼接过程抛错（%s）：%s" % (type(exc).__name__, exc))
+                lines.append("     %s 可能是不完整的半成品，别当成品用。" % out_path)
+                return web.json_response({"ok": False, "report": "\n".join(lines), "out": "",
+                                          "attempted_out": out_path, "searched": note})
+            return web.json_response({"ok": bool(rep.get("ok")),
+                                      "report": "\n".join(lines) + "\n" + rep.get("report", ""),
+                                      "out": out_path if rep.get("ok") else "",
+                                      "attempted_out": out_path, "asserts": rep.get("asserts"),
                                       "searched": note})
+
+    # ========================================================================
+    # 环境自检（7.4②）：`GET /h3relay/health`
+    # ========================================================================
+    # 为什么值得有：.github/ISSUE_TEMPLATE/bug_report.md 要用户填「本包版本 / ComfyUI 版本 /
+    #   Python+torch / OS」—— 全靠手动翻；本包特有的三项（节点注册数 / 时序契约 / 上游可选依赖）
+    #   更是没人会主动查。这里一次给全 ⇒ **把 3–5 轮问答压成一行 curl**。
+    # ⚠ 它**查不到"包压根没加载"**（目录嵌套放错 / 没重启）—— 那时本路由也不存在。
+    #   那种情况看启动日志的 `[H3 Relay] v… 已加载` 那行：**没有 = 没加载**。
+    @PromptServer.instance.routes.get("/h3relay/health")
+    async def h3relay_health(request):  # pragma: no cover - 需要运行中的宿主
+        import platform
+        import sys as _sys
+
+        # ① 节点注册（⚠ 分出口取：V3 模式下 NODE_CLASS_MAPPINGS 恒为 None，拿它数会永远得 0）
+        names = _node_names() or ["<枚举失败>"]
+
+        # ② 时序契约（不一致 ⇒ 本包尾段切片算术对上游失效 ⇒ 会产出错位坏片）
         try:
-            rep = CORE.assemble_mp4_segments(segs, out_path, on_log=print,
-                                             audio_codec=a_codec, audio_bitrate=a_bitrate,
-                                             crf=crf, pcm_paths=pcms)
-        except Exception as exc:            # noqa: BLE001
-            # 拼接内部抛错（缺库 / 文件被占用 / 编码器缺失…）也必须变成画布上看得懂的提示，
-            # 不然前端只看到 500、status 格子里什么都没有。
-            lines.append("  🔴 拼接过程抛错（%s）：%s" % (type(exc).__name__, exc))
-            lines.append("     %s 可能是不完整的半成品，别当成品用。" % out_path)
-            return web.json_response({"ok": False, "report": "\n".join(lines), "out": "",
-                                      "attempted_out": out_path, "searched": note})
-        return web.json_response({"ok": bool(rep.get("ok")),
-                                  "report": "\n".join(lines) + "\n" + rep.get("report", ""),
-                                  "out": out_path if rep.get("ok") else "",
-                                  "attempted_out": out_path, "asserts": rep.get("asserts"),
-                                  "searched": note})
+            from . import layout_contract as _lc
+            _c_ok, _c_msgs = _lc.check_layout(force=True)
+        except Exception as _e:                      # noqa: BLE001
+            _c_ok, _c_msgs = None, ["检查本身失败：%r" % (_e,)]
+
+        # ③ 上游可选依赖（第 8 节点用；没装不影响其它 7 个）
+        try:
+            from . import nodes as _n
+            _has = _n._comfy_registry().get(_n._UPSCALER_NODE) is not None
+            _up = "已装" if _has else "未装（可选；只影响 🔍 潜空间分块放大）"
+        except Exception as _e:                      # noqa: BLE001
+            _up = "未知（%s）" % type(_e).__name__
+
+        try:
+            import torch as _t
+            _torch = _t.__version__
+        except Exception:                            # noqa: BLE001
+            _torch = "（未装）"
+
+        _fp = folder_paths
+        return web.json_response({
+            "package": "ComfyUI-H3-Latent-Relay",
+            "version": __version__,
+            "node_api": NODE_API,
+            "node_api_default": NODE_API_DEFAULT,
+            "node_api_fallback": NODE_API_FALLBACK_REASON,
+            "nodes_registered": len(names),
+            "nodes": names,
+            "contract_ok": _c_ok,
+            "contract": _c_msgs,
+            "upstream_upscaler": _up,
+            "python": _sys.version.split()[0],
+            "torch": _torch,
+            "os": "%s %s" % (platform.system(), platform.release()),
+            "comfyui_base": str(getattr(_fp, "base_path", "") or ""),
+            "output_dir": _fp.get_output_directory(),
+        })
+
+
+# ============================================================================
+# 加载摘要（7.4①）：一行说清"包到底加载成什么样了"
+# ============================================================================
+# 为什么值得打这一行：**最高频的"装了没生效"是包压根没加载**（`custom_nodes/` 下嵌套了两层、
+#   或装完没重启）—— 那种情况连 `/h3relay/health` 都不存在，任何基于路由的自检都够不着。
+#   这一行是**零门槛**判据：**它没出现在启动日志里 ⇒ 包没加载**；出现了就能直接贴进 issue
+#   （issue 模板要的「本包版本」也就有了）。
+# ⚠ 上游可选依赖**不在这里查**：包加载时宿主的 `nodes` 模块可能还没就绪，查了会误报"未装"。
+# ⚠ 整段包在 try 里：**摘要本身绝不许把包加载搞挂**。
+def _node_names():
+    """当前出口会注册的节点名清单。
+
+    ⚠ V3 模式下 `NODE_CLASS_MAPPINGS` **恒为 None**（见文件头「两条出口必须互斥」），
+      所以必须走 `v3.nodes_v3.NODES`；某些加载环境（离线工具）拿不到它时，**退回 V1 的映射** ——
+      两套清单本来就一一对应（`tools/assert_default_exit.py` + 69 项逐字段机检都在锁这件事）。
+
+    🔴 2026-09-25 修：原先写的是 `from .v3 import nodes`，而**文件名是 `v3/nodes_v3.py`**
+      ⇒ 每次都抛 `ModuleNotFoundError`，又被下面的 `except: pass` 吞掉 ⇒ **这个分支从来没生效过**，
+      一直静默退回 V1 映射。当时没暴露，是因为两套清单 1:1、退回去算出来**还是 8 个、名字也对**
+      —— **结果正确 ≠ 代码正确**。真风险：一旦 V1/V3 分叉，banner 与 `/h3relay/health` 会
+      **静默报 V1 的清单，而宿主跑的是 V3**（正是本包最忌讳的静默失效）。
+      ⇒ 两处收口：① 走对模块名；② `except` 分支**必须出声**（不静默降级）。
+      机检 = `tests/test_v3_schema.py` 的 6.1（判据 = **取到的是 NODES 序而非字典序**，
+      这正是当初能一眼看穿"走了哪条分支"的那个差异）。
+    """
+    try:
+        if NODE_API == "v3":
+            # ⚠ 模块名是 `nodes_v3`（**不是** `nodes`）。这里**保证能成功**：NODE_API 仍是 "v3"
+            #   意味着 `from .v3.entrypoint import comfy_entrypoint` 已成功，而它开头就
+            #   `from .nodes_v3 import NODES` ⇒ 该模块早已在 sys.modules 里。
+            from .v3.nodes_v3 import NODES as _v3_NODES
+            ns = [getattr(c, "__name__", "?") for c in (_v3_NODES or ())]
+            if ns:
+                return ns
+            print("[H3 Relay] ⚠️ V3 节点清单为空（`v3.nodes_v3.NODES`）⇒ 退回 V1 映射计数。"
+                  "这行说明 V3 出口有问题，别只看 banner 的节点数。")
+        elif NODE_CLASS_MAPPINGS:
+            return sorted(NODE_CLASS_MAPPINGS)
+    except Exception as _e:                 # noqa: BLE001
+        # 🔴 不许静默：退回 V1 计数会让 banner/health 报出**另一套出口**的清单。
+        print("[H3 Relay] ⚠️ 节点清单取用失败（%s: %s）⇒ 退回 V1 映射计数，"
+              "banner 的节点数可能不代表当前出口。" % (type(_e).__name__, _e))
+    try:
+        from .nodes import NODE_CLASS_MAPPINGS as _v1
+        return sorted(_v1 or {})
+    except Exception:                       # noqa: BLE001
+        return []
+
+
+def _load_banner() -> str:
+    _names = _node_names()
+    n_nodes = len(_names) if _names else -1
+    api = NODE_API + ("（V3 失败已回退）" if NODE_API_FALLBACK_REASON else "")
+    try:
+        from . import layout_contract as _lc
+        _ok, _ = _lc.check_layout()
+        contract = "✓" if _ok else "**不一致（会产出错位坏片）**"
+    except Exception as _e:                 # noqa: BLE001
+        contract = "未查（%s）" % type(_e).__name__
+    return ("[H3 Relay] v%s 已加载｜节点 %s 个（出口 %s）｜时序契约 %s"
+            % (__version__, n_nodes if n_nodes >= 0 else "?", api, contract))
+
+
+try:
+    print(_load_banner())
+except Exception as _e:                     # noqa: BLE001
+    print("[H3 Relay] ⚠ 加载摘要生成失败（不影响包加载）：%r" % (_e,))

@@ -57,7 +57,6 @@ import importlib.util
 import os
 import sys
 import tempfile
-import traceback
 
 import torch
 
@@ -193,7 +192,6 @@ print()
 print("=" * 78)
 print("4) conditioning 注入")
 print("=" * 78)
-import node_helpers  # noqa: E402
 
 MARK = 7.0
 cond = [[torch.zeros(1, 8), {"minimax_keyframes": [
@@ -283,7 +281,6 @@ print()
 print("=" * 78)
 print("7) 节点返回值契约（每个分支的返回路数必须 == len(RETURN_TYPES)）")
 print("=" * 78)
-import importlib.util  # noqa: E402
 import types  # noqa: E402
 
 # 目录名含连字符，不能直接当包名 → 伪造一个包壳再按文件加载 nodes.py
@@ -768,6 +765,57 @@ _e_before = float((_ratio(_ppost[:12]) - _r_body).abs().max())
 _e_after = float((_ratio(_w1[:12]) - _r_body).abs().max())
 check("12.43 白平衡校正：段头 R:G:B 比例向段体靠拢",
       _e_after < _e_before, "偏差 %.4f → %.4f" % (_e_before, _e_after))
+
+# 12.44 分位统计的 numel 上限（2026-09-25 实测钉死）
+#   torch.quantile 硬上限 = 2^24；段体/段头是**整帧 flatten** ⇒ 高分辨率必撞：
+#   0.796MP(672x1184) 每通道只容 21.1 帧、1.03MP(768x1344) 只有 16.3 帧，
+#   而 90 帧段的段体（robust_body 筛后 ~25 帧 = 19.9M）必然超限 ⇒ hist_match 一开就抛。
+#   0.3MP 下测不出来（那里每通道 54.6 帧）—— 是**分辨率红利**，不是设计。
+_qs_t = torch.linspace(0.0, 1.0, 16)
+_small = torch.rand(500)
+check("12.44 分位包装：未超限时与 torch.quantile **逐位一致**（不改既有行为）",
+      torch.equal(CORE._quantile_capped(_small, _qs_t), torch.quantile(_small, _qs_t)))
+
+_saved_qmax = CORE.QUANTILE_MAX_ELEMS
+_saved_qsamp = CORE.QUANTILE_SAMPLE_ELEMS
+try:
+    CORE.QUANTILE_MAX_ELEMS = 20000                      # 人为压低 ⇒ 模拟高分辨率
+    CORE.QUANTILE_SAMPLE_ELEMS = 20000                   # 采样目标同步压低（否则 step=1 不采样）
+    _big = torch.rand(200000)
+    _capped = CORE._quantile_capped(_big, _qs_t, "夹具")   # 超限 ⇒ 走子采样，不该抛
+    _exact = torch.quantile(_big, _qs_t)
+    _dmax = float((_capped - _exact).abs().max())
+    check("12.45 分位包装：超限时**自动子采样、不抛**（原版在真尺寸下必抛）",
+          int(_capped.numel()) == int(_qs_t.numel()), "numel=%d" % int(_capped.numel()))
+    # 子采样 2e4 点估计分位，标准误 ~sqrt(0.25/2e4)=3.5e-3；3σ ≈ 0.011 ⇒ 判据取 0.03
+    check("12.46 分位包装：子采样结果贴近精确分位（max|d| < 0.03，理论量级内）",
+          _dmax < 0.03, "max|d|=%.4f（采样 2e4 点，理论 3σ≈0.011）" % _dmax)
+    # 12.47 🔴 关键性质：**采样点数与输入规模脱钩** ⇒ 耗时可控、分辨率无关。
+    #   这是 2.0MP+ 场景不"卡住"的依据（采到刚好 2^24 会单段 18 s，见 relay_core 注释）。
+    #   （编号 2026-09-25 与下面那条「端到端」对调 ⇒ 文件内编号按出现顺序递增。）
+    _pts = []
+    for _n in (200000, 2000000, 20000000):
+        _t = torch.rand(_n)
+        _pts.append(len(_t[::(-(-_n // CORE.QUANTILE_SAMPLE_ELEMS))]))
+    check("12.47 分位包装：采样点数与输入规模**脱钩**（分辨率无关 ⇒ 2MP/4MP 耗时同级）",
+          len(set(_pts)) == 1 and _pts[0] == CORE.QUANTILE_SAMPLE_ELEMS,
+          "2e5/2e6/2e7 点输入 → 采样 %s" % _pts)
+finally:
+    CORE.QUANTILE_MAX_ELEMS = _saved_qmax
+    CORE.QUANTILE_SAMPLE_ELEMS = _saved_qsamp
+
+# 12.48 端到端：直方图匹配在「人为压到超限」时仍能出结果（真尺寸下原版必抛）
+try:
+    CORE.QUANTILE_MAX_ELEMS = 5000
+    CORE.QUANTILE_SAMPLE_ELEMS = 5000
+    _hs = torch.rand(64, 24, 24, 3)
+    _hs[40:] += 0.15                                     # 段体亮一档
+    _ho = CORE.match_hist_head_to_body(_hs, 12, 1.0, 40)
+    check("12.48 直方图匹配：人为压到超限时正常出结果、帧数守恒",
+          tuple(_ho.shape) == tuple(_hs.shape), str(tuple(_ho.shape)))
+finally:
+    CORE.QUANTILE_MAX_ELEMS = _saved_qmax
+    CORE.QUANTILE_SAMPLE_ELEMS = _saved_qsamp
 
 # —— 低频残差传递（2026-09-16，借鉴 Director 的段间引导低频对齐）——
 # 合成"两段不同亮度"的序列：上段暗、下段亮（或反之），且**各带高频噪声**。
@@ -1374,12 +1422,35 @@ check("19.6 只对齐统计量（逐通道仿射）⇒ 空间结构不被复制�
 # 19.7 节点层：新 widget **追加在 optional 末位**（旧工作流取值不前移）
 # 🔴 2026-09-21：`run_id`（E3/E4 观测用）追加在末位 ⇒ 尾部断言跟着延长一位。
 # 🔴 2026-09-22：`save_pcm`（音频 PCM 边车）再追加一位。
+# 🔴 2026-09-25：`diagnostics`（只读观测总闸，默认关）再追加一位。
 #   本断言的作用是「**防止有人把新 widget 插到中间**」⇒ 延长尾部列表即可，不是放宽。
 _opt19 = list(NODES.H3RelayTrimAV.INPUT_TYPES()["optional"])
 check("19.7 新 widget 追加在 optional 末位（前缀顺序稳定）",
-      _opt19[-6:] == ["match_prev", "match_prev_frames", "match_prev_gain_max",
-                      "match_prev_offset_max", "run_id", "save_pcm"],
-      "尾部=%s" % (_opt19[-6:],))
+      _opt19[-7:] == ["match_prev", "match_prev_frames", "match_prev_gain_max",
+                      "match_prev_offset_max", "run_id", "save_pcm", "diagnostics"],
+      "尾部=%s" % (_opt19[-7:],))
+
+# 19.8 只读观测的总闸（2026-09-25 GG 拍板：**对外默认关**，本地产线入口显式开）
+#   三路观测（E3 DTW 代价 / 裁量→跳跃曲线 / E4 外观三元组）**都不参与裁量**（纯打印）⇒
+#   默认关**不改变任何帧/latent/音频**，只省 CPU（实测三路合计 0.361 s/段 @0.796MP/90 帧）。
+_diag_img = torch.rand(50, 16, 16, 3)
+_diag_img[22:] += 0.10                                   # 造出「钉住区之后」的差异供观测
+_diag_off = NODES.H3RelayTrimAV().trim(_diag_img, trim_frames=22, fps=24.0, settle_frames=0)[2]
+_diag_on = NODES.H3RelayTrimAV().trim(_diag_img, trim_frames=22, fps=24.0, settle_frames=0,
+                                      diagnostics=True)[2]
+check("19.7b 诊断默认关 ⇒ 报告里无 DTW / 跳跃曲线 / 外观三元组（对外省 ~0.4 s/段）",
+      ("DTW" not in _diag_off) and ("跳跃曲线" not in _diag_off)
+      and ("外观三元组" not in _diag_off), "report=%r" % _diag_off[-80:])
+check("19.7c diagnostics=True ⇒ 三路观测全回来（本地产线入口就是这么传的）",
+      ("DTW" in _diag_on) and ("跳跃曲线" in _diag_on) and ("外观三元组" in _diag_on),
+      "report=%r" % _diag_on[-80:])
+_diag_off_img = NODES.H3RelayTrimAV().trim(_diag_img, trim_frames=22, fps=24.0, settle_frames=0)[0]
+_diag_on_img = NODES.H3RelayTrimAV().trim(_diag_img, trim_frames=22, fps=24.0, settle_frames=0,
+                                          diagnostics=True)[0]
+check("19.7d 开关诊断**不改变裁切结果**（帧数一致、逐位相同）",
+      int(_diag_off_img.shape[0]) == int(_diag_on_img.shape[0])
+      and torch.equal(_diag_off_img, _diag_on_img),
+      "%d vs %d" % (int(_diag_off_img.shape[0]), int(_diag_on_img.shape[0])))
 
 # 19.8 节点层：默认全关（不接线时行为与 0.4.x 逐位一致）
 _it19 = NODES.H3RelayTrimAV.INPUT_TYPES()["optional"]
@@ -2657,10 +2728,18 @@ else:
         import types as _types
 
         class _Routes:
-            def post(self, _path):
-                def _deco(fn):
-                    return fn
-                return _deco
+            """装饰器透传 stub：注册路由时用哪个 HTTP 方法都认。
+
+            ⚠ 别写死方法名 —— 2026-09-25 踩过：新增 `GET /h3relay/health` 后，
+            原来只实现 `post` 的 stub 直接 `AttributeError` ⇒ 26.15 假红。
+            用 `__getattr__` 兜底，以后加任何方法（get/put/delete…）都不用回来改这里。
+            """
+            def __getattr__(self, _name):
+                def _reg(_path):
+                    def _deco(fn):
+                        return fn
+                    return _deco
+                return _reg
 
         class _FakePS:
             routes = _Routes()

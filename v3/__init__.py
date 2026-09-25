@@ -16,17 +16,11 @@
 ``nodes.py`` 的 V1 实现。``relay_core.py`` 的算法与那 384 项断言**完全不被动到**。
 
 节点清单（8 个，``node_id`` 与 V1 **完全同名** ⇒ 用户已存的工作流零改动可用）：
-    H3RelayLatentSave / H3RelayLatentLoad / H3RelayLatentUpscale / H3RelayTrimAV /
+    H3RelayLatentUpscale / H3RelayLatentSave / H3RelayLatentLoad / H3RelayTrimAV /
     H3RelayCopyBridge / H3RelayPost / H3RelayAudioSeam / H3RelayChain
-"""
 
-V3_NODE_IDS = [
-    "H3RelayLatentUpscale",
-    "H3RelayLatentSave",
-    "H3RelayLatentLoad",
-    "H3RelayTrimAV",
-    "H3RelayCopyBridge",
-    "H3RelayPost",
-    "H3RelayAudioSeam",
-    "H3RelayChain",
-]
+⚠️ **清单的唯一真相源 = ``v3/nodes_v3.py`` 的 ``NODES``**（上面那行只是给人读的注释）。
+   2026-09-25 删掉了本文件里原来那个 `V3_NODE_IDS` 列表：它与 `NODES` 是**同一份清单的两处声明**、
+   且**全仓零引用**（`grep -rn V3_NODE_IDS` 只命中它自己的定义）⇒ 留着就是一个会分叉的孪生体。
+   要"人读版清单"，改上面那段 docstring 即可；**要程序读，一律用 `nodes_v3.NODES`**。
+"""

@@ -1055,6 +1055,14 @@
           "widget": {
             "name": "save_pcm"
           }
+        },
+        {
+          "name": "diagnostics",
+          "type": "BOOLEAN",
+          "link": null,
+          "widget": {
+            "name": "diagnostics"
+          }
         }
       ],
       "outputs": [
@@ -1111,7 +1119,8 @@
         1.15,
         0.06,
         "relay_demo",
-        true
+        true,
+        false
       ]
     },
     {

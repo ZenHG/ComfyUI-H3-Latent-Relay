@@ -5,14 +5,28 @@
 # 所以不需要额外解析输出。
 #
 # 期望值：
-#   · 384/0  tests/test_relay_core.py      算法层
-#   ·  82/0  tools/review_050.py           文档—代码一致性
+#   · 392/0  tests/test_relay_core.py      算法层
+#   ·  86/0  tools/review_050.py           文档—代码一致性（✅ 本数字由**本文件的 H3g 自引用机检**盯着）
 #   ·  15/0  tools/smoke_nodes.py          节点层冒烟
 #   ·   4/4  tools/assert_default_exit.py  默认出口 = V3（契约 1 + 行为 3；必须单进程、不设环境变量）
-#   ·  58/0  tests/test_v3_schema.py       V3 与 V1 逐字段一致（**CI 里 7 节点 / 98 input**；
-#                                          本机装齐上游超分节点包时 65/0 / 8 节点 / 111 input）
+#   ·  69/0  tests/test_v3_schema.py       V3 与 V1 逐字段一致（**8 节点 / 112 个 input**，
+#                                          CI 与本机**一致** —— 见下方 2026-09-25 的更正）
 #   ·  29/0  tests/test_prompt_dispatch.mjs  Chain 词分发纯函数（node）
-# 改动后若这些数字变了，请同步 CONTRIBUTING.md「方面数/断言数」与 tests 头注释。
+# 改动后若这些数字变了，请同步 CONTRIBUTING.md「方面数/断言数」、tests 头注释 **以及本文件**。
+# ⚠️ 本文件曾是**已知盲区**（自己漂移过：停在 384；`assert_default_exit` 的期望值与第 11 行
+#    自相矛盾 3/3 vs 4/4；`review_050` 的执行行写 82 而真值 83）。2026-09-25 已收口：
+#      · `tests/test_relay_core.py` → **H3f**（逐行扫，头注释与执行行**都**认）
+#      · `tools/review_050.py`      → **H3g**（自引用，必须是该文件最后一个检查）
+#      · `tests/test_v3_schema.py`  → **H3h**（核本文件 + docs/08 + README + `__init__` 的
+#        节点数 / input 数 / 机检项数三组声明）
+# 🔴 2026-09-25 更正一个**错误前提**：本文件原先写「CI 的节点数 / input 数比本机少，
+#    因为 CI 没装上游超分节点包」。实测**不成立** —— 宿主 ComfyUI **自带**注册
+#    `latent_upscale_models`（`folder_paths.py:43`），所以 `H3RelayLatentUpscale` 的
+#    `INPUT_TYPES()` **永不抛错**、永不被 V3 entrypoint 的逐节点容错跳过
+#    ⇒ **两边恒为 8 节点 / 112 个 input**。
+#    （验证手法：把上游节点从宿主注册表摘掉，`get_node_list()` 仍是 8 个。）
+#    那组偏小的数字只活在**注释**里、无人断言，所以 CI 一直绿着而文档一直是错的。
+#    ⇒ 现在两边一致，这组数字已由 **H3h** 机检。
 name: ci
 
 on:
@@ -57,13 +71,21 @@ jobs:
           echo "--- 将安装的宿主依赖 ---"; cat "$RUNNER_TEMP/host-requirements.txt"
           pip install -r "$RUNNER_TEMP/host-requirements.txt"
 
+      # 静态检查（配置在 pyproject.toml 的 [tool.ruff]）。
+      # ⚠ 2026-09-25 才真正接进来 —— 之前配置一直在、却**从没跑过**，属"形同虚设"。
+      # 零 GPU、秒级 ⇒ 放最前，快速失败。`--exclude dist`：那是 make_minimal_bundle 的生成物。
+      - name: Lint (ruff)
+        run: |
+          pip install -q ruff
+          ruff check . --exclude dist
+
       - name: Regression trio
         env:
           COMFYUI_PATH: ${{ runner.temp }}/ComfyUI
           PYTHONPATH: ${{ runner.temp }}/ComfyUI
         run: |
-          python tests/test_relay_core.py   # 期望 384/0
-          python tools/review_050.py        # 期望 82/0
+          python tests/test_relay_core.py   # 期望 392/0
+          python tools/review_050.py        # 期望 86/0（H3g 自引用机检）
           python tools/smoke_nodes.py       # 期望 15/0
 
       # 默认出口 = V3（2026-09-24 从 v1 切过来）。**必须单跑一个进程**：
@@ -72,18 +94,18 @@ jobs:
         env:
           COMFYUI_PATH: ${{ runner.temp }}/ComfyUI
           PYTHONPATH: ${{ runner.temp }}/ComfyUI
-        run: python tools/assert_default_exit.py   # 期望 3/3
+        run: python tools/assert_default_exit.py   # 期望 4/4
 
       # V3 外壳与 V1 的逐字段一致性（零 GPU）。默认出口现在是 V3 ⇒ 它必须被 CI 覆盖。
-      # ⚠️ CI 期望数是 **58/0（7 节点 / 98 input）**，不是本机的 65/0：
-      #    `H3RelayLatentUpscale` 要上游节点包 `MinimaxH3LatentUpscaler3D`，CI 里没装 ⇒
-      #    该节点诚实降级被跳过（不是失败；脚本会把实际节点数与 input 数打在结果行里）。
-      #    本机装齐上游包时为 65/0（8 节点 / 111 input）。
+      # ⚠️ 2026-09-25 更正：这里原先写「CI 的节点数 / input 数比本机少」（前提 = CI 没装上游
+      #    超分节点包）—— **前提是错的**。宿主 ComfyUI 自带注册 `latent_upscale_models`
+      #    （`folder_paths.py:43`）⇒ `H3RelayLatentUpscale.INPUT_TYPES()` 永不抛错、永不被跳过
+      #    ⇒ CI 与本机**恒为 8 节点 / 112 个 input**，数字两边一致。
       - name: V3 schema parity (vs V1)
         env:
           COMFYUI_PATH: ${{ runner.temp }}/ComfyUI
           PYTHONPATH: ${{ runner.temp }}/ComfyUI
-        run: python tests/test_v3_schema.py       # CI 期望 58/0（7 节点）
+        run: python tests/test_v3_schema.py       # 期望 69/0（8 节点 / 112 个 input）
 
       # Chain 词分发的纯函数（与浏览器里跑的是同一份 web/relay_kit_prompt.js）
       - name: Chain prompt dispatch (node)
