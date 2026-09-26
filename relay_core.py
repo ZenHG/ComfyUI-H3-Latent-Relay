@@ -943,6 +943,9 @@ AUDIO_SEAM_PATCH_GUARD_CENT_HZ: float = 2500.0    # 门②：有声帧谱质心 
 AUDIO_SEAM_PATCH_GUARD_FLAT: float = 0.11         # 门③：有声帧谱平坦度 < 此值（0–1，越小越「有音高」）
 AUDIO_SEAM_PATCH_GUARD_WIN: int = 1024            # 三特征共用 STFT 窗长（样本 @32k = 32ms）
 AUDIO_SEAM_PATCH_GUARD_HOP: int = 512             # 上述 STFT 的 hop（样本 @32k = 16ms，50% 重叠）
+# ⚠️ 上面两行的「样本数」与 `_guard_features` 的 `1.0/32000.0` 频率换算，
+#   都以 **H3 默认音频采样率 32000 Hz** 为前提（不是笔误）；H3 若改默认采样率须一并调整。
+#   同一前提还贯穿：`_frame_rms(hop=1600)` = 50ms、`_speech_onset_in_head` 返回的样本数单位。
 
 
 def _guard_features(wf: torch.Tensor, n_probe: int,
@@ -986,6 +989,11 @@ def _guard_features(wf: torch.Tensor, n_probe: int,
     if int(act.sum()) < 3:                   # 全段平坦 ⇒ 没有「事件帧」，退回全帧（保守）
         act = torch.ones_like(fdb, dtype=torch.bool)
     F = torch.fft.rfft(fr, dim=1).abs() + 1e-12
+    # ⚠️ 32000 = **H3 的默认音频采样率**（MiniMax-H3 音频 VAE 固定输出 32 kHz），
+    #   **不是笔误、也不是写死的 bug**。守卫全程以 32000 为前提：
+    #     · 本行的 `1.0/32000.0` 只用于把 FFT 频点换算成 Hz（`cent_act` 的判据线 2500 Hz 同此前提）；
+    #     · `_frame_rms` 的 `hop=1600` 也正是「50ms @ 32k」，与返回的「样本数」单位一致。
+    #   ⇒ 若将来 H3 改了默认采样率，**这两处必须一起改**（可用 `wf` 的实际采样率替换本行）。
     freqs = torch.fft.rfftfreq(w, 1.0 / 32000.0, device=x.device, dtype=x.dtype)
     cent = (F * freqs.unsqueeze(0)).sum(dim=1) / F.sum(dim=1)
     flat = torch.exp(torch.log(F).mean(dim=1)) / F.mean(dim=1)
@@ -1034,11 +1042,14 @@ def _speech_onset_in_head(wf: torch.Tensor, n_probe: int,
     —— 那是「语音当底噪」既知边界，且那种素材 patch 本来就无意义。BGM 乐句峰（±3dB 起伏）
     < 2×中位 ⇒ 不触发；台词通常 +14dB 以上 ⇒ 稳触发。
 
-    🛡 ``layers``（0.6.10，**默认 2**）：多档前置判据，见常量区 `AUDIO_SEAM_PATCH_GUARD_LAYERS`。
+    🛡 ``layers``（0.6.10，**默认 0**）：多档前置判据，见常量区 `AUDIO_SEAM_PATCH_GUARD_LAYERS`。
     0 = 0.6.9 行为（逐位一致）；1/2/3 = 追加「能量阶跃」「谱质心」「谱平坦度」门。
     **判据不过 ⇒ 直接返回 None（= 头部无台词）** ⇒ patch 不做避让，等同现行「头部干净」路径。
     ⚠️ 非零档在**通过**判据后**仍走原来的 2×中位逻辑**找 run 起点 —— 前置门只管「有没有」，
     不管「在哪」，因此它只可能**减少**误报，不会**改变**已触发时的收缩位置。
+    🔴 **为什么默认是 0 而不是某个正档**：多档判据的准确率是在 `n_probe` = 素材全长（2.0s）
+    下标定的，而**真产线 `n_probe` = patch 窗长**（`chain_auto.sh`: `PATCH_N=1.0`），
+    阈值随窗长漂移 ⇒ 正档在真口径下 TP 掉到 0~3/5。详见常量区与 README §7.3.1。
     """
     # ---- 多档前置门 ----
     _lay = max(0, min(3, int(layers)))

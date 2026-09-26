@@ -59,7 +59,7 @@ node tests/test_prompt_dispatch.mjs      # 期望 29/0
 ## V3 外壳与默认出口（零 GPU、秒级）
 
 ```bash
-COMFYUI_PATH=<根> python tests/test_v3_schema.py        # 本机 69/0（8 节点 / 112 个 input）；CI 62/0（7 节点 / 99 input）
+COMFYUI_PATH=<根> python tests/test_v3_schema.py        # 本机 69/0（8 节点 / 113 个 input）；CI 62/0（7 节点 / 100 input）
 COMFYUI_PATH=<根> python tools/assert_default_exit.py   # 期望 4/4
 ```
 
@@ -72,10 +72,10 @@ Combo `options` **全序** / outputs 路数与显示名 / `is_output_node` / 显
 > `import nodes`**。
 > · 宿主 `nodes` **可导入**（本机）⇒ 上游节点不在注册表 ⇒ `_upscaler_cls()` 抛 **RuntimeError**
 >   ⇒ `_upscaler_module()` 捕获它（**只** `except RuntimeError`）⇒ 退回 `get_filename_list`
->   （宿主自带注册 `latent_upscale_models`）⇒ 不抛 ⇒ **8 节点 / 112 input**。
+>   （宿主自带注册 `latent_upscale_models`）⇒ 不抛 ⇒ **8 节点 / 113 input**。
 > · 宿主 `nodes` **导不进来**（CI：只 clone 宿主、不装上游包）⇒ 抛的是 **ModuleNotFoundError**
 >   （ImportError 子类）⇒ **穿透**（没被捕获）⇒ INPUT_TYPES 抛 ⇒ V3 entrypoint 的逐节点容错
->   跳过它 ⇒ **7 节点 / 99 input**。**这是设计内的降级，不是失败。**
+>   跳过它 ⇒ **7 节点 / 100 input**。**这是设计内的降级，不是失败。**
 >
 > ⇒ 判据跟着环境走（`_HOST_REGISTRY_OK`），**两个数并排写才是正确形态**。
 > ⚠️ **别用"只把上游节点从注册表摘掉"来模拟 CI** —— 那复现的是「装了宿主、没装上游包」，
