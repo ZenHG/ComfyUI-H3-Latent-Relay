@@ -912,12 +912,118 @@ def _voiced_frac_from_frames(rms: torch.Tensor, hop: int, nfr: int, start: int,
 
 
 AUDIO_SEAM_PATCH_GUARD_K: float = 2.0
+# 🛡 台词守卫·判据档位（0.6.10）。
+#
+# 🔴 默认 = 0。**为什么不是 2**（2026-09-26 复盘，含一次我自己的口径失误）：
+#   多档判据的 acc 0.938 是在 `n_probe = 2.0s`（= 素材全长）口径下标定的，
+#   而**真产线 `n_probe = patch 窗长`**（`chain_auto.sh`: `PATCH_N=1.0`；`l1_api` 副路 1.2）。
+#   按真口径重测：档 2 在 `patch=1.2` 时 acc 0.562、`patch=1.0` 时 0.625，
+#   且 **TP 只有 0~3 / 5**。阈值（12 / 2500 / 0.11）**随窗长漂移，不可迁移**。
+#   ⇒ 依据不足，**不能设成默认**。要用请自行标定后显式开启。
+#
+# 🔴 更根本的边界（实测，见 README §7.3.1）：**守卫只对「段首有静音垫」的素材有效**。
+#   素材若整段有人声/音乐铺底（人声自己就是底噪），中位被抬高 ⇒ 阈值高过人声峰值
+#   ⇒ **永不触发**，任何档位都救不了（实锤：`aseamC_s2` / `l1At2_s2`，台词从 0.10s 起，
+#   整段最大帧 −4.0 dB，而阈值要 −3.5 dB ⇒ 窗内超阈帧 = 0）。
+#   ⇒ **台词保护的主防线是 `patch_seconds ≤ 1.2`（对齐出词侧段首留白纪律），不是守卫。**
+#
+# 档位语义（`layers`，累积）：
+#   0（默认） = 现行单判据：2×全源中位能量 + 持续 ≥2 帧。**= 0.6.9 行为，逐位一致。**
+#   1 = 门①：能量阶跃 `step = P95(fdb) − P20(fdb)` ≥ 12 dB（治「安静素材误报」）。
+#   2 = 门①+门②：再加「有声帧谱质心 `cent_act` < 2500 Hz」（治高频冲击：碰杯/门响）。
+#   3 = 门①+门②+门③：再加「有声帧谱平坦度 `flat_act` < 0.11」（治稳态乐音：钢琴/BGM）。
+#
+# ⚠️ 档 1~3 的方向是**降低灵敏度**（更不容易判「有台词」）。这与守卫「宁枉勿纵」的
+#    设计意图**相反** —— 实测误报代价极低（patch 只要 ≥100ms，静默早在 10ms 内结束），
+#    所以**理论正确方向应是「多报」**；但「多报」的判据实测全都不可分（15 类已穷尽）。
+#    ⇒ 档 1~3 仅在「确诊为误报、且素材属 A 类（头部有静音垫）」时才值得开。
+AUDIO_SEAM_PATCH_GUARD_LAYERS: int = 0
+AUDIO_SEAM_PATCH_GUARD_STEP_DB: float = 12.0      # 门①：能量阶跃 ≥ 此值（dB）
+AUDIO_SEAM_PATCH_GUARD_CENT_HZ: float = 2500.0    # 门②：有声帧谱质心 < 此值（Hz）
+AUDIO_SEAM_PATCH_GUARD_FLAT: float = 0.11         # 门③：有声帧谱平坦度 < 此值（0–1，越小越「有音高」）
+AUDIO_SEAM_PATCH_GUARD_WIN: int = 1024            # 三特征共用 STFT 窗长（样本 @32k = 32ms）
+AUDIO_SEAM_PATCH_GUARD_HOP: int = 512             # 上述 STFT 的 hop（样本 @32k = 16ms，50% 重叠）
+
+
+def _guard_features(wf: torch.Tensor, n_probe: int,
+                    win: int = AUDIO_SEAM_PATCH_GUARD_WIN,
+                    hop: int = AUDIO_SEAM_PATCH_GUARD_HOP) -> Optional[dict]:
+    """多档守卫的三个**跨信息域**特征；算不出（音频太短）返回 ``None``。
+
+    | 键 | 量 | 域 | 判的是 | 人声实测 | 干扰源实测 |
+    |---|---|---|---|---|---|
+    | `step_db` | `P95(fdb) − P20(fdb)` | 能量/时间 | **有没有事件** | 12.1–70.2 | 钢琴 6.5 / 静音 4.8 |
+    | `cent_act` | 有声帧能量加权谱质心中位 | 谱形状 | 事件**是不是高频冲击** | 895–2182 Hz | 碰杯 4131–4930 |
+    | `flat_act` | 有声帧谱平坦度中位 | 谐噪结构 | 事件**是不是稳态乐音** | 0.029–0.104 | 钢琴/BGM 0.075–0.206 |
+
+    三个量分属**能量 / 谱形状 / 谐噪**三域 —— 这是关键：同一域里堆特征无效
+    （实测 `P50+动态` 等同域组合 LOO ≤0.688，跨域组合 LOO 0.875）。
+
+    - `fdb` = 32ms 窗 / 50% 重叠 STFT 的帧 dB。用 `P95−P20` 而非 `max−min`，
+      是为了不让**单点瞬态**抬高判据。
+    - 「有声帧」= `fdb > P90 − 25dB` 的帧（参与事件的帧，不含事件前的静音垫）。
+      ⚠️ 必须用「有声帧」而非全帧：全帧中位会被**人声进场前的静音/底噪**拉低 ——
+      实测 `tone_s1` 全帧质心 4098 Hz（看着像高频冲击）而 `cent_act` 1284 Hz（正确识别人声）。
+    - `flat_act` = `exp(mean(ln|X|)) / mean(|X|)`，0=纯音，1=白噪。
+    """
+    x = wf
+    while x.dim() > 1:                       # 压到 1 维（与 `_frame_rms` 同口径：先混单声道）
+        x = x.mean(dim=0)
+    total = min(int(x.shape[-1]), max(0, int(n_probe)))
+    w = max(64, int(win))
+    h = max(1, int(hop))
+    if total < w + h:
+        return None
+    nf = 1 + (total - w) // h
+    idx = torch.arange(w, device=x.device).unsqueeze(0) + \
+        h * torch.arange(nf, device=x.device).unsqueeze(1)
+    fr = x[idx] * torch.hann_window(w, device=x.device, dtype=x.dtype).unsqueeze(0)
+    frms = fr.pow(2).mean(dim=1).clamp_min(0.0).sqrt()
+    fdb = 20.0 * torch.log10(frms + 1e-12)
+    step_db = float(torch.quantile(fdb, 0.95) - torch.quantile(fdb, 0.20))
+    p90 = float(torch.quantile(fdb, 0.90))
+    act = fdb > (p90 - 25.0)
+    if int(act.sum()) < 3:                   # 全段平坦 ⇒ 没有「事件帧」，退回全帧（保守）
+        act = torch.ones_like(fdb, dtype=torch.bool)
+    F = torch.fft.rfft(fr, dim=1).abs() + 1e-12
+    freqs = torch.fft.rfftfreq(w, 1.0 / 32000.0, device=x.device, dtype=x.dtype)
+    cent = (F * freqs.unsqueeze(0)).sum(dim=1) / F.sum(dim=1)
+    flat = torch.exp(torch.log(F).mean(dim=1)) / F.mean(dim=1)
+    return dict(
+        step_db=step_db,
+        cent_act=float(torch.median(cent[act])),
+        flat_act=float(torch.median(flat[act])),
+    )
+
+
+def _guard_layers_pass(feats: Optional[dict], layers: int) -> Tuple[bool, str]:
+    """按档位跑前置门 ⇒ ``(是否可能有人声, 未通过时的人类可读原因)``。
+
+    层与档位是**累积**关系：档 2 必须同时过门①与门②。
+    """
+    lay = max(0, min(3, int(layers)))
+    if lay <= 0:
+        return True, ""
+    if feats is None:
+        return False, "音频太短（不足一个分析窗）"
+    if feats["step_db"] < float(AUDIO_SEAM_PATCH_GUARD_STEP_DB):
+        return False, ("能量阶跃 %.1fdB < %.1fdB（头部无「事件」）"
+                       % (feats["step_db"], AUDIO_SEAM_PATCH_GUARD_STEP_DB))
+    if lay >= 2 and feats["cent_act"] >= float(AUDIO_SEAM_PATCH_GUARD_CENT_HZ):
+        return False, ("有声帧谱质心 %.0fHz ≥ %.0fHz（事件是高频宽带冲击，非人声）"
+                       % (feats["cent_act"], AUDIO_SEAM_PATCH_GUARD_CENT_HZ))
+    if lay >= 3 and feats["flat_act"] >= float(AUDIO_SEAM_PATCH_GUARD_FLAT):
+        return False, ("有声帧谱平坦度 %.3f ≥ %.3f（事件是稳态乐音，非人声）"
+                       % (feats["flat_act"], AUDIO_SEAM_PATCH_GUARD_FLAT))
+    return True, ""
 
 
 def _speech_onset_in_head(wf: torch.Tensor, n_probe: int,
                           hop_samples: int = 1600,
                           k: float = AUDIO_SEAM_PATCH_GUARD_K,
-                          sustain: int = AUDIO_SEAM_BED_VOICED_SUSTAIN) -> Optional[int]:
+                          sustain: int = AUDIO_SEAM_BED_VOICED_SUSTAIN,
+                          layers: int = AUDIO_SEAM_PATCH_GUARD_LAYERS,
+                          ) -> Optional[int]:
     """目标段**头部 [0, n_probe)** 里首个「持续 ≥sustain 帧」有声 run 的起点（样本）；无 ⇒ None。
 
     与床窗判据（`_voiced_frac_from_frames`）同机件同基线（**全源中位**），阈值松一档（2× vs 3×，
@@ -927,7 +1033,19 @@ def _speech_onset_in_head(wf: torch.Tensor, n_probe: int,
     （「头部干净 ⇒ 零副作用」承诺在 BGM 素材上被打破）。中位的失效域只有「语音占 >50% 帧」
     —— 那是「语音当底噪」既知边界，且那种素材 patch 本来就无意义。BGM 乐句峰（±3dB 起伏）
     < 2×中位 ⇒ 不触发；台词通常 +14dB 以上 ⇒ 稳触发。
+
+    🛡 ``layers``（0.6.10，**默认 2**）：多档前置判据，见常量区 `AUDIO_SEAM_PATCH_GUARD_LAYERS`。
+    0 = 0.6.9 行为（逐位一致）；1/2/3 = 追加「能量阶跃」「谱质心」「谱平坦度」门。
+    **判据不过 ⇒ 直接返回 None（= 头部无台词）** ⇒ patch 不做避让，等同现行「头部干净」路径。
+    ⚠️ 非零档在**通过**判据后**仍走原来的 2×中位逻辑**找 run 起点 —— 前置门只管「有没有」，
+    不管「在哪」，因此它只可能**减少**误报，不会**改变**已触发时的收缩位置。
     """
+    # ---- 多档前置门 ----
+    _lay = max(0, min(3, int(layers)))
+    if _lay > 0:
+        _ok, _why = _guard_layers_pass(_guard_features(wf, n_probe), _lay)
+        if not _ok:
+            return None
     rms, hop, nfr = _frame_rms(wf, hop_samples)
     if rms is None:
         return None
@@ -1195,7 +1313,8 @@ def audio_seam_patch(audio: Any, bed_audio: Any, patch: float = AUDIO_SEAM_PATCH
                      target_audio: Any = None,
                      gain_max_db: float = AUDIO_SEAM_BED_GAIN_MAX_DB,
                      stage_index: int = 0,
-                     patch_guard: bool = True) -> Tuple[Any, str]:
+                     patch_guard: bool = True,
+                     patch_guard_layers: int = AUDIO_SEAM_PATCH_GUARD_LAYERS) -> Tuple[Any, str]:
     """把本段头部 ``patch`` 秒换成 ``bed_audio``（上一段）里的床声窗；**长度守恒**。
 
     替换区 ``[0, N-X)`` 纯床声，``[N-X, N)`` 是床声 → 本段自身音频的交叉淡变
@@ -1223,9 +1342,10 @@ def audio_seam_patch(audio: Any, bed_audio: Any, patch: float = AUDIO_SEAM_PATCH
     if X >= n:                                  # 边界淡变不能吃掉整个替换区
         X = max(0, n - 1)
     # 🛡 patch 台词守卫（0.6.5，默认开）：见常量区注释。检不出台词 ⇒ 逐位走旧行为。
+    #    守卫**判据档位** `patch_guard_layers` 默认 0 = 0.6.9 行为（多档判据见常量区注释）。
     guard_note = ""
     if patch_guard:
-        _onset = _speech_onset_in_head(wf, n)
+        _onset = _speech_onset_in_head(wf, n, layers=patch_guard_layers)
         if _onset is not None:
             _margin = int(round(AUDIO_SEAM_PATCH_GUARD_MARGIN_S * sr))
             _safe = _onset - _margin

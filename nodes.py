@@ -497,8 +497,11 @@ class H3RelayLatentSave:
         return {
             "required": {
                 "latent": ("LATENT", {
-                    "tooltip": "【接法】从本段采样器（SelfLiftH3Sampler）的 latent 输出口拉线过来。\n"
-                               "作用：把本段拍完的 latent 存成文件，它是下一段的「接力棒」。",
+                    "tooltip": "【接法】从本段采样器的 latent 输出口拉线过来 —— 官方 SamplerCustomAdvanced、\n"
+                               "第三方渐进采样器（SelfLiftH3Sampler 等）都吃；**本包不绑定任何特定采样器**。\n"
+                               "作用：把本段拍完的 latent 存成文件，它是下一段的「接力棒」。\n"
+                               "🔴 走「一采 → 放大 → 二采」两遍法时接**一采的输出**，别接二采的：\n"
+                               "续接契约取原生域，存放大后的等于让下一段再过一次放大（双倍漂移）。",
                 }),
                 "run_id": ("STRING", {
                     "default": "relay",
@@ -1916,6 +1919,24 @@ class H3RelayAudioSeam:
                                "头部本来就是环境声 ⇒ 行为与关闭时**逐位一致**（零副作用）。\n"
                                "关 ⇒ 旧行为（可能吞字）。",
                 }),
+                "patch_guard_layers": ("INT", {
+                    "advanced": True,
+                    "default": CORE.AUDIO_SEAM_PATCH_GUARD_LAYERS, "min": 0, "max": 3, "step": 1,
+                    "tooltip": "🛡 台词守卫·判据档位（**默认 0 = 0.6.9 行为，逐位一致**）。\n"
+                               "⚠️ 档 1~3 的方向是**降低灵敏度**（更不容易判「有台词」），\n"
+                               "   **与守卫「宁枉勿纵」的设计意图相反**，且阈值只在 16 条素材 +\n"
+                               "   `patch=2.0` 口径下标定（真产线 patch=1.0/1.2 时 TP 降到 0~3/5）\n"
+                               "   ⇒ **依据不足，默认关**。要用请先拿自己的素材试听。\n"
+                               "  0 = 单判据：2×全源中位能量 + 持续 ≥2 帧（**默认**）。\n"
+                               "  1 = + 能量阶跃 ≥12dB（治「安静素材把环境噪声当台词」）。\n"
+                               "  2 = + 有声帧谱质心 <2500Hz（治碰杯/门响等高频冲击）。\n"
+                               "  3 = + 有声帧谱平坦度 <0.11（治钢琴/BGM 等稳态乐音）。\n"
+                               "🔴 **别把台词安全寄托在本开关上**：守卫只对「段首有静音垫」的素材有效；\n"
+                               "   素材若整段有人声/音乐铺底（人声自己就是底噪），中位被抬高 ⇒\n"
+                               "   阈值高过人声峰值 ⇒ **永不触发**，任何档位都救不了。\n"
+                               "   **主防线是 `patch_seconds ≤ 1.2`**（对齐出词侧段首留白纪律）。\n"
+                               "   详见 README §7.3.1「台词保护：缩短 patch 才是主防线」。",
+                }),
             },
         }
 
@@ -1981,7 +2002,7 @@ class H3RelayAudioSeam:
              bed_select=CORE.AUDIO_SEAM_BED_SELECT,
              join_curve="qsin", join_prime_ms=CORE.AUDIO_ENCODER_PRIME_MS,
              join_cross_ms=0.0, join_segment_seconds=0.0, join_align_seconds=0.0,
-             patch_guard=True):
+             patch_guard=True, patch_guard_layers=CORE.AUDIO_SEAM_PATCH_GUARD_LAYERS):
         me = _audio_stage_path(run_id, int(stage_index))
         idx = int(stage_index)
         patch = float(patch_seconds or 0.0)
@@ -2063,7 +2084,8 @@ class H3RelayAudioSeam:
                                          float(fade_seconds),
                                          select=str(bed_select or CORE.AUDIO_SEAM_BED_SELECT),
                                          target_audio=target,
-                                         stage_index=idx, patch_guard=bool(patch_guard))
+                                         stage_index=idx, patch_guard=bool(patch_guard),
+                                         patch_guard_layers=int(patch_guard_layers or 0))
         CORE.save_audio(out, me, note=note)
         line = rep + ("｜已落盘（供后段当床源）：%s" % me)
         if target is None:
