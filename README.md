@@ -5,7 +5,7 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 
 | 项 | 值 |
 |---|---|
-| 版本 | **0.6.8**（8 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
+| 版本 | **0.6.10**（8 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
 | 许可 | **MIT**（第三方出处见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)） |
 | 宿主 | 需要**带 MiniMax-H3 支持的 ComfyUI**（其自身为 GPL-3.0，见「11. 许可与出处」） |
 
@@ -77,10 +77,9 @@ git clone https://github.com/ZenHG/ComfyUI-H3-Latent-Relay.git
 与消费 `minimax_keyframes` / `minimax_refs` 的 `comfy/model_base.py`）。装到不含 H3 的旧版
 ComfyUI 上，节点能注册但**续接静默无效**——用前先确认 ComfyUI 版本。
 
-> 版本下限的依据（不是拍脑袋）：本包的 `web/` 前端靠宿主 `WEB_DIRECTORY` 机制挂载、
-> 元数据靠 `comfy_config` 解析 `pyproject.toml` —— 这两条在 **0.37.0 上实测通过**（零 GPU 探针）。
-> Python 侧写的是 `requires-python = ">=3.10"`，但本包**未使用** 3.10+ 独有语法
-> （无 `match`、无新式联合类型），真要放宽到 3.9 亦无语法障碍 —— `>=3.10` 是刻意取的保守下限。
+> 下限依据：`web/` 挂载靠宿主 `WEB_DIRECTORY`、元数据靠 `comfy_config` 解析 `pyproject.toml`
+> —— 这两条在 **0.37.0 上实测通过**。`requires-python = ">=3.10"` 是刻意取的保守下限
+> （本包未使用 3.10+ 独有语法，真要放宽到 3.9 亦无语法障碍）。
 
 **除一个可选节点外，不依赖任何第三方 H3 节点包**：`minimax_keyframes` / `minimax_refs` /
 `resolved_frame_index` 全是 ComfyUI **原生**协议，零 monkey patch、**零 patch 别人的包**。
@@ -129,8 +128,7 @@ git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git
 **两条出口都能直接跑**，切换**不需要改图**。
 
 **为什么默认切到 V3**：官方明确「今后节点功能的扩展也只会添加到 V3 架构中」，V1 拿不到新能力；
-且本包 V3 出口已过两道实测闸门 —— 69 项逐字段机检 ＋ 2 段真实链（362/362 帧守恒、流拷贝无损、
-PCM 边车被拼接路由取到）。
+且本包 V3 出口已过**逐字段机检 + 2 段真实链**验证（帧守恒、流拷贝无损、PCM 边车被拼接路由取到）。
 
 ```bash
 H3RELAY_NODE_API=v1 python main.py     # 万一 V3 有问题，一行回退到 V1（两条出口代码都在）
@@ -346,7 +344,7 @@ V1 分支命中即返回，两套一起导出时 **V3 永不生效**。所以 V3
 | 桥 | `context_frames` | `22` | 钉住窗帧数，只认 `5+17k`（5/22/39/…/124），须小于本段帧数 |
 | 桥 | `mask_mode` | `hard` | 🟢 生产档 `hard`（钉住区零重绘）｜🟡 对照 `ramp`/`window`｜🔴 实验 `taper`/`blend`（`taper` **不钉住**） |
 | 桥 | `ref_anchor_stage` | `-1` | ≥0 时自动读该段作**全局外观锚**，防长程漂移 |
-| 裁重叠 | `settle_frames` / `diagnostics` | `0` / `False` | 不裁沉降；`seam_ghost` 同样默认 `0`。`diagnostics` = 三路**只读观测**总闸，**默认关**（对外省 ~0.4 s/段 CPU），**本地产线入口显式传 `True`** |
+| 裁重叠 | `settle_frames` / `diagnostics` | `0` / `False` | 不裁沉降；`seam_ghost` 同样默认 `0`。`diagnostics` = 三路**只读观测**总闸，**默认关**（关掉不改变任何帧 / latent / 音频，只省 CPU） |
 | 后处理 Post | 19 个旋钮 | `0` | 全关 = 逐位直通；跨段两项需另打勾 `cross_seg_ack` |
 | 音频缝 | `patch_seconds` | `0` | 逐位直通；`fade_seconds` 默认 `0.25` |
 
@@ -365,7 +363,11 @@ V1 分支命中即返回，两套一起导出时 **V3 永不生效**。所以 V3
 - 不接它或 `patch_seconds=0`，音频逐位直通。
 - **输出接法**：`音频缝 [0] audio` → 落盘节点的 `audio`（`CreateVideo.audio`）。**别让 `VAEDecodeAudio` 直连落盘节点** —— 那是未裁的原始音频，会音画不同步（见 §4 的红色警示）。
 - ⚠️ `patch_seconds > 0` 会把**本段头 `patch_seconds` 秒整段换成上一段的环境声**。若本段头部本来有台词，这 N 秒的台词会被换掉 ⇒ 段首留白是硬纪律（见 [`docs/06`](docs/06-continuity-scripting.md)）。节点会自动**避开床源里的有声区**（挑窗时跳过含语音的位置），并在日志里报 `🎙 窗内有声帧占比`。
-- 🛡 **patch 台词守卫（默认开）**：patch 也会吃掉**本段自己**落在头部的台词（实测「这家店」0.60–1.70s 被 2.0s patch 整句吞掉）⇒ 节点自动探测本段头部台词起点，**patch 收缩到台词前 0.40s**（2×全源中位能量判据 + 持续帧滤波）；台词太靠前（起点 < 0.10s 可用）则 patch 整个关闭、头部原样保留。report 显式打印判定与收缩前后值。守卫只保台词 —— 缝处保护相应变弱，**出词侧段首留白仍是根治**。`patch_guard=0` 回旧行为。真实渲染两场验证：台词 0.90s 起 ⇒ patch 2.0→0.65s 一字未损；台词从第 0 帧开始 ⇒ patch 自动关闭零吞字。**BGM 类连续音乐不触发**（BGM 峰 < 2×中位；首版 P10 基线在 BGM 上误触发，已被压力矩阵打回）。每个旋钮的推荐值与开关理由见 §7.3。
+- 🛡 **patch 台词守卫（默认开）**：patch 会吃掉**本段自己**落在头部的台词 ⇒ 节点自动探测本段头部台词起点，
+  **patch 收缩到台词前 0.40 s**；台词太靠前（可用窗 < 0.10 s）则 patch 整个关闭、头部原样保留。
+  report 显式打印判定与收缩前后值。`patch_guard=0` 回旧行为。
+  ⚠️ **守卫只对「段首有静音垫」的素材有效** —— 整段人声/音乐铺底者**原理性无效**。
+  **别把台词安全寄托在它身上：主防线是 `patch_seconds ≤ 1.2`**（详见 **§7.3.1**）。
 
 出词层面的配套纪律（段首缓冲、台词安全时刻、末帧锚链）见
 [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md)。
@@ -676,7 +678,7 @@ python tools/concat_segments.py s1.mp4 s2.mp4 -o film.mp4 --json   # 退出码 0
 | 开了 `lowfreq_pull` 后**每段要等 20 多秒** | 盒式模糊耗时 **∝ 核半径²**，而 `lowfreq_blur` 默认 **64**：实测 2.07MP/12 帧 **22.1 s**（0.80MP 是 8.6 s）—— 与**分辨率强相关**，且只在开了 `lowfreq_pull` 时才付（默认关 = 0 s） | 把 `lowfreq_blur` 降到 **16–32**：同条件实测 **k=32 → 5.6 s · k=16 → 1.6 s · k=9 → 0.6 s**。质量代价极小 —— 实测缝点阶跃 32/64 = **0.0011 vs 0.0024**（`docs/02`）⇒ **高分辨率下默认就该降档** |
 | 选了 `pcm_lossless` 后**浏览器里放不出声音** | 成片音轨是 PCM f32，浏览器不放 PCM | 这是**母版档**的预期行为：拿给剪辑/归档。要能预览就用默认的 `aac_256k` |
 | 日志有「⚠ PCM 边车写入失败」 | 磁盘满 / 目录不可写 / safetensors 缺失 | **不影响本段产物**；拼接会自动退回解码。清出空间或 `pip install safetensors` 即可 |
-| 日志里**没有** 🧪 DTW / 裁量→跳跃曲线 / 外观三元组了 | 「裁重叠」的 `diagnostics` **默认关**（三路是纯打印、不参与裁量；对外省 ~0.4 s/段 CPU） | 要看就把 `diagnostics` 打开 —— 或走跑批入口传 `diagnostics=True`（本产线 `l1_api` 就是这么传的） |
+| 日志里**没有** 🧪 DTW / 裁量→跳跃曲线 / 外观三元组了 | 「裁重叠」的 `diagnostics` **默认关**（三路是纯打印、不参与裁量） | 要看就把 `diagnostics` 打开 |
 
 完整排障表、工作流文件自检工具、API 提交方式见
 [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md)。
@@ -685,7 +687,7 @@ python tools/concat_segments.py s1.mp4 s2.mp4 -o film.mp4 --json   # 退出码 0
 
 ## 10. 常见疑问（FAQ）
 
-> 都是被实际问到的问题，答案带**实测数字**（测法与复现命令见 `CHANGES.md` 与 `tools/`）。
+> 都是被实际问到的问题，答案带**实测数字**。
 
 ### 10.1 自动连跑会不会越跑越占显存？会不会跑到后面硬件不够？
 **显存不累加。** 每次提交是**独立一次执行**（连跑只是"再排一次队"），模型每段重新 stage ——
