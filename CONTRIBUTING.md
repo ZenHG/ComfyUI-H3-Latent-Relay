@@ -18,7 +18,7 @@ python tests/test_relay_core.py
   报告里请贴实际执行数，不要按源码行数统计（互斥分支不会同时执行）。
 - **改动后必须同步这几处计数与清单**（v0.4.2 起列为纪律，`tools/review_050.py` 会逐项核）：
   `__init__.py` 头注释节点清单 · 本文件的「方面数/断言数」· `tests/test_relay_core.py`
-  头注释覆盖清单 · 版本号三处（`__init__.py` / `pyproject.toml` / `CHANGES.md` 顶部）·
+  头注释覆盖清单 · 版本号四处（`__init__.py` / `pyproject.toml` / `CHANGES.md` 顶部 / `README.md` 首部）·
   `README.md` 节点表与参数表 · `requirements.txt`。
 
 ## 代码纪律

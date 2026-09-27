@@ -247,20 +247,27 @@ print("H. 文档同步清单（v0.4.2 计划「四、文档修正」列的六项
 print("=" * 78)
 import re as _re  # noqa: E402
 
-# H1 版本号三处一致
+# H1 版本号四处一致
+# 🔴 2026-09-27 扩到四处：此前只查三处，**README 首部的「| 版本 |」行不在覆盖内** ⇒
+#   实测漂了一整轮（README 写 0.6.8 而代码是 0.6.10）而套件全绿。
+# ⚠️ **刻意不扫 `docs/*.md`**：那里的版本号是**历史语义**（「本文件由 README（0.6.0 梳理）拆出」
+#   「0.6.7 重写」），不是「当前版本声明」⇒ 纳入只会造假红。docs 只写「适用版本：主干」，不写数字。
 _v_init = _re.search(r'__version__\s*=\s*"([^"]+)"',
                      open(os.path.join(KIT, "__init__.py"), encoding="utf-8").read())
 _v_py = _re.search(r'^version\s*=\s*"([^"]+)"',
                    open(os.path.join(KIT, "pyproject.toml"), encoding="utf-8").read(), _re.M)
 _v_ch = _re.search(r"^## ([\d.]+)", open(os.path.join(KIT, "CHANGES.md"),
                                          encoding="utf-8").read(), _re.M)
-print("      __init__=%s pyproject=%s CHANGES 顶=%s"
+_v_readme = _re.search(r"^\|\s*版本\s*\|\s*\*\*([\d.]+)\*\*",
+                       open(os.path.join(KIT, "README.md"), encoding="utf-8").read(), _re.M)
+print("      __init__=%s pyproject=%s CHANGES 顶=%s README 首部=%s"
       % (_v_init.group(1) if _v_init else "?",
          _v_py.group(1) if _v_py else "?",
-         _v_ch.group(1) if _v_ch else "?"))
-ck("H1 版本号三处一致（含 CHANGES 顶部条目）",
-   _v_init and _v_py and _v_ch
-   and _v_init.group(1) == _v_py.group(1) == _v_ch.group(1))
+         _v_ch.group(1) if _v_ch else "?",
+         _v_readme.group(1) if _v_readme else "?"))
+ck("H1 版本号四处一致（含 CHANGES 顶部条目与 README 首部声明）",
+   _v_init and _v_py and _v_ch and _v_readme
+   and _v_init.group(1) == _v_py.group(1) == _v_ch.group(1) == _v_readme.group(1))
 
 # H2 __init__.py 头注释节点清单齐备
 _miss_init = [n for n in _reg if n not in _init]
