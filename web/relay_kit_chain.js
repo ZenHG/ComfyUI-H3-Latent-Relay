@@ -295,12 +295,19 @@ async function queuePrompt(chainNode, state, stage) {
     }
     try {
         const res = await app.queuePrompt(0, 1);
-        const id = res?.prompt_id ?? null;
+        const id = typeof res === "string" ? res : (res?.prompt_id ?? null);
         // 按**段号**记（不是 push）：同一段重跑时后一次覆盖前一次 ⇒ 拼接拿到的是"每段最新那一次"，
         // 顺序也天然按段号排；push 会把重跑的段算成两段、拼出一条带重复的片。
         if (id && state) state.stageIds[stage] = id;
         setStatus(chainNode, `已排队，采样中…（第 ${stage + 1} 段）`);
-        return id;
+        // 🔴 0.6.13 修（2026-09-28 实测：新版前端 app.queuePrompt 返回 **true**，
+        //   旧版返回 {prompt_id}，都没有统一形状）：旧代码 `return id` ⇒ boolean 返回时
+        //   恒为 null ⇒ 连跑 handler 的 `if (ok === null) state.mode = "idle"` 把状态机
+        //   **静默**打回 idle ⇒ 第 1 段跑完就永远停住（status 冻结、无任何报错）。
+        //   排队失败的信号是**异常**（下方 catch 已转 ⚠ status）；`res === false` 也算失败。
+        //   拿不到 prompt_id 就不记 stageIds ⇒ 拼接自动走「按最近 N 段落盘记录」的兜底路。
+        if (res === false) return null;
+        return id ?? "queued";
     } catch (err) {
         setStatus(chainNode, "⚠ 排队失败：" + err.message);
         throw err;
