@@ -20,7 +20,7 @@
 
 跑法::
 
-    I:/python/python.exe exp/history_anchor_v2/precheck_tiha.py --run e1q_on --stage 5
+    python exp/history_anchor_v2/precheck_tiha.py --run <run_id> --stage <段号>
 
 退出码（**三个，不是两个** —— 仓库纪律「没报错不是没问题的证据」）::
 
@@ -61,7 +61,7 @@ def _default_relay_root() -> str:
     优先级：``RELAY_KIT_ROOT`` > ``COMFYUI_PATH`` > 由本文件位置反推。
 
     🔴 反推**只在"从部署副本运行"时成立**（副本位于 ``<comfy>/custom_nodes/<kit>/…``）；
-    从 H 仓源码目录运行时会推出一个**错路径**（实测：``H:\\output\\relay_kit``）。
+    从本仓源码目录运行时会推出一个**错路径**（指向 ``<包名>\\output\\relay_kit``）。
     ⇒ 因此这里**校验推导结果**：ComfyUI 根必须含 ``comfy/`` 子包与 ``output/``，
     否则**硬退出并叫人设 `COMFYUI_PATH`** —— 绝不拿一个明显不对的路径继续往下走
     （《规范》§3.2「闸读不到输入时必须喊，绝不沉默通过」）。
@@ -79,7 +79,8 @@ def _default_relay_root() -> str:
             raise Fail(
                 "推导出的 ComfyUI 根看起来不对：%s\n"
                 "        （本脚本位于 %s ⇒ 反推只在「从部署副本运行」时成立）\n"
-                "        ⇒ 请显式指定：设 COMFYUI_PATH=I:/ComfyUI，或用 --root <relay_kit 目录>。"
+                "        ⇒ 请显式指定：设 COMFYUI_PATH=<你的 ComfyUI 根目录>，"
+                "或用 --root <relay_kit 目录>。"
                 % (comfy, _HERE))
     return os.path.join(comfy, "output", "relay_kit")
 

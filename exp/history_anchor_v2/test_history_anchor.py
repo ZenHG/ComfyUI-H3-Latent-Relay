@@ -4,7 +4,7 @@
 
 跑法::
 
-    I:/python/python.exe exp/history_anchor_v2/test_history_anchor.py
+    python exp/history_anchor_v2/test_history_anchor.py
 
 判据纪律（与 tests/test_experimental.py 同一套）：
 
