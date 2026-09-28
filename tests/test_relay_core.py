@@ -510,11 +510,15 @@ except Exception as e:  # noqa: BLE001
     check("11.3 noop 能吃下 status 参数（不会 TypeError）", False, repr(e))
 
 # 11.4 前端 JS 确实在找这个 widget 名
+#   ⚠ 2026-09-28：判据放宽 —— 0.6.13 把「按名字找 widget」抽成了 `findWidget(n, name)`，
+#   原来那条 `'x.name === "status"' in _src` 是**对源码字面量的硬匹配**，重构一次就假红。
+#   这里认**两种写法**：抽出来的 `findWidget(..., "status")`，或内联的 `name === "status"`。
 _js = os.path.join(_KIT_DIR, "web", "relay_kit_chain.js")
 try:
     _src = open(_js, encoding="utf-8").read()
-    check("11.4 前端 JS 找的 widget 名与后端一致（status）",
-          'x.name === "status"' in _src, "未在 relay_kit_chain.js 里找到该查找")
+    _found = ('findWidget(chainNode, "status")' in _src) or ('x.name === "status"' in _src)
+    check("11.4 前端 JS 找的 widget 名与后端一致（status）", _found,
+          "未在 relay_kit_chain.js 里找到对 status 的查找")
 except Exception as e:  # noqa: BLE001
     check("11.4 前端 JS 找的 widget 名与后端一致（status）", False, repr(e))
 
@@ -1163,10 +1167,35 @@ except Exception as e:
     check("16.4 中文 note 落盘往返不崩且流仍逐位相同", False, "→ %s: %s" % (type(e).__name__, e))
 check("16.5 原子写：落盘后无 .tmp 残留", not os.path.isfile(tmp_c + ".tmp"))
 
-# 16.6 stage_index=0 的友好报错可达（0.4.1 前被 _stage_path 抢抛「不能为负」）
-expect_raise("16.6 LatentLoad stage_index=0 → 引导文案（而非「不能为负」）",
-             lambda: NODES.H3RelayLatentLoad().load(run_id="unittest_arity", stage_index=0),
-             "没有上一段可续")
+# 16.6 stage_index=0 交「空上下文」而不是 raise（2026-09-28 改）
+#   为什么必须这样：宿主在提交前会把 **bypass 的节点"溶解"掉**、把它的输入接到下游；
+#   本节点没有 LATENT 输入 ⇒ 一旦被旁路，桥的 required `context_latent` 会**从 prompt 里消失**
+#   ⇒ 整个 prompt 被 `prompt_outputs_failed_validation` 拒掉（实测）。
+#   ⇒ 第 1 段必须让本节点**留在链上**、交一个空包，由桥识别后走直通分支。
+try:
+    _empty, _info = NODES.H3RelayLatentLoad().load(run_id="unittest_arity", stage_index=0)
+    check("16.6 LatentLoad stage_index=0 → 交空上下文（不抛错）",
+          isinstance(_empty, dict) and _empty.get("samples") is None and "无上一段" in _info,
+          "实得 %r / %r" % (_empty, _info))
+except Exception as e:
+    check("16.6 LatentLoad stage_index=0 → 交空上下文（不抛错）", False,
+          "→ %s: %s" % (type(e).__name__, e))
+
+# 16.6b 该空包必须被桥识别为「无上下文」并直通（而不是当真 latent 去 build）
+try:
+    _out0 = NODES.H3RelayCopyBridge().bridge(
+        av_latent(12, seed=3), {"samples": None}, context_frames=22,
+        run_id="unittest_arity", stage_index=0)
+    check("16.6b 桥收到空包 ⇒ 直通且 trim=0", int(_out0[2]) == 0, "trim=%r" % (_out0[2],))
+except Exception as e:
+    check("16.6b 桥收到空包 ⇒ 直通且 trim=0", False, "→ %s: %s" % (type(e).__name__, e))
+
+# 16.6c 段号≥1 收到空包仍必须 raise（反坏片守卫没丢）
+expect_raise("16.6c 段号≥1 + 空包 → 仍 raise（不得静默直通）",
+             lambda: NODES.H3RelayCopyBridge().bridge(
+                 av_latent(12, seed=3), {"samples": None}, context_frames=22,
+                 run_id="unittest_arity", stage_index=1),
+             "没有可续接的上一段")
 
 # 16.7 run_id 非法字符替换为 _（不再静默同目录）
 p_a = NODES._stage_path("my/film", 0)

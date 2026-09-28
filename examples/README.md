@@ -2,12 +2,12 @@
 
 | 文件 | 回答的问题 | 规模 |
 |---|---|---|
-| `minimal_relay_official.json` | 第 2 段要接对**哪些线**（全官方节点 + 本包） | 18 节点 |
-| `fullflow_second_pass_latent_upscale_ui.json` | **一采 → 🔍 潜空间放大 → 二采 → 续接** 整条链路怎么接 | 43 节点 |
+| `minimal_relay_official.json` | 第 2 段要接对**哪些线**（全官方节点 + 本包） | 19 节点 |
+| `fullflow_second_pass_latent_upscale_ui.json` | **一采 → 🔍 潜空间放大 → 二采 → 续接** 整条链路怎么接 | 45 节点 |
 
 ## `minimal_relay_official.json`
 
-**全官方节点 + 本包**的最小续接工作流（17 个功能节点 + 1 个注释框），只回答一个问题：
+**全官方节点 + 本包**的最小续接工作流（18 个功能节点 + 1 个注释框），只回答一个问题：
 **「第 2 段要接对哪些线？」**
 
 ```
@@ -16,10 +16,20 @@
               → VAEDecode / VAEDecodeAudio → 🔗 续接裁重叠 → 🔗 续接后处理 Post
                                                   ↘ 🔗 续接音频缝
               → CreateVideo → SaveVideo
+
+🔗 读上段 latent ──→ 拷贝桥的 context_latent（第 1 段它交「空上下文」→ 桥自动直通）
 ```
 
-图里有一个 `段号`（`PrimitiveInt`）同时喂给「桥」和「落盘」的 `stage_index`，
+图里有一个 `段号`（`PrimitiveInt`）同时喂给「读上段 latent」「桥」「落盘」三处的 `stage_index`，
 所以**跑下一段只需要改这一个数**；画布上还有一个注释框写着步骤，不用回来翻 README。
+
+> 🔴 **为什么必须接「读上段 latent」**（0.6.12 起）：
+> 桥的 `context_latent` 是 **required** ⇒ 不接线会让提交校验**直接失败**
+> （`Required input is missing`）。
+> 也**不能靠"旁路读节点"绕过**：宿主提交前会把 bypass 的节点"溶解"掉、把它的输入接到下游，
+> 而这个节点没有 LATENT 输入 ⇒ 桥的 required 输入会**从 prompt 里消失**，同样被拒。
+> 正确做法就是**接上它**：`stage_index = 0` 时它交一个「空上下文」，桥识别后自动直通、不裁帧；
+> `stage_index ≥ 1` 时它读上一段的落盘文件、真续接。
 
 **怎么用**
 1. 把 JSON 丢进 `ComfyUI/user/default/workflows/`，在 ComfyUI 里打开（或直接拖进画布）。

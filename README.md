@@ -5,7 +5,7 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 
 | 项 | 值 |
 |---|---|
-| 版本 | **0.6.11**（8 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
+| 版本 | **0.6.12**（8 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
 | 许可 | **MIT**（第三方出处见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)） |
 | 宿主 | 需要**带 MiniMax-H3 支持的 ComfyUI**（其自身为 GPL-3.0，见「11. 许可与出处」） |
 
@@ -107,7 +107,7 @@ git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git
 - **没装也不影响其他 7 个节点**：整包照常加载，只有在使用本节点时抛一条**写明仓库地址与权重地址**
   的报错（不静默降级、不假成功）。
 
-随包的 [`examples/`](examples/README.md) 有两份可直接打开的工作流：**最小续接演示**（18 节点，
+随包的 [`examples/`](examples/README.md) 有两份可直接打开的工作流：**最小续接演示**（19 节点，
 只用官方节点 + 本包）与**全流程示例**（45 节点：0.3MP 一采 → 🔍 潜空间放大 → 2 步二采 → 拷贝桥续接，
 **本包 8 个节点全在场**，含「放大之后哪些线要留在原生域」的接线纪律）。
 
@@ -156,9 +156,15 @@ V1 分支命中即返回，两套一起导出时 **V3 永不生效**。所以 V3
 3. 点 Queue。
 
 ```
-[H3 Relay] 无 context_latent → 直通（独立段，不续接）。
+[H3 Relay] 读上段 latent：第 1 段无上一段 → 交空上下文（桥会直通、不裁帧）
+[H3 Relay] 复合桥：无 context_latent -> 直通（独立段，不续接）。
 [H3 Relay] 裁 0 帧 → 不裁（独立段或纯首段）。
 ```
+
+> 🔴 **第 1 段什么都不用做**：「读上段 latent」在 `stage_index = 0` 时会交一个「空上下文」，
+> 桥收到后自动直通。**不要**为了"第 1 段没有上一段"去拔线或旁路 ——
+> 桥的 `context_latent` 是必填，缺了整张图会被提交校验拒掉（`Required input is missing`）；
+> 而**旁路上游节点也一样不行**（宿主提交前会把 bypass 的节点"溶解"掉，那个 required 输入会直接消失）。
 
 **第 2 段起**
 
@@ -176,8 +182,8 @@ V1 分支命中即返回，两套一起导出时 **V3 永不生效**。所以 V3
 
 | 参数 | 第 1 段 | 第 2 段起 | 填在哪 |
 |---|---|---|---|
-| `stage_index`（段号） | `0` | `1`、`2`、`3`… | 桥 + 落盘（**必须一样大**） |
-| `run_id` | 同一个片子名，如 `myfilm` | **与第 1 段一字不差** | 桥 + 落盘 |
+| `stage_index`（段号） | `0` | `1`、`2`、`3`… | **读上段 latent + 桥 + 落盘**（三处必须一样大；用 Chain 会自动同步） |
+| `run_id` | 同一个片子名，如 `myfilm` | **与第 1 段一字不差** | 读上段 latent + 桥 + 落盘 |
 | `context_frames` | `22` | `22`（不用动） | 桥（钉住窗，只认 5/22/39/56/73/90/107/124） |
 | `settle_frames` | —（首段不裁） | 保持 `0` | **裁重叠** |
 | `seam_ghost` | —（首段不裁） | 保持 `0`（默认关） | **裁重叠** |
@@ -626,7 +632,7 @@ curl -s http://127.0.0.1:8188/history/<prompt_id> | \
 ## 8. 离线自测
 
 ```bash
-python tests/test_relay_core.py         # 期望「失败 0」（本版 404 项）
+python tests/test_relay_core.py         # 期望「失败 0」（本版 406 项）
 node   tests/test_prompt_dispatch.mjs   # 期望「失败 0」（Chain 词分发纯函数，node 跑）
 python tools/review_050.py              # 期望「失败 0」（文档—代码一致性）
 python tools/smoke_nodes.py             # 期望「失败 0」（节点层冒烟）
@@ -647,7 +653,7 @@ python tools/concat_segments.py s1.mp4 s2.mp4 -o film.mp4 --json   # 退出码 0
 脚本会自动上溯定位 ComfyUI 根目录；装在别处时用
 `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。
 
-**404 项断言，零 GPU、不加载模型**，覆盖二十八个方面 —— 例如：
+**406 项断言，零 GPU、不加载模型**，覆盖二十八个方面 —— 例如：
 
 | 组 | 覆盖 |
 |---|---|
@@ -852,4 +858,4 @@ RuntimeError: shape mismatch: value tensor of shape [2392, 96]
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 开发环境 · 自测纪律 · 许可条款 |
 | [`SECURITY.md`](SECURITY.md) | 密钥 / 依赖 / 网络行为声明 |
 | [`tools/README.md`](tools/README.md) | 七个脚本的用途与期望值（六个自检/取证 + 一个拼接 CLI） |
-| [`examples/README.md`](examples/README.md) | 两份可直接打开的工作流：**最小续接演示**（18 节点）与**全流程示例**（45 节点，8 个节点全在场）· 生成器 |
+| [`examples/README.md`](examples/README.md) | 两份可直接打开的工作流：**最小续接演示**（19 节点）与**全流程示例**（45 节点，8 个节点全在场）· 生成器 |

@@ -561,9 +561,10 @@ class H3RelayLatentLoad:
                 }),
                 "stage_index": ("INT", {
                     "default": 0, "min": 0, "max": 9999, "step": 1,
-                    "tooltip": "【填什么】填「你要读的那一段」的段号 = 本段段号 - 1。\n"
-                               "例：现在做第 2 段（本段号 1），这里填 1 → 读第 1 段（stage 0）的文件。\n"
-                               "填 0 会报错：第 1 段没有上一段可读。",
+                    "tooltip": "【填什么】填**本段的段号**（与「桥」「落盘」填一样的数）。\n"
+                               "节点内部按「本段段号 − 1」去读上一段：本段填 1 → 读第 1 段（stage 0）。\n"
+                               "填 0 = 第 1 段：没有上一段可读，本节点交一个「空上下文」，\n"
+                               "桥收到后自动直通（不续接、不裁帧）—— 这是正常行为，**不用手动旁路**。",
                 }),
             },
             "optional": {
@@ -578,7 +579,9 @@ class H3RelayLatentLoad:
     RETURN_NAMES = ("context_latent", "info")
     FUNCTION = "load"
     CATEGORY = CATEGORY
-    DESCRIPTION = "读回上一段的 AV latent；第 1 段（stage_index=0）没有上一段时会明确报错。"
+    DESCRIPTION = ("读回上一段的 AV latent，交给「续接 拷贝桥」做续接。\n"
+                   "第 1 段（stage_index = 0）没有上一段可读 ⇒ 本节点交一个「空上下文」，\n"
+                   "桥收到后自动直通（不续接、不裁帧）；第 2 段起读上一段的落盘文件、真续接。")
 
     @_node_errors("run_id", "explicit_path")
     def load(self, run_id, stage_index, explicit_path=""):
@@ -587,10 +590,20 @@ class H3RelayLatentLoad:
         # 必须先判段号再进 _stage_path：否则 stage_index=0 会先撞上
         # 「stage_index 不能为负」的误导性报错，下面的引导文案永远到不了。
         if idx < 0 and not explicit:
-            raise RuntimeError(
-                "stage_index=0 是第 1 段，没有上一段可续。\n"
-                "    第 1 段请走独立路径（不接本节点，或把续接 拷贝桥的 context_latent 留空）。"
-            )
+            # 第 1 段没有上一段可读 —— 这是**正常情况**，不是错误。
+            #
+            # 🔴 为什么这里**不能 raise**（2026-09-28 改，原为 RuntimeError）：
+            #   宿主在提交前会把 **bypass 的节点"溶解"掉**、把它的输入直接接到下游。
+            #   本节点没有 LATENT 输入 ⇒ 一旦被旁路，桥的 required `context_latent`
+            #   会**直接从 prompt 里消失** ⇒ 整个 prompt 被
+            #   `prompt_outputs_failed_validation / Required input is missing` 拒掉（实测）。
+            #   ⇒ 正确做法是**交一个「空上下文」**，由桥识别后走它自己的直通分支
+            #     （桥会打日志、`trim_frames` 输出 0）。
+            # ⚠️ 「该续接却没有来源」的硬拦**没有丢** —— 它在桥里：
+            #   `stage_index >= 1` 且上下文为空 ⇒ 仍然 raise（宁可不跑，也不出无续接的哑片）。
+            print("[H3 Relay] 读上段 latent：第 1 段无上一段 → 交空上下文（桥会直通、不裁帧）",
+                  flush=True)
+            return ({"samples": None}, "stage 0：无上一段（空上下文）")
         path = explicit or _stage_path(run_id, idx)
         latent = CORE.load_av_latent(path)
         info = CORE.describe_latent(latent)
@@ -1092,26 +1105,33 @@ class H3RelayTrimAV:
 
 
 class H3RelayChain:
-    """🔗 续接连跑（Chain）—— 纯控制节点，不在执行路径上。
+    """🔗 续接连跑（Chain）—— 只负责"按按钮"，自己不参与连线。
 
-    前端按钮（web/relay_kit_chain.js）会找到同一张图里的
-    「续接 拷贝桥 + 续接 Latent 存」，自动推进它们的 stage_index 并排队：
+    它做的事：找到同一张图里的「桥 + 落盘 + 读上段 latent」，
+    自动推进它们的段号并排队，让你不用每段手动改数字。
 
-        ▶ Run      按当前段号跑一次（不满意可重跑，覆盖同段号文件）
-        ✔ Approve  段号 +1（桥和落盘同步改），排队跑下一段
-        ⏩ 连跑     按 segments 自动循环：跑完一段 → 段号+1 → 再跑（0 = 无限）
-        ⏹ Stop     当前采样跑完后停止推进
+        ▶ Run      按当前段号跑一次（不满意再点一次，覆盖同段号的文件）
+        ✔ Approve  段号 +1，排队跑下一段
+        ⏩ 连跑     按 segments 的段数自动一段段跑（0 = 一直跑，直到点 Stop）
+        ⏹ Stop     当前这段跑完后不再推进
         ↺ Reset    段号归 0，从第 1 段重来
-        🧩 拼成一条 把已经跑完的 N 段拼成一条成片（0.6.7）
+        🧩 拼成一条 把已经跑完的几段拼成一条成片
 
-    0.6.7 加的两件事（**都默认关 = 老图逐位不变**）：
-      · **词分发**（`prompts` + `prompt_target`）：填了 `prompts` 时，跑第 k 段前自动把第 k 块词
-        写进出词节点 —— 连跑不再"反复提交同一份词"。
-      · **自动拼接**（`auto_concat` + `concat_name`）：连跑结束后把 N 段拼成一条成片，
-        画面**流拷贝（无损）**、音频按段去 priming 对齐（秒级）。
+    可选的两个便利功能（**都默认关，不影响老工作流**）：
+      · **自动换词**（`prompts`）：把每段的词用单独一行 `---` 分开粘进来，
+        跑第 k 段前自动把第 k 块写进出词节点。留空 = 不换词。
+      · **自动拼成片**（`auto_concat`）：连跑跑完自动把 N 段拼成一条。
 
-    使用前提：把 Chain、桥、落盘三个节点拉进**同一个分组框**（框选 → 右键 → 添加分组），
-    否则按钮找不到要推进的节点。
+    使用前提：把 Chain、桥、落盘、读上段 latent 拉进**同一个分组框**
+    （框选 → 右键 → 添加分组），否则按钮找不到要推进的节点。
+
+    **第 1 段什么都不用做**：「读上段 latent」在 `stage_index == 0` 时会交一个「空上下文」，
+    桥识别后自动直通（latent 原样过、裁剪帧数输出 0）；段号 ≥ 1 时读上一段、真续接。
+    ⇒ 直接点「⏩ 连跑」就能从第 1 段一路跑下去。
+    ⚠ **别旁路「读上段 latent」**（会让桥的 required 输入从 prompt 里消失 ⇒ 整个 prompt 被拒）；
+    **也别旁路桥**（它没有 INT 输入可透传，`trim_frames` 会变成空值）。
+
+    按钮点了没反应时，看 `status` 格子 —— 它会说明卡在哪一步、该怎么改。
     """
 
     @classmethod
@@ -1120,8 +1140,9 @@ class H3RelayChain:
             "required": {
                 "segments": ("INT", {
                     "default": 5, "min": 0, "max": 9999, "step": 1,
-                    "tooltip": "【连跑几段】点「⏩ 连跑」时生效：5 = 连跑 5 段后自动停；0 = 不停，直到点 ⏹ Stop。\n"
-                               "其他按钮不受它影响。填了 prompts 时，段数还应 ≤ 词块数。",
+                    "tooltip": "【连跑几段】只对「⏩ 连跑」按钮有效。\n"
+                               "填 2 = 自动跑 2 段就停；填 0 = 一直跑，直到你点「⏹ Stop」。\n"
+                               "其他按钮不受它影响。填了 prompts 时，段数不要超过词块数。",
                 }),
             },
             "optional": {
@@ -1130,59 +1151,51 @@ class H3RelayChain:
                 # 不会让它前面的取值错位（见 CHANGES 0.2.1 的槽位错位说明）。
                 "status": ("STRING", {
                     "default": "",
-                    "tooltip": "【不用填，自动显示】前端把连跑状态写在这里：\n"
-                               "当前段号 / 已排队 / ⚠ 分组没放对 / ⚠ 排队失败 / 词分发结果 / 拼接结果…\n"
-                               "点了按钮没反应时，先看这一格说了什么。",
+                    "tooltip": "【不用填】这里显示连跑状态：跑到第几段 / 有没有在排队 / 出错原因。\n"
+                               "🔴 按钮点了没反应时，先看这一格 —— 它会说明卡在哪一步、该怎么改。",
                 }),
                 # —— 0.6.7：词分发 + 自动拼接。**一律追加在 status 之后**，
                 #    旧工作流少这几格只走默认值，位置不错位。
                 "prompts": ("STRING", {
                     "default": "", "multiline": True,
-                    "tooltip": "【可选｜多段各自的词】用**单独一行 `---`** 分隔每段的词：\n"
-                               "第 1 块喂第 1 段、第 2 块喂第 2 段……留空 = 老行为（不换词）。\n"
-                               "⚠ 块数不够要跑的段数时**不排队**并报错 —— 免得你以为换了词、其实没有。\n"
-                               "UI 用：把 N 段词一次性粘进来，跑之前不用再手动改画布上的词。",
+                    "tooltip": "【可选｜每一段各自的词】\n"
+                               "用**单独一行 `---`** 把词分成几块：第 1 块给第 1 段、第 2 块给第 2 段……\n"
+                               "留空 = 不换词（每段都用画布上原来那份）。\n"
+                               "⚠ 词块数不够要跑的段数时**不排队**并告诉你 —— 免得你以为换了词、其实没换。\n"
+                               "也可以从别的节点**连线**进来（比如「easy positive」），这时以连线上的词为准。",
                 }),
                 "prompt_target": ("STRING", {
                     "default": "",
-                    "tooltip": "【可选】词写进哪个格子。两种写法：\n"
-                               "  · `683` —— 节点 id，自动挑它的词格；\n"
-                               "  · `683.h3_data` —— 点名到字段（`h3_data` 是 JSON 字符串时会只改里面的 prompt）。\n"
-                               "留空 = 自动探测：优先 `CSGlideCastCS` 的 `h3_data`，其次官方出词节点的 `prompt`；\n"
-                               "**探测到多个就报错**，这时把节点 id 填进来。",
+                    "tooltip": "【可选】词写进哪个节点。\n"
+                               "留空 = 自动找：图里只有一个出词节点时不用填。\n"
+                               "有多个出词节点、不知道该写哪个时，把节点编号填进来（比如 992）。\n"
+                               "填不准也没关系 —— 自动找不唯一时它会在 status 里把候选列出来，照着填即可。",
                 }),
                 "auto_concat": ("BOOLEAN", {
                     "default": False,
-                    "tooltip": "【可选】⏩ 连跑跑完就**自动把 N 段拼成一条**成片（画面流拷贝无损，秒级）。\n"
-                               "关（默认）= 老行为，跑完只得到 N 个 mp4；想拼时点「🧩 拼成一条」。",
+                    "tooltip": "【可选】打开 = 「⏩ 连跑」跑完**自动把这几段拼成一条成片**（画面无损，几秒钟）。\n"
+                               "关着（默认）= 只得到 N 个分段 mp4；想拼时点「🧩 拼成一条」。",
                 }),
                 "concat_name": ("STRING", {
                     "default": "",
-                    "tooltip": "【可选】成片文件名（不用写扩展名）。留空 = 用落盘的 run_id。\n"
-                               "成片存到 ComfyUI 的 output/ 目录，拼完路径会写进 status 那一格。",
+                    "tooltip": "【可选】成片叫什么名字（不用写 .mp4）。留空 = 用落盘时的 run_id。\n"
+                               "成片存在 ComfyUI 的 output/ 目录，拼完路径会显示在 status 那一格。",
                 }),
                 # —— 2026-09-22 追加（成片音轨档 / 画质档）：**继续追加在末位**，槽位安全同上。
                 "audio_out": (["aac_256k", "aac_192k", "pcm_lossless"], {
                     "default": "aac_256k",
-                    "tooltip": "【成片音轨档】拼成片时音轨怎么编：\n"
-                               "  · `aac_256k`（默认）— mp4 + AAC 256k。**兼容第一**，浏览器能放。\n"
-                               "      （实测 SNR ≈ 48 dB，已经比画面那一代的 44.6 dB 还高 ⇒ 听感透明）\n"
-                               "  · `aac_192k` — 同上，省 ~25% 体积，SNR ≈ 40 dB。\n"
-                               "  · `pcm_lossless` — **无损母版**：音轨不再做任何有损编码。\n"
-                               "      ⚠ 代价：文件约 4.4 MB/秒（44.1k 立体声 f32），且**浏览器预览没声音**\n"
-                               "      （PCM 音轨浏览器不放）⇒ 这是给剪辑/归档的档，不是预览档。\n"
-                               "前提：拼接时能读到各段的 **PCM 边车**（「裁重叠」的 save_pcm 开着）。\n"
-                               "  读不到就退回 mp4 解码 —— 此时 `pcm_lossless` 仍是「零新增有损」（1 代）。",
+                    "tooltip": "【成片音轨用哪种】只影响拼出来的成片，不影响任何分段文件。\n"
+                               "  · `aac_256k`（默认）— 通用档：浏览器能放、剪辑软件都认。\n"
+                               "  · `aac_192k` — 一样能放，文件小约 25%。\n"
+                               "  · `pcm_lossless` — **无损母版**，给剪辑/归档用。\n"
+                               "      ⚠ 代价：文件大很多，且**浏览器预览没声音** ⇒ 别拿它当预览档。",
                 }),
                 "video_crf": ("INT", {
                     "default": 16, "min": 0, "max": 51, "step": 1,
-                    "tooltip": "【画面重编码质量】crf 越小越清晰、文件越大。默认 16。\n"
-                               "⚠ **默认走画面流拷贝（无损），这一格根本用不到** —— 它只在两种时候生效：\n"
-                               "  · 各段**规格不一致**（分辨率/帧率/像素格式对不上）⇒ 拷贝不可行，只能重编码；\n"
-                               "  · 流拷贝路的成片断言不过 ⇒ 自动退回重编码。\n"
-                               "参考（本仓实测，416×736 段）：crf 16 ≈ 720 kbps；crf 0 仍**不是**无损\n"
-                               "（RGB→YUV 4:2:0 先丢，天花板 46.5 dB）⇒ 想要真无损请从**落盘节点**下手，\n"
-                               "不是把这里调到 0。",
+                    "tooltip": "【成片画面质量】默认 16，**平时用不到**。\n"
+                               "成片默认走「画面直接拷贝」= 无损，根本不重新编码。\n"
+                               "只有各段规格对不上（分辨率/帧率不一致）而必须重编码时，这一格才生效：\n"
+                               "数字越小越清晰、文件越大。",
                 }),
             },
         }
@@ -1191,13 +1204,17 @@ class H3RelayChain:
     FUNCTION = "noop"
     CATEGORY = CATEGORY
     DESCRIPTION = (
-        "自动连跑控制器：配合桥 + 落盘使用。\n"
-        "第一步：把 Chain、桥、落盘放进同一个分组框。\n"
-        "第二步：桥和落盘 stage_index 填 0，点 ▶ Run 拍第 1 段。\n"
-        "第三步：填 prompts（`---` 分块，第 k 块喂第 k 段）⇒ 点 ⏩ 连跑，词自动换、段号自动推进。\n"
-        "第四步（可选）：开 auto_concat 让跑完自动成片，或点「🧩 拼成一条」当场拼。\n"
-        "         成片音轨默认 AAC 256k（`audio_out` 可换 192k 或无损母版）；画面一律流拷贝（无损）。\n"
-        "状态显示在 status 格子里（点了没反应就看它）。"
+        "🔗 续接连跑：帮你自动改段号、自动换词、自动拼成片。\n"
+        "它自己不参与连线，只控制同一分组里的「桥 / 落盘 / 读上段 latent」。\n"
+        "\n"
+        "怎么用：\n"
+        "1. 把这四个节点框进**同一个分组**（框选 → 右键 → 添加分组）。\n"
+        "2. 直接点「⏩ 连跑」（或「▶ Run」）—— **第 1 段不用你管**：\n"
+        "   「读上段 latent」在 stage_index=0 时会自己交「空上下文」，桥自动直通；\n"
+        "   从第 2 段起它读上一段、桥真续接。段号一路自动加、词自动换（prompts 填了的话）。\n"
+        "3. 想拼成一条成片：点「🧩 拼成一条」（或开 auto_concat 让它跑完自动拼）。\n"
+        "\n"
+        "按钮点了没反应？看 status 格子，它会说明原因。"
     )
 
     @_node_errors("segments")
@@ -1233,8 +1250,11 @@ class H3RelayCopyBridge:
                                "上一段尾部会逐位写进它的开头，并附噪声掩码。",
                 }),
                 "context_latent": ("LATENT", {
-                    "tooltip": "上一段的完整 AV latent（🔗 H3 续接 Latent 读）。\n"
-                               "第 1 段（stage 0）不要接本节点——没有上一段可拷。",
+                    "tooltip": "上一段的完整 AV latent（从「🔗 读上段 latent」接过来）。\n"
+                               "🔴 **第 1 段也要接**：那个节点在 `stage_index = 0` 时会交一个「空上下文」，\n"
+                               "本桥收到后自动直通（不续接、不裁帧）—— 这是正常行为。\n"
+                               "⚠ 别因为「第 1 段没有上一段」就把这根线拔掉、或把上游节点旁路：\n"
+                               "本输入是必填，缺了整张图会被提交校验拒掉（`Required input is missing`）。",
                 }),
                 "context_frames": ("INT", {
                     "default": 22, "min": 5, "max": 124, "step": 17,
@@ -1408,17 +1428,24 @@ class H3RelayCopyBridge:
         # 原 Latent 桥「段号>=1 却无来源 -> 必须 raise（不得静默直通）」是反坏片关键守卫，
         # 路由收敛后必须保留在此：
         _idx = int(stage_index)
-        if context_latent is None and _idx >= 1:
+        # 「空上下文」的两种形态：
+        #   · `None` —— context_latent 没接线；
+        #   · `{"samples": None}` —— 「续接 Latent 读」在第 1 段交回来的**占位空包**
+        #     （它必须留在链上，否则宿主提交校验会报 required 缺失；见 `H3RelayLatentLoad.load`）。
+        _ctx_empty = context_latent is None or not (
+            isinstance(context_latent, dict) and context_latent.get("samples") is not None
+        )
+        if _ctx_empty and _idx >= 1:
             raise RuntimeError(
                 "stage_index=%d 表示本段是第 %d 段，但没有可续接的上一段 latent：\n"
-                "    · context_latent 没接线，且\n"
+                "    · context_latent 没接线（或「续接 Latent 读」读不到文件），且\n"
                 "    · run_id 是空的（或只有空白）\n"
                 "再跑下去会「静默直通」—— 产出的是独立段而不是续接段，\n"
                 "但界面与日志都显示成功。\n"
                 "    第 2 段起请把 run_id 填成与「续接 Latent 存」完全一致的名字；\n"
                 "    若这确实是独立段，把 stage_index 改回 0。"
                 % (_idx, _idx + 1))
-        if context_latent is None:
+        if _ctx_empty:
             # 直通（独立段，不续接）：latent 原样返回，conditioning 不钉帧原样返回。
             _msg = "[H3 Relay] 复合桥：无 context_latent -> 直通（独立段，不续接）。"
             print(_msg, flush=True)

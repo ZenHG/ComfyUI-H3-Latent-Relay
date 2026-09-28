@@ -5,7 +5,7 @@
 # 所以不需要额外解析输出。
 #
 # 期望值：
-#   · 404/0  tests/test_relay_core.py      算法层
+#   · 406/0  tests/test_relay_core.py      算法层
 #   ·  86/0  tools/review_050.py           文档—代码一致性（✅ 本数字由**本文件的 H3g 自引用机检**盯着）
 #   ·  15/0  tools/smoke_nodes.py          节点层冒烟
 #   ·   4/4  tools/assert_default_exit.py  默认出口 = V3（契约 1 + 行为 3；必须单进程、不设环境变量）
@@ -88,7 +88,7 @@ jobs:
           COMFYUI_PATH: ${{ runner.temp }}/ComfyUI
           PYTHONPATH: ${{ runner.temp }}/ComfyUI
         run: |
-          python tests/test_relay_core.py   # 期望 404/0
+          python tests/test_relay_core.py   # 期望 406/0
           python tools/review_050.py        # 期望 86/0（H3g 自引用机检）
           python tools/smoke_nodes.py       # 期望 15/0
 

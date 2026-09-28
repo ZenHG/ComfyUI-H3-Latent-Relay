@@ -491,8 +491,22 @@ def build(oi, length=73, width=448, height=768):
     neg = g.add("ConditioningZeroOut", pos=[420, 380],
                 links_in={"conditioning": (cond, 0)})
 
+    # 🔴 0.6.12：桥的 `context_latent` 是 **required** ⇒ 不接线会让提交校验**直接失败**
+    #   （`prompt_outputs_failed_validation / Required input is missing`）。
+    #   而且第 1 段**不能靠"旁路读节点"绕过**：宿主提交前会把 bypass 的节点"溶解"掉、
+    #   把它的输入接到下游；本节点没有 LATENT 输入 ⇒ 桥的 required 输入会**从 prompt 里消失**。
+    #   ⇒ 正确接法 = **接上「读上段 latent」**：
+    #       · `stage_index == 0` ⇒ 它交一个「空上下文」，桥识别后自动直通、不裁帧；
+    #       · `stage_index ≥ 1` ⇒ 它读上一段落盘文件，桥真续接。
+    #   段号仍只有 `① 段号` 一处要改（这里也接到它）。
+    load = g.add("H3RelayLatentLoad", pos=[800, 620],
+                 links_in={"stage_index": (stage, "INT")},
+                 values={"run_id": "relay_demo"},
+                 title="🔗 读上段 latent（第 1 段自动交空上下文→桥直通；第 2 段起读上一段）")
+
     bridge = g.add("H3RelayCopyBridge", pos=[800, 40],
                    links_in={"conditioning": (cond, 0), "latent": (cond, "LATENT"),
+                             "context_latent": (load, "context_latent"),
                              "stage_index": (stage, "INT")},
                    values={"context_frames": 22, "mask_mode": "hard", "pin_audio": True,
                            "run_id": "relay_demo"},
@@ -551,7 +565,8 @@ def build(oi, length=73, width=448, height=768):
         "\n"
         "第 1 段：\n"
         "  ① 段号 = 0，填好 prompt → 点 Queue。\n"
-        "  日志会打印「无 context_latent → 直通（独立段，不续接）」，裁重叠不裁。\n"
+        "  日志会打印「读上段 latent：第 1 段无上一段 → 交空上下文」\n"
+        "  和「复合桥：无 context_latent -> 直通（独立段，不续接）」，裁重叠不裁。\n"
         "\n"
         "第 2 段：\n"
         "  只改两处：\n"
