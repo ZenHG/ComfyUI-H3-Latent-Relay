@@ -58,6 +58,14 @@ MANIFEST_RUNTIME = [
     "v3/_compat.py",
     "v3/nodes_v3.py",
     "v3/entrypoint.py",
+    # 🧪 E1'（TIHA）时不变历史锚：nodes.py 顶层 import `.exp.history_anchor_v2.h3_adapter`。
+    #    **默认关**（无 `_tiha.json` 即不生效），但**会被 import** ⇒ 必须随分发集一起发，
+    #    否则干净环境里 `import nodes` 直接 ImportError。
+    #    两级 `__init__.py` 由 import 机制隐式执行，静态扫描看不到 —— 与 v3/ 同理。
+    "exp/__init__.py",
+    "exp/history_anchor_v2/__init__.py",
+    "exp/history_anchor_v2/history_anchor.py",
+    "exp/history_anchor_v2/h3_adapter.py",
 ]
 
 MANIFEST_FRONTEND = [

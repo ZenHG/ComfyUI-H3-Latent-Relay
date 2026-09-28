@@ -1491,6 +1491,31 @@ def load_audio(path: str) -> Dict[str, Any]:
     return {"waveform": wf, "sample_rate": int(meta["sample_rate"])}
 
 
+def audio_to_fp32(audio: Any) -> Any:
+    """把 AUDIO 的波形统一成 **float32** —— 本包把音频交给图里下游之前必须做。
+
+    为什么必须（真 bug，修于 0.6.11）：本包音频一路是 fp16（`VAEDecodeAudio` 按底模精度出，
+    落盘/读回也保持），而 `VHS_VideoCombine` 合成音轨时**写死 `-f f32le` 且不做 dtype 转换**
+    （`waveform.squeeze(0).transpose(0,1).numpy().tobytes()`）⇒ fp16 字节被当 f32 解读
+    ⇒ 编码后**逐样本全零**。画面 / 边车 / 日志全都正常，只有成片没声音，极难排查。
+
+    为什么改在**我们这侧**：`float32` 是 ComfyUI 里 AUDIO 的**事实约定**
+    （VHS 自己的 `get_audio` 也返回 f32），fp16 是**我们**的偏离；且下游消费方不止一个。
+    转 f32 **无损**（纯加宽，不改值），已是 f32 时**返回原对象**（零拷贝、零开销），
+    代价只是波形内存翻倍（音频量级，可忽略）。
+
+    形状与其余键**原样保留**（含 `sample_rate` / 前导维）；``None`` 原样返回（图中 audio 可选）。
+    """
+    if audio is None:
+        return None
+    wf = audio.get("waveform")
+    if not isinstance(wf, torch.Tensor) or wf.dtype == torch.float32:
+        return audio                                  # 已是 f32 / 形状不对（交给下游自己报）
+    out = dict(audio)
+    out["waveform"] = wf.to(torch.float32)
+    return out
+
+
 # ---------------------------------------------------------------- 接缝自检
 # 实测（2026-09-11）：续接段的「钉住区 → 新内容」切换**不总落在 trim 值上**。
 # 73 帧段实测切换点在原第 22→23 帧之间（MAE 6.5 → 102.3），

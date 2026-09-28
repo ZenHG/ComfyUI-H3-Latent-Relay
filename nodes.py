@@ -48,6 +48,10 @@ import folder_paths
 
 from . import relay_core as CORE
 from . import layout_contract as CONTRACT
+# 🧪 E1'（TIHA）时不变历史锚 —— **默认关**（run 目录下无 `_tiha.json` 即不生效）。
+#    适配层刻意做窄：只负责读配置/找历史段/调核心，算法全在
+#    `exp/history_anchor_v2/history_anchor.py`（那份零本包依赖、可独立单测）。
+from .exp.history_anchor_v2 import h3_adapter as TIHA_ADAPTER
 
 
 # ============================================================================
@@ -860,8 +864,11 @@ class H3RelayTrimAV:
             # 第 1 段（也是本段音频最完整的一段）同样要落边车 —— 否则成片第一段白丢一代。
             _u, _n = _pcm_sidecar(audio, save_pcm)
             if _n:
-                print(msg + _n)
-            _r = (images, audio, msg, images[:1])
+                # ⚠ 2026-09-28 修：原先写 `print(msg + _n)`，而 `msg` 上面已 print 过一次
+                #   ⇒ 日志里同一句出现两遍（对比下面主路径的 `print(_n.strip("\n"))`）。
+                #   边车成功时才多这一行，所以只在 pin>0 的日志里看不见这个重复。
+                print(_n.strip("\n"))
+            _r = (images, CORE.audio_to_fp32(audio), msg, images[:1])
             return {"ui": {CORE.PCM_UI_KEY: [_u]}, "result": _r} if _u else _r
 
         # 沉降帧：钉住区之后模型还会先复现上一段若干帧才切到本段 prompt。
@@ -1077,7 +1084,10 @@ class H3RelayTrimAV:
         _u, _n = _pcm_sidecar(audio_out, save_pcm)
         if _n:
             print(_n.strip("\n"))
-        _r = (out, audio_out, line + "\n" + check + _n, tail)
+        # 🔴 交出去的那份音频统一转 **float32**（边车仍存原 dtype = fp16，省一半空间；
+        #   组装层读边车时自己会转 f32）。不转的后果见 `CORE.audio_to_fp32` ——
+        #   `VHS_VideoCombine` 按 f32le 送 ffmpeg 且不做 dtype 转换 ⇒ fp16 进去 = 成片静音。
+        _r = (out, CORE.audio_to_fp32(audio_out), line + "\n" + check + _n, tail)
         return {"ui": {CORE.PCM_UI_KEY: [_u]}, "result": _r} if _u else _r
 
 
@@ -1451,7 +1461,35 @@ class H3RelayCopyBridge:
                 anchor_latent=ref_anchor_latent,
                 anchor_frames=int(ref_anchor_frames),
             )
+            # 🧪 E1'（TIHA）时不变历史锚 —— **默认关**。
+            #
+            # 【域归属】本机制改的是 **conditioning 的 `minimax_refs`**，
+            #   **不属于**「三代域纪律」里的时间轴 `TrimAV` / 画质域 `Post` / 音频域 `AudioSeam`
+            #   任何一域 —— 它与三域**正交**：不动时间轴、不动像素、不动音频，
+            #   只往 conditioning 追加参考块。以后新增 conditioning 层机制都归这一类。
+            #
+            # 开关由 **run 目录下的 `_tiha.json`** 决定（不存在 / depth<=0 ⇒ 返回 []，
+            # 主干逐位不变 —— 唯一的额外动作是 1 次 `os.path.isfile`）。
+            # 为什么用配置文件而不是节点入参：
+            #   ① 不动 INPUT_TYPES ⇒ **零 schema 变更**（加 widget 会牵动示例图 widgets_values、
+            #      机检 input 计数、多处文档数字 —— 见 LOCAL-维护规范 §二·D「加 widget 牵动一串」）；
+            #   ② 天然按 run 隔离，A/B 两臂只需各写一次文件。
+            # 代价：失去 /object_info 校验 ⇒ 用「提交前预检 precheck_tiha.py」+ 服务端探针日志补上。
+            _tiha_refs = TIHA_ADAPTER.build_refs(
+                run_id, int(stage_index), int(ref_anchor_stage),
+                stage_path_fn=_stage_path,        # 路径推导只此一份，适配层不重复实现
+                load_fn=CORE.load_av_latent,
+                video_fn=CORE.video_from_latent,
+                anchor_latent=ref_anchor_latent,  # 复用已加载的锚，避免二次读盘
+                log=lambda m: print("[H3 Relay] " + m, flush=True),
+            )
             cond_out = CORE.apply_relay(conditioning, plan)
+            if _tiha_refs:
+                import node_helpers
+                cond_out = node_helpers.conditioning_set_values(
+                    cond_out, {"minimax_refs": _tiha_refs}, append=True)
+                print("[H3 Relay] E1'（TIHA）：已追加 %d 个时不变历史锚块" % len(_tiha_refs),
+                      flush=True)
             extra = ["[H3 Relay] 复合桥·钉帧路径：" + plan.summary()]
             for n in plan.notes:
                 extra.append("    注记：" + n)
@@ -2053,7 +2091,12 @@ class H3RelayAudioSeam:
             # ♪ 边车回显：本节点刚落的那份 `me` **就是送进落盘节点的同一份音频**
             #   （直通档也是它）⇒ 拼接直读它，既无损又不会绕过任何音频缝处理。
             _u = _pcm_ui(me)
-            _r = (audio, line, _j if _j is not None else audio)
+            # 🔴 两路 AUDIO 出口转 float32（见 `CORE.audio_to_fp32`：下游 `VHS_VideoCombine`
+            #   按 f32le 送 ffmpeg 且不转 dtype，fp16 进去 ⇒ 成片整轨静音）。
+            #   落盘那份（`save_audio(audio, me)`）保持原 dtype —— 只被本包读回，省一半磁盘。
+            #   ⚠ `joined` 缺失时**复用同一个结果**，别对同一份波形转两遍（白多一次整块拷贝）。
+            _a_out = CORE.audio_to_fp32(audio)
+            _r = (_a_out, line, CORE.audio_to_fp32(_j) if _j is not None else _a_out)
             return {"ui": {CORE.PCM_UI_KEY: [_u]}, "result": _r} if _u else _r
 
         b_idx = int(bed_stage)
@@ -2099,7 +2142,13 @@ class H3RelayAudioSeam:
         print(line)
         # ♪ 边车回显（同上）：`me` = 本节点输出 `out` = 落盘节点拿到的音频。
         _u = _pcm_ui(me)
-        _r = (out, line, _j if _j is not None else out)
+        # 🔴 两路 AUDIO 出口都转 float32（理由同 `CORE.audio_to_fp32`：下游 `VHS_VideoCombine`
+        #   按 f32le 送 ffmpeg 且不转 dtype，fp16 进去 ⇒ 成片整轨静音）。
+        #   落盘用的 `out`（`save_audio` 那一份）**保持原 dtype** —— 它只被本包读回，
+        #   且组装层 `load_pcm_sidecar` 自己会转 f32；存 fp16 省一半磁盘。
+        #   ⚠ `joined` 缺失时复用同一份结果（别转两遍）。
+        _a_out = CORE.audio_to_fp32(out)
+        _r = (_a_out, line, CORE.audio_to_fp32(_j) if _j is not None else _a_out)
         return {"ui": {CORE.PCM_UI_KEY: [_u]}, "result": _r} if _u else _r
 
 NODE_CLASS_MAPPINGS = {

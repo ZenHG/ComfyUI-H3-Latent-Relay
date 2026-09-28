@@ -9,11 +9,45 @@
 >
 > | 版本 | 迁移动作 |
 > |---|---|
+> | 0.6.11 | **无需动作**。唯一行为变化：接 `VHS_VideoCombine` 的图由「成片整轨静音」变「有声」（修 bug） |
 > | 0.6.10 | `patch_seconds` 推荐值由 `2.0` 改为 **≤1.2**（旧值对「台词贴头」素材会吞字） |
 > | 0.6.2 | `join_cross_ms` 默认 `50 → 0`（旧默认每缝让音频提前 50 ms、逐段累积） |
 > | 0.6.0 | 引用 `H3RelayMotionContext` 的图需改接 `H3RelayCopyBridge`（该节点已删除） |
 > | 0.5.0 | ① `settle_frames` 默认 `-1 → 0`；② 0.5.0 之前存的图，UI 上看不到「裁重叠」新加的第 4 路输出 `prev_tail`（执行不受影响，但接不上 `H3RelayPost` 的 `guide`）⇒ 重加节点或给 JSON 的 `outputs` 末尾补一项 |
 > | 0.3.0 | `settle_frames` 新增（尾缺 ⇒ 取默认，旧工作流无需重连） |
+
+---
+
+## 0.6.11 — 2026-09-28
+
+**修「接 `VHS_VideoCombine` 时成片整轨静音」：本包交出去的 AUDIO 一律收敛到 float32。**
+
+### 改了什么
+
+「裁重叠」`H3RelayTrimAV` 与「音频缝」`H3RelayAudioSeam` 的**全部 AUDIO 出口**
+（各两条返回路）统一过新增的 `relay_core.audio_to_fp32()`：
+
+- 已是 f32 ⇒ **返回原对象**（零拷贝，保住「直通不改」的既有语义）
+- fp16 / bf16 / f64 ⇒ 转 f32（**加宽无损**）
+- `None` ⇒ `None`（图里 audio 可选）；**落盘的 PCM 边车保持 fp16**（只被本包读回，省一半磁盘）
+
+### 为什么必须修
+
+本包音频是 fp16（`VAEDecodeAudio` 按底模精度出），而 `VHS_VideoCombine` 合成音轨时
+**写死 `-f f32le` 且不转 dtype** ⇒ fp16 的字节被当 f32 解读 ⇒ 编码后**逐样本全零**。
+症状：画面正常、PCM 边车完好、日志一行不报错，**只有成片没声音**。
+
+### 要不要动你的配置
+
+**不用**：无 widget 增删（V3 机检 input 数不变），存量工作流零迁移动作。
+接 `banzhangVideoCombine` 或 `SaveAudio` 的图**本就不受影响**（前者自己转 f32，后者走 torchaudio）；
+**唯一变化**是接 `VHS_VideoCombine` 的图由静音变有声。
+⚠️ 另注意 `VHS_VideoCombine` 的**主文件本来就不带音轨**，带音轨的是它另存的 `<名>-audio.mp4`。
+
+### 已知限制
+
+病根是下游消费方的 dtype 假定。本包按 ComfyUI 里 AUDIO 的**事实约定**（f32）修，
+**没有去改 VHS**（第三方包，升级会覆盖）。fp64 输入同样降到 f32（VHS 只认 f32）。
 
 ---
 

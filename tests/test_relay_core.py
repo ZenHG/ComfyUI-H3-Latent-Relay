@@ -51,6 +51,11 @@
      PyAV 版本兼容/CLI 入口（合成 mp4 + 合成边车，零 GPU）
  27. 画质域 AV latent 分块放大（0.6.8）：块数自选的合规边界（每块 ≥ 2·overlap+1）、
      单块=整段放大恒等、分块边界无跳变、帧数不许被改、上游口径常量不漂移（拆包/回包见节点）
+ 28. 音频出口 dtype 契约（0.6.11 修静音 bug）：`audio_to_fp32` 的零拷贝快路径、
+     fp16/bf16/f64 一律收敛 f32 且逐位无损、键与形状不动、None 直通；
+     **事故复现锁**（模拟 VHS 的 `-f f32le` 封装路：原始 dtype 进去 = 数字静音，过本包出口 = 逐位还原）；
+     🛡 节点出口契约（「裁重叠」「音频缝」**全部** AUDIO 返回路都是 f32，
+     而**落盘的 PCM 边车保持 fp16** —— 省一半磁盘，组装层读回时自己转）
 """
 
 import importlib.util
@@ -2995,6 +3000,85 @@ try:
                  "huggingface.co/LBH-123-AI")
 finally:
     NODES._comfy_registry = _ORIG_REGFN
+
+
+print()
+print("=" * 78)
+print("28) 音频出口 dtype 契约：交出去的 AUDIO 必须收敛到 float32")
+print("=" * 78)
+# 背景（0.6.11）：本包音频是 fp16，而 `VHS_VideoCombine` 合成音轨时写死 `-f f32le` 且不转 dtype
+# ⇒ fp16 字节被当 f32 解读 ⇒ 编码后逐样本全零（画面/边车/日志都正常，只有成片没声音）。
+# 本组同时锁「出口契约」与「事故复现」——后者防有人在别处又 `return audio` 原始 dtype。
+import numpy as _np28  # noqa: E402
+
+_a16 = {"waveform": torch.rand(1, 2, 40000) * 0.3, "sample_rate": 32000}
+_a16["waveform"] = _a16["waveform"].to(torch.float16)
+_a32 = {"waveform": _a16["waveform"].to(torch.float32), "sample_rate": 32000}
+
+_r32 = CORE.audio_to_fp32(_a32)
+check("28.1 已是 f32 ⇒ 返回**原对象**（零拷贝、零开销；保住「直通不改」的既有语义）",
+      _r32 is _a32)
+_r16 = CORE.audio_to_fp32(_a16)
+check("28.2 fp16 ⇒ 波形转 f32，且与 `.float()` **逐位相等**（加宽无损，不改值）",
+      _r16["waveform"].dtype == torch.float32
+      and torch.equal(_r16["waveform"], _a16["waveform"].float()),
+      "%s → %s" % (_a16["waveform"].dtype, _r16["waveform"].dtype))
+check("28.3 其余键与形状原样保留（sample_rate / 前导维都不动）",
+      int(_r16["sample_rate"]) == 32000
+      and tuple(_r16["waveform"].shape) == tuple(_a16["waveform"].shape)
+      and set(_r16.keys()) == set(_a16.keys()),
+      "shape=%s keys=%s" % (tuple(_r16["waveform"].shape), sorted(_r16.keys())))
+check("28.4 None ⇒ None（图里 audio 是可选输入，这里不许 raise）",
+      CORE.audio_to_fp32(None) is None)
+_b16 = {"waveform": (torch.rand(1, 1, 100) * 0.05).to(torch.bfloat16), "sample_rate": 32000}
+_f16 = {"waveform": (torch.rand(1, 1, 100) * 0.05).to(torch.float64), "sample_rate": 32000}
+check("28.5 其它浮点 dtype（bf16 / f64）也一律收敛到 f32",
+      CORE.audio_to_fp32(_b16)["waveform"].dtype == torch.float32
+      and CORE.audio_to_fp32(_f16)["waveform"].dtype == torch.float32)
+check("28.6 非张量 / 缺键不在这里拦（交给下游自己报，保持函数单一职责）",
+      CORE.audio_to_fp32({"sample_rate": 32000}) == {"sample_rate": 32000})
+
+# —— 🔴 事故复现锁：逐字模拟 VHS 的封装路（`-f f32le` + 不转 dtype）——
+def _vhs_mux_bytes(a):                      # noqa: D401  (VHS nodes.py 的原式)
+    return a["waveform"].squeeze(0).transpose(0, 1).numpy().tobytes()
+
+_bad = _np28.frombuffer(_vhs_mux_bytes(_a16), dtype="<f4").reshape(-1, 2)
+_good = _np28.frombuffer(_vhs_mux_bytes(_r16), dtype="<f4").reshape(-1, 2)
+check("28.7 ⛔ 事故复现：fp16 直接进 VHS ⇒ 峰值掉到 ~1e-9（= 编码后**数字静音**）",
+      float(_np28.abs(_bad).max()) < 1e-6,
+      "absmax=%.3e（%.0f dB）" % (float(_np28.abs(_bad).max()),
+                                 20 * _np28.log10(max(float(_np28.abs(_bad).max()), 1e-30))))
+check("28.8 ✅ 走本包出口 ⇒ 同一封装路**逐位还原**真波形（回归锁：不许再退化）",
+      _np28.allclose(_good, _a32["waveform"].squeeze(0).transpose(0, 1).numpy(), atol=0)
+      and float(_np28.abs(_good).max()) > 0.1,
+      "absmax=%.4f" % float(_np28.abs(_good).max()))
+
+# —— 节点出口契约：两条路都要转（防以后再有人在别处 `return audio`）——
+_img28 = torch.rand(40, 8, 8, 3)
+_p0_28 = unwrap(NODES.H3RelayTrimAV().trim(_img28, trim_frames=0, fps=24.0,
+                                           audio=_a16, save_pcm=False))
+check("28.9 「裁重叠」pin<=0 早退路：第 2 路 audio 出口是 f32（实跑事故就走这条）",
+      _p0_28[1]["waveform"].dtype == torch.float32, str(_p0_28[1]["waveform"].dtype))
+_pd_28 = unwrap(NODES.H3RelayTrimAV().trim(_img28, trim_frames=22, fps=24.0,
+                                           settle_frames=0, audio=_a16, save_pcm=False))
+check("28.10 「裁重叠」裁头主路：第 2 路 audio 出口同样是 f32",
+      _pd_28[1]["waveform"].dtype == torch.float32, str(_pd_28[1]["waveform"].dtype))
+
+_RID28 = "_unit_audio28"
+try:
+    _s28, _l28, _j28 = unwrap(NODES.H3RelayAudioSeam().seam(_a16, _RID28, 0))
+    check("28.11 「音频缝」两路 AUDIO 出口（audio / joined）都是 f32",
+          _s28["waveform"].dtype == torch.float32
+          and _j28["waveform"].dtype == torch.float32,
+          "audio=%s joined=%s" % (_s28["waveform"].dtype, _j28["waveform"].dtype))
+    check("28.12 落盘的那一份**保持原 dtype**（fp16，省一半磁盘；组装层读回自己转 f32）",
+          CORE.load_audio(NODES._audio_stage_path(_RID28, 0))["waveform"].dtype
+          == torch.float16,
+          str(CORE.load_audio(NODES._audio_stage_path(_RID28, 0))["waveform"].dtype))
+finally:
+    _d28 = os.path.dirname(NODES._audio_stage_path(_RID28, 0))
+    if os.path.isdir(_d28):
+        shutil.rmtree(_d28, ignore_errors=True)
 
 
 print()

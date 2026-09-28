@@ -1,0 +1,29 @@
+# 本目录 = E1'（时不变历史锚 TIHA）。本文件的作用是**让本目录与根 .gitignore 的既有惯例对齐**。
+#
+# 根 .gitignore 已声明的两条惯例：
+#   RESEARCH_*.md   → 本地调研笔记，不入库
+#   LOCAL-*.md      → 本地维护规范 / 自读文档，不入库
+# 根因（引自根 .gitignore 原文）：这些文档"记的是内部维护纪律与已犯过的错（含本机路径、
+# 错误数字的沿革），对使用者无价值，且细节随版本变 ⇒ 放进公开仓库只会多一份会漂的文档"。
+# 另有提交 7b6048a「docs: 对外文档按「用户可读」标准梳理（剥离内部证据细节）」同旨。
+#
+# ── 入库的（3 件，全部可移植、无本机路径、过 ruff）─────────────────────────────
+#   history_anchor.py        核心模块
+#   test_history_anchor.py   零 GPU 单测
+#   precheck_tiha.py         提交前预检（默认路径由 COMFYUI_PATH / 脚本位置反推）
+#
+# ── 不入库的（本地，对齐上面两条惯例）─────────────────────────────────────────
+#   verify_on_real_latents.py  一次性的 A/B 验证脚本，默认参数指向本机 coffee_short 工程
+#   RESEARCH-E1重写-*.md        调研+设计文档（对应惯例里的 RESEARCH_*.md）
+#   E1p-代码优化审查-*.md       审查报告，含"9 分钟白跑""部署副本分叉"等内部证据细节
+#   CONFLICT-*.md              与 H 仓规范的冲突排查，含本机命令与原始输出
+#   TEST-*-2026-*.md           长链测试设计，含本机路径与执行步骤
+#                              （以上三份对应惯例里的 LOCAL-*.md）
+#
+# ⚠️ 生成的出词（e1long_seg1..10.txt）落在 `I:/coffee_short/_l1/prompts/`，
+#    本就不在仓库里；提示词由 `gen_e1long_prompts.py` 从台账重生成 ⇒ 无需入库。
+verify_on_real_latents.py
+RESEARCH-E1重写-*.md
+E1p-代码优化审查-*.md
+CONFLICT-*.md
+TEST-*-2026-*.md
