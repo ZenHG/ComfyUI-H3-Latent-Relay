@@ -37,15 +37,20 @@
 //     `undefined` ⇒ 「本轮跑过本组桥/落盘」永远记不上 ⇒ `stepDone()` 一进门就
 //     `if (!sawMine) return;` ⇒ **段号永远不推进**（连跑看起来"只跑了第 1 段"）。
 //     现在两种形态都认（`executingNodeId()`）。
-//   · 🔴 **连跑跑完一段就静默停住，还有两处独立原因**（0.6.13 修，浏览器实测）：
+//   · 🔴 **连跑跑完一段就静默停住，另有三处独立原因**（0.6.13 修，浏览器实测）：
 //     ① 新版前端 `app.queuePrompt` 返回 **布尔 `true`**（没有 `prompt_id`）⇒ 取
 //        `res?.prompt_id` 得 undefined ⇒ 旧代码 `return id` = null ⇒ 连跑 handler 的
 //        `if (ok === null) state.mode = "idle"` 把状态机**静默**打回 idle（无任何提示）。
-//     ② **整轮命中缓存**时（图没变、种子固定）宿主**不逐节点发 `executing`**，只发一条
-//        `execution_cached {nodes:[…]}` + 几条 `executed` ⇒ 「本轮跑过本组」恒判否
-//        ⇒ `stepDone()` 在 `if (!sawMine) return;` 处静默返回。
-//     ⇒ 现在：排队成败只看**异常**与 `res === false`；「跑过本组」的证据源有三路
-//     （`executing` / `execution_cached.nodes` / `executed`）。
+//     ② **整轮命中缓存**时（图没变、同一轮复跑）宿主**不逐节点发 `executing`**，只发一条
+//        `execution_cached {nodes:[…]}` + 几条 `executed` ⇒ 「本轮跑过本组」恒判否。
+//     ③ **最根本、也最隐蔽的一个：id 类型错配** —— `pairIds` 里是**字符串**
+//        （新版前端 `node.id` 是字符串，实测 `pairIds: ["961","902"]`），比对却写
+//        `has(Number(id))` ⇒ **恒 false**。①②是必要条件，但全被这一层挡住。
+//     ⇒ 现在：排队成败只看**异常**与 `res === false`；id 一律 `String()` 归一；
+//     「跑过本组」的证据源三路（`executing` / `execution_cached.nodes` / `executed`）；
+//     收尾信号加了 `awaiting` 闸门（队列提交瞬间宿主会先发一条空 `executing(NULL)`），
+//     且 `execution_success` 与 `executing(null)` **只认其一**（免得段号一次跳 2）。
+//     自助排查：控制台 `__h3Relay.debug()` 直接看状态机内部。
 //   · 所有按钮回调统一包 `guard()`：任何异常都写进 `status` 格 + 控制台，
 //     **不再有"点了没反应"这种无声故障**。
 //   · 按钮 widget 补 `{ serialize: false }` —— 旧写法会被序列化进 `widgets_values`，
@@ -316,6 +321,9 @@ async function queuePrompt(chainNode, state, stage) {
         //   排队失败的信号是**异常**（下方 catch 已转 ⚠ status）；`res === false` 也算失败。
         //   拿不到 prompt_id 就不记 stageIds ⇒ 拼接自动走「按最近 N 段落盘记录」的兜底路。
         if (res === false) return null;
+        // 排队**成功** ⇒ 本组进入「等一轮跑完」态：`stepDone()` 只认置位后的收尾信号，
+        // 免得队列提交瞬间宿主先发的空事件（实测 `executing(NULL)` 会紧跟着来）把段号误推。
+        if (state) state.awaiting = true;
         return id ?? "queued";
     } catch (err) {
         setStatus(chainNode, "⚠ 排队失败：" + err.message);
@@ -496,11 +504,34 @@ function executingNodeId(detail) {
 const CHAINS = new Set();
 let listenersBound = false;
 
+// 🔴 0.6.13：本前端**是否发 `execution_success`**（一条就够全轮收尾）。
+//   发了就只认它 —— 否则 `execution_success` 与 `executing(null)` 会各触发一次
+//   `stepDone()` ⇒ 段号一次跳 2、拼接漏段。两者取其一，绝不双认。
+let hostSendsSuccess = false;
+
+// 诊断出口（**只读快照**，不参与逻辑）：浏览器控制台敲 `__h3Relay.debug()` 就能看到
+// 每个 Chain 组的状态机内部（mode / awaiting / sawMine / pairIds / remaining）。
+// 连跑"停住"这类只在真前端才复现的问题，没有这层内部视图只能靠猜——0.6.13 的三处原因
+// （detail 形状 / queuePrompt 返回形状 / id 类型）全靠它挖出来。
+try {
+    window.__h3Relay = {
+        debug: () => [...CHAINS].map((s) => ({
+            mode: s.mode, awaiting: s.awaiting, sawMine: s.sawMine, remaining: s.remaining,
+            pairIds: [...s.pairIds], stageIds: [...(s.stageIds ?? [])],
+        })),
+    };
+} catch { /* 非浏览器环境（测试里 import 本文件）忽略 */ }
+
 function bindGlobalListeners() {
     if (listenersBound) return;
     listenersBound = true;
     api.addEventListener("executing", ({ detail }) => {
         for (const s of CHAINS) s.onExecuting(detail);
+    });
+    // 全轮收尾的**首选**信号：带 prompt_id，最干净。
+    api.addEventListener("execution_success", ({ detail }) => {
+        hostSendsSuccess = true;
+        for (const s of CHAINS) s.onExecutionSuccess(detail);
     });
     // 🔴 0.6.13 修（2026-09-28 实测）：**整轮全命中缓存**时（图没变、种子固定 ⇒ 复跑同一段），
     //   宿主**不逐节点发 `executing`**，只发一条 `execution_cached {nodes:[…]}` +
@@ -535,14 +566,21 @@ app.registerExtension({
             // pairIds：本组「桥/落盘」的 id **集合**，连跑开始时算一次就够 ——
             //   executing 事件每执行一个节点都会触发，在里面重算 findPair 等于每节点扫一遍全图。
             const state = {
-                mode: "idle", remaining: 0, sawMine: false,
+                mode: "idle", remaining: 0, sawMine: false, awaiting: false,
                 stageIds: [], pairIds: new Set(),
+
+                /** 本组"正在等一轮跑完"（排队成功后置位；`stepDone` 消费掉）。 */
+                armed() { return this.mode === "chain" && this.awaiting; },
 
                 /** 惰性算一次本组「桥 + 落盘」的 id 集合（下段第一个事件会用新图重建）。 */
                 refreshPairIds() {
                     if (this.pairIds.size) return this.pairIds;
                     const pair = findPair(node);
-                    this.pairIds = new Set(pair ? [pair.bridge.id, pair.save.id] : []);
+                    // 🔴 0.6.13：id 一律**字符串化**再存。新版前端 `node.id` 是字符串
+                    //   （实测 pairIds=["961","902"]），旧写法 `has(Number(id))` 做的是
+                    //   数字比对 ⇒ 恒 false ⇒ `sawMine` 永远记不上 ⇒ 连跑跑完第 1 段静默停住。
+                    //   （0.6.12 修的 `detail.node`、0.6.13 修的返回形状都对，全被这一层挡住。）
+                    this.pairIds = new Set(pair ? [String(pair.bridge.id), String(pair.save.id)] : []);
                     return this.pairIds;
                 },
 
@@ -556,15 +594,22 @@ app.registerExtension({
                  */
                 markMine(id) {
                     if (id == null) return;
-                    if (this.refreshPairIds().has(Number(id))) this.sawMine = true;
+                    // 比之前先看 `armed()`：**放弃**本轮之前（上一轮残留/别组）的事件的干扰。
+                    if (!this.armed()) return;
+                    if (this.refreshPairIds().has(String(id))) this.sawMine = true;
                 },
 
                 /** 每个节点执行时都会调到这里（由模块级监听分发）。 */
                 onExecuting(detail) {
-                    if (detail == null) { this.stepDone(); return; } // detail 为空 = 本轮队列跑完
+                    // detail 为空 = 本轮队列跑完。宿主若另发 `execution_success`，收尾**只认那条**，
+                    // 否则两条都触发 ⇒ 段号一次跳 2。
+                    if (detail == null) { if (!hostSendsSuccess) this.stepDone(); return; }
                     if (this.mode !== "chain") return;
                     this.markMine(executingNodeId(detail));
                 },
+
+                /** `execution_success` = 本轮真的跑完了（首选收尾信号，见上）。 */
+                onExecutionSuccess() { this.stepDone(); },
 
                 /** 整轮命中缓存（宿主不发 per-node executing）时的证据。 */
                 onCached(detail) {
@@ -581,13 +626,16 @@ app.registerExtension({
                 onExecutionError() {
                     if (this.mode !== "chain") return;
                     this.mode = "idle";
+                    this.awaiting = false;
                     setStatus(node, "⚠ 执行出错，连跑已停（stage_index 保持当前值，可直接重跑）。");
                 },
 
                 /** 一段跑完：推进段号，决定继续还是收尾。 */
                 stepDone() {
                     if (this.mode !== "chain") return;
-                    if (!this.sawMine) return; // 本轮没执行过本组的桥/落盘 → 别的组的收尾，忽略
+                    if (!this.awaiting) return;   // 没在等一轮 ⇒ 旧事件/别组的收尾，不理
+                    if (!this.sawMine) return;    // 本轮没执行过本组的桥/落盘 → 别的组的收尾，忽略
+                    this.awaiting = false;
                     this.sawMine = false;
                     this.pairIds = new Set();  // 下段第一个 executing 事件会重建（图改了也自动跟上）
 
@@ -637,6 +685,7 @@ app.registerExtension({
                 const pair = findPair(node);
                 if (!pair) return;
                 state.mode = "idle";
+                state.awaiting = false;
                 await startStage(node, state, getStage(pair.bridge), "Run", pair);
             });
 
@@ -648,6 +697,7 @@ app.registerExtension({
                 if (!d.ok) { setStatus(node, d.message); return; }
                 setStageAll(pair, next);            // 先确认词能写上，再推进段号
                 state.mode = "idle";
+                state.awaiting = false;
                 setStatus(node, `Approve：段号推进到 ${next}，排队中…` + withMsg(d.message));
                 await queuePrompt(node, state, next);
             });
@@ -660,6 +710,8 @@ app.registerExtension({
                 state.remaining = seg;
                 state.stageIds = [];
                 state.pairIds = new Set();
+                state.sawMine = false;
+                state.awaiting = false;   // 由 queuePrompt 成功后再置位
                 setStatus(node, `连跑开始：segments=${seg <= 0 ? "∞" : seg}，首段排队中…`);
                 const ok = await startStage(node, state, getStage(pair.bridge), "连跑", pair);
                 if (ok === null) state.mode = "idle";   // 词分发没过 ⇒ 别停在 chain 态
@@ -668,6 +720,7 @@ app.registerExtension({
             addBtn("⏹ Stop（本轮跑完即停）", () => {
                 if (state.mode === "chain") {
                     state.mode = "idle";
+                state.awaiting = false;
                     setStatus(node, "已请求停止：当前采样跑完后不再推进。");
                 } else {
                     setStatus(node, "当前没有在连跑。");
