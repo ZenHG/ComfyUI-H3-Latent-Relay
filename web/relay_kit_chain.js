@@ -642,26 +642,32 @@ app.registerExtension({
                     const pair = findPair(node);
                     if (!pair) { this.mode = "idle"; return; }
 
-                    const next = getStage(pair.bridge) + 1;
-                    setStageAll(pair, next);
-
                     const seg = Math.round(widgetValue(node, "segments", 0) || 0);
                     const infinite = seg <= 0;
                     const more = infinite || this.remaining > 1;
                     if (this.remaining > 0) this.remaining -= 1;
 
                     if (!more) {
+                        // 收尾路径段号还是要推（"已落盘，可直接继续 Approve" 的语义不变）
+                        setStageAll(pair, getStage(pair.bridge) + 1);
+                        const done = getStage(pair.bridge);
                         this.mode = "idle";
-                        setStatus(node, `✅ 连跑结束，当前段号 ${next}（已落盘，可直接继续 Approve）。`);
+                        setStatus(node, `✅ 连跑结束，当前段号 ${done}（已落盘，可直接继续 Approve）。`);
                         if (widgetValue(node, "auto_concat", false)) concatFilm(node, this, true);
                         return;
                     }
+                    // 🔴 0.6.14：与 Approve 对齐——**先确认词能写上，再推进段号**。
+                    //   旧顺序（先 setStageAll 再 dispatchStage）在词不够时会留下"段号推上去了、
+                    //   但那一段没跑"的悬空状态。词分发失败 ⇒ 段号保持当前值，补词后 Approve 继续。
+                    const next = getStage(pair.bridge) + 1;
                     const d = dispatchStage(node, next);
                     if (!d.ok) {
                         this.mode = "idle";
-                        setStatus(node, d.message);
+                        setStatus(node, d.message
+                            + `\n（段号保持 ${getStage(pair.bridge)}，补词后可 Approve 继续。）`);
                         return;
                     }
+                    setStageAll(pair, next);
                     setStatus(node, `连跑中：第 ${next + 1} 段排队…（剩余 ${infinite ? "∞" : this.remaining}）`
                         + withMsg(d.message));
                     queuePrompt(node, this, next).catch(() => (this.mode = "idle"));
@@ -706,6 +712,24 @@ app.registerExtension({
                 const pair = findPair(node);
                 if (!pair) return;
                 const seg = Math.round(widgetValue(node, "segments", 0) || 0);
+                // 🔴 0.6.14 预检：有限段模式下，把会跑到的**最后一段**提前验词——
+                //   别跑到一半才发现词不够（首段有词、末段没有时旧代码会白跑前几段）。
+                if (seg > 0) {
+                    const src = readPrompts(node);
+                    if (src.ok) {
+                        const blocks = splitPromptBlocks(src.text);
+                        const start = getStage(pair.bridge);
+                        const last = start + seg - 1;
+                        if (blocks.length && last >= blocks.length) {
+                            const fit = Math.max(1, blocks.length - start);
+                            setStatus(node,
+                                `⚠ prompts 只有 ${blocks.length} 块词，连跑会跑到第 ${last + 1} 段 ⇒ 不够。` +
+                                `要么补齐到 ${last + 1} 块，要么把 segments 改成 ${fit}。`);
+                            return;
+                        }
+                    }
+                    // src 读不到（连线情形）不拦：startStage 里会给出更具体的指引。
+                }
                 state.mode = "chain";
                 state.remaining = seg;
                 state.stageIds = [];
@@ -720,7 +744,7 @@ app.registerExtension({
             addBtn("⏹ Stop（本轮跑完即停）", () => {
                 if (state.mode === "chain") {
                     state.mode = "idle";
-                state.awaiting = false;
+                    state.awaiting = false;
                     setStatus(node, "已请求停止：当前采样跑完后不再推进。");
                 } else {
                     setStatus(node, "当前没有在连跑。");
