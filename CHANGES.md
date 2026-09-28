@@ -9,7 +9,7 @@
 >
 > | 版本 | 迁移动作 |
 > |---|---|
-> | 0.6.13 | **无需动作**。修「连跑跑完第 1 段就静默停住」的最后一环：新版前端 `app.queuePrompt` 返回 `true`（没有 `prompt_id`），旧代码把它当「没排上」⇒ 状态机被静默打回 idle。**刷新浏览器页面即生效** |
+> | 0.6.13 | **无需动作**。修「连跑跑完一段就静默停住」的**两处**独立原因：①新版前端 `app.queuePrompt` 返回 `true`（没有 `prompt_id`），旧代码误判「没排上」⇒ 状态机被静默打回 idle；②**整轮命中缓存**时宿主不逐节点发 `executing` ⇒ 「本轮跑过本组」恒判否。**刷新浏览器页面即生效** |
 > | 0.6.12 | **无需动作**。修 Chain 按钮「点了没反应」；段号推进补齐「读上段 latent」；**第 1 段改为自动直通**（不再需要手动旁路）。**刷新浏览器页面即生效** |
 > | 0.6.11 | **无需动作**。唯一行为变化：接 `VHS_VideoCombine` 的图由「成片整轨静音」变「有声」（修 bug） |
 > | 0.6.10 | `patch_seconds` 推荐值由 `2.0` 改为 **≤1.2**（旧值对「台词贴头」素材会吞字） |
@@ -22,20 +22,25 @@
 
 ## 0.6.13 — 2026-09-28
 
-**修「连跑跑完第 1 段就静默停住」的最后一环：`app.queuePrompt` 的返回值形状。**
+**修「连跑跑完一段就静默停住」。实测是两个互相独立的原因叠在一起，两个都修。**
 
 ### 改了什么
 
-- 🔴 **新版前端 `app.queuePrompt` 返回布尔值 `true`**（浏览器内实测拿到的真实返回），
+- 🔴 **原因①：新版前端 `app.queuePrompt` 返回布尔值 `true`**（浏览器内实测拿到的真实返回），
   旧版返回 `{prompt_id: …}`。扩展的 `queuePrompt()` 取 `res?.prompt_id` ⇒ boolean 情形下
   恒为 `undefined` ⇒ **函数返回 null** —— 但排队其实**已经成功**（服务端正常执行）。
-- 连跑 handler 里有 `if (ok === null) state.mode = "idle"`：排队被判成「没排上」⇒
-  状态机被**静默**打回 idle（status 冻结在「已排队，采样中…（第 1 段）」，无任何报错）。
+  连跑 handler 里有 `if (ok === null) state.mode = "idle"`：排队被判成「没排上」⇒
+  状态机被**静默**打回 idle（status 冻结在「已排队，采样中…」，无任何报错）。
   第 1 段跑完后 `executing(null)` 如期到达，但 `stepDone()` 第一行
-  `mode !== "chain"` 直接 return ⇒ **永远停住**。
-- **修法**：排队失败的信号是**异常**（`catch` 已转 ⚠ status）；`res === false` 也算失败。
+  `mode !== "chain"` 直接 return ⇒ 永远停住。
+  **修法**：排队失败的信号是**异常**（`catch` 已转 ⚠ status）；`res === false` 也算失败。
   其余一律视为已排队；拿不到 `prompt_id` 就不记 `stageIds` ⇒ 自动拼接走
   「按最近 N 段落盘记录」的既有兜底路。
+- 🔴 **原因②：整轮命中缓存时不发 per-node `executing`**。图没变、种子固定 ⇒ 复跑同一段
+  会整轮复用缓存；此时宿主只发一条 `execution_cached {nodes:[…]}` + 几条 `executed`，
+  然后直接 `execution_success` → `executing(null)`。而「本轮跑过本组」的判据只看
+  `executing` ⇒ 恒为 false ⇒ `stepDone()` 在 `if (!sawMine) return;` 处静默返回 ⇒ 又冻住。
+  **修法**：证据源扩到三种 —— `executing` / `execution_cached.nodes` / `executed`。
 - **要不要动配置**：不用。刷新浏览器页面即生效。
 
 ### 已知限制

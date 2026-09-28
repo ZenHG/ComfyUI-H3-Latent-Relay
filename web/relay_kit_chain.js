@@ -37,6 +37,15 @@
 //     `undefined` ⇒ 「本轮跑过本组桥/落盘」永远记不上 ⇒ `stepDone()` 一进门就
 //     `if (!sawMine) return;` ⇒ **段号永远不推进**（连跑看起来"只跑了第 1 段"）。
 //     现在两种形态都认（`executingNodeId()`）。
+//   · 🔴 **连跑跑完一段就静默停住，还有两处独立原因**（0.6.13 修，浏览器实测）：
+//     ① 新版前端 `app.queuePrompt` 返回 **布尔 `true`**（没有 `prompt_id`）⇒ 取
+//        `res?.prompt_id` 得 undefined ⇒ 旧代码 `return id` = null ⇒ 连跑 handler 的
+//        `if (ok === null) state.mode = "idle"` 把状态机**静默**打回 idle（无任何提示）。
+//     ② **整轮命中缓存**时（图没变、种子固定）宿主**不逐节点发 `executing`**，只发一条
+//        `execution_cached {nodes:[…]}` + 几条 `executed` ⇒ 「本轮跑过本组」恒判否
+//        ⇒ `stepDone()` 在 `if (!sawMine) return;` 处静默返回。
+//     ⇒ 现在：排队成败只看**异常**与 `res === false`；「跑过本组」的证据源有三路
+//     （`executing` / `execution_cached.nodes` / `executed`）。
 //   · 所有按钮回调统一包 `guard()`：任何异常都写进 `status` 格 + 控制台，
 //     **不再有"点了没反应"这种无声故障**。
 //   · 按钮 widget 补 `{ serialize: false }` —— 旧写法会被序列化进 `widgets_values`，
@@ -493,6 +502,17 @@ function bindGlobalListeners() {
     api.addEventListener("executing", ({ detail }) => {
         for (const s of CHAINS) s.onExecuting(detail);
     });
+    // 🔴 0.6.13 修（2026-09-28 实测）：**整轮全命中缓存**时（图没变、种子固定 ⇒ 复跑同一段），
+    //   宿主**不逐节点发 `executing`**，只发一条 `execution_cached {nodes:[…]}` +
+    //   几条 `executed`，然后直接 `execution_success` → `executing(null)`。
+    //   ⇒ 只靠 `executing` 判定「本轮跑过本组」会恒为 false ⇒ `stepDone()` 静默 return
+    //     ⇒ 连跑又冻住（status 停在「已排队，采样中…」）。缓存命中同样是「本组跑了」，要认。
+    api.addEventListener("execution_cached", ({ detail }) => {
+        for (const s of CHAINS) s.onCached(detail);
+    });
+    api.addEventListener("executed", ({ detail }) => {
+        for (const s of CHAINS) s.onExecuted(detail);
+    });
     api.addEventListener("execution_error", () => {
         for (const s of CHAINS) s.onExecutionError();
     });
@@ -518,18 +538,44 @@ app.registerExtension({
                 mode: "idle", remaining: 0, sawMine: false,
                 stageIds: [], pairIds: new Set(),
 
+                /** 惰性算一次本组「桥 + 落盘」的 id 集合（下段第一个事件会用新图重建）。 */
+                refreshPairIds() {
+                    if (this.pairIds.size) return this.pairIds;
+                    const pair = findPair(node);
+                    this.pairIds = new Set(pair ? [pair.bridge.id, pair.save.id] : []);
+                    return this.pairIds;
+                },
+
+                /**
+                 * 记「本轮确实跑过本组」——**三种来源都认**：
+                 *   · `executing`（逐节点执行；真跑时用）
+                 *   · `execution_cached`（整轮命中缓存时宿主**只发这一条**，里面带节点清单）
+                 *   · `executed`（产出事件，兼作兜底）
+                 * 🔴 只认 `executing` 是 0.6.13 之前的死路：缓存轮次不逐节点发事件 ⇒
+                 *    `sawMine` 恒 false ⇒ 连跑跑完一轮就静默停住。
+                 */
+                markMine(id) {
+                    if (id == null) return;
+                    if (this.refreshPairIds().has(Number(id))) this.sawMine = true;
+                },
+
                 /** 每个节点执行时都会调到这里（由模块级监听分发）。 */
                 onExecuting(detail) {
                     if (detail == null) { this.stepDone(); return; } // detail 为空 = 本轮队列跑完
                     if (this.mode !== "chain") return;
-                    const id = executingNodeId(detail);
-                    if (id == null) return;
-                    // 用缓存的 id 集合比对，**不**在每个节点上重扫全图。
-                    if (!this.pairIds.size) {
-                        const pair = findPair(node);
-                        this.pairIds = new Set(pair ? [pair.bridge.id, pair.save.id] : []);
-                    }
-                    if (this.pairIds.has(Number(id))) this.sawMine = true;
+                    this.markMine(executingNodeId(detail));
+                },
+
+                /** 整轮命中缓存（宿主不发 per-node executing）时的证据。 */
+                onCached(detail) {
+                    if (this.mode !== "chain") return;
+                    for (const id of detail?.nodes ?? []) this.markMine(id);
+                },
+
+                /** 产出事件——兼作兜底（个别前端在缓存轮只发 executed）。 */
+                onExecuted(detail) {
+                    if (this.mode !== "chain") return;
+                    this.markMine(detail?.display_node ?? detail?.node ?? null);
                 },
 
                 onExecutionError() {
