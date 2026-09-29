@@ -58,7 +58,7 @@ _CONCAT_LOCK = asyncio.Lock()
 #     `elif hasattr(module,"comfy_entrypoint"): ...`
 #   （ComfyUI/nodes.py:2295-2337）—— V1 分支命中即 return ⇒ 同时导出两者时 **V3 永不生效**。
 #   所以 V3 模式下把 NODE_CLASS_MAPPINGS **显式设为 None**（宿主的判据含 "is not None"）。
-# 默认 **v3**（2026-09-24 切换）：V3 出口已过 70 项逐字段机检（9 节点 / 116 个 input
+# 默认 **v3**（2026-09-24 切换）：V3 出口已过 70 项逐字段机检（8 节点 / 116 个 input
 # 的顺序·取值·组合项全序与 V1 一致）＋ 2 段真实链验证（362/362 帧守恒 · 流拷贝无损 ·
 # PCM 边车被拼接路由取到）。
 # ⚠️ 回退到 V1：设 H3RELAY_NODE_API=v1 后重启 —— 两条出口的代码都还在，只是默认换了。
@@ -334,7 +334,7 @@ if PromptServer is not None:           # pragma: no branch
         except Exception as _e:                      # noqa: BLE001
             _c_ok, _c_msgs = None, ["检查本身失败：%r" % (_e,)]
 
-        # ③ 上游可选依赖（第 9 节点用；没装不影响其它 7 个）
+        # ③ 上游可选依赖（第 8 节点用；没装不影响其它 7 个）
         try:
             from . import nodes as _n
             _has = _n._comfy_registry().get(_n._UPSCALER_NODE) is not None

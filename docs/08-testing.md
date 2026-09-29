@@ -60,7 +60,7 @@ node tests/test_prompt_dispatch.mjs      # 期望 13/0
 ## V3 外壳与默认出口（零 GPU、秒级）
 
 ```bash
-COMFYUI_PATH=<根> python tests/test_v3_schema.py        # 本机 70/0（9 节点 / 116 个 input）；CI 63/0（8 节点 / 103 input）
+COMFYUI_PATH=<根> python tests/test_v3_schema.py        # 本机 70/0（8 节点 / 116 个 input）；CI 63/0（8 节点 / 103 input）
 COMFYUI_PATH=<根> python tools/assert_default_exit.py   # 期望 4/4
 ```
 
@@ -73,14 +73,14 @@ Combo `options` **全序** / outputs 路数与显示名 / `is_output_node` / 显
 > `import nodes`**。
 > · 宿主 `nodes` **可导入**（本机）⇒ 上游节点不在注册表 ⇒ `_upscaler_cls()` 抛 **RuntimeError**
 >   ⇒ `_upscaler_module()` 捕获它（**只** `except RuntimeError`）⇒ 退回 `get_filename_list`
->   （宿主自带注册 `latent_upscale_models`）⇒ 不抛 ⇒ **9 节点 / 116 input**。
+>   （宿主自带注册 `latent_upscale_models`）⇒ 不抛 ⇒ **8 节点 / 116 input**。
 > · 宿主 `nodes` **导不进来**（CI：只 clone 宿主、不装上游包）⇒ 抛的是 **ModuleNotFoundError**
 >   （ImportError 子类）⇒ **穿透**（没被捕获）⇒ INPUT_TYPES 抛 ⇒ V3 entrypoint 的逐节点容错
 >   跳过它 ⇒ **8 节点 / 103 input**。**这是设计内的降级，不是失败。**
 >
 > ⇒ 判据跟着环境走（`_HOST_REGISTRY_OK`），**两个数并排写才是正确形态**。
 > ⚠️ **别用"只把上游节点从注册表摘掉"来模拟 CI** —— 那复现的是「装了宿主、没装上游包」，
-> 那种情况**仍是 9 节点**。正确复现：`sys.modules["nodes"] = None` 后跑该测试。
+> 那种情况**仍是 8 节点**。正确复现：`sys.modules["nodes"] = None` 后跑该测试。
 > 这组数字已由 `tools/review_050.py` 的 **H3h** 机检（语义 = 「当前环境的真值必须出现在
 > 声明集合里」，并限制每个数最多两种取值）。
 
@@ -133,10 +133,10 @@ python tools/make_minimal_bundle.py --zip     # → dist/ComfyUI-H3-Latent-Relay
    （含各级父包的 `__init__.py` 这种隐式依赖），**必须与清单逐一相等**
    ⇒ 将来有人新增模块却忘了改清单，会**当场报错**，而不是让用户先撞到 `ImportError`；
 2. 写出 `dist/`（幂等；`--force` 才覆盖，且只删自己产出的目录）；
-3. **自验**：把产出目录当**独立包**加载，断言 9 个节点齐全、默认出口 `v3`（未回退）、
+3. **自验**：把产出目录当**独立包**加载，断言 8 个节点齐全、默认出口 `v3`（未回退）、
    `WEB_DIRECTORY` 有前端文件、节点层异常上下文仍在，
    并断言 **没有一个本包模块来自原仓**（证明这份副本自足）。
    `--verify-only <目录>` 可只跑自验。
 
-> 实测：把 zip 解压到**仓外**（另一块盘）加载，9 节点 / 槽位 / 默认出口 / 前端 / 异常上下文
+> 实测：把 zip 解压到**仓外**（另一块盘）加载，8 节点 / 槽位 / 默认出口 / 前端 / 异常上下文
 > 全部通过，来自原仓的模块数 = **0**。
