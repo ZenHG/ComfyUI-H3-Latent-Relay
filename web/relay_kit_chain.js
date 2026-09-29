@@ -191,8 +191,9 @@ function findLoads(chainNode) {
 
 // ─────────────────────────── 状态显示 ───────────────────────────
 
-/** 进度条文本（**纯字符**，零渲染开销）。`ratio` 0~1。 */
-function bar(ratio, width = 10) {
+/** 进度条文本（**纯字符**，零渲染开销）。`ratio` 0~1。
+ *  ⚠️ 宽度默认 **6 格**：它要塞进**按钮文字**里，节点窄时 10 格会被截断成半截条。 */
+function bar(ratio, width = 6) {
     const r = Math.max(0, Math.min(1, Number(ratio) || 0));
     const n = Math.round(r * width);
     return "█".repeat(n) + "░".repeat(width - n);

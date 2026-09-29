@@ -296,6 +296,10 @@ V1 分支命中即返回，两套一起导出时 **V3 永不生效**。所以 V3
 | `CSGlideCastCS`（出词 + 规格） | `ComfyUI-Banzhang-All`（第三方，**非本包依赖**） |
 | `SelfLiftH3Sampler`（AV 采样器） | `comfyui-SelfLift`（第三方，**非本包依赖**） |
 
+> 📂 **`examples/` 里那两个演示工作流**另需 **KJNodes**（用到 `CreateFadeMaskAdvanced` /
+> `MiniMaxChunkFeedForward`）—— 那是**示例图**的依赖，不是本包的（本包本身零第三方节点包依赖）。
+> 只想要"最小接法"的话用 `minimal_relay_official.json`，它**全官方节点 + 本包**。
+
 可选节点（默认全关 = 逐位直通，删掉照样跑）：**后处理 Post**（画质域）、**音频缝**（音频域）、
 **Chain**（自动连跑，见 [`docs/07-chain.md`](docs/07-chain.md)）。
 
