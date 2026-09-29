@@ -1,0 +1,22 @@
+{
+  "_note": "词分块口径的**跨语言共用样本**。Python（tests/test_relay_core.py 第 11 组）与 Node（tests/test_prompt_dispatch.mjs）读同一份 —— 铁律一：UI 与 API 必须同一套实现，口径不能各写一遍。改口径必须同时改这里，两边会一起红。",
+  "_expect_semantics": "expect = 分块结果（已去空块、块内保留原换行、整体去首尾空白）",
+  "cases": [
+    { "name": "空串", "text": "", "expect": [] },
+    { "name": "只有空白", "text": "   \n\t\n", "expect": [] },
+    { "name": "单块无分隔", "text": "abc", "expect": ["abc"] },
+    { "name": "两块", "text": "a\n---\nb", "expect": ["a", "b"] },
+    { "name": "CRLF 两块", "text": "a\r\n---\r\nb", "expect": ["a", "b"] },
+    { "name": "分隔行带缩进与尾空格", "text": "a\n   ---   \nb", "expect": ["a", "b"] },
+    { "name": "只有两个横线不算分隔", "text": "a\n--\nb", "expect": ["a\n--\nb"] },
+    { "name": "四个横线也算分隔", "text": "a\n----\nb", "expect": ["a", "b"] },
+    { "name": "块内多行保留", "text": "l1\nl2\n---\nl3", "expect": ["l1\nl2", "l3"] },
+    { "name": "连续分隔产生的空块被丢掉", "text": "a\n---\n---\nb", "expect": ["a", "b"] },
+    { "name": "首行即分隔（首块为空被丢）", "text": "---\na", "expect": ["a"] },
+    { "name": "末行是分隔（末块为空被丢）", "text": "a\n---", "expect": ["a"] },
+    { "name": "整块首尾空白被去", "text": "  a  \n---\n\tb\t", "expect": ["a", "b"] },
+    { "name": "块内保留内部缩进", "text": "  a\n  b\n---\nc", "expect": ["a\n  b", "c"] },
+    { "name": "分隔行只有横线加 tab", "text": "a\n\t---\t\nb", "expect": ["a", "b"] },
+    { "name": "三块真实场景", "text": "词1\n---\n词2\n---\n词3", "expect": ["词1", "词2", "词3"] }
+  ]
+}

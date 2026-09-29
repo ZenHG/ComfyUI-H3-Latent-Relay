@@ -43,6 +43,7 @@ import inspect
 import json
 import math
 import os
+import time
 
 import folder_paths
 
@@ -174,6 +175,40 @@ def _audio_stage_path(run_id: str, stage_index: int) -> str:
     """音频落盘路径：与 latent 同目录，文件名前缀 audio_（互不覆盖）。"""
     p = _stage_path(run_id, stage_index)
     return os.path.join(os.path.dirname(p), "audio_%05d.safetensors" % int(stage_index))
+
+
+def _progress_path(run_id: str) -> str:
+    """连跑进度文件：与段文件**同目录**（`output/relay_kit/<run_id>/_progress.json`）。
+
+    复用 `_stage_path` 取目录 ⇒ run_id 的清洗/保留名校验与段文件**完全一致**（不会两套规则）。
+    """
+    return os.path.join(os.path.dirname(_stage_path(run_id, 0)), "_progress.json")
+
+
+def _write_progress(run_id: str, stage_index: int, segments: int) -> str:
+    """把连跑进度落盘（断点续跑用）。返回文件路径。
+
+    🔴 语义 = **「第 `stage_index` 段已经开始」**，**不是**「已完成」：
+    Chain 在**段首**执行（它的活是交词），所以这里记的就是"正在跑这一段"。
+    ⇒ 宿主中途卡死/被杀之后重启，从这一段**重跑**即可 —— **宁可重跑一段，绝不跳段**
+    （跳段会拼出中间缺一段的成片，而且很难发现）。
+
+    原子写（临时文件 + `os.replace`）：断电也不会留半截 JSON。
+    """
+    path = _progress_path(run_id)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    payload = {
+        "run_id": str(run_id),
+        "stage_index": int(stage_index),
+        "segments": int(segments),
+        "updated": time.time(),
+        "note": "第 stage_index 段**已开始**（不是已完成）⇒ 续跑从这一段重跑",
+    }
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+    return path
 
 
 def _pcm_ui(path: str):
@@ -1105,7 +1140,7 @@ class H3RelayTrimAV:
 
 
 class H3RelayChain:
-    """🔗 续接连跑（Chain）—— 只负责"按按钮"，自己不参与连线。
+    """🔗 续接连跑（Chain）—— 负责"按按钮"与"交词"，本体不接画面线。
 
     它做的事：找到同一张图里的「桥 + 落盘 + 读上段 latent」，
     自动推进它们的段号并排队，让你不用每段手动改数字。
@@ -1117,9 +1152,12 @@ class H3RelayChain:
         ↺ Reset    段号归 0，从第 1 段重来
         🧩 拼成一条 把已经跑完的几段拼成一条成片
 
-    可选的两个便利功能（**都默认关，不影响老工作流**）：
-      · **自动换词**（`prompts`）：把每段的词用单独一行 `---` 分开粘进来，
-        跑第 k 段前自动把第 k 块写进出词节点。留空 = 不换词。
+    两个便利功能（**都默认关，不影响老工作流**）：
+      · **自动换词**（`prompts`）：把每段的词用单独一行 `---` 分开粘进来。
+        🔴 **0.6.15 起词分发是节点能力**：本节点按 `stage_index` 取出第 k 块，
+        从 **`prompt` 输出口**交出去 —— 把它连到出词节点的 `prompt` 输入即可。
+        这样**画布手点与 API 提交图 JSON 走的是同一个节点**（铁律一：UI/API 同一套实现）。
+        留空 = 不换词。词块不够要跑的段数时**直接报错**，不会静默复用上一块。
       · **自动拼成片**（`auto_concat`）：连跑跑完自动把 N 段拼成一条。
 
     使用前提：把 Chain、桥、落盘、读上段 latent 拉进**同一个分组框**
@@ -1166,10 +1204,10 @@ class H3RelayChain:
                 }),
                 "prompt_target": ("STRING", {
                     "default": "",
-                    "tooltip": "【可选】词写进哪个节点。\n"
-                               "留空 = 自动找：图里只有一个出词节点时不用填。\n"
-                               "有多个出词节点、不知道该写哪个时，把节点编号填进来（比如 992）。\n"
-                               "填不准也没关系 —— 自动找不唯一时它会在 status 里把候选列出来，照着填即可。",
+                    "tooltip": "⚠ **已废弃（0.6.15）**：这一格是给旧版「前端替你写词」那条路用的，那条路已删除。\n"
+                               "现在词由本节点的 `prompt` **输出口**给 —— 把它连到出词节点的 `prompt` 输入即可，\n"
+                               "不用（也无法）在这里指定写哪个节点。\n"
+                               "保留这一格只是为了**不让旧工作流的槽位错位**（删掉会让后面的格整体前移）。",
                 }),
                 "auto_concat": ("BOOLEAN", {
                     "default": False,
@@ -1197,31 +1235,83 @@ class H3RelayChain:
                                "只有各段规格对不上（分辨率/帧率不一致）而必须重编码时，这一格才生效：\n"
                                "数字越小越清晰、文件越大。",
                 }),
+                # —— 0.6.15：连跑的**段号**搬进节点（词分发节点化的配套）。**继续追加在末位**。
+                "stage_index": ("INT", {
+                    "default": 0, "min": 0, "max": 9999, "step": 1,
+                    "tooltip": "【现在跑第几段】段号从 0 开始（第 1 段 = 0）。\n"
+                               "它决定本节点输出 `prompts` 里的**第几块词**（第 0 块给第 0 段）。\n"
+                               "· 画布上：点 ▶ / ✔ / ⏩ 时**会自动和桥、落盘、读上段 latent 一起改**，不用手填。\n"
+                               "· 脚本提交 JSON：循环里把这一格和桥/落盘的段号**改成同一个数**（见 README §7.4）。\n"
+                               "⚠ 填得比词块数大 ⇒ 执行时直接报错（不会静默复用上一块词）。",
+                }),
+                # —— 0.6.15：断点续跑用的 run 标识。**继续追加在末位**（槽位安全）。
+                "run_id": ("STRING", {
+                    "default": "",
+                    "tooltip": "【可选｜续跑用】和桥 / 落盘上填的 `run_id` **填成一样**。\n"
+                               "填了之后，本节点每跑一段会把「跑到第几段」记到段文件同目录的\n"
+                               "`_progress.json` 里 ⇒ 中途卡死/重启后点「⏭ 续跑」就能从那段接着跑。\n"
+                               "留空 = 不记进度（老行为，一个文件都不多写）。",
+                }),
+                # —— 0.6.15：拼接结果显示位。**继续追加在末位**。
+                #    为什么单开一格：成片路径写在 `status` 里会被后一条状态消息冲掉，
+                #    而这个路径是用户**跑完之后最想拿去用**的东西 ⇒ 给它一个**不会被覆盖**的位置。
+                "concat_result": ("STRING", {
+                    "default": "",
+                    "tooltip": "【不用填】成片路径：拼接成功后这里显示 `output/` 下的成片文件（可选中复制）。\n"
+                               "⚠ 路径写进控制台没人看，所以单独放这一格；它不会被状态消息覆盖。\n"
+                               "拼接失败时这里显示失败原因（完整报告在控制台）。",
+                }),
             },
         }
 
-    RETURN_TYPES = ()
-    FUNCTION = "noop"
+    RETURN_TYPES = ("STRING", "STRING")
+    RETURN_NAMES = ("prompt", "report")
+    FUNCTION = "run"
     CATEGORY = CATEGORY
     DESCRIPTION = (
         "🔗 续接连跑：帮你自动改段号、自动换词、自动拼成片。\n"
-        "它自己不参与连线，只控制同一分组里的「桥 / 落盘 / 读上段 latent」。\n"
+        "它控制同一分组里的「桥 / 落盘 / 读上段 latent」，另有一个 `prompt` 输出口。\n"
         "\n"
         "怎么用：\n"
         "1. 把这四个节点框进**同一个分组**（框选 → 右键 → 添加分组）。\n"
-        "2. 直接点「⏩ 连跑」（或「▶ Run」）—— **第 1 段不用你管**：\n"
+        "2. 要「每段用各自的词」：把 `prompts` 用**单独一行 `---`** 分成几块粘进来，\n"
+        "   再把本节点的 **`prompt` 输出连到出词节点的 `prompt` 输入**（这一步是关键，别漏）。\n"
+        "   取第几块由本节点的 `stage_index` 决定：画布上会自动跟着按钮改；\n"
+        "   脚本提交 JSON 时在循环里自己改（见 README §7.4 的循环模板）。\n"
+        "3. 直接点「⏩ 连跑」（或「▶ Run」）—— **第 1 段不用你管**：\n"
         "   「读上段 latent」在 stage_index=0 时会自己交「空上下文」，桥自动直通；\n"
-        "   从第 2 段起它读上一段、桥真续接。段号一路自动加、词自动换（prompts 填了的话）。\n"
-        "3. 想拼成一条成片：点「🧩 拼成一条」（或开 auto_concat 让它跑完自动拼）。\n"
+        "   从第 2 段起它读上一段、桥真续接。段号一路自动加、词自动换。\n"
+        "4. 想拼成一条成片：点「🧩 拼成一条」（或开 auto_concat 让它跑完自动拼）。\n"
         "\n"
         "按钮点了没反应？看 status 格子，它会说明原因。"
     )
 
-    @_node_errors("segments")
-    def noop(self, segments=5, **kwargs):
-        # **kwargs 吞掉 status / prompts / prompt_target / auto_concat / concat_name
-        # 这类只给前端读的输入（它们不参与执行）。
-        return {}
+    @_node_errors("segments", "stage_index")
+    def run(self, segments=5, prompts="", stage_index=0, run_id="", **kwargs):
+        """连跑控制节点的**执行**部分：只做一件事 —— 交出现在这一段该用的词。
+
+        本体的活（推进段号、排队下一段、拼接）都在画布按钮 / 前端那条路上；
+        但**「第 k 段喂第 k 块词」必须是节点能力**，否则 API 提交图 JSON 的用户拿不到
+        （铁律一：UI 与 API 必须同一套实现，且必须基于节点）。
+        所以这里按 `stage_index` 从 `prompts` 取出第 k 块，从 `prompt` 输出口交出去 ——
+        把它连到出词节点的 `prompt` 输入即可，UI 与脚本**走的是同一个节点**。
+
+        `run_id` 非空时顺带把「跑到第几段」落盘（断点续跑）：
+        **写的是「第 k 段已开始」**，所以宿主卡死重启后从这一段重跑，**不会跳段**。
+
+        **kwargs 吞掉 status / prompt_target / auto_concat / concat_name / audio_out /
+        video_crf 这类由前端读走或只给显示的输入（它们不参与本节点的执行）。
+        """
+        if str(run_id).strip():
+            try:
+                _write_progress(run_id, int(stage_index), int(segments))
+            except Exception as err:                          # noqa: BLE001
+                # 记进度失败**不能**拖垮这一段的执行（磁盘满/权限问题都不该让片子跑不出来）。
+                print("[H3 Relay] ⚠ 写连跑进度失败（不影响本段执行）：%s" % err)
+        block, total = CORE.pick_prompt_block(prompts, stage_index)
+        if total == 0:
+            return "", "未填 prompts ⇒ 不换词（沿用画布上原来那份）。"
+        return block, "第 %d/%d 块词（stage_index=%d）" % (int(stage_index) + 1, total, int(stage_index))
 
 
 class H3RelayCopyBridge:

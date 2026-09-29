@@ -138,6 +138,8 @@ V3_NODES = asyncio.run(_ext.get_node_list())
 #      正确复现法：`sys.modules["nodes"] = None` 后跑本文件
 #      ⇒ 实测 `通过 59（失败 3）／7 节点 · 99 input`，与 CI 日志（run 36116073154）**一字不差**。
 #      探针留档在**本机临时目录**（不入库；路径见本地维护规范文档，公开仓库不放本机路径）。
+#      ⚠️ 0.6.15 加第 9 个节点（`H3RelayConcatSegments`）与 Chain 的 `run_id` 后，两组数字各 +1/+13：
+#         本机 **8 节点 · 116 input**；CI **7 节点 · 103 input**（比 0.6.14 各 +1 input，来自 Chain 的 ）。
 _EXPECT_NODES = 8 if _HOST_REGISTRY_OK else 7
 check("2.1 get_node_list() 返回 %d 个节点（宿主注册表 %s）"
       % (_EXPECT_NODES, "可用 ⇒ 8 个外壳全在场" if _HOST_REGISTRY_OK

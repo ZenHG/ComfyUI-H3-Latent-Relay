@@ -56,6 +56,15 @@
 //   · 按钮 widget 补 `{ serialize: false }` —— 旧写法会被序列化进 `widgets_values`，
 //     让节点凭空多出 6 个 `null` 槽位（旧图槽位解读会因此错位）。
 //
+// 0.6.15 —— 词分发**节点化**（铁律一：UI 与 API 必须同一套实现，且必须基于节点）：
+//   · `H3RelayChain` 从「无输出」变成「按自己的 `stage_index` 输出 `prompts` 的第 k 块」
+//     （新输出口 `prompt` + 新输入口 `stage_index`）。把 `Chain.prompt → 出词节点.prompt`
+//     接上之后，**画布手点与 API 提交图 JSON 走的是同一个节点** —— 脚本用户也拿到了词分发
+//     （此前它只存在于本文件里，`README §7.4` 因此把 API 侧标成 ❌）。
+//   · 本文件**保留**「把词写进目标格」的老路（老图不受影响），但在没接线时于 `status`
+//     里提示一次，引导走节点化那条路。
+//   · 段号推进从三处扩到**四处**（加 Chain 自己）：它决定输出第几块词。
+//
 // 效能（0.6.13）：
 //   · **全局监听只注册一份**（模块级 `CHAINS` 集合）。旧写法在每个 Chain 实例的
 //     `onNodeCreated` 里各注册 3 个 `api` 监听 ⇒ 多实例时开销成倍，且**节点被删/复制后
@@ -71,8 +80,11 @@
 
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { splitPromptBlocks, resolveTarget, writePrompt, describeTarget, collectStageIds }
-    from "./relay_kit_prompt.js";
+// 🔴 0.6.15：只 import **还需要的**两个纯函数。
+//   `resolveTarget` / `writePrompt` / `describeTarget` 随"前端写词"那条老路一起删了 ——
+//   词现在由 Chain 节点的 `prompt` 输出口给（铁律一：不允许"两条路各写一遍"）。
+//   `splitPromptBlocks` 仍要（前端做**词块数预检**）；`collectStageIds` 仍要（拼接取段记录）。
+import { splitPromptBlocks, collectStageIds } from "./relay_kit_prompt.js";
 
 /** litegraph 的节点模式：0 = Always（启用），4 = Bypass（旁路）。 */
 const MODE_ALWAYS = 0;
@@ -179,6 +191,32 @@ function findLoads(chainNode) {
 
 // ─────────────────────────── 状态显示 ───────────────────────────
 
+/** 进度条文本（**纯字符**，零渲染开销）。`ratio` 0~1。 */
+function bar(ratio, width = 10) {
+    const r = Math.max(0, Math.min(1, Number(ratio) || 0));
+    const n = Math.round(r * width);
+    return "█".repeat(n) + "░".repeat(width - n);
+}
+
+/**
+ * 节流：`progress` 事件**每采样步都触发**（8 步就是 8 次）。
+ * 每次都写 UI 会让画布每步重绘 —— 200ms 一次足够人眼看出在动，也不拖采样。
+ */
+function throttle(fn, ms = 200) {
+    let last = 0, timer = null, pending = null;
+    return (...args) => {
+        pending = args;
+        const now = Date.now();
+        if (now - last >= ms) { last = now; fn(...pending); return; }
+        if (!timer) {
+            timer = setTimeout(() => { timer = null; last = Date.now(); fn(...pending); }, ms);
+        }
+    };
+}
+
+/** 「⏩ 连跑」按钮的原始文字（运行中会被换成带进度的）。 */
+const CHAIN_BTN = "⏩ 连跑（按 segments 自动循环）";
+
 function setStatus(chainNode, text) {
     const w = findWidget(chainNode, "status");
     if (w) {
@@ -254,8 +292,16 @@ function ensureLoadsEnabled(pair) {
     return changed;
 }
 
-/** 把段号同步推进到三处（读上段 latent / 桥 / 落盘），并保证读节点启用。 */
-function setStageAll(pair, v) {
+/**
+ * 把段号同步推进到**四处**（Chain 自己 / 读上段 latent / 桥 / 落盘），并保证读节点启用。
+ *
+ * 🔴 0.6.15 加第一处：Chain 自己也有 `stage_index` 了 —— 它决定节点从 `prompts`
+ * 里输出**第几块词**（词分发节点化：UI 连线与 API 提交图 JSON 走同一个节点）。
+ * 四处必须一样大，否则"画面上在第 3 段、喂的却是第 2 块词"。
+ * 老图没有这一格 ⇒ `setStage` 找不到 widget 会静默跳过（不报错、不影响旧行为）。
+ */
+function setStageAll(chainNode, pair, v) {
+    setStage(chainNode, v);
     setStage(pair.bridge, v);
     setStage(pair.save, v);
     for (const n of pair.loads ?? []) setStage(n, v);
@@ -357,6 +403,30 @@ function upstreamText(linkId) {
 }
 
 /**
+ * Chain 的 `prompt` 输出口有没有接线。
+ *
+ * 🔴 0.6.15 起「第 k 段喂第 k 块词」是**节点能力**：Chain 按自己的 `stage_index`
+ * 从 `prompts` 取出第 k 块，从 `prompt` 输出口交出去。
+ * 把 `Chain.prompt → 出词节点.prompt` 接上之后，**画布手点与 API 提交图 JSON
+ * 走的是同一个节点**（铁律一：UI 与 API 必须同一套实现）。
+ *
+ * 没接线时下面那条老路（前端把词写进目标格）仍然会兜住 —— 老图不受影响；
+ * 但那条路**只有画布能用**，脚本用户拿不到 ⇒ 在 status 里点一次，让人知道该接哪根线。
+ */
+function promptOutputLinked(chainNode) {
+    const out = (chainNode.outputs ?? []).find((o) => o.name === "prompt");
+    return !!(out && out.links && out.links.length);
+}
+
+/** 没接线时的一次性提示（同一实例只提示一次，免得每段都刷屏）。 */
+function nodeHintOnce(state, chainNode) {
+    if (!state || state.hinted || promptOutputLinked(chainNode)) return "";
+    state.hinted = true;
+    return "｜ ⚠ 建议接线：把本节点 `prompt` 输出接到出词节点的 `prompt` 输入" +
+        "（这样脚本提交 JSON 也能自动换词；现在这条老路只有画布能用）";
+}
+
+/**
  * 取**实际会参与执行**的 `prompts` 文本。
  *
  * 🔴 为什么不能只读 `widget.value`（0.6.12 修）：`prompts` 可以**被转成输入并连线**
@@ -374,50 +444,94 @@ function readPrompts(chainNode) {
 }
 
 /**
- * 开始第 `stage` 段（0 起算）前把词写进目标节点。
- * 没填 `prompts` ⇒ 直接放行（老行为，一个字都不动）。
+ * 检查这一段该用的词是否就绪 —— **不再把词写进任何 widget**。
+ *
+ * 🔴 0.6.15 起「第 k 段喂第 k 块词」是 **Chain 节点的能力**（节点按 `stage_index` 从
+ * `prompts` 取第 k 块，从 `prompt` 输出口交给下游）。前端那条"替你写进目标格"的老路
+ * **已删除** —— 保留它就会有两套实现（铁律一禁止"两条路各写一遍"）。
+ *
+ * ⇒ 因此这里只做两件事：**① 没接线就直接拦下**（否则词根本没地方去，会静默不换词）；
+ *   **② 段号超出词块数就拦下**（不排队，绝不静默复用上一块）。
+ *
+ * 返回 `{ok, message}`；`ok=false` 时调用方**不排队**。
  */
-function dispatchStage(chainNode, stage) {
+function checkStagePrompt(chainNode, stage) {
+    if (!promptOutputLinked(chainNode)) {
+        return {
+            ok: false,
+            message: "⚠ 本节点的 `prompt` 输出**没有接线** ⇒ 词分发不会生效。\n"
+                + "0.6.15 起词由**节点**输出（前端不再替你写格子）：把 `Chain.prompt` "
+                + "连到出词节点的 `prompt` 输入即可。\n"
+                + "（只跑一段、不需要换词的话，把 `prompts` 留空就不会拦你。）",
+        };
+    }
     const src = readPrompts(chainNode);
     if (!src.ok) {
         return {
             ok: false,
-            message:
-                `⚠ prompts 是从上游连线来的，但读不到上游的词：${src.message} ⇒ **没有排队**。\n` +
-                `两个办法：① 把词**直接粘进 Chain 的 prompts 格**、断开这条连线（最稳，推荐）；` +
-                `② 保持连线，但让上游节点带一个 positive / prompt / text 文本格。`,
+            message: `⚠ prompts 读不到：${src.message}\n`
+                + "⇒ 把词**直接粘进 Chain 的 `prompts` 格**（最稳），"
+                + "或让上游节点带一个 positive / prompt / text 文本格。",
         };
     }
     const blocks = splitPromptBlocks(src.text);
-    if (!blocks.length) return { ok: true, message: "" };
+    if (!blocks.length) return { ok: true, message: "" };   // 留空 = 不换词
     if (stage >= blocks.length) {
         return {
             ok: false,
-            message:
-                `⚠ prompts 只有 ${blocks.length} 块词，第 ${stage + 1} 段没有对应词 ⇒ **没有排队**。` +
-                `（要么补齐第 ${stage + 1} 块，要么把 segments 改成 ${blocks.length} 或更小。）`,
+            message: `⚠ prompts 只有 ${blocks.length} 块词，第 ${stage + 1} 段没有对应词 ⇒ **没有排队**。`
+                + `（要么补齐第 ${stage + 1} 块，要么把 segments 改成 ${blocks.length} 或更小。）`,
         };
     }
-    const r = resolveTarget(graphNodes(), widgetValue(chainNode, "prompt_target", ""));
-    if (!r.ok) return { ok: false, message: "⚠ " + r.message };
-    const w = writePrompt(r.target, blocks[stage]);
-    if (!w.ok) return { ok: false, message: "⚠ " + w.message };
     return {
         ok: true,
-        message: `第 ${stage + 1}/${blocks.length} 段词 → ${describeTarget(r.target)}`
+        message: `第 ${stage + 1}/${blocks.length} 段词由节点输出`
             + (src.from ? `（词源 ${src.from}）` : ""),
     };
 }
 
-/** 状态行里带上词分发结果（没有就什么都不加）。 */
+/** 往一个 widget 写值（找不到就静默跳过 —— 老图可能没这一格）。 */
+function setWidgetValue(n, name, value) {
+    const w = findWidget(n, name);
+    if (!w) return false;
+    w.value = value;
+    n.setDirtyCanvas?.(true, true);
+    return true;
+}
+
+/**
+ * 给用户一个**明显**提示（拼接是"后台做完"的事，只写 status 容易被错过）。
+ *
+ * 各版本前端的提示 API 不一样 ⇒ **逐级退**，而不是绑死一个：
+ * 新版 `extensionManager.toast` → 旧版 `ui.dialog` → 都没有就只剩
+ * `concat_result` 格 + status（**仍不会静默**，因为那两处一定会写）。
+ */
+function notifyUser(summary, detail, severity = "success") {
+    try {
+        const em = app?.extensionManager;
+        if (typeof em?.toast?.add === "function") {
+            em.toast.add({ severity, summary, detail, life: 10000 });
+            return true;
+        }
+        if (typeof app?.ui?.dialog?.show === "function") {
+            app.ui.dialog.show(`${summary}\n${detail}`);
+            return true;
+        }
+    } catch (err) {
+        console.warn("[H3 Relay Chain] 提示 API 不可用（不影响拼接结果）：", err);
+    }
+    return false;
+}
+
+/** 状态行里带上词检查结果（没有就什么都不加）。 */
 function withMsg(msg) {
     return msg ? `｜ ${msg}` : "";
 }
 
-/** 开始第 `stage` 段：先保证读节点启用，再分词写格，最后排队。任一步没过都**不排队**。 */
+/** 开始第 `stage` 段：先保证读节点启用，再查词，最后排队。任一步没过都**不排队**。 */
 async function startStage(node, state, stage, label, pair) {
     const restored = ensureLoadsEnabled(pair);
-    const d = dispatchStage(node, stage);
+    const d = checkStagePrompt(node, stage);
     if (!d.ok) {
         setStatus(node, d.message);
         return null;
@@ -425,7 +539,8 @@ async function startStage(node, state, stage, label, pair) {
     const note = restored.length
         ? `｜ 已恢复「读上段 latent」#${restored.join("、")} 为启用（旁路它会导致提交校验失败）`
         : "";
-    setStatus(node, `${label}：stage=${stage} 排队中…` + withMsg(d.message) + note);
+    setStatus(node, `${label}：stage=${stage} 排队中…` + withMsg(d.message) + note
+        + nodeHintOnce(state, node));
     return queuePrompt(node, state, stage);
 }
 
@@ -472,10 +587,84 @@ async function concatFilm(chainNode, state, auto = false) {
             }),
         });
         const data = await res.json();
-        setStatus(chainNode, (data.ok ? "✅ " : "🔴 ") + (data.report || data.error || "拼接失败"));
+        // 🔴 status 是**单行** widget：多行 report 塞进去会被压扁、成片路径反而看不见。
+        // 所以：路径进**专用格** `concat_result`（不会被状态消息冲掉、可选中复制），
+        // 完整报告进控制台，再给一次**明显提示**（toast）。
+        const rep = String(data.report || data.error || "拼接失败");
+        const first = rep.split("\n").map((s) => s.trim()).filter(Boolean)[0] || rep;
+        const resultText = data.ok ? (data.out || "(路径见控制台)") : `失败：${first}`;
+        setWidgetValue(chainNode, "concat_result", resultText);
+        setStatus(chainNode, data.ok ? `✅ 拼接成功：${resultText}` : `🔴 ${first}`);
+        notifyUser(data.ok ? "🎬 拼接完成" : "⚠ 拼接失败",
+                   data.ok ? `成片：${resultText}` : first,
+                   data.ok ? "success" : "error");
+        console.info("[H3 Relay Chain] 拼接完整报告：\n" + rep);
     } catch (err) {
+        setWidgetValue(chainNode, "concat_result", `失败：${err.message}`);
         setStatus(chainNode, (auto ? "⚠ 自动拼接请求失败：" : "⚠ 拼接请求失败：") + err.message);
     }
+}
+
+/**
+ * 开始一轮连跑（「⏩ 连跑」与「⏭ 续跑」共用同一段逻辑，只有文案不同）。
+ *
+ * 返回 `true` = 已成功排队；`false` = 被前置检查拦下（**没有排队**）。
+ */
+async function startChainRun(node, state, pair, label = "连跑") {
+    const seg = Math.round(widgetValue(node, "segments", 0) || 0);
+    // 🔴 0.6.14 预检：有限段模式下，把会跑到的**最后一段**提前验词——
+    //   别跑到一半才发现词不够（首段有词、末段没有时旧代码会白跑前几段）。
+    if (seg > 0) {
+        const src = readPrompts(node);
+        if (src.ok) {
+            const blocks = splitPromptBlocks(src.text);
+            const start = getStage(pair.bridge);
+            const last = start + seg - 1;
+            if (blocks.length && last >= blocks.length) {
+                const fit = Math.max(1, blocks.length - start);
+                setStatus(node,
+                    `⚠ prompts 只有 ${blocks.length} 块词，连跑会跑到第 ${last + 1} 段 ⇒ 不够。` +
+                    `要么补齐到 ${last + 1} 块，要么把 segments 改成 ${fit}。`);
+                return false;
+            }
+        }
+        // src 读不到（连线情形）不拦：startStage 里会给出更具体的指引。
+    }
+    state.mode = "chain";
+    state.remaining = seg;
+    state.stageIds = [];
+    state.pairIds = new Set();
+    state.sawMine = false;
+    state.awaiting = false;   // 由 queuePrompt 成功后再置位
+    setStatus(node, `${label}开始：segments=${seg <= 0 ? "∞" : seg}，首段排队中…`);
+    state.onStageChanged?.();          // 按钮立刻变「⏳ 连跑中 …」（明显反馈）
+    const ok = await startStage(node, state, getStage(pair.bridge), label, pair);
+    if (ok === null) { state.mode = "idle"; state.onStageChanged?.(); }   // 词分发没过 ⇒ 别停在 chain 态
+    return ok !== null;
+}
+
+/**
+ * 把连跑进度画到「⏩ 连跑」按钮的**文字**上（明显反馈 + 辨识度）。
+ *
+ * 为什么画在按钮上而不是 `status` 格：`status` 要留给"排队中 / 词分发 / 报错"这类
+ * **事件消息**，而进度是**周期性**的 —— 两者写同一个格子会互相覆盖。
+ * 按钮文字是独立显示位，而且运行中它一眼就能看出"现在在跑、跑到第几段"。
+ *
+ * ⚡ 效能：**只在文字真的变了才 `setDirtyCanvas`**（否则每步采样都重绘画布）。
+ */
+function refreshChainLabel(state, node) {
+    const w = state?.btns?.[CHAIN_BTN];
+    if (!w) return;
+    let text = CHAIN_BTN;
+    if (state.mode === "chain") {
+        const seg = Math.round(widgetValue(node, "segments", 0) || 0);
+        const doneN = seg > 0 ? Math.max(0, seg - state.remaining) : 0;
+        const pos = seg > 0 ? `${bar(doneN / seg)} ${doneN}/${seg}` : "∞";
+        text = `⏳ 连跑中 ${pos}${state.lastProgress ? " · " + state.lastProgress : ""}`;
+    }
+    if (w.label === text) return;
+    w.label = text;
+    node.setDirtyCanvas?.(true, false);
 }
 
 /**
@@ -547,6 +736,10 @@ function bindGlobalListeners() {
     api.addEventListener("execution_error", () => {
         for (const s of CHAINS) s.onExecutionError();
     });
+    // 采样进度（**每步都触发**）⇒ 只用来更新「⏩ 连跑」按钮上的进度文字，走节流。
+    api.addEventListener("progress", ({ detail }) => {
+        for (const s of CHAINS) s.onProgress(detail);
+    });
 }
 
 app.registerExtension({
@@ -566,8 +759,10 @@ app.registerExtension({
             // pairIds：本组「桥/落盘」的 id **集合**，连跑开始时算一次就够 ——
             //   executing 事件每执行一个节点都会触发，在里面重算 findPair 等于每节点扫一遍全图。
             const state = {
-                mode: "idle", remaining: 0, sawMine: false, awaiting: false,
+                mode: "idle", remaining: 0, sawMine: false, awaiting: false, hinted: false,
                 stageIds: [], pairIds: new Set(),
+                btns: {}, lastProgress: "",          // 按钮引用 / 最近一次采样进度文案
+                chainNode: node,
 
                 /** 本组"正在等一轮跑完"（排队成功后置位；`stepDone` 消费掉）。 */
                 armed() { return this.mode === "chain" && this.awaiting; },
@@ -627,7 +822,23 @@ app.registerExtension({
                     if (this.mode !== "chain") return;
                     this.mode = "idle";
                     this.awaiting = false;
+                    this.onStageChanged();
                     setStatus(node, "⚠ 执行出错，连跑已停（stage_index 保持当前值，可直接重跑）。");
+                },
+
+                /** `progress` = 采样步数（**每步都触发** ⇒ 走节流）。 */
+                onProgress(detail) {
+                    if (this.mode !== "chain") return;
+                    const v = Number(detail?.value ?? 0), m = Number(detail?.max ?? 0);
+                    if (!m) return;
+                    this.lastProgress = `采样 ${v}/${m}`;
+                    this.paint();
+                },
+
+                /** 段号推进 / 收尾时刷新按钮文字（这些是**低频**事件，直接刷）。 */
+                onStageChanged() {
+                    this.lastProgress = "";
+                    refreshChainLabel(this, node);
                 },
 
                 /** 一段跑完：推进段号，决定继续还是收尾。 */
@@ -649,30 +860,34 @@ app.registerExtension({
 
                     if (!more) {
                         // 收尾路径段号还是要推（"已落盘，可直接继续 Approve" 的语义不变）
-                        setStageAll(pair, getStage(pair.bridge) + 1);
+                        setStageAll(node, pair, getStage(pair.bridge) + 1);
                         const done = getStage(pair.bridge);
                         this.mode = "idle";
+                        this.onStageChanged();          // 按钮还原（明显反馈）
                         setStatus(node, `✅ 连跑结束，当前段号 ${done}（已落盘，可直接继续 Approve）。`);
                         if (widgetValue(node, "auto_concat", false)) concatFilm(node, this, true);
                         return;
                     }
                     // 🔴 0.6.14：与 Approve 对齐——**先确认词能写上，再推进段号**。
-                    //   旧顺序（先 setStageAll 再 dispatchStage）在词不够时会留下"段号推上去了、
+                    //   旧顺序（先 setStageAll 再查词）在词不够时会留下"段号推上去了、
                     //   但那一段没跑"的悬空状态。词分发失败 ⇒ 段号保持当前值，补词后 Approve 继续。
                     const next = getStage(pair.bridge) + 1;
-                    const d = dispatchStage(node, next);
+                    const d = checkStagePrompt(node, next);
                     if (!d.ok) {
                         this.mode = "idle";
                         setStatus(node, d.message
                             + `\n（段号保持 ${getStage(pair.bridge)}，补词后可 Approve 继续。）`);
                         return;
                     }
-                    setStageAll(pair, next);
+                    setStageAll(node, pair, next);
                     setStatus(node, `连跑中：第 ${next + 1} 段排队…（剩余 ${infinite ? "∞" : this.remaining}）`
                         + withMsg(d.message));
                     queuePrompt(node, this, next).catch(() => (this.mode = "idle"));
                 },
             };
+
+            // 采样进度**节流**刷新（`progress` 每步都触发；200ms 一次足够看出在动）。
+            state.paint = throttle(() => refreshChainLabel(state, node), 200);
 
             CHAINS.add(state);
             bindGlobalListeners();
@@ -684,12 +899,21 @@ app.registerExtension({
             };
 
             // ⚠️ 一律带 `{ serialize: false }`：按钮不该进 widgets_values（否则旧图凭空多出空槽位）。
-            const addBtn = (label, fn) =>
-                node.addWidget("button", label, null, guard(node, label, fn), { serialize: false });
+            // 同时把 widget 存进 `state.btns`：连跑中要把「⏩ 连跑」的文字换成进度（明显反馈）。
+            const addBtn = (label, fn) => {
+                const w = node.addWidget("button", label, null, guard(node, label, fn),
+                                         { serialize: false });
+                state.btns[label] = w;
+                return w;
+            };
 
             addBtn("▶ Run（按当前段号跑一次）", async () => {
                 const pair = findPair(node);
                 if (!pair) return;
+                if (state.mode === "chain") {          // 防误点：连跑中再点 Run 会把状态机打回 idle
+                    setStatus(node, "⚠ 正在连跑中 —— 先点「⏹ Stop」，或等这一段跑完。");
+                    return;
+                }
                 state.mode = "idle";
                 state.awaiting = false;
                 await startStage(node, state, getStage(pair.bridge), "Run", pair);
@@ -698,10 +922,15 @@ app.registerExtension({
             addBtn("✔ Approve（段号+1 并跑下一段）", async () => {
                 const pair = findPair(node);
                 if (!pair) return;
+                if (state.mode === "chain") {
+                    setStatus(node, "⚠ 正在连跑中 —— 段号会自动推进，不用点 Approve。"
+                        + "想停下来点「⏹ Stop」。");
+                    return;
+                }
                 const next = getStage(pair.bridge) + 1;
-                const d = dispatchStage(node, next);
+                const d = checkStagePrompt(node, next);
                 if (!d.ok) { setStatus(node, d.message); return; }
-                setStageAll(pair, next);            // 先确认词能写上，再推进段号
+                setStageAll(node, pair, next);      // 先确认词能写上，再推进段号
                 state.mode = "idle";
                 state.awaiting = false;
                 setStatus(node, `Approve：段号推进到 ${next}，排队中…` + withMsg(d.message));
@@ -711,40 +940,52 @@ app.registerExtension({
             addBtn("⏩ 连跑（按 segments 自动循环）", async () => {
                 const pair = findPair(node);
                 if (!pair) return;
-                const seg = Math.round(widgetValue(node, "segments", 0) || 0);
-                // 🔴 0.6.14 预检：有限段模式下，把会跑到的**最后一段**提前验词——
-                //   别跑到一半才发现词不够（首段有词、末段没有时旧代码会白跑前几段）。
-                if (seg > 0) {
-                    const src = readPrompts(node);
-                    if (src.ok) {
-                        const blocks = splitPromptBlocks(src.text);
-                        const start = getStage(pair.bridge);
-                        const last = start + seg - 1;
-                        if (blocks.length && last >= blocks.length) {
-                            const fit = Math.max(1, blocks.length - start);
-                            setStatus(node,
-                                `⚠ prompts 只有 ${blocks.length} 块词，连跑会跑到第 ${last + 1} 段 ⇒ 不够。` +
-                                `要么补齐到 ${last + 1} 块，要么把 segments 改成 ${fit}。`);
-                            return;
-                        }
-                    }
-                    // src 读不到（连线情形）不拦：startStage 里会给出更具体的指引。
+                await startChainRun(node, state, pair, "连跑");
+            });
+
+            // 🔴 0.6.15 断点续跑：宿主卡死 / 被看门狗杀掉之后，不用从头再来。
+            //   进度由 Chain 节点自己**每段写一次**（`output/relay_kit/<run_id>/_progress.json`，
+            //   `run_id` 填了才写 ⇒ 老图零副作用）。
+            //   语义 = 「第 k 段**已开始**」⇒ 从 k 段重跑：**宁可重跑一段，绝不跳段**。
+            addBtn("⏭ 续跑（从上次跑到的那段继续）", async () => {
+                const pair = findPair(node);
+                if (!pair) return;
+                const runId = String(widgetValue(node, "run_id", "")).trim();
+                if (!runId) {
+                    setStatus(node, "⚠ 续跑要先在 `run_id` 格里填上（与桥 / 落盘的 run_id 填一样）"
+                        + " —— 它用来找上次的进度文件。");
+                    return;
                 }
-                state.mode = "chain";
-                state.remaining = seg;
-                state.stageIds = [];
-                state.pairIds = new Set();
-                state.sawMine = false;
-                state.awaiting = false;   // 由 queuePrompt 成功后再置位
-                setStatus(node, `连跑开始：segments=${seg <= 0 ? "∞" : seg}，首段排队中…`);
-                const ok = await startStage(node, state, getStage(pair.bridge), "连跑", pair);
-                if (ok === null) state.mode = "idle";   // 词分发没过 ⇒ 别停在 chain 态
+                if (typeof api?.fetchApi !== "function") {
+                    setStatus(node, "⚠ 这个 ComfyUI 前端没有 api.fetchApi ⇒ 读不了进度。"
+                        + "（进度文件在 `output/relay_kit/<run_id>/_progress.json`，可以直接看）");
+                    return;
+                }
+                let prog = null;
+                try {
+                    const res = await api.fetchApi(
+                        `/h3relay/progress?run_id=${encodeURIComponent(runId)}`);
+                    prog = await res.json();
+                } catch (err) {
+                    setStatus(node, "⚠ 读进度失败：" + err.message);
+                    return;
+                }
+                if (!prog || !prog.ok) {
+                    setStatus(node, "⚠ " + ((prog && prog.error) || "读不到进度"));
+                    return;
+                }
+                const k = Math.max(0, Math.round(prog.stage_index ?? 0));
+                const when = prog.updated
+                    ? new Date(prog.updated * 1000).toLocaleString() : "时间未知";
+                setStageAll(node, pair, k);
+                await startChainRun(node, state, pair, `⏭ 续跑（上次第 ${k + 1} 段，${when}）`);
             });
 
             addBtn("⏹ Stop（本轮跑完即停）", () => {
                 if (state.mode === "chain") {
                     state.mode = "idle";
                     state.awaiting = false;
+                    state.onStageChanged();
                     setStatus(node, "已请求停止：当前采样跑完后不再推进。");
                 } else {
                     setStatus(node, "当前没有在连跑。");
@@ -758,7 +999,7 @@ app.registerExtension({
             addBtn("↺ Reset（段号归 0，从第 1 段重来）", () => {
                 const pair = findPair(node);
                 if (!pair) return;
-                setStageAll(pair, 0);
+                setStageAll(node, pair, 0);
                 state.stageIds = [];
                 setStatus(node, "已归 0：下一段将作为第 1 段（不续接，只落盘）。");
             });

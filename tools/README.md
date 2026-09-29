@@ -24,7 +24,7 @@
 
 | 脚本 | 干什么 | 怎么跑 |
 |---|---|---|
-| `make_minimal_bundle.py` | **产出最小可运行分发集**（19 文件 / 646 KB，zip 221 KB）：只带运行期 8 文件 + 前端 2 + 示例 3 + 元数据/法律/readme 6，**不带** `docs/` `tests/` `tools/` `.github/`。三件事一起做：① 清单与**静态 import 推导**交叉校验（防加了模块忘改清单）② 写出 `dist/` ③ **自验**把产出当独立包加载（8 节点 / 默认 V3 / 前端在 / 异常上下文 / **零模块来自原仓**） | `python tools/make_minimal_bundle.py --zip` |
+| `make_minimal_bundle.py` | **产出最小可运行分发集**（19 文件 / 646 KB，zip 221 KB）：只带运行期 8 文件 + 前端 2 + 示例 3 + 元数据/法律/readme 6，**不带** `docs/` `tests/` `tools/` `.github/`。三件事一起做：① 清单与**静态 import 推导**交叉校验（防加了模块忘改清单）② 写出 `dist/` ③ **自验**把产出当独立包加载（9 节点 / 默认 V3 / 前端在 / 异常上下文 / **零模块来自原仓**） | `python tools/make_minimal_bundle.py --zip` |
 
 前四个失败时会以非零退出码退出（CI 直接可用），见 `.github/workflows/ci.yml`。
 

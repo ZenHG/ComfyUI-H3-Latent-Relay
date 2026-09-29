@@ -502,12 +502,12 @@ check("11.2 槽位安全：segments 仍居首、status 未被前移、新格只�
       list(req) == ["segments"] and list(opt)[0] == "status",
       "required=%s optional=%s" % (list(req), list(opt)))
 
-# 11.3 前端会把 status 一起传进来 → noop 必须能吃下
+# 11.3 前端会把 status 一起传进来 → run 必须能吃下（0.6.15 起 FUNCTION 由 noop 改为 run）
 try:
-    chain_cls().noop(segments=3, status="第 2 段")
-    check("11.3 noop 能吃下 status 参数（不会 TypeError）", True)
+    chain_cls().run(segments=3, status="第 2 段")
+    check("11.3 run 能吃下 status 参数（不会 TypeError）", True)
 except Exception as e:  # noqa: BLE001
-    check("11.3 noop 能吃下 status 参数（不会 TypeError）", False, repr(e))
+    check("11.3 run 能吃下 status 参数（不会 TypeError）", False, repr(e))
 
 # 11.4 前端 JS 确实在找这个 widget 名
 #   ⚠ 2026-09-28：判据放宽 —— 0.6.13 把「按名字找 widget」抽成了 `findWidget(n, name)`，
@@ -533,15 +533,19 @@ check("11.6 默认档 = 老行为（prompts 空、auto_concat 关、成片名空
       % (opt["prompts"][1].get("default"), opt["prompts"][1].get("multiline"),
          opt["auto_concat"][1].get("default")))
 try:
-    chain_cls().noop(segments=3, status="第 2 段", prompts="a\n---\nb", prompt_target="6.h3_data",
-                     auto_concat=True, concat_name="film")
-    check("11.7 noop 能吃下 0.6.7 的四个新参数（不会 TypeError）", True)
+    chain_cls().run(segments=3, status="第 2 段", prompts="a\n---\nb", prompt_target="6.h3_data",
+                    auto_concat=True, concat_name="film")
+    check("11.7 run 能吃下 0.6.7 的四个新参数（不会 TypeError）", True)
 except Exception as e:  # noqa: BLE001
-    check("11.7 noop 能吃下 0.6.7 的四个新参数（不会 TypeError）", False, repr(e))
+    check("11.7 run 能吃下 0.6.7 的四个新参数（不会 TypeError）", False, repr(e))
 try:
     _js2 = open(os.path.join(_KIT_DIR, "web", "relay_kit_prompt.js"), encoding="utf-8").read()
-    check("11.8 词分发纯函数模块在位（前端与离线单测共用同一份逻辑）",
-          "export function splitPromptBlocks" in _js2 and "export function writePrompt" in _js2)
+    # ⚠ 2026-09-15：0.6.15 把「前端写词」那条老路删了（词改由 Chain 节点输出）
+    #   ⇒ 断言改为「只留两个还需要的纯函数」，并**反向**确认老路函数已不在（防它悄悄回来）。
+    check("11.8 词分发纯函数模块只留 splitPromptBlocks + collectStageIds（老路已删）",
+          "export function splitPromptBlocks" in _js2 and "export function collectStageIds" in _js2
+          and "export function writePrompt" not in _js2
+          and "export function resolveTarget" not in _js2)
 except Exception as e:  # noqa: BLE001
     check("11.8 词分发纯函数模块在位（前端与离线单测共用同一份逻辑）", False, repr(e))
 
@@ -559,10 +563,65 @@ check("11.11 槽位安全：新格仍在其前面所有格之后（concat_name �
       and list(opt).index("video_crf") > list(opt).index("concat_name"),
       "optional=%s" % list(opt))
 try:
-    chain_cls().noop(segments=3, audio_out="pcm_lossless", video_crf=23)
-    check("11.12 noop 能吃下音轨/画质两个新参数（**kwargs 兜住）", True)
+    chain_cls().run(segments=3, audio_out="pcm_lossless", video_crf=23)
+    check("11.12 run 能吃下音轨/画质两个新参数（**kwargs 兜住）", True)
 except Exception as e:  # noqa: BLE001
-    check("11.12 noop 能吃下音轨/画质两个新参数（**kwargs 兜住）", False, repr(e))
+    check("11.12 run 能吃下音轨/画质两个新参数（**kwargs 兜住）", False, repr(e))
+
+# 11.13~11.19 0.6.15 词分发**节点化**（铁律一：UI 与 API 必须同一套实现，且必须基于节点）
+#   背景：0.6.7~0.6.14 词分发只存在于前端 JS（web/relay_kit_prompt.js）⇒ README §7.4
+#   把 API/脚本侧的「词分发」标成 ❌。那正是铁律一禁止的「只有 UI 路径才有的分支（或反过来）」。
+#   0.6.15 把「第 k 段喂第 k 块词」做成 Chain 节点的**输出口** ⇒ 画布连线与 API 提交图 JSON
+#   走同一个节点；核心分块算法在 relay_core（唯一权威实现）。
+check("11.13 stage_index 作为可选 widget 存在（决定输出第几块词）",
+      "stage_index" in opt and opt["stage_index"][1].get("default") == 0
+      and opt["stage_index"][1].get("min") == 0,
+      "stage_index=%r" % (opt.get("stage_index"),))
+check("11.14 槽位安全：0.6.15 的三个新格都追加在末位（stage_index / run_id / concat_result）",
+      list(opt)[-3:] == ["stage_index", "run_id", "concat_result"]
+      and list(opt).index("stage_index") > list(opt).index("video_crf"),
+      "optional=%s" % list(opt))
+check("11.15 词分发节点化的接口契约：FUNCTION=run / 输出 prompt+report",
+      chain_cls.FUNCTION == "run" and tuple(chain_cls.RETURN_TYPES) == ("STRING", "STRING")
+      and tuple(chain_cls.RETURN_NAMES) == ("prompt", "report"),
+      "FUNCTION=%r RETURN_TYPES=%r RETURN_NAMES=%r"
+      % (chain_cls.FUNCTION, chain_cls.RETURN_TYPES, getattr(chain_cls, "RETURN_NAMES", None)))
+
+# 11.16 行为：按 stage_index 取第 k 块 —— **不是**"能跑就算过"，要真的取对
+_chain = chain_cls()
+_p0 = _chain.run(segments=2, prompts="词A\n---\n词B", stage_index=0)
+_p1 = _chain.run(segments=2, prompts="词A\n---\n词B", stage_index=1)
+check("11.16 run 按 stage_index 输出第 k 块词（0 起算）",
+      _p0[0] == "词A" and _p1[0] == "词B" and "2" in _p0[1] and "2" in _p1[1],
+      "stage0=%r stage1=%r" % (_p0, _p1))
+
+# 11.17 越界必须 raise（**不许静默复用上一块词** —— 那正是"以为换了词、其实没换"）
+try:
+    _chain.run(segments=9, prompts="只有一块", stage_index=3)
+    check("11.17 词块不够 ⇒ 直接报错（不静默复用）", False, "没 raise")
+except Exception as e:  # noqa: BLE001
+    check("11.17 词块不够 ⇒ 直接报错（不静默复用）",
+          "1 块" in str(e) or "只有一块" in str(e), repr(e)[:140])
+
+# 11.18 未填 prompts ⇒ 空词 + 明说"不换词"（老行为：一个字都不动）
+_p_empty = _chain.run(segments=2, prompts="", stage_index=1)
+check("11.18 未填 prompts ⇒ 输出空词并说明不换词（老行为不变）",
+      _p_empty[0] == "" and "不换词" in _p_empty[1], "%r" % (_p_empty,))
+
+# 11.19 跨语言口径锁定：relay_core 的分块 == 共享样本的期望
+#   Node 侧 tests/test_prompt_dispatch.mjs 读**同一份** tests/prompt_blocks_cases.json。
+#   🔴 为什么必须有：词分发现在是「节点（Python）+ 画布副本（JS）」两条**调用**路径，
+#   但**口径只能有一份**。工具里曾经还照抄过第三份（用 splitlines，与 JS 已经漂移）。
+try:
+    import json as _json  # noqa: E402
+    _cases = _json.load(open(os.path.join(_KIT_DIR, "tests", "prompt_blocks_cases.json"),
+                             encoding="utf-8"))["cases"]
+    _bad = [c["name"] for c in _cases
+            if CORE.split_prompt_blocks(c["text"]) != c["expect"]]
+    check("11.19 分块口径与共享样本一致（%d 例，跨语言锁）" % len(_cases), not _bad,
+          "不一致：%s" % _bad)
+except Exception as e:  # noqa: BLE001
+    check("11.19 分块口径与共享样本一致", False, repr(e))
 
 # ---------------------------------------------------------------- 第 12 组：沉降帧
 print()

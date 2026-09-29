@@ -5,7 +5,7 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 
 | 项 | 值 |
 |---|---|
-| 版本 | **0.6.14**（8 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
+| 版本 | **0.6.15**（9 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
 | 许可 | **MIT**（第三方出处见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)） |
 | 宿主 | 需要**带 MiniMax-H3 支持的 ComfyUI**（其自身为 GPL-3.0，见「11. 许可与出处」） |
 
@@ -23,7 +23,7 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 | [1](#1-它解决什么问题) | 它解决什么问题 | 第一次来 |
 | [2](#2-安装) | 安装 | 装包时 |
 | [3](#3-5-分钟跑通) | 5 分钟跑通 | 装完立刻 |
-| [4](#4-接线唯一桥) | 接线（唯一桥）· **§4.1 全流程档：8 个节点全在场** | 每次搭图 |
+| [4](#4-接线唯一桥) | 接线（唯一桥）· **§4.1 全流程档：9 个节点全在场** | 每次搭图 |
 | [5](#5-节点速览) | 节点速览（8 个） | 找节点时 |
 | [6](#6-参数主旋钮) | 参数（主旋钮） | 要调参时 |
 | [7](#7-音频缝) | 音频缝 · **多段拼接** · **🔴 台词保护：缩短 patch 才是主防线**（§7.3.1）· **API/脚本用户怎么用**（§7.4） | 出片有咔哒声 / 段接不起来 / **台词被吞** / 不开画布 |
@@ -67,7 +67,7 @@ git clone https://github.com/ZenHG/ComfyUI-H3-Latent-Relay.git
 或下载 ZIP → 解压 → 文件夹改名为 `ComfyUI-H3-Latent-Relay` → 放进 `custom_nodes/`。
 
 装好后**重启 ComfyUI 后端**（ComfyUI-Manager 点 *Restart*；没装就重启 Python 进程）——
-仅刷新浏览器不会加载新节点。节点列表里搜 `🔗 H3 续接`（7 个）+ `🔍 H3 潜空间分块放大` 即可看到全部 8 个节点。
+仅刷新浏览器不会加载新节点。节点列表里搜 `🔗 H3 续接`（7 个）+ `🔍 H3 潜空间分块放大` 即可看到全部 9 个节点。
 
 依赖只用 `torch`（**顶层 import**，缺了整包注册失败）与 `safetensors`（延迟 import，缺了只在落盘那步报错）。
 
@@ -109,7 +109,7 @@ git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git
 
 随包的 [`examples/`](examples/README.md) 有两份可直接打开的工作流：**最小续接演示**（19 节点，
 只用官方节点 + 本包）与**全流程示例**（45 节点：0.3MP 一采 → 🔍 潜空间放大 → 2 步二采 → 拷贝桥续接，
-**本包 8 个节点全在场**，含「放大之后哪些线要留在原生域」的接线纪律）。
+**本包 9 个节点全在场**，含「放大之后哪些线要留在原生域」的接线纪律）。
 
 ---
 
@@ -123,8 +123,8 @@ git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git
 | **V1**（回退用） | `H3RELAY_NODE_API=v1` | 传统 `NODE_CLASS_MAPPINGS`。与 0.6.x **逐位一致** |
 
 **节点名、输入输出的顺序与取值、默认值、组合项、显示名全部相同**
-（8 个节点、113 个 input 逐项机检一致，见 `tests/test_v3_schema.py`；CI 里因宿主 `nodes`
-导不进来会少一个 `H3RelayLatentUpscale` ⇒ 那边是 7 节点 / 100 input，属**设计内降级**）⇒ 已有工作流、脚本、API 图
+（9 个节点、116 个 input 逐项机检一致，见 `tests/test_v3_schema.py`；CI 里因宿主 `nodes`
+导不进来会少一个 `H3RelayLatentUpscale` ⇒ 那边是 8 节点 / 103 input，属**设计内降级**）⇒ 已有工作流、脚本、API 图
 **两条出口都能直接跑**，切换**不需要改图**。
 
 **为什么默认切到 V3**：官方明确「今后节点功能的扩展也只会添加到 V3 架构中」，V1 拿不到新能力；
@@ -248,9 +248,9 @@ V1 分支命中即返回，两套一起导出时 **V3 永不生效**。所以 V3
 > 每缝差 ~0.9s，且**逐段累积**（第 3 段起口型明显对不上）。节点只能发现"输入没接"，
 > **发现不了"输出被悬空"**，所以这条得自己盯住。
 
-### 4.1 全流程档：**8 个节点全在场**（`examples/fullflow_second_pass_latent_upscale_ui.json`）
+### 4.1 全流程档：**9 个节点全在场**（`examples/fullflow_second_pass_latent_upscale_ui.json`）
 
-上面那张是**最小必备**接法。产线现役的「一采 → 🔍 放大 → 二采 → 续接」把 8 个节点都用上了，
+上面那张是**最小必备**接法。产线现役的「一采 → 🔍 放大 → 二采 → 续接」把 9 个节点都用上了，
 顺序与两条硬纪律如下（★ = 交付支路，☆ = 续接契约，两者**不是一条线**）：
 
 ```
@@ -265,7 +265,7 @@ V1 分支命中即返回，两套一起导出时 **V3 永不生效**。所以 V3
 ⑨  续接 音频缝 ← ⑧音频 → 🔗 续接 裁重叠（音画同裁 + 落 PCM 边车）← ⑧画面
 ⑩ 🔗 续接 后处理 Post ← ⑨（guide ← 裁重叠[3] prev_tail；20 个旋钮默认全 0 = 逐位直通）
 ⑪ CreateVideo → SaveVideo（单文件带音轨）
-⑫ 🔗 续接 连跑 Chain：`prompts` 用 `---` 分块 ⇒ 连跑逐段换词；跑完点 🧩 拼成一条 直接出成片
+⑫ 🔗 续接 连跑 Chain：`prompts` 用 `---` 分块 ⇒ 连跑逐段换词（**0.6.15 起把 `Chain.prompt` 连到出词节点的 `prompt`，脚本提交 JSON 也同功能**）；跑完点 🧩 拼成一条 直接出成片
 ```
 
 - 🔴 **二采不接桥的 `conditioning`**：钉帧锚（`minimax_keyframes`）与本段目标**必须同网格**，
@@ -306,7 +306,7 @@ V1 分支命中即返回，两套一起导出时 **V3 永不生效**。所以 V3
 
 ## 5. 节点速览
 
-**8 个节点分三层——一个最小工作流只用得到前 3 个**（后 5 个都是"删掉照样跑"的可选项；
+**9 个节点分三层——一个最小工作流只用得到前 3 个**（后 5 个都是"删掉照样跑"的可选项；
 产线现役的全流程示例把 **8 个全接上了**，顺序与纪律见 §4.1）：
 
 | 层 | 节点 | 说明 |
@@ -324,7 +324,7 @@ V1 分支命中即返回，两套一起导出时 **V3 永不生效**。所以 V3
 | 🔗 **H3 续接后处理 Post** | **画质域**：跨段统计匹配 / 低频残差 / 色调 / 反卷积 / 高频迁移 / 糊区锐化，全部默认关 |
 | 🔗 **H3 续接音频缝** | **音频域**：把上一段环境声补进本段头部，**长度守恒**（零 A/V 位移），默认关 |
 | 🔍 **H3 潜空间分块放大** | **画质域 · latent 层**：拆 H3 的 AV 打包 latent → 逐块调学习式 3D 放大器 → 回包。**零去噪**（不重采样、不改表演与口型）、**时间维一帧不动**（帧网格与 `裁重叠` 裁量不受影响）、**音频流原样带回**。`chunks` 是显存旋钮（1 = 整段一次过），`mode` 支持 ×倍数 / 目标尺寸 / 兆像素。⚠️ 需装可选依赖见 §2.1；⚠️ `chunks>1` 会改画面见 §9 |
-| 🔗 **H3 续接连跑 Chain** | 自动连跑控制器：同分组框内自动推进「桥 + 落盘」段号并排队。**0.6.7 起还会换词、还会拼片**：填 `prompts`（`---` 分块，第 k 块喂第 k 段）⇒ 连跑自动换词；开 `auto_concat` 或点 **🧩 拼成一条** ⇒ 跑完直接得到成片（包内实现，不需外部 ffmpeg）。留空/关 = 老行为逐位不变 |
+| 🔗 **H3 续接连跑 Chain** | 自动连跑控制器：同分组框内自动推进「桥 + 落盘」段号并排队。**0.6.7 起还会换词、还会拼片**：填 `prompts`（`---` 分块，第 k 块喂第 k 段）⇒ 连跑自动换词；开 `auto_concat` 或点 **🧩 拼成一条** ⇒ 跑完直接得到成片（包内实现，不需外部 ffmpeg）。留空/关 = 老行为逐位不变。**0.6.15 起它还有 `prompt` 输出口**：把 `Chain.prompt` 连到出词节点的 `prompt` 输入，「第 k 段喂第 k 块词」就成了**节点能力** ⇒ **画布手点与 API 提交图 JSON 同功能**（脚本见 §7.4）；同版还加了 **`run_id`（断点续跑）** 与 **「⏭ 续跑」按钮** |
 
 > **三个域，别混挂**：时间轴 = `H3RelayTrimAV`（冻结）／画质域 = `H3RelayPost`／音频域 = `H3RelayAudioSeam`。
 >
@@ -576,13 +576,44 @@ B 类素材的特征是**全段有人声**（人声自己就是底噪）。守�
 |---|---|---|
 | 续接本体（桥 / 裁重叠 / 后处理 / 音频缝） | ✅ 连线 | ✅ **一样能用**（纯节点） |
 | 音频 PCM 边车（`save_pcm`，音频代际 2→1） | ✅ 默认开 | ✅ **一样能用**（节点落盘 + 把路径回显进 history） |
-| 词分发（第 k 段喂第 k 块词） | ✅ 填 `prompts` | ❌ **`prompts` 不生效**（前端实现）——脚本里自己逐段改词再排队 |
-| 连跑 / 自动成片（⏩ / `auto_concat` / 🧩） | ✅ 点按钮 | ❌ 同上（按钮与 `auto_concat` 都是前端实现） |
-| **把 N 段拼成一条成片** | ✅ 🧩 按钮 | ✅ **三条非 UI 路径**（见下） |
+| **词分发（第 k 段喂第 k 块词）** | ✅ 填 `prompts` + 把 `Chain.prompt` 连到出词节点 | ✅ **一样能用**（0.6.15 起是**节点能力**：Chain 按 `stage_index` 输出第 k 块）——循环里改 `stage_index` 即可，见下 |
+| **连跑（⏩）的循环本身** | ✅ 点按钮 | ⚠ **由脚本自己循环**（节点在单次执行里只知道"现在第几段"，无法自己提交下一个 prompt）——模板见下 |
+| **把 N 段拼成一条成片** | ✅ 🧩 按钮 / `auto_concat` | ✅ **三条非 UI 路径**（见下），与按钮同一份核心代码 |
 
-> ⚠️ `status` / `prompts` / `prompt_target` / `auto_concat` / `concat_name` / `audio_out` / `video_crf`
-> 这几格**只在画布里有用**（前两者供显示与前端分发，后五者由前端读出来再发给后端）。
+> ⚠️ `status` / `prompt_target` / `auto_concat` / `concat_name` / `audio_out` / `video_crf`
+> 这几格**只在画布里有用**（`status` 供显示，其余由前端读出来再发给后端）。
 > 脚本提交 JSON 时它们会被忽略（不报错），**不要靠它们**。
+>
+> ✅ **`prompts` 与 `stage_index` 是例外**（0.6.15 起）：它们是 `H3RelayChain` 的**真输入**，
+> 脚本提交 JSON 时**照常生效** —— 节点按 `stage_index` 从 `prompts` 取出第 k 块，
+> 从 `prompt` 输出口交出去。**词怎么切、越界怎么办，和画布是同一份实现**（`relay_core`）。
+
+**脚本侧的循环模板**（"连跑"在脚本里长什么样）：
+
+```python
+# 与画布的唯一区别是「谁推进段号」：画布靠按钮，脚本靠这个循环。
+# 词的选取不用你管 —— Chain 节点按 stage_index 自己取（与画布同一份实现）。
+import json, time, urllib.request
+
+BASE = "http://127.0.0.1:8188"
+wf = json.load(open("my_workflow_api.json", encoding="utf-8"))
+CHAIN, BRIDGE, SAVE, LOAD = "958", "961", "902", "960"   # ← 换成你自己图里的节点号
+SEGMENTS = 3
+
+for k in range(SEGMENTS):
+    for nid in (CHAIN, BRIDGE, SAVE, LOAD):
+        # ⚠ 四处段号必须一样大；老图（0.6.14 及以前）要先给 Chain 补一个 stage_index
+        wf[nid]["inputs"]["stage_index"] = k
+    wf[BRIDGE]["inputs"]["run_id"] = "myfilm"             # 同一个 run_id ⇒ 各段文件进同一目录
+    body = json.dumps({"prompt": wf, "client_id": "my-script"}).encode("utf-8")
+    req = urllib.request.Request(BASE + "/prompt", body, {"Content-Type": "application/json"})
+    pid = json.load(urllib.request.urlopen(req))["prompt_id"]
+    while True:                                           # 等这一段跑完
+        h = json.load(urllib.request.urlopen(BASE + "/history/" + pid))
+        if pid in h:
+            break
+        time.sleep(2)
+```
 
 **拼接的三条非 UI 路径**（都走同一份核心代码 `relay_core.assemble_mp4_segments`，行为完全一致）：
 
@@ -632,7 +663,7 @@ curl -s http://127.0.0.1:8188/history/<prompt_id> | \
 ## 8. 离线自测
 
 ```bash
-python tests/test_relay_core.py         # 期望「失败 0」（本版 406 项）
+python tests/test_relay_core.py         # 期望「失败 0」（本版 413 项）
 node   tests/test_prompt_dispatch.mjs   # 期望「失败 0」（Chain 词分发纯函数，node 跑）
 python tools/review_050.py              # 期望「失败 0」（文档—代码一致性）
 python tools/smoke_nodes.py             # 期望「失败 0」（节点层冒烟）
@@ -653,7 +684,7 @@ python tools/concat_segments.py s1.mp4 s2.mp4 -o film.mp4 --json   # 退出码 0
 脚本会自动上溯定位 ComfyUI 根目录；装在别处时用
 `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。
 
-**406 项断言，零 GPU、不加载模型**，覆盖二十八个方面 —— 例如：
+**413 项断言，零 GPU、不加载模型**，覆盖二十八个方面 —— 例如：
 
 | 组 | 覆盖 |
 |---|---|
@@ -675,7 +706,7 @@ python tools/concat_segments.py s1.mp4 s2.mp4 -o film.mp4 --json   # 退出码 0
 | 续接"看起来没生效" | ComfyUI 版本不含 H3 支持 | 确认 `comfy_extras/nodes_minimax_h3.py` 存在 |
 | 成片接缝处重播上一段 | 裁重叠的 `trim_frames` 没接桥 `[2]` | 按「4. 接线」补线 |
 | **音画越到后面越不同步**（第 3 段起口型明显对不上） | **音频线没走「裁重叠」**：`VAEDecodeAudio` 直连了落盘节点，画面裁了音频没裁 ⇒ 每缝差 ~0.9s 且累积 | 把落盘节点的 `audio` 改接 `裁重叠 [1] audio`（或经 `音频缝 [0] audio`）——见 §4 |
-| **连跑好几段，每段台词却一模一样** | 没填 `prompts`（连跑的默认行为就是**反复提交同一张图**、只改段号 ⇒ 词不换） | 在 Chain 上填 `prompts`（`---` 分块，第 k 块喂第 k 段）再点 ⏩ 连跑；只跑一段时手改 prompt 也行 |
+| **连跑好几段，每段台词却一模一样** | 没填 `prompts`（连跑的默认行为就是**反复提交同一张图**、只改段号 ⇒ 词不换） | 在 Chain 上填 `prompts`（`---` 分块，第 k 块喂第 k 段）再点 ⏩ 连跑；只跑一段时手改 prompt 也行。⚠ **若你是脚本提交 JSON**：还要把 `Chain.prompt` 连到出词节点的 `prompt` 输入（画布那条老路脚本拿不到，见 §7.4） |
 | 拼成一条后每缝有 ~0.87s 静止画 / 声音整体前移 | 用了 `ffmpeg -f concat` 或 `acrossfade` 拼 | 见 §7.1 的拼法 + 自检 |
 | 拼接报「第 k 段音频比视频长 0.X s ⇒ 很可能是音频线绕过了裁重叠」 | 落盘节点的 `audio` 接的是 `VAEDecodeAudio`（未裁原始音频） | 改接「裁重叠 `[1] audio`」（或经「音频缝 `[0] audio`」）后重跑该段，再拼 |
 | 拼接报告说某段「音频源=AAC」 | 该段没有 PCM 边车（旧图 / `save_pcm` 关了 / 这次提交没跑「裁重叠」） | 想拿满音频质量：确认图中「裁重叠」的 `save_pcm` 开着、且音频从它出线，重跑该段再拼 |
@@ -738,7 +769,7 @@ A·VΔ **0.0011 s**；`pcm_lossless` 档成片音轨与边车**逐位一致**。
 用户启动带 `--output-directory`、容器挂载盘，写死就**直接失败**。本包口径 = **只信节点自己报的路径**
 （`abs_path` 优先，缺了才按 `type`+`subfolder` 拼；键名与字段名都不写死白名单）。
 
-### 10.7 节点表里配了脚本，但按钮点了没反应？
+### 10.8 节点表里配了脚本，但按钮点了没反应？
 `app.queuePrompt` / `api.fetchApi` 属**前端内部接口**，不同 ComfyUI 版本可能是别的形状。
 本包在缺了的时候会在 Chain 的 `status` 格里**明说**（不是静默失效），并指向仍然可用的路径 —— 见 §7.4。
 
@@ -773,7 +804,7 @@ RuntimeError: shape mismatch: value tensor of shape [2392, 96]
 而它的「分块省显存」与噪声掩码**互斥** ⇒ 只要桥在场（= 有掩码），显存旋钮就只剩 `lowres_scale` 一个。
 机制与源码级核对见 [`docs/03`](docs/03-sampling-and-design.md)。
 
-**本包自己就提供了第三条路**（§4.1 全流程档已接完，8 个节点全在场）：
+**本包自己就提供了第三条路**（§4.1 全流程档已接完，9 个节点全在场）：
 
 | 你的约束 | 选哪条 |
 |---|---|
@@ -858,4 +889,4 @@ RuntimeError: shape mismatch: value tensor of shape [2392, 96]
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 开发环境 · 自测纪律 · 许可条款 |
 | [`SECURITY.md`](SECURITY.md) | 密钥 / 依赖 / 网络行为声明 |
 | [`tools/README.md`](tools/README.md) | 七个脚本的用途与期望值（六个自检/取证 + 一个拼接 CLI） |
-| [`examples/README.md`](examples/README.md) | 两份可直接打开的工作流：**最小续接演示**（19 节点）与**全流程示例**（45 节点，8 个节点全在场）· 生成器 |
+| [`examples/README.md`](examples/README.md) | 两份可直接打开的工作流：**最小续接演示**（19 节点）与**全流程示例**（45 节点，9 个节点全在场）· 生成器 |

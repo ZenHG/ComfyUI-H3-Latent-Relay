@@ -2,7 +2,7 @@
   "id": "5a7b0c66-c5dc-4161-8b6f-af601c8fb0f8",
   "revision": 0,
   "last_node_id": 1013,
-  "last_link_id": 202,
+  "last_link_id": 203,
   "nodes": [
     {
       "id": 126,
@@ -42,6 +42,8 @@
         }
       ],
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "VAELoader",
         "ue_properties": {
           "widget_ue_connectable": {
@@ -106,6 +108,8 @@
         }
       ],
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "UNETLoader",
         "ue_properties": {
           "widget_ue_connectable": {
@@ -182,6 +186,8 @@
         }
       ],
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "CLIPLoader",
         "ue_properties": {
           "widget_ue_connectable": {
@@ -242,6 +248,8 @@
         }
       ],
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "VAELoader",
         "ue_properties": {
           "widget_ue_connectable": {
@@ -296,6 +304,8 @@
         }
       ],
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "KSamplerSelect",
         "ue_properties": {
           "widget_ue_connectable": {
@@ -350,6 +360,8 @@
         }
       ],
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "RandomNoise",
         "ue_properties": {
           "widget_ue_connectable": {
@@ -410,6 +422,8 @@
         }
       ],
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "ModelAttentionBackend",
         "ue_properties": {
           "widget_ue_connectable": {
@@ -440,7 +454,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 27,
+      "order": 29,
       "mode": 0,
       "inputs": [
         {
@@ -470,6 +484,8 @@
         }
       ],
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "BasicGuider",
         "ue_properties": {
           "widget_ue_connectable": {},
@@ -490,7 +506,7 @@
         330
       ],
       "flags": {},
-      "order": 31,
+      "order": 33,
       "mode": 0,
       "inputs": [
         {
@@ -549,6 +565,8 @@
         }
       ],
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "SamplerCustomAdvanced",
         "ue_properties": {
           "widget_ue_connectable": {},
@@ -569,7 +587,7 @@
         120
       ],
       "flags": {},
-      "order": 32,
+      "order": 34,
       "mode": 0,
       "inputs": [
         {
@@ -599,6 +617,8 @@
         }
       ],
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "VAEDecodeAudio",
         "ue_properties": {
           "widget_ue_connectable": {},
@@ -619,7 +639,7 @@
         120
       ],
       "flags": {},
-      "order": 38,
+      "order": 40,
       "mode": 0,
       "inputs": [
         {
@@ -649,6 +669,8 @@
         }
       ],
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "VAEDecode",
         "ue_properties": {
           "widget_ue_connectable": {},
@@ -669,7 +691,7 @@
         170
       ],
       "flags": {},
-      "order": 33,
+      "order": 35,
       "mode": 0,
       "inputs": [
         {
@@ -755,7 +777,7 @@
         320
       ],
       "flags": {},
-      "order": 23,
+      "order": 24,
       "mode": 0,
       "inputs": [
         {
@@ -857,6 +879,8 @@
         }
       ],
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "BlockSparseAttention",
         "ue_properties": {
           "widget_ue_connectable": {},
@@ -899,7 +923,7 @@
         140
       ],
       "flags": {},
-      "order": 26,
+      "order": 28,
       "mode": 0,
       "inputs": [
         {
@@ -944,6 +968,8 @@
         }
       ],
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "MiniMaxH3SigmaShift",
         "ue_properties": {
           "widget_ue_connectable": {
@@ -975,7 +1001,7 @@
         140
       ],
       "flags": {},
-      "order": 25,
+      "order": 27,
       "mode": 0,
       "inputs": [
         {
@@ -1017,6 +1043,8 @@
         }
       ],
       "properties": {
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "d3cfe21625e5170126ce06fbfcfe1d88108688c3",
         "Node name for S&R": "MiniMaxChunkFeedForward",
         "ue_properties": {
           "widget_ue_connectable": {
@@ -1048,7 +1076,7 @@
         110
       ],
       "flags": {},
-      "order": 28,
+      "order": 30,
       "mode": 0,
       "inputs": [
         {
@@ -1101,6 +1129,8 @@
         }
       ],
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "BasicScheduler",
         "ue_properties": {
           "widget_ue_connectable": {
@@ -1135,7 +1165,7 @@
         440
       ],
       "flags": {},
-      "order": 35,
+      "order": 37,
       "mode": 0,
       "inputs": [
         {
@@ -1354,7 +1384,8 @@
         "join_cross_ms": 0,
         "join_segment_seconds": 0,
         "join_align_seconds": 0,
-        "patch_guard": true
+        "patch_guard": true,
+        "patch_guard_layers": 0
       }
     },
     {
@@ -1449,7 +1480,7 @@
         530
       ],
       "flags": {},
-      "order": 24,
+      "order": 25,
       "mode": 0,
       "inputs": [
         {
@@ -1744,10 +1775,10 @@
       ],
       "size": [
         270,
-        400
+        520
       ],
       "flags": {},
-      "order": 20,
+      "order": 7,
       "mode": 0,
       "inputs": [
         {
@@ -1828,9 +1859,54 @@
             "name": "video_crf"
           },
           "link": null
+        },
+        {
+          "localized_name": "stage_index",
+          "name": "stage_index",
+          "shape": 7,
+          "type": "INT",
+          "widget": {
+            "name": "stage_index"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "run_id",
+          "name": "run_id",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "run_id"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "concat_result",
+          "name": "concat_result",
+          "shape": 7,
+          "type": "STRING",
+          "widget": {
+            "name": "concat_result"
+          },
+          "link": null
         }
       ],
-      "outputs": [],
+      "outputs": [
+        {
+          "localized_name": "prompt",
+          "name": "prompt",
+          "type": "STRING",
+          "links": [
+            203
+          ]
+        },
+        {
+          "localized_name": "report",
+          "name": "report",
+          "type": "STRING",
+          "links": null
+        }
+      ],
       "title": "连跑控制(词分发+自动拼接)",
       "properties": {
         "Node name for S&R": "H3RelayChain",
@@ -1848,7 +1924,17 @@
         true,
         "",
         "aac_256k",
-        22
+        22,
+        0,
+        "",
+        "",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
       ],
       "widgets_values_named": {
         "segments": 4,
@@ -1856,12 +1942,16 @@
         "prompts": "subject_definitions: <Subject 1> 许然，中国女性，东亚面孔，黑色齐肩直发、耳前碎发别在耳后，米白色细针织高领衫；她的身份、脸型、发型与服装锚点均来自 @图片1，全片内与参考图完全一致。 <Subject 2> 暗调影棚纵深拍摄区：地面摄影轨道沿画面纵深方向铺设，两侧各一排柔光箱与灯架，头顶悬一盏圆形吊灯，深处一名穿深色工装的助理背对镜头扶着器材车，光带中细尘漂浮。  [Shot 1] 画面是许然的胸部以上近景：她位于画面中央偏右，走在轨道右侧的地面上，与轨道平行、朝镜头方向匀速迈步，每一步重心在左右脚之间可见地交换，双肩随步伐交替轻微起伏，发梢前后轻摆，高领衫下摆随步伐在腰间轻轻摆动，视线正对镜头；暖色柔光主灯的光域落在她脸上，青蓝色轮廓光自画面右侧勾着她的脸颊与肩部轮廓。摄影轨道位于她左后侧的地面上，从画框下缘向画面深处笔直延伸，镜头以与她步行完全相同的速度沿轨道缓缓后退跟移，全程不停顿——两侧成排的柔光箱与灯架以与步伐一致的节奏一排排掠过她身后、向画面深处滑出，头顶的圆形吊灯轻轻左右摇摆，光带中的细尘缓慢漂浮，深处那名背对镜头的助理推着器材车沿背景深处的横向轨道缓缓向右横移。她走着，呼吸匀，S1对着镜头开口说话:<d>[zh]这一镜，我边走边说，从开场到现在，走了八秒了。</d>。说完不再说话，她继续走，重心仍在左右脚之间交替，器材车继续缓缓右移，吊灯继续轻摆，镜头在同速后退的同时开始向她左侧极缓慢地偏转弧线、画面停在运动中途。  【项目影像规格】 全片画面无任何文字与符号、无标签、无印刷品、无图形标志；无字幕无标题条。  overall_soundscape: 影棚里匀速的脚步声落在地板上，极低底噪，衣料的细微摩擦声，远处器材车导轨的轻滚声。 non_diegetic_music: N/A\n\n---\n\nsubject_definitions: <Subject 1> 许然，中国女性，东亚面孔，黑色齐肩直发、耳前碎发别在耳后，米白色细针织高领衫；她的身份、脸型、发型与服装锚点均来自 @图片1，全片内与参考图完全一致。 <Subject 2> 暗调影棚纵深拍摄区、柔光箱灯架与摄影轨道，背景层、光位与色温以 <Video 1> 的末帧为准。 <Video 1> 上一段末帧：许然胸部以上近景、画面中央偏右、正走在轨道右侧的地面上朝镜头匀速迈步，重心在左右脚之间交替，摄影轨道在她左后侧从画框下缘向深处笔直延伸，头顶一盏亮着的圆形吊灯，两侧成排柔光箱与灯架向深处排开，画面右侧一台架在三脚架上的摄影机，暖主光落在她脸上、青蓝轮廓光在画面右侧，视线正对镜头，镜头刚起一丝向她左侧偏转的弧线趋势。  [Shot 1] 承接 <Video 1> 末帧的取景，画面保持原位：许然的胸部以上近景，她仍位于画面中央偏右、继续走在轨道右侧的地面上，与轨道平行、朝镜头方向匀速迈步，每一步重心在左右脚之间可见地交换，双肩随步伐交替轻微起伏，发梢前后轻摆，高领衫下摆在腰间轻轻摆动，视线正对镜头。镜头继续以与她步行相同的速度后退跟移，同时沿极缓慢的弧线绕向她左前方，方位一直在变、永不到达某个角度为止，她的面孔相对镜头的侧度在弧线上极缓地加深，从正对渐渐带上一点四分之三侧，视线始终随头部微转落在镜头上，身后的柔光箱与灯架从正后方向侧后方滑动掠过，两侧的灯架列以与步伐一致的节奏一排排掠过她身侧向画面深处滑出。她边走边说，深处那名背对镜头的助理推着器材车从画面后方左缘缓缓入画、沿背景深处的横向轨道向右横移，行至画面后方正中，车顶的摇臂随推行轻轻颤动，头顶的圆形吊灯继续轻摆，S1对着镜头开口说话:<d>[zh]这就叫一镜到底，镜头跟着我，不切不停，一口气。</d>。说完不再说话，她继续走，重心仍在左右脚之间交替，器材车仍在缓缓右移，镜头仍在同速后退跟移、画面停在运动中途。  【项目影像规格】 全片画面无任何文字与符号、无标签、无印刷品、无图形标志；无字幕无标题条。  overall_soundscape: 匀速的脚步声落在地板上连绵持续，极低底噪，衣料摩擦声，器材车导轨的轻滚声由远及近。 non_diegetic_music: N/A\n\n---\n\nsubject_definitions: <Subject 1> 许然，中国女性，东亚面孔，黑色齐肩直发、耳前碎发别在耳后，米白色细针织高领衫；她的身份、脸型、发型与服装锚点均来自 @图片1，全片内与参考图完全一致。 <Subject 2> 暗调影棚纵深拍摄区、柔光箱灯架与摄影轨道，背景层、光位与色温以 <Video 1> 的末帧为准。 <Video 1> 上一段末帧：许然胸部以上近景、画面中央偏右、正走在轨道右侧的地面上朝镜头匀速迈步，摄影轨道在她左后侧从画框下缘向深处延伸，暖主光在画面左上、青蓝轮廓光在画面右侧，她的面孔带一点四分之三侧度、视线正对镜头，镜头位于她左前方、弧线仍在继续，身后柔光箱灯架从正后偏向侧后滑动，头顶圆形吊灯轻摆，深处背对镜头的助理推着器材车行至画面后方正中、仍沿横向轨道向右缓移。  [Shot 1] 承接 <Video 1> 末帧的取景，画面保持原位：许然的胸部以上近景，她仍位于画面中央偏右、继续走在轨道右侧的地面上、朝镜头方向匀速迈步，重心在左右脚之间交替，双肩轻微起伏，发梢与衣摆随步伐轻摆，视线正对镜头。镜头继续以与她步行相同的速度后退跟移、沿极缓慢的弧线绕向她左侧，方位持续变化、不停点，她的面孔相对镜头的侧度沿弧线继续极缓加深，视线始终随头部微转落在镜头上，两侧的柔光箱与灯架继续一排排掠过她身侧向画面深处滑出。她走着，抬头看了一眼头顶那盏轻轻摇摆的圆形吊灯，随即视线回到镜头上，颈线在抬眼时拉出一道弧线，深处那名背对镜头的助理推着器材车沿横向轨道继续向右缓缓横移，行至画面后方偏右，S1对着镜头开口说话:<d>[zh]你看头顶那盏灯，一直在晃，身后的车也一直动着。</d>。说完不再说话，她继续走，视线正对镜头，器材车继续缓缓右移接近画面右缘，吊灯继续轻摆，镜头仍在同速后退跟移、画面停在运动中途。  【项目影像规格】 全片画面无任何文字与符号、无标签、无印刷品、无图形标志；无字幕无标题条。  overall_soundscape: 匀速的脚步声落在地板上连绵持续，极低底噪，衣料摩擦声，器材车导轨的轻滚声，吊灯悬链的细微金属吱呀声。 non_diegetic_music: N/A\n\n---\n\nsubject_definitions: <Subject 1> 许然，中国女性，东亚面孔，黑色齐肩直发、耳前碎发别在耳后，米白色细针织高领衫；她的身份、脸型、发型与服装锚点均来自 @图片1，全片内与参考图完全一致。 <Subject 2> 暗调影棚纵深拍摄区、柔光箱灯架与摄影轨道，背景层、光位与色温以 <Video 1> 的末帧为准。 <Video 1> 上一段末帧：许然胸部以上近景、画面中央偏右、正走在轨道右侧的地面上朝镜头匀速迈步，摄影轨道在她左后侧从画框下缘向深处延伸，暖主光在画面左上、青蓝轮廓光在画面右侧，她的面孔带浅侧度、视线正对镜头，镜头在她左前方、弧线仍在缓绕，身后灯架列持续向侧后滑动，头顶圆形吊灯轻摆，深处背对镜头的助理推着器材车行至画面后方偏右、接近右缘。  [Shot 1] 承接 <Video 1> 末帧的取景，画面保持原位：许然的胸部以上近景，她仍位于画面中央偏右、继续走在轨道右侧的地面上、朝镜头方向匀速迈步，重心在左右脚之间交替，双肩轻微起伏，发梢与衣摆随步伐轻摆，视线正对镜头。镜头继续以与她步行相同的速度后退跟移、弧线仍在向她左侧缓绕，方位一直在变、不停点，她的面孔相对镜头的侧度沿弧线继续极缓加深，视线始终随头部微转落在镜头上，两侧的柔光箱与灯架继续一排排掠过她身侧向画面深处滑出。深处那名背对镜头的助理推着器材车沿横向轨道继续右移，缓缓移出画面右缘，滚动的车轮最后掠过画框右缘，头顶的圆形吊灯仍在轻摆，光带中的细尘在两侧灯架间缓慢漂浮，S1对着镜头开口说话:<d>[zh]你已经看了三十秒，没切一下，这一镜还在继续。</d>。说完不再说话，她继续朝镜头走来，重心仍在左右脚之间交替，衣领随呼吸轻轻起伏，灯架仍在缓缓向深处滑出，吊灯继续轻摆，镜头仍在同速后退与缓绕中、方位停在变化中途、画面停在运动中途。  【项目影像规格】 全片画面无任何文字与符号、无标签、无印刷品、无图形标志；无字幕无标题条。  overall_soundscape: 匀速的脚步声落在地板上连绵持续，极低底噪，衣料摩擦声，器材车导轨的轻滚声渐弱移出画面，吊灯悬链的细微金属吱呀声。 non_diegetic_music: N/A",
         "prompt_target": "",
         "auto_concat": true,
-        "concat_name": "ot_full",
+        "concat_name": "",
         "audio_out": "aac_256k",
         "video_crf": 22,
+        "stage_index": 0,
+        "run_id": "",
+        "concat_result": "",
         "▶ Run（按当前段号跑一次）": null,
         "✔ Approve（段号+1 并跑下一段）": null,
         "⏩ 连跑（按 segments 自动循环）": null,
+        "⏭ 续跑（从上次跑到的那段继续）": null,
         "⏹ Stop（本轮跑完即停）": null,
         "🧩 拼成一条（把已跑的 N 段拼成成片）": null,
         "↺ Reset（段号归 0，从第 1 段重来）": null
@@ -1879,7 +1969,7 @@
         130
       ],
       "flags": {},
-      "order": 29,
+      "order": 31,
       "mode": 0,
       "inputs": [
         {
@@ -1909,6 +1999,8 @@
         }
       ],
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "BasicGuider",
         "ue_properties": {
           "widget_ue_connectable": {},
@@ -1929,7 +2021,7 @@
         130
       ],
       "flags": {},
-      "order": 30,
+      "order": 32,
       "mode": 0,
       "inputs": [
         {
@@ -1983,6 +2075,8 @@
       ],
       "title": "二采2步denoise0.20(照三采576口径)",
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "BasicScheduler",
         "ue_properties": {
           "widget_ue_connectable": {},
@@ -2013,7 +2107,7 @@
         130
       ],
       "flags": {},
-      "order": 7,
+      "order": 8,
       "mode": 0,
       "inputs": [
         {
@@ -2039,6 +2133,8 @@
         }
       ],
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "KSamplerSelect",
         "ue_properties": {
           "widget_ue_connectable": {},
@@ -2065,7 +2161,7 @@
         130
       ],
       "flags": {},
-      "order": 8,
+      "order": 9,
       "mode": 0,
       "inputs": [
         {
@@ -2091,6 +2187,8 @@
         }
       ],
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "RandomNoise",
         "ue_properties": {
           "widget_ue_connectable": {},
@@ -2119,7 +2217,7 @@
         210
       ],
       "flags": {},
-      "order": 9,
+      "order": 26,
       "mode": 0,
       "inputs": [
         {
@@ -2196,6 +2294,8 @@
       ],
       "title": "钉住区掩码:头7latent帧m=0",
       "properties": {
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "d3cfe21625e5170126ce06fbfcfe1d88108688c3",
         "Node name for S&R": "CreateFadeMaskAdvanced",
         "ue_properties": {
           "widget_ue_connectable": {},
@@ -2232,7 +2332,7 @@
         130
       ],
       "flags": {},
-      "order": 37,
+      "order": 39,
       "mode": 0,
       "inputs": [
         {
@@ -2289,6 +2389,8 @@
         }
       ],
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "SamplerCustomAdvanced",
         "ue_properties": {
           "widget_ue_connectable": {},
@@ -2309,7 +2411,7 @@
         130
       ],
       "flags": {},
-      "order": 36,
+      "order": 38,
       "mode": 0,
       "inputs": [
         {
@@ -2340,6 +2442,8 @@
       ],
       "title": "把 954 掩码挂到 latent 上",
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "SetLatentNoiseMask",
         "ue_properties": {
           "widget_ue_connectable": {},
@@ -2360,7 +2464,7 @@
         350
       ],
       "flags": {},
-      "order": 34,
+      "order": 36,
       "mode": 0,
       "inputs": [
         {
@@ -2541,10 +2645,10 @@
       ],
       "size": [
         270,
-        630
+        650
       ],
       "flags": {},
-      "order": 39,
+      "order": 41,
       "mode": 0,
       "inputs": [
         {
@@ -2779,12 +2883,14 @@
           "link": null
         },
         {
+          "localized_name": "diagnostics",
           "name": "diagnostics",
+          "shape": 7,
           "type": "BOOLEAN",
-          "link": null,
           "widget": {
             "name": "diagnostics"
-          }
+          },
+          "link": null
         }
       ],
       "outputs": [
@@ -2875,7 +2981,8 @@
         "match_prev_gain_max": 1.15,
         "match_prev_offset_max": 0.06,
         "run_id": "demo",
-        "save_pcm": true
+        "save_pcm": true,
+        "diagnostics": false
       }
     },
     {
@@ -2923,7 +3030,7 @@
         100
       ],
       "flags": {},
-      "order": 18,
+      "order": 17,
       "mode": 0,
       "inputs": [
         {
@@ -2967,6 +3074,8 @@
       ],
       "title": "LoRA加载器（仅模型）",
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "LoraLoaderModelOnly",
         "ue_properties": {
           "widget_ue_connectable": {},
@@ -3064,7 +3173,7 @@
           "widget": {
             "name": "prompt"
           },
-          "link": null
+          "link": 203
         },
         {
           "label": "宽度",
@@ -3195,6 +3304,8 @@
       ],
       "title": "① 参考条件：prompt / refs 数量 / length 改这里",
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "MiniMaxH3ReferenceToVideo",
         "ue_properties": {
           "widget_ue_connectable": {
@@ -3301,6 +3412,8 @@
       ],
       "title": "一采分辨率",
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.0",
         "Node name for S&R": "ResolutionSelector",
         "ue_properties": {
           "widget_ue_connectable": {
@@ -3308,9 +3421,7 @@
           },
           "version": "7.8",
           "input_ue_unconnectable": {}
-        },
-        "cnr_id": "comfy-core",
-        "ver": "0.33.0"
+        }
       },
       "widgets_values": [
         "9:16 (Portrait Widescreen)",
@@ -3362,14 +3473,14 @@
       ],
       "title": "时长",
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.0",
         "Node name for S&R": "PrimitiveFloat",
         "ue_properties": {
           "widget_ue_connectable": {},
           "version": "7.8",
           "input_ue_unconnectable": {}
-        },
-        "cnr_id": "comfy-core",
-        "ver": "0.33.0"
+        }
       },
       "widgets_values": [
         6
@@ -3392,7 +3503,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 19,
+      "order": 18,
       "mode": 0,
       "inputs": [
         {
@@ -3444,14 +3555,14 @@
         }
       ],
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.0",
         "Node name for S&R": "ComfyMathExpression",
         "ue_properties": {
           "widget_ue_connectable": {},
           "version": "7.8",
           "input_ue_unconnectable": {}
-        },
-        "cnr_id": "comfy-core",
-        "ver": "0.33.0"
+        }
       },
       "widgets_values": [
         "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17"
@@ -3516,6 +3627,8 @@
       ],
       "title": "ref 图 4",
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "LoadImage",
         "ue_properties": {
           "widget_ue_connectable": {
@@ -3614,6 +3727,8 @@
       ],
       "title": "二采分辨率",
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.0",
         "Node name for S&R": "ResolutionSelector",
         "ue_properties": {
           "widget_ue_connectable": {
@@ -3621,9 +3736,7 @@
           },
           "version": "7.8",
           "input_ue_unconnectable": {}
-        },
-        "cnr_id": "comfy-core",
-        "ver": "0.33.0"
+        }
       },
       "widgets_values": [
         "9:16 (Portrait Widescreen)",
@@ -3675,6 +3788,8 @@
       ],
       "title": "一采步数",
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "PrimitiveInt",
         "ue_properties": {
           "widget_ue_connectable": {
@@ -3732,6 +3847,8 @@
       ],
       "title": "二采步数",
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
         "Node name for S&R": "PrimitiveInt",
         "ue_properties": {
           "widget_ue_connectable": {
@@ -3758,11 +3875,11 @@
         1660
       ],
       "size": [
-        230,
-        80
+        360,
+        130
       ],
       "flags": {},
-      "order": 1008,
+      "order": 23,
       "mode": 0,
       "inputs": [
         {
@@ -3812,20 +3929,23 @@
           "links": []
         }
       ],
+      "title": "掩码帧数 = latent T（像素 17k+5 ↔ latent 5k+2）",
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.0",
         "Node name for S&R": "ComfyMathExpression",
         "ue_properties": {
           "widget_ue_connectable": {},
           "version": "7.8",
           "input_ue_unconnectable": {}
-        },
-        "cnr_id": "comfy-core",
-        "ver": "0.33.0"
+        }
       },
       "widgets_values": [
         "5 * floor((a - 5) / 17) + 2"
       ],
-      "title": "掩码帧数 = latent T（像素 17k+5 ↔ latent 5k+2）"
+      "widgets_values_named": {
+        "expression": "5 * floor((a - 5) / 17) + 2"
+      }
     },
     {
       "id": 1009,
@@ -3836,10 +3956,10 @@
       ],
       "size": [
         230,
-        80
+        130
       ],
       "flags": {},
-      "order": 1009,
+      "order": 19,
       "mode": 0,
       "inputs": [
         {
@@ -3889,20 +4009,23 @@
           "links": []
         }
       ],
+      "title": "掩码宽 = 二采宽 / 16",
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.0",
         "Node name for S&R": "ComfyMathExpression",
         "ue_properties": {
           "widget_ue_connectable": {},
           "version": "7.8",
           "input_ue_unconnectable": {}
-        },
-        "cnr_id": "comfy-core",
-        "ver": "0.33.0"
+        }
       },
       "widgets_values": [
         "floor(a / 16)"
       ],
-      "title": "掩码宽 = 二采宽 / 16"
+      "widgets_values_named": {
+        "expression": "floor(a / 16)"
+      }
     },
     {
       "id": 1010,
@@ -3913,10 +4036,10 @@
       ],
       "size": [
         230,
-        80
+        130
       ],
       "flags": {},
-      "order": 1010,
+      "order": 20,
       "mode": 0,
       "inputs": [
         {
@@ -3966,20 +4089,23 @@
           "links": []
         }
       ],
+      "title": "掩码高 = 二采高 / 16",
       "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.0",
         "Node name for S&R": "ComfyMathExpression",
         "ue_properties": {
           "widget_ue_connectable": {},
           "version": "7.8",
           "input_ue_unconnectable": {}
-        },
-        "cnr_id": "comfy-core",
-        "ver": "0.33.0"
+        }
       },
       "widgets_values": [
         "floor(a / 16)"
       ],
-      "title": "掩码高 = 二采高 / 16"
+      "widgets_values_named": {
+        "expression": "floor(a / 16)"
+      }
     },
     {
       "id": 1011,
@@ -3990,57 +4116,74 @@
       ],
       "size": [
         320,
-        100
+        150
       ],
       "flags": {},
-      "order": 40,
+      "order": 43,
       "mode": 0,
       "inputs": [
         {
+          "label": "图像组",
+          "localized_name": "图像",
           "name": "images",
           "type": "IMAGE",
           "link": 201
         },
         {
+          "label": "音频",
+          "localized_name": "音频",
           "name": "audio",
+          "shape": 7,
           "type": "AUDIO",
           "link": 92
         },
         {
+          "label": "帧率",
+          "localized_name": "帧率",
           "name": "fps",
           "type": "FLOAT",
-          "link": null,
           "widget": {
             "name": "fps"
-          }
+          },
+          "link": null
         },
         {
+          "label": "位深度",
+          "localized_name": "位深度",
           "name": "bit_depth",
+          "shape": 7,
           "type": "COMBO",
-          "link": null,
           "widget": {
             "name": "bit_depth"
-          }
+          },
+          "link": null
         },
         {
+          "label": "色彩空间",
+          "localized_name": "色彩空间",
           "name": "color_space",
+          "shape": 7,
           "type": "COMBO",
-          "link": null,
           "widget": {
             "name": "color_space"
-          }
+          },
+          "link": null
         },
         {
+          "localized_name": "codec",
           "name": "codec",
+          "shape": 7,
           "type": "COMBO",
-          "link": null,
           "widget": {
             "name": "codec"
-          }
+          },
+          "link": null
         }
       ],
       "outputs": [
         {
+          "label": "视频",
+          "localized_name": "视频",
           "name": "VIDEO",
           "type": "VIDEO",
           "links": [
@@ -4049,14 +4192,32 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "CreateVideo"
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
+        "Node name for S&R": "CreateVideo",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "fps": true,
+            "bit_depth": true,
+            "color_space": true,
+            "codec": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
       },
       "widgets_values": [
-        24.0,
+        24,
         "auto",
         "sRGB",
         "none"
-      ]
+      ],
+      "widgets_values_named": {
+        "fps": 24,
+        "bit_depth": "auto",
+        "color_space": "sRGB",
+        "codec": "none"
+      }
     },
     {
       "id": 1012,
@@ -4067,66 +4228,95 @@
       ],
       "size": [
         320,
-        100
+        110
       ],
       "flags": {},
-      "order": 41,
+      "order": 44,
       "mode": 0,
       "inputs": [
         {
+          "label": "视频",
+          "localized_name": "视频",
           "name": "video",
           "type": "VIDEO",
           "link": 200
         },
         {
+          "label": "文件名前缀",
+          "localized_name": "文件名前缀",
           "name": "filename_prefix",
           "type": "STRING",
-          "link": null,
           "widget": {
             "name": "filename_prefix"
-          }
+          },
+          "link": null
         },
         {
+          "label": "格式",
+          "localized_name": "格式",
           "name": "format",
           "type": "COMFY_DYNAMICCOMBO_V3",
-          "link": null,
           "widget": {
             "name": "format"
-          }
+          },
+          "link": null
         },
         {
+          "localized_name": "编解码器",
           "name": "format.codec",
           "type": "COMFY_DYNAMICCOMBO_V3",
-          "link": null,
           "widget": {
             "name": "format.codec"
-          }
+          },
+          "link": null
         },
         {
+          "label": "编解码器",
+          "localized_name": "编解码器",
           "name": "codec",
+          "shape": 7,
           "type": "COMFY_DYNAMICCOMBO_V3",
-          "link": null,
           "widget": {
             "name": "codec"
-          }
+          },
+          "link": null
         }
       ],
       "outputs": [
         {
+          "localized_name": "video",
           "name": "video",
           "type": "VIDEO",
           "links": []
         }
       ],
       "properties": {
-        "Node name for S&R": "SaveVideo"
+        "cnr_id": "comfy-core",
+        "ver": "0.37.0",
+        "Node name for S&R": "SaveVideo",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "filename_prefix": true,
+            "format": true,
+            "format.codec": true,
+            "codec": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
       },
       "widgets_values": [
         "video/h3_fullflow",
         "auto",
         "auto",
         "auto"
-      ]
+      ],
+      "widgets_values_named": {
+        "filename_prefix": "video/h3_fullflow",
+        "format": "auto",
+        "format.codec": "auto",
+        "codec": "auto"
+      }
     },
     {
       "id": 1013,
@@ -4136,186 +4326,230 @@
         -170
       ],
       "size": [
-        320,
-        100
+        520,
+        540
       ],
       "flags": {},
-      "order": 39,
+      "order": 42,
       "mode": 0,
       "inputs": [
         {
+          "localized_name": "images",
           "name": "images",
           "type": "IMAGE",
           "link": 91
         },
         {
+          "localized_name": "guide",
           "name": "guide",
+          "shape": 7,
           "type": "IMAGE",
           "link": 202
         },
         {
+          "localized_name": "match_prev",
           "name": "match_prev",
+          "shape": 7,
           "type": "FLOAT",
-          "link": null,
           "widget": {
             "name": "match_prev"
-          }
+          },
+          "link": null
         },
         {
+          "localized_name": "match_prev_frames",
           "name": "match_prev_frames",
+          "shape": 7,
           "type": "INT",
-          "link": null,
           "widget": {
             "name": "match_prev_frames"
-          }
+          },
+          "link": null
         },
         {
+          "localized_name": "match_prev_gain_max",
           "name": "match_prev_gain_max",
+          "shape": 7,
           "type": "FLOAT",
-          "link": null,
           "widget": {
             "name": "match_prev_gain_max"
-          }
+          },
+          "link": null
         },
         {
+          "localized_name": "match_prev_offset_max",
           "name": "match_prev_offset_max",
+          "shape": 7,
           "type": "FLOAT",
-          "link": null,
           "widget": {
             "name": "match_prev_offset_max"
-          }
+          },
+          "link": null
         },
         {
+          "localized_name": "lowfreq_pull",
           "name": "lowfreq_pull",
+          "shape": 7,
           "type": "FLOAT",
-          "link": null,
           "widget": {
             "name": "lowfreq_pull"
-          }
+          },
+          "link": null
         },
         {
+          "localized_name": "lowfreq_frames",
           "name": "lowfreq_frames",
+          "shape": 7,
           "type": "INT",
-          "link": null,
           "widget": {
             "name": "lowfreq_frames"
-          }
+          },
+          "link": null
         },
         {
+          "localized_name": "lowfreq_blur",
           "name": "lowfreq_blur",
+          "shape": 7,
           "type": "INT",
-          "link": null,
           "widget": {
             "name": "lowfreq_blur"
-          }
+          },
+          "link": null
         },
         {
+          "localized_name": "head_zone_frames",
           "name": "head_zone_frames",
+          "shape": 7,
           "type": "INT",
-          "link": null,
           "widget": {
             "name": "head_zone_frames"
-          }
+          },
+          "link": null
         },
         {
+          "localized_name": "hist_match",
           "name": "hist_match",
+          "shape": 7,
           "type": "FLOAT",
-          "link": null,
           "widget": {
             "name": "hist_match"
-          }
+          },
+          "link": null
         },
         {
+          "localized_name": "wb_match",
           "name": "wb_match",
+          "shape": 7,
           "type": "FLOAT",
-          "link": null,
           "widget": {
             "name": "wb_match"
-          }
+          },
+          "link": null
         },
         {
+          "localized_name": "deconv_strength",
           "name": "deconv_strength",
+          "shape": 7,
           "type": "FLOAT",
-          "link": null,
           "widget": {
             "name": "deconv_strength"
-          }
+          },
+          "link": null
         },
         {
+          "localized_name": "deconv_radius",
           "name": "deconv_radius",
+          "shape": 7,
           "type": "FLOAT",
-          "link": null,
           "widget": {
             "name": "deconv_radius"
-          }
+          },
+          "link": null
         },
         {
+          "localized_name": "detail_borrow",
           "name": "detail_borrow",
+          "shape": 7,
           "type": "FLOAT",
-          "link": null,
           "widget": {
             "name": "detail_borrow"
-          }
+          },
+          "link": null
         },
         {
+          "localized_name": "detail_blur",
           "name": "detail_blur",
+          "shape": 7,
           "type": "INT",
-          "link": null,
           "widget": {
             "name": "detail_blur"
-          }
+          },
+          "link": null
         },
         {
+          "localized_name": "settle_sharpen",
           "name": "settle_sharpen",
+          "shape": 7,
           "type": "FLOAT",
-          "link": null,
           "widget": {
             "name": "settle_sharpen"
-          }
+          },
+          "link": null
         },
         {
+          "localized_name": "settle_auto",
           "name": "settle_auto",
+          "shape": 7,
           "type": "FLOAT",
-          "link": null,
           "widget": {
             "name": "settle_auto"
-          }
+          },
+          "link": null
         },
         {
+          "localized_name": "settle_sharpen_frames",
           "name": "settle_sharpen_frames",
+          "shape": 7,
           "type": "INT",
-          "link": null,
           "widget": {
             "name": "settle_sharpen_frames"
-          }
+          },
+          "link": null
         },
         {
+          "localized_name": "match_prev_stats_frames",
           "name": "match_prev_stats_frames",
+          "shape": 7,
           "type": "INT",
-          "link": null,
           "widget": {
             "name": "match_prev_stats_frames"
-          }
+          },
+          "link": null
         },
         {
+          "localized_name": "baseline",
           "name": "baseline",
+          "shape": 7,
           "type": "COMBO",
-          "link": null,
           "widget": {
             "name": "baseline"
-          }
+          },
+          "link": null
         },
         {
+          "localized_name": "cross_seg_ack",
           "name": "cross_seg_ack",
+          "shape": 7,
           "type": "BOOLEAN",
-          "link": null,
           "widget": {
             "name": "cross_seg_ack"
-          }
+          },
+          "link": null
         }
       ],
       "outputs": [
         {
+          "localized_name": "images",
           "name": "images",
           "type": "IMAGE",
           "links": [
@@ -4323,37 +4557,86 @@
           ]
         },
         {
+          "localized_name": "report",
           "name": "report",
           "type": "STRING",
           "links": []
         }
       ],
-      "properties": {
-        "Node name for S&R": "H3RelayPost"
-      },
       "title": "🔗 后处理 Post（全默认关 = 直通；要治缝阶跃就把 match_prev 调到 0.5）",
+      "properties": {
+        "Node name for S&R": "H3RelayPost",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "match_prev": true,
+            "match_prev_frames": true,
+            "match_prev_gain_max": true,
+            "match_prev_offset_max": true,
+            "lowfreq_pull": true,
+            "lowfreq_frames": true,
+            "lowfreq_blur": true,
+            "head_zone_frames": true,
+            "hist_match": true,
+            "wb_match": true,
+            "deconv_strength": true,
+            "deconv_radius": true,
+            "detail_borrow": true,
+            "detail_blur": true,
+            "settle_sharpen": true,
+            "settle_auto": true,
+            "settle_sharpen_frames": true,
+            "match_prev_stats_frames": true,
+            "baseline": true,
+            "cross_seg_ack": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
       "widgets_values": [
-        0.0,
+        0,
         12,
         1.15,
         0.06,
-        0.0,
+        0,
         12,
         64,
         24,
-        0.0,
-        0.0,
-        0.0,
+        0,
+        0,
+        0,
         1.5,
-        0.0,
+        0,
         9,
-        0.0,
-        0.0,
+        0,
+        0,
         24,
         1,
         "robust",
         false
-      ]
+      ],
+      "widgets_values_named": {
+        "match_prev": 0,
+        "match_prev_frames": 12,
+        "match_prev_gain_max": 1.15,
+        "match_prev_offset_max": 0.06,
+        "lowfreq_pull": 0,
+        "lowfreq_frames": 12,
+        "lowfreq_blur": 64,
+        "head_zone_frames": 24,
+        "hist_match": 0,
+        "wb_match": 0,
+        "deconv_strength": 0,
+        "deconv_radius": 1.5,
+        "detail_borrow": 0,
+        "detail_blur": 9,
+        "settle_sharpen": 0,
+        "settle_auto": 0,
+        "settle_sharpen_frames": 24,
+        "match_prev_stats_frames": 1,
+        "baseline": "robust",
+        "cross_seg_ack": false
+      }
     }
   ],
   "links": [
@@ -4654,6 +4937,78 @@
       "INT"
     ],
     [
+      91,
+      957,
+      0,
+      1013,
+      0,
+      "IMAGE"
+    ],
+    [
+      92,
+      957,
+      1,
+      1011,
+      1,
+      "AUDIO"
+    ],
+    [
+      96,
+      1008,
+      1,
+      954,
+      2,
+      "INT"
+    ],
+    [
+      97,
+      1009,
+      1,
+      954,
+      3,
+      "INT"
+    ],
+    [
+      98,
+      1010,
+      1,
+      954,
+      4,
+      "INT"
+    ],
+    [
+      99,
+      961,
+      2,
+      957,
+      2,
+      "INT"
+    ],
+    [
+      100,
+      992,
+      0,
+      950,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      201,
+      1013,
+      0,
+      1011,
+      0,
+      "IMAGE"
+    ],
+    [
+      202,
+      957,
+      3,
+      1013,
+      1,
+      "IMAGE"
+    ],
+    [
       37,
       317,
       0,
@@ -4702,46 +5057,6 @@
       "FLOAT"
     ],
     [
-      78,
-      993,
-      0,
-      992,
-      9,
-      "INT"
-    ],
-    [
-      79,
-      993,
-      1,
-      992,
-      10,
-      "INT"
-    ],
-    [
-      77,
-      995,
-      1,
-      992,
-      11,
-      "INT"
-    ],
-    [
-      91,
-      957,
-      0,
-      1013,
-      0,
-      "IMAGE"
-    ],
-    [
-      92,
-      957,
-      1,
-      1011,
-      1,
-      "AUDIO"
-    ],
-    [
       93,
       995,
       1,
@@ -4766,46 +5081,6 @@
       "INT"
     ],
     [
-      96,
-      1008,
-      1,
-      954,
-      2,
-      "INT"
-    ],
-    [
-      97,
-      1009,
-      1,
-      954,
-      3,
-      "INT"
-    ],
-    [
-      98,
-      1010,
-      1,
-      954,
-      4,
-      "INT"
-    ],
-    [
-      99,
-      961,
-      2,
-      957,
-      2,
-      "INT"
-    ],
-    [
-      100,
-      992,
-      0,
-      950,
-      1,
-      "CONDITIONING"
-    ],
-    [
       200,
       1011,
       0,
@@ -4814,20 +5089,36 @@
       "VIDEO"
     ],
     [
-      201,
-      1013,
+      78,
+      993,
       0,
-      1011,
-      0,
-      "IMAGE"
+      992,
+      9,
+      "INT"
     ],
     [
-      202,
-      957,
-      3,
-      1013,
+      79,
+      993,
       1,
-      "IMAGE"
+      992,
+      10,
+      "INT"
+    ],
+    [
+      77,
+      995,
+      1,
+      992,
+      11,
+      "INT"
+    ],
+    [
+      203,
+      958,
+      0,
+      992,
+      8,
+      "STRING"
     ]
   ],
   "groups": [
@@ -4847,10 +5138,10 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 1.2839025177495065,
+      "scale": 0.45,
       "offset": [
-        -160.61298909835648,
-        -739.981215096408
+        -4017.777777777778,
+        682.2222222222222
       ]
     },
     "ue_links": [],

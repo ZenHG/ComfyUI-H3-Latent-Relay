@@ -24,7 +24,7 @@ AV 打包 latent 适配器）：**未装那个包时本包照常加载**，只�
     🔗 H3 续接裁重叠        H3RelayTrimAV         裁掉钉住区重播帧（音画同裁+接缝自检），并交出 prev_tail
     🔗 H3 续接后处理 Post   H3RelayPost           画质域后处理（跨段统计匹配/低频残差/直方图+白平衡/反卷积/高频迁移/糊区锐化/自适应糊区补偿；互斥组 + 逐层可审计）
     🔗 H3 续接音频缝        H3RelayAudioSeam      音频域：上一段环境声补本段头（床声电平对齐，长度守恒，零 A/V 位移）+ joined 整片拼接（J-cut 时间轴守恒）
-    🔗 H3 续接连跑 Chain    H3RelayChain          UI 自动连跑（段号自动推进 + 自动排队 + **词分发** + **自动拼接成片**）
+    🔗 H3 续接连跑 Chain    H3RelayChain          UI 自动连跑（段号自动推进 + 自动排队 + **词分发**〔按段号输出第 k 块词〕+ **自动拼接成片**）
     🔍 H3 潜空间分块放大    H3RelayLatentUpscale  画质域：拆 AV 打包 latent → 逐块调学习式 3D 放大器（**零去噪、时间维不动**）→ 回包保留原音频；块数自选、分块==整段
 
 后端路由（不是节点；由 Chain 的按钮触发）：
@@ -58,7 +58,7 @@ _CONCAT_LOCK = asyncio.Lock()
 #     `elif hasattr(module,"comfy_entrypoint"): ...`
 #   （ComfyUI/nodes.py:2295-2337）—— V1 分支命中即 return ⇒ 同时导出两者时 **V3 永不生效**。
 #   所以 V3 模式下把 NODE_CLASS_MAPPINGS **显式设为 None**（宿主的判据含 "is not None"）。
-# 默认 **v3**（2026-09-24 切换）：V3 出口已过 69 项逐字段机检（8 节点 / 113 个 input
+# 默认 **v3**（2026-09-24 切换）：V3 出口已过 70 项逐字段机检（9 节点 / 116 个 input
 # 的顺序·取值·组合项全序与 V1 一致）＋ 2 段真实链验证（362/362 帧守恒 · 流拷贝无损 ·
 # PCM 边车被拼接路由取到）。
 # ⚠️ 回退到 V1：设 H3RELAY_NODE_API=v1 后重启 —— 两条出口的代码都还在，只是默认换了。
@@ -99,7 +99,7 @@ else:
 
 WEB_DIRECTORY = "./web"
 
-__version__ = "0.6.14"
+__version__ = "0.6.15"
 
 
 # ============================================================================
@@ -286,6 +286,39 @@ if PromptServer is not None:           # pragma: no branch
     #   更是没人会主动查。这里一次给全 ⇒ **把 3–5 轮问答压成一行 curl**。
     # ⚠ 它**查不到"包压根没加载"**（目录嵌套放错 / 没重启）—— 那时本路由也不存在。
     #   那种情况看启动日志的 `[H3 Relay] v… 已加载` 那行：**没有 = 没加载**。
+    @PromptServer.instance.routes.get("/h3relay/progress")
+    async def h3relay_progress(request):  # pragma: no cover - 需要运行中的宿主
+        """连跑进度（断点续跑用）：`?run_id=xxx` ⇒ `{ok, stage_index, segments, updated}`。
+
+        进度由 `H3RelayChain.run()` **每段写一次**（`output/relay_kit/<run_id>/_progress.json`，
+        `run_id` 留空则不写 —— 老图零副作用）。
+        🔴 记的是「第 `stage_index` 段**已开始**」，**不是已完成** ⇒ 宿主卡死/重启后
+        从这一段**重跑**即可，**绝不跳段**（跳段会拼出中间缺一段的成片）。
+        """
+        import json as _json
+        import os as _os
+        from .nodes import _progress_path            # 延迟 import：V3 / V1 两种出口下都在
+
+        run_id = (request.query.get("run_id") or "").strip()
+        if not run_id:
+            return web.json_response({"ok": False, "error": "缺少 run_id 参数"}, status=400)
+        try:
+            path = _progress_path(run_id)
+        except Exception as err:                     # noqa: BLE001
+            return web.json_response({"ok": False, "error": "run_id 不合法：%s" % err})
+        if not _os.path.isfile(path):
+            return web.json_response({
+                "ok": False, "run_id": run_id,
+                "error": "还没有进度记录（这一段还没开始跑过，或者 Chain 上的 run_id 没填）"})
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = _json.load(fh)
+        except Exception as err:                     # noqa: BLE001
+            return web.json_response({"ok": False, "error": "进度文件读不了：%s" % err})
+        data["ok"] = True
+        data["path"] = path
+        return web.json_response(data)
+
     @PromptServer.instance.routes.get("/h3relay/health")
     async def h3relay_health(request):  # pragma: no cover - 需要运行中的宿主
         import platform
@@ -301,7 +334,7 @@ if PromptServer is not None:           # pragma: no branch
         except Exception as _e:                      # noqa: BLE001
             _c_ok, _c_msgs = None, ["检查本身失败：%r" % (_e,)]
 
-        # ③ 上游可选依赖（第 8 节点用；没装不影响其它 7 个）
+        # ③ 上游可选依赖（第 9 节点用；没装不影响其它 7 个）
         try:
             from . import nodes as _n
             _has = _n._comfy_registry().get(_n._UPSCALER_NODE) is not None
@@ -349,7 +382,7 @@ def _node_names():
 
     ⚠ V3 模式下 `NODE_CLASS_MAPPINGS` **恒为 None**（见文件头「两条出口必须互斥」），
       所以必须走 `v3.nodes_v3.NODES`；某些加载环境（离线工具）拿不到它时，**退回 V1 的映射** ——
-      两套清单本来就一一对应（`tools/assert_default_exit.py` + 69 项逐字段机检都在锁这件事）。
+      两套清单本来就一一对应（`tools/assert_default_exit.py` + 70 项逐字段机检都在锁这件事）。
 
     🔴 2026-09-25 修：原先写的是 `from .v3 import nodes`，而**文件名是 `v3/nodes_v3.py`**
       ⇒ 每次都抛 `ModuleNotFoundError`，又被下面的 `except: pass` 吞掉 ⇒ **这个分支从来没生效过**，

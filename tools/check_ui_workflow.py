@@ -365,17 +365,77 @@ VIDEO_SAVE_LIKE = ("SaveVideo", "SaveWEBM", "SaveAnimatedWEBP", "VHS_VideoCombin
                    "banzhangVideoCombine")
 
 
+_RELAY_CORE_CACHE = []
+
+
+def relay_core_mod():
+    """取包内 ``relay_core``（**词分发权威实现**所在）；取不到返回 ``None``。
+
+    🔴 铁律一：UI 与 API 必须同一套实现。本工具早期版本在这里**照抄了一份**分块口径
+    （与前端 `splitPromptBlocks` 各写一遍）—— 那正是"两条路各写一遍"，而且两份已经漂移：
+    老副本用 Python 的 `splitlines()`（还会在 `\\v \\f \\x85 \\u2028` 处断行），
+    前端用 JS 的 `/\\r?\\n/`（只在 `\\n` 处断）。现在**唯一实现**在 `relay_core`。
+
+    优先复用 `local_pack_defs()` 已经加载的那份（同一个模块对象 ⇒ 口径必然一致）；
+    没加载过就自己按文件路径加载一次。**取不到就返回 None**，调用方明确跳过并标注，
+    **绝不静默退回本地副本**。
+    """
+    if _RELAY_CORE_CACHE:
+        return _RELAY_CORE_CACHE[0]
+    mod = sys.modules.get("h3latentrelay_local_check.relay_core")
+    if mod is None:
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "h3relay_core_toolcheck", os.path.join(pack_root(), "relay_core.py"))
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+        except Exception:                                     # noqa: BLE001
+            mod = None
+    _RELAY_CORE_CACHE.append(mod)
+    return mod
+
+
 def prompt_blocks(text):
-    """按「单独一行、三个及以上短横线」分块（与前端 `splitPromptBlocks` 同一口径）。"""
-    blocks, cur = [], []
-    for line in str(text or "").splitlines():
-        if len(line.strip()) >= 3 and set(line.strip()) == {"-"}:
-            blocks.append("\n".join(cur))
-            cur = []
-        else:
-            cur.append(line)
-    blocks.append("\n".join(cur))
-    return [b.strip() for b in blocks if b.strip()]
+    """按「单独一行、≥3 个短横线」分块 —— **委托给权威实现** `relay_core.split_prompt_blocks`。
+
+    读不到 `relay_core` 时返回 `None`（调用方据此**跳过并标注**，不静默退回副本）。
+    """
+    mod = relay_core_mod()
+    if mod is None:
+        return None
+    return mod.split_prompt_blocks(text)
+
+
+def upstream_prompts(wf, node, oi):
+    """Chain 的 `prompts` 若是**连线**进来的，沿 link 取上游文本格的值。
+
+    🔴 为什么必须追（2026-09-29 实测）：`prompts` 由连线提供时，**生效的是连线值**，
+    而 Chain 自己那一格可能还留着上一版的旧词 —— 实测某张生产图本机残留 777 字符 / 1 块，
+    上游 `easy positive` 是 3520 字符 / 2 块。只读本机 ⇒ **假红**（报"只有 1 块词、跑到第 2 段会拒绝"），
+    而实际跑起来完全正确。这与前端 `readPrompts()` 是同一条口径（有连线一律读上游）。
+
+    返回 `(text, 上游节点 id)`；取不到返回 `(None, ...)`（调用方回退到本机值）。
+    """
+    inp = next((i for i in (node.get("inputs") or []) if i.get("name") == "prompts"), None)
+    if not inp or inp.get("link") is None:
+        return None, None
+    link = next((l for l in (wf.get("links") or []) if l and l[0] == inp["link"]), None)
+    if not link:
+        return None, None
+    up = next((n for n in (wf.get("nodes") or []) if str(n.get("id")) == str(link[1])), None)
+    if not up:
+        return None, None
+    vals = up.get("widgets_values")
+    if not isinstance(vals, list):
+        return None, up.get("id")
+    defn = (oi or {}).get(up.get("type"))
+    named = dict(zip(frontend_slots(defn), vals)) if defn else {}
+    for k in ("positive", "prompt", "text", "string"):     # 与前端 upstreamText 同优先级
+        v = named.get(k)
+        if isinstance(v, str) and v.strip():
+            return v, up.get("id")
+    cands = [v for v in vals if isinstance(v, str) and v.strip()]
+    return (cands[0] if len(cands) == 1 else None), up.get("id")
 
 
 def check_chain_prompts(wf, oi):
@@ -399,11 +459,18 @@ def check_chain_prompts(wf, oi):
         v = dict(zip(slots, n["widgets_values"]))
         seg = v.get("segments")
         seg = int(seg) if isinstance(seg, (int, float)) and not isinstance(seg, bool) else 0
-        blocks = prompt_blocks(v.get("prompts"))
+        # 🔴 有连线一律读上游（与前端 `readPrompts()` 同口径）—— 只读本机会**假红**
+        src_text, src_id = upstream_prompts(wf, n, oi)
+        blocks = prompt_blocks(src_text if src_text is not None else v.get("prompts"))
+        if blocks is None:
+            out.append("node %s H3RelayChain: ⚠ 读不到包内 relay_core ⇒ 词块数检查**跳过**"
+                       "（不静默退回本地副本；词分发口径见 CONTRIBUTING 铁律一）" % n["id"])
+            blocks = []
         if blocks and seg > 0 and len(blocks) < seg:
+            where = ("（词源 #%s，连线）" % src_id) if src_text is not None else ""
             out.append("node %s H3RelayChain: `prompts` 只有 %d 块词、`segments`=%d ⇒ 跑到第 %d 段会"
-                       "**拒绝排队**（补齐第 %d 块，或把 segments 改成 ≤ %d）"
-                       % (n["id"], len(blocks), seg, len(blocks) + 1, len(blocks) + 1, len(blocks)))
+                       "**拒绝排队**（补齐第 %d 块，或把 segments 改成 ≤ %d）%s"
+                       % (n["id"], len(blocks), seg, len(blocks) + 1, len(blocks) + 1, len(blocks), where))
         tgt = str(v.get("prompt_target") or "").strip()
         if tgt and not any(str(x.get("id")) == tgt.split(".")[0].strip() for x in nodes):
             out.append("node %s H3RelayChain: `prompt_target=%s` 指向的节点不在这张图上 "
