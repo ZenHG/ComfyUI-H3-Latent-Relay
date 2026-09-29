@@ -954,16 +954,41 @@ ck("L12 README §7.2 判据能力边界与兜底措施在位（能量型边界 +
 # ⚠️ 正则刻意收窄，避免误伤：
 #   · 节点数**只在"同一行还有 input"时**才认（README 里"3 节点/18 节点/45 节点"是别的意思）
 #   · 更正说明里**不许复述旧数字**（历史留在 CHANGES.md 与本地审核文档里）
-_v3out = (subprocess.run([sys.executable, os.path.join(KIT, "tests", "test_v3_schema.py")],
-                         capture_output=True, text=True, encoding="utf-8", errors="replace",
-                         env=dict(os.environ, COMFYUI_PATH=COMFY)).stdout or "")
-_m_v3 = _re.search(r"通过\s*(\d+)\s*/\s*失败\s*(\d+)\s*（节点\s*(\d+)\s*个，逐项比对的 input\s*(\d+)\s*个）",
-                   _v3out)
-_v3_pass = int(_m_v3.group(1)) if _m_v3 else -1
-_v3_nodes = int(_m_v3.group(3)) if _m_v3 else -1
-_v3_input = int(_m_v3.group(4)) if _m_v3 else -1
-print("      实跑：test_v3_schema 通过 %s（失败 %s）／%s 节点 · %s input"
-      % (_v3_pass, _m_v3.group(2) if _m_v3 else "?", _v3_nodes, _v3_input))
+def _run_v3(ci_env: bool):
+    """跑一次 ``test_v3_schema``，返回 ``(通过, 节点数, input 数)``；抓不到终态行返回 ``None``。
+
+    🔴 ``ci_env=True`` 时把 ``sys.modules["nodes"] = None`` **写进子进程**（不是父进程）。
+
+    为什么必须写进子进程（2026-09-29 实测）：本包判据分**两套环境** ——
+    本机 8 节点 / CI 7 节点（CI 里宿主 `nodes` 导不进来 ⇒ `H3RelayLatentUpscale` 缺席）。
+    而 ``sys.modules`` **不跨进程**：父进程设了它，子进程看不到。
+    于是"本地复现 CI"会变成一句空话 —— 本地只验了本机那一半，
+    **CI 红（`节点数真值 7 不在声明 [8, 9] 里`）本地永远发现不了**。
+    """
+    _script = os.path.join(KIT, "tests", "test_v3_schema.py")
+    if ci_env:
+        _code = ("import sys, runpy; sys.modules['nodes'] = None; "
+                 "sys.argv = [%r]; runpy.run_path(%r, run_name='__main__')"
+                 % (_script, _script))
+        _cmd = [sys.executable, "-c", _code]
+    else:
+        _cmd = [sys.executable, _script]
+    _r = subprocess.run(_cmd, capture_output=True, text=True, encoding="utf-8",
+                        errors="replace", env=dict(os.environ, COMFYUI_PATH=COMFY))
+    _o = (_r.stdout or "") + (_r.stderr or "")
+    _m = _re.search(r"通过\s*(\d+)\s*/\s*失败\s*(\d+)\s*（节点\s*(\d+)\s*个，"
+                    r"逐项比对的 input\s*(\d+)\s*个）", _o)
+    return (int(_m.group(1)), int(_m.group(3)), int(_m.group(4))) if _m else None
+
+
+_v3_envs = [("本机", _run_v3(False)), ("CI", _run_v3(True))]
+for _nm, _r in _v3_envs:
+    if _r:
+        print("      实跑（%-4s）：test_v3_schema 通过 %d ／%d 节点 · %d input" % ((_nm,) + _r))
+    else:
+        print("      实跑（%-4s）：**抓不到终态行**（脚本可能崩了）" % _nm)
+# H3h 的"脚本至少能跑"用本机那次判（CI 那次在无宿主环境下本来就少一个节点）
+_v3_pass = _v3_envs[0][1][0] if _v3_envs[0][1] else -1
 
 # ⚠️ **语义是「当前环境的真值 ∈ 文档声明集合」**，不是「所有声明都等于真值」——
 #   本包有**两种合法环境**：宿主 `nodes` 可导入（本机 8 节点 / 112 input）与不可导入
@@ -991,12 +1016,18 @@ print("      声明集合：input %s ｜ 节点 %s ｜ 项数 %s"
       % (sorted(_decl_in), sorted(_decl_nd), sorted(_decl_ps)))
 
 _bad_v3 = []
-if _v3_input not in _decl_in:
-    _bad_v3.append("input 真值 %d 不在声明 %s 里" % (_v3_input, sorted(_decl_in)))
-if _v3_nodes not in _decl_nd:
-    _bad_v3.append("节点数真值 %d 不在声明 %s 里" % (_v3_nodes, sorted(_decl_nd)))
-if _v3_pass not in _decl_ps:
-    _bad_v3.append("项数真值 %d 不在声明 %s 里" % (_v3_pass, sorted(_decl_ps)))
+# 🔴 两种环境**都要**过：只验本机 = 本地永远发现不了 CI 红（2026-09-29 实测）。
+for _nm, _r in _v3_envs:
+    if not _r:
+        _bad_v3.append("%s 环境：test_v3_schema 没跑出终态行（脚本崩了？）" % _nm)
+        continue
+    _p, _nd, _in = _r
+    if _in not in _decl_in:
+        _bad_v3.append("%s：input 真值 %d 不在声明 %s 里" % (_nm, _in, sorted(_decl_in)))
+    if _nd not in _decl_nd:
+        _bad_v3.append("%s：节点数真值 %d 不在声明 %s 里" % (_nm, _nd, sorted(_decl_nd)))
+    if _p not in _decl_ps:
+        _bad_v3.append("%s：项数真值 %d 不在声明 %s 里" % (_nm, _p, sorted(_decl_ps)))
 for _nm, _st in (("input", _decl_in), ("节点数", _decl_nd), ("项数", _decl_ps)):
     if len(_st) > 2:                             # 只有两种环境 ⇒ 每个数最多两种取值
         _bad_v3.append("%s 声明了 %d 种取值 %s（本包只有两种环境 ⇒ 最多 2 种）"
