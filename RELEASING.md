@@ -70,6 +70,10 @@ python tools/release.py --verify-only   # 只回答「两边现在同步吗」�
   `tools/release.py` **发布前真查**（`git ls-files` + `git check-ignore`，任一不符**直接拒发**）。
 - 「建 Publisher + 生成 API Key」**只能在 <https://registry.comfy.org> 网页上做**（GitHub OAuth，
   没有任何 API/CLI 路径；`comfy-cli` 只吃 PAT）。PublisherId **发布后不可改**。
+- **发布者资料（description / logo / website / source_code_repo / support）也只能在网页上改** ——
+  实测（2026-09-30）：`PUT /publishers/{id}` 存在且接受 PUT，但**发布用 PAT 不被接受**：
+  放 `Authorization: Bearer <PAT>` 得 `401 user not found`，放请求体得 `401 missing auth token`。
+  它要的是**用户会话**令牌，而那只有浏览器登录后才有。⇒ 别在这上面浪费时间，也别把它写进自动化。
 - 密钥进过任何共享记录（聊天/工单/截图）⇒ **立刻作废重发**，换掉文件内容即可。
 - **轮换**（别用 `echo … > 文件`，那会把明文留在 shell 历史里）：
 
