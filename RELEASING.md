@@ -71,6 +71,15 @@ python tools/release.py --verify-only   # 只回答「两边现在同步吗」�
 - 「建 Publisher + 生成 API Key」**只能在 <https://registry.comfy.org> 网页上做**（GitHub OAuth，
   没有任何 API/CLI 路径；`comfy-cli` 只吃 PAT）。PublisherId **发布后不可改**。
 - 密钥进过任何共享记录（聊天/工单/截图）⇒ **立刻作废重发**，换掉文件内容即可。
+- **轮换**（别用 `echo … > 文件`，那会把明文留在 shell 历史里）：
+
+  ```bash
+  # ① 在 registry 网站生成新 Key  ＞ ② 装进本机（从 stdin 读、不回显、不进 shell 历史）
+  python tools/release.py --set-token
+  # ③ 再去网站把**旧 Key 作废** —— 本地删文件 ≠ 远端失效
+  ```
+
+  `--set-token` 写盘后会**立刻**验一遍忽略规则，且**不做任何网络动作**（不会顺带发布）。
 - 🔴 **别往 ignore 文件里写行内注释**（`模式  # 注释` 会被当成模式的一部分 ⇒ **静默不忽略**）。
   加完行**必须** `git check-ignore -v <路径>` 验一遍。
 

@@ -376,15 +376,62 @@ def sync_deploy(deploy: str, head: str = "HEAD") -> None:
 
 
 # --------------------------------------------------------------------------- 主流程
+def set_token() -> int:
+    """把**新的** registry PAT 写进 `<仓根>/.comfy_registry_token`（只存，不发布）。
+
+    为什么单独做一个模式：轮换密钥时人最可能的做法是
+    `echo <PAT> > 文件` 或 `export COMFY_REGISTRY_PAT=…` —— 两者都会把**明文密钥**
+    留在 shell 历史 / 其它进程的环境里。这里改成从 **stdin（不回显）** 读，
+    写完**立刻**验一遍忽略规则，且**明确不做任何网络动作**。
+    """
+    import getpass
+    p = os.environ.get("COMFY_REGISTRY_PAT_FILE") or TOKEN_FILE_DEFAULT
+    say("把**新的** registry PAT 粘进来再回车（输入不回显、不进 shell 历史）：")
+    # ⚠️ 必须先判 tty 再用 getpass：`getpass.getpass()` 在**非 tty**（管道/重定向）下**不会抛异常**
+    #    而是去开控制台 —— 实测会**直接挂住**（`printf ... | release.py --set-token` 挂到被杀）。
+    #    管道场景要走普通 `readline`，交互场景才用 getpass（不回显）。
+    if sys.stdin is not None and sys.stdin.isatty():
+        t = getpass.getpass("PAT: ").strip()
+    else:
+        t = (sys.stdin.readline() if sys.stdin else "").strip()
+    if len(t) < 16:
+        die("太短（%d 字符）—— 看起来不像 PAT，没写盘。" % len(t))
+    if not t.startswith("pat-"):
+        say("  ⚠️ 它不以 `pat-` 开头 —— registry 发的 Key 通常是 `pat-` + uuid 的形状，"
+            "确认一下是不是贴错了（仍继续写，但请自己核对）")
+    if os.path.isfile(p):
+        _remember_then_forget(p)                          # 只提示"会被覆盖"，不打印旧值
+    with io.open(p, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(t + "\n")
+    rel = os.path.relpath(p, REPO).replace("\\", "/")
+    ignored = git("check-ignore", rel, quiet=True).returncode == 0
+    tracked = git("ls-files", "--error-unmatch", rel, quiet=True).returncode == 0
+    say("  ✅ 已写入 %s（%d 字符）" % (p, len(t)))
+    say("  %s 忽略规则命中：%s" % ("✅" if ignored else "🔴", "是" if ignored else "**否（.gitignore 坏了？）**"))
+    say("  %s 未被 git 跟踪：%s" % ("✅" if not tracked else "🔴", "是" if not tracked else "**否！立刻 git rm --cached**"))
+    say("\n（本次**没有**发布任何东西。要发就 `tools/release.py --go`。）")
+    say("⚠️ 别忘了在 <https://registry.comfy.org> 把**旧 Key 作废** —— 本地删文件 ≠ 远端失效。")
+    return 0 if (ignored and not tracked) else 1
+
+
+def _remember_then_forget(p: str) -> None:
+    say("  （目标文件已存在，将覆盖；不读也不打印旧内容）")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="H 仓发布器：GitHub + Comfy Registry 同步发布并交叉验证")
     ap.add_argument("--go", action="store_true", help="真发布（默认只预演）")
     ap.add_argument("--verify-only", action="store_true", help="只做交叉验证（纯只读）")
     ap.add_argument("--skip-ci-wait", action="store_true", help="不等 CI（默认等）")
+    ap.add_argument("--set-token", action="store_true",
+                    help="把新的 registry PAT 写进 <仓根>/.comfy_registry_token（从 stdin 读，不发布）")
     a = ap.parse_args()
 
     global GIT
     GIT = os.environ.get("H3RELAY_GIT") or shutil.which("git") or "git"
+
+    if a.set_token:
+        return set_token()
 
     f = local_facts()
     slug = repo_slug()
