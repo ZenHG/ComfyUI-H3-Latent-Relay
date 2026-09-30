@@ -1,5 +1,7 @@
 # Full parameter manual (bridge / TrimAV / Post / AudioSeam)
 
+<!-- EN-SYNC src=docs/02-parameters.md stamped=2026-09-30 mode=see tools/en_sync.json -->
+
 🌐 English translation of [`docs/02-parameters.md`](02-parameters.md). **The Chinese file is the source of
 truth** — if the two ever disagree, the Chinese one wins.
 

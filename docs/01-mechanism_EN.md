@@ -1,5 +1,7 @@
 # Mechanism: continuation routes · protocol sources · timing grid · head trimming and how much
 
+<!-- EN-SYNC src=docs/01-mechanism.md stamped=2026-09-30 mode=see tools/en_sync.json -->
+
 🌐 English translation of [`docs/01-mechanism.md`](01-mechanism.md). **The Chinese file is the source of
 truth** — if the two ever disagree, the Chinese one wins.
 
