@@ -80,11 +80,21 @@ def _extract(source: str, name: str, required: bool = True) -> str:
 
 
 def _load(source: str, names, ns: dict) -> dict:
-    """把若干函数 exec 进给定命名空间（缺的全局由调用方提供）。"""
+    """把若干函数 exec 进给定命名空间（缺的全局由调用方提供）。
+
+    ⚠️ `# noqa: S102`（`exec`）是**刻意保留**的，不是漏改（2026-09-30 记录）：
+    - 本文件是**开发者工具**，输入是**本仓自己的源码**（从 `git show <rev>` 取），不是外部不可信数据；
+    - 「差分验证重写前后逐位等价」这件事**本质上就要执行被抽出来的函数体** —— 换成 `importlib`
+      只是把同一个动作换个拼法，**并不会更安全**，反而把「这里有动态执行」这件事藏起来（那是自欺）；
+    - 它**不进 registry 包**：`.comfyignore` 排掉了 `tools/`（`comfy node pack` 可复核）。
+      但 `comfy node validate` 的 S 规则扫描**不吃 `.comfyignore`**（它对本仓 `ruff check . --select
+      S102,S307,E702`）⇒ 不加这行就会在每次发布前打印一条**指向不会发布的文件**的告警。
+    若将来真要让 `exec` 归零，正确做法是改**判据**（比对 AST 或输出，而不是执行源码），不是换拼法。
+    """
     out = dict(ns)
     bodies = [b for b in (_extract(source, n, required=False) for n in names) if b]
     blob = "from __future__ import annotations\n" + "\n\n".join(bodies)
-    exec(compile(blob, "<extracted>", "exec"), out)
+    exec(compile(blob, "<extracted>", "exec"), out)  # noqa: S102
     return out
 
 
