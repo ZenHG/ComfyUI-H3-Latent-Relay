@@ -7,7 +7,7 @@
 #
 # 期望值：
 #   · 413/0  tests/test_relay_core.py      算法层
-#   ·  90/0  tools/review_050.py           文档—代码一致性（✅ 本数字由**本文件的 H3g 自引用机检**盯着）
+#   ·  91/0  tools/review_050.py           文档—代码一致性（✅ 本数字由**本文件的 H3g 自引用机检**盯着）
 #   ·  16/0  tools/smoke_nodes.py          节点层冒烟（✅ H3j 自 2026-09-30 起机检）
 #   ·   4/4  tools/assert_default_exit.py  默认出口 = V3（契约 1 + 行为 3；必须单进程、不设环境变量）
 #   ·  70/0  tests/test_v3_schema.py       V3 与 V1 逐字段一致（**本机 8 节点 / 116 个 input**；
@@ -107,7 +107,7 @@ jobs:
           PYTHONPATH: ${{ runner.temp }}/ComfyUI
         run: |
           python tests/test_relay_core.py   # 期望 413/0
-          python tools/review_050.py        # 期望 90/0（H3g 自引用机检；L13 英文同步闸 + H3j/H3k/H3l）
+          python tools/review_050.py        # 期望 91/0（H3g 自引用机检；L13 + H3j/H3k/H3l/H3m 无凭据字面量）
           python tools/smoke_nodes.py       # 期望 16/0
           # 这两个此前**只在本地清单里、CI 没跑**（2026-09-30 补齐覆盖缺口）：
           python tests/test_experimental.py                              # 期望 29/0（实验层）

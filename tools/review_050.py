@@ -1295,6 +1295,44 @@ ck("H3l 发布规范在位且成对（RELEASING.md 提到两个渠道 + 指向 t
    not _bad_rel, "%d 处：%s" % (len(_bad_rel), _bad_rel[:6]))
 
 # ============================================================================
+# H3m 仓库内无凭据字面量（2026-09-30 新增）
+# ============================================================================
+# 🔴 为什么：凭据一旦进了 git 历史就**擦不干净**（要 rewrite + force push，而公开仓的历史重写
+#    本身就是二次事故）。所以判据只能是「**根本别让它进来**」，且两个入口都要覆盖：
+#      ① 受控文件的**内容**（把 token 写成脚本默认值、.env 忘了 ignore）
+#      ② **提交信息**（粘日志/命令时顺手带上一行）
+#    ⚠️ 命中时**绝不打印匹配到的值**（那等于再泄露一次）⇒ 只报位置，形状一律脱敏。
+#    ⚠️ **已知覆盖差（诚实记录）**：CI 的 checkout 默认 depth=1 ⇒ CI 里只扫得到当前这一条
+#       提交信息，**本地跑才扫到 50 条**。别把 CI 绿当成"历史干净"。
+#    ⚠️ 本文件自己的正则字面量不会自匹配（`pat-` 后面紧跟 `[`，不是十六进制字符）。
+_SECRET_RE = _re.compile(r"pat-[0-9a-fA-F]{8,}-"
+                         r"|gh[pousr]_[A-Za-z0-9]{20,}"
+                         r"|sk-[A-Za-z0-9]{20,}"
+                         r"|AKIA[0-9A-Z]{16}")
+_bad_sec = []
+for _sf in (subprocess.run(["git", "ls-files"], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace").stdout or "").split():
+    try:
+        with open(os.path.join(KIT, _sf), encoding="utf-8", errors="ignore") as _fh:
+            if _SECRET_RE.search(_fh.read()):
+                _bad_sec.append("文件 %s" % _sf)
+    except OSError:
+        continue
+_sec_shas = (subprocess.run(["git", "-C", KIT, "log", "-n", "50", "--format=%H"],
+                            capture_output=True, text=True, encoding="utf-8",
+                            errors="replace").stdout or "").split()
+_sec_msgs = (subprocess.run(["git", "-C", KIT, "log", "-n", "50", "--format=%B%x00"],
+                            capture_output=True, text=True, encoding="utf-8",
+                            errors="replace").stdout or "").split("\x00")
+for _sec_i, _sec_msg in enumerate(_sec_msgs):
+    if _sec_msg.strip() and _SECRET_RE.search(_sec_msg):
+        _bad_sec.append("提交信息 %s…（值已脱敏）"
+                        % (_sec_shas[_sec_i][:9] if _sec_i < len(_sec_shas) else "?"))
+print("      扫了受控文件 + %d 条提交信息（CI 里可能只有 1 条：checkout depth=1）" % len(_sec_shas))
+ck("H3m 仓库内无凭据字面量（受控文件内容 + 最近 N 条提交信息；命中只报位置、绝不打印值）",
+   not _bad_sec, "%d 处：%s" % (len(_bad_sec), _bad_sec[:6]))
+
+# ============================================================================
 # H3g 本文件**自己的**期望数（2026-09-25 新增）
 # ============================================================================
 # 🔴 **必须是本文件最后一个 ck()**：它算的是「本文件的总检查数」= 此刻已跑数 + 自己这 1 条。
