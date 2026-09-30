@@ -126,7 +126,7 @@ git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git
 
 **节点名、输入输出的顺序与取值、默认值、组合项、显示名全部相同**
 （8 个节点、116 个 input 逐项机检一致，见 `tests/test_v3_schema.py`；CI 里因宿主 `nodes`
-导不进来会少一个 `H3RelayLatentUpscale` ⇒ 那边是 8 节点 / 103 input，属**设计内降级**）⇒ 已有工作流、脚本、API 图
+导不进来会少一个 `H3RelayLatentUpscale` ⇒ 那边是 7 节点 / 103 input，属**设计内降级**）⇒ 已有工作流、脚本、API 图
 **两条出口都能直接跑**，切换**不需要改图**。
 
 **为什么默认切到 V3**：官方明确「今后节点功能的扩展也只会添加到 V3 架构中」，V1 拿不到新能力；
@@ -883,7 +883,9 @@ RuntimeError: shape mismatch: value tensor of shape [2392, 96]
 | 文件 | 内容 |
 |---|---|
 | [`docs/01-mechanism.md`](docs/01-mechanism.md) | 两条续接路线的历史与取舍 · 协议出处 · **放大之后哪条线留在原生域（keyframes 与 refs 的分辨率态度相反）** · 时序网格 · 为什么必须裁头 · 裁多少帧怎么量 · 运行时契约 · 音频窗口径 |
+| 🇬🇧 [`docs/01-mechanism_EN.md`](docs/01-mechanism_EN.md) | **上一行的英文版**（同内容全文翻译） |
 | [`docs/02-parameters.md`](docs/02-parameters.md) | 参数全量手册（桥 / 裁重叠 / 后处理 Post / 音频缝 / **🔍 潜空间分块放大**） |
+| 🇬🇧 [`docs/02-parameters_EN.md`](docs/02-parameters_EN.md) | **上一行的英文版**（每个旋钮、默认值与硬约束逐条对应） |
 | [`docs/03-sampling-and-design.md`](docs/03-sampling-and-design.md) | 采样链取舍 · 本包的设计取向（该量的不让用户配） |
 | [`docs/04-canvas-and-widgets.md`](docs/04-canvas-and-widgets.md) | 画布外观 · `advanced` 折叠 · 旧图看不到 `prev_tail` 的处理 |
 | [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md) | 完整排障表 · 工作流文件自检 · API 提交 |

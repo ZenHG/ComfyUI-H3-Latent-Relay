@@ -7,7 +7,7 @@
 
 ## 为什么要有它
 
-本仓是**开发者仓**：`docs/`（9 篇）· `tests/`（4 套）· `tools/`（10 个）· `.github/`（CI 与模板）
+本仓是**开发者仓**：`docs/`（9 篇，其中 01/02 另有英文版 `*_EN.md`）· `tests/`（4 套）· `tools/`（10 个）· `.github/`（CI 与模板）
 加起来比运行期代码还多。想让用户 git clone 一份干净的，或者想打 zip 发给别人时，
 手挑文件容易**漏**（漏一个 `.py` 就是 `ImportError`，且往往是别人先发现）。
 
@@ -89,16 +89,18 @@ MANIFEST_META = [
     "LICENSE",
     "licenses/Apache-2.0.txt",
     "THIRD-PARTY-NOTICES.md",
-    # 用户必读
+    # 用户必读（中英文各一份：英文是精简版，中文是唯一真相源）
     "README.md",
+    "README_EN.md",
 ]
 
 MANIFEST = MANIFEST_RUNTIME + MANIFEST_FRONTEND + MANIFEST_EXAMPLES + MANIFEST_META
 
 # 明确排除（写出来是为了让「为什么不带」有据可查，也便于将来有人问）
 EXCLUDED_NOTE = {
-    "docs/": "9 篇深度文档（机制/参数/画布/troubleshooting）——开发与排查用，非运行必需",
-    "tests/": "4 套离线自测（392+86+15+69 项）——开发用",
+    "docs/": "9 篇深度文档（机制/参数/画布/troubleshooting；01/02 另有英文版 *_EN.md）"
+             "——开发与排查用，非运行必需",
+    "tests/": "4 套离线自测 ——开发用（**项数不在此复述**，见 tools/README.md 与 ci.yml）",
     "tools/": "10 个自检/取证/CLI ——开发用（含本脚本自身）",
     ".github/": "CI 工作流与 issue 模板",
     "CHANGES.md": "版本流水（历史，含旧机路径，已豁免开源卫生扫描）",

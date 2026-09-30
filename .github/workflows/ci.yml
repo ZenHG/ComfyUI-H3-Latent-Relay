@@ -10,7 +10,7 @@
 #   ·  15/0  tools/smoke_nodes.py          节点层冒烟
 #   ·   4/4  tools/assert_default_exit.py  默认出口 = V3（契约 1 + 行为 3；必须单进程、不设环境变量）
 #   ·  70/0  tests/test_v3_schema.py       V3 与 V1 逐字段一致（**本机 8 节点 / 116 个 input**；
-#                                          **CI 63/0 / 8 节点 / 103 input** —— 差一个 Upscale，原因见下）
+#                                          **CI 63/0 / 7 节点 / 103 input** —— 差一个 Upscale，原因见下）
 #   ·  13/0  tests/test_prompt_dispatch.mjs  Chain 词分发纯函数（node）
 # 改动后若这些数字变了，请同步 CONTRIBUTING.md「方面数/断言数」、tests 头注释 **以及本文件**。
 # ⚠️ 本文件曾是**已知盲区**（自己漂移过：停在 384；`assert_default_exit` 的期望值与第 11 行
@@ -109,7 +109,7 @@ jobs:
         env:
           COMFYUI_PATH: ${{ runner.temp }}/ComfyUI
           PYTHONPATH: ${{ runner.temp }}/ComfyUI
-        run: python tests/test_v3_schema.py       # 本机 70/0（8 节点 / 116 个 input）· CI 63/0（8 节点 / 103 input）
+        run: python tests/test_v3_schema.py       # 本机 70/0（8 节点 / 116 个 input）· CI 63/0（7 节点 / 103 input）
 
       # Chain 词分发的纯函数（与浏览器里跑的是同一份 web/relay_kit_prompt.js）
       - name: Chain prompt dispatch (node)

@@ -77,6 +77,11 @@ without H3 the nodes still register but **continuation silently does nothing** �
 `minimax_keyframes` / `minimax_refs` / `resolved_frame_index` are all ComfyUI **native** protocols:
 zero monkey patching, and **nothing in another pack is patched**.
 
+> **Lower-bound basis:** `web/` mounting relies on the host's `WEB_DIRECTORY`, and metadata relies on
+> `comfy_config` parsing `pyproject.toml` — both verified on **0.37.0**. `requires-python = ">=3.10"` is
+> deliberately conservative (the pack uses no 3.10-only syntax, so relaxing it to 3.9 is not a syntax
+> problem).
+
 ### 2.1 Optional: only needed for 🔍 latent tile upscaling
 
 `H3RelayLatentUpscale` is an **AV-packed-latent adapter** over the community pack
@@ -116,7 +121,7 @@ The pack ships two node definitions and **enables exactly one at a time** (env v
 
 Node names, input/output order and values, defaults, combos and display names are all identical
 (8 nodes / 116 inputs, machine-checked in `tests/test_v3_schema.py`; in CI one host-only node
-`H3RelayLatentUpscale` cannot be imported ⇒ 8 nodes / 103 inputs there, a **designed downgrade**) ⇒
+`H3RelayLatentUpscale` cannot be imported ⇒ 7 nodes / 103 inputs there, a **designed downgrade**) ⇒
 existing workflows, scripts and API graphs **run on either exit, with no graph edits**.
 
 ```bash
@@ -504,6 +509,32 @@ recognition**. Measured behaviour:
 > lossless). Still **not implemented**: ASR semantic re-checking (it would rescue the BGM-type misses in
 > the table above; registered in `CONTRIBUTING`).
 
+### 7.3 Tuning guide: the recommended value per knob, and when to move it (0.6.5 measured)
+
+> Principle: **the default is the recommendation.** This table answers "when would I ever touch it" —
+> every row carries measurement evidence, and rows without evidence are explicitly marked "do not touch".
+
+| Knob | Recommended | When to move it, and why (all measured) |
+|---|---|---|
+| `patch_seconds` | **≤ 1.2** (aligned with the head-padding discipline on the prompt side); **0** = off | the patch only covers the first **10 ms** of AAC priming silence at the head (measured on 11 real films: the first 10 ms sits at −50 to −122 dBFS while the head's 0–1 s average is 39–80 dB higher) ⇒ **`patch=1.2` is already plenty**. Why 2.0 is no longer recommended: material with dialogue in the head splits into two classes — **class A** (dialogue after 1.4 s) is untouched by `patch≤1.2`; **class B** (dialogue from 0.1 s, wall-to-wall voice) **swallows words for any `patch>0.1`, and the guard is structurally useless there**. ⚠️ The older wording "2.0 stays safe with dialogue up front" is retracted. See **§7.3.1**. |
+| `tile_seconds` | **0** (take a single window) when the bed source's tail is clean; **1.2** when it contains dialogue or a BGM phrase | tiles take material from an earlier clean region of the bed source. The bed-window criterion catches "BGM + dialogue" bed sources reliably (dialogue at +14 dB ⇒ 66.7 % of the window ⇒ switch window). In the S2 scenario (continuous BGM) the generated BGM is naturally continuous, so the patch's value drops by itself and tiles mainly protect dialogue. |
+| `fade_seconds` | **0.25, do not touch** | 0 = hard cut, an audible click at the seam; this is the value measured in production. |
+| `bed_select` | **tail, do not touch** | the old `quiet` (0.5.0) behaviour replaced the patch with quieter content (measured −42 vs −12.8 dBFS) ⇒ the seam turns from a "dip" into a "silent hole" and the downbeat is flattened. `quiet` is kept for reproducing the control only. |
+| `bed_stage` | **0** (segment 1) | the same scene's ambience is stationary, so segment 1 is the most stable source; only consider changing it when the earlier segment has a special sound field (explosion → quiet interior). ⚠ must be **< this segment's stage number**. |
+| `patch_guard` | **on (default)** — but **effective only on material with a silent pad at the head** | ⚠️ **the boundary was lowered** (measured 2026-09-26): the guard works on **class A** (a genuinely quiet head with dialogue later) and shrinks or disables itself; on **class B** (wall-to-wall voice/music ⇒ the median is raised ⇒ the threshold sits above the voice peak) it **never triggers and is structurally useless**. **Do not stake dialogue safety on it** — the primary defence is `patch_seconds ≤ 1.2` (see §7.3.1). |
+| `patch_guard_layers` | **0** (= existing behaviour, changes no output) | 🛡 guard criterion levels (cumulative 0/1/2/3): 1 = + energy-step gate, 2 = + voiced-frame spectral-centroid gate, 3 = + spectral-flatness gate. ⚠️ **insufficiently calibrated** (thresholds drift with the analysis window length; small sample) ⇒ **default 0**; if you want it, audition it on your own material first. |
+| ~~`exp_bed_jitter`~~ | — | 🔴 **this parameter was removed on 2026-09-22** (`1c87aff`: the experimental level measured out to nothing against the target, so it was deleted along with it) ⇒ **it is not a settable parameter**; setting it is **silently ignored** by the host (extra input keys raise nothing and warn nothing). Historical conclusion in [`CHANGES.md`](CHANGES.md). |
+| `settle_frames` (TrimAV) | **0** | `-1` (automatic) cures blur but **introduces a jump**. Most of the "blur" is whole-chain detail loss, not the segment head's settle region (sampling-chain A/B decided 2026-09-19). |
+
+**Honest criterion boundaries:** the bed-window criterion and the dialogue guard are both **energy-based**
+(frame RMS vs whole-source median), not speech recognition — material where voice occupies **> 50 % of the
+frames** (podcasts, continuous narration) defeats both criteria, and on such material a patch is
+meaningless anyway; low-level voice (only ~6 dB above ambience) can also be missed. Every decision is
+printed in the log and auditable; **the final judgement is your ears** (the four-part check, starting with
+the original-speed original file).
+
+---
+
 ### 7.3.1 🔴 Dialogue protection: **shortening the patch is the primary defence — the guard is only a backstop**
 
 > This section is the conclusion of a full zero-GPU measurement round (2026-09-26). **Read it before
@@ -536,17 +567,24 @@ the voice ⇒ the threshold sits above the voice peak ⇒ **zero frames exceed i
 with dialogue up front") — **that claim is retracted; do not configure from it.**
 It holds for class A; for class B it **swallows words**.
 
-**Criteria exhaustively falsified (15 families — do not re-walk this path):** energy (RMS mean /
-percentiles / peak, run-length, step), lowered baselines (P05/P10 instead of median, lowered *k*),
-relative measures (window median − whole-segment median), spectral shape (`spec_centroid` / `cent_act`),
-harmonic-to-noise measures (`hnr` / autocorrelation / spectral flatness), temporal structure
-(`zcr` / `gap_ratio` / `n_seg`), modulation (2–8 Hz syllable rate, spectral flux), external
-(`webrtcvad`: 0.375 accuracy — fundamentally a GMM-energy VAD, same family), and cross-domain
-combinations (`step` + `cent_act` + `flat_act`: only looks good on long windows; at production window
-lengths TP collapses to 0–3 / 5). ⚠️ This is **not** "the model has never seen this before": steady voice
-and steady music are **inseparable on any statistic of a 1-second window**. Separating them requires
-time-frequency structure (formant transitions, voiced/unvoiced alternation) — i.e. rebuilding a VAD, and
-VADs measure **worse**.
+**Criteria exhaustively falsified (15 families — do not re-walk this path):**
+
+| Domain | Criterion | Result |
+|---|---|---|
+| Energy | `rms` mean / percentiles / peak, run-length, `step` (step change) | ❌ voice and piano/BGM alias at the same magnitude |
+| Energy | lowered baseline percentiles (P05/P10 instead of the median), lowered `k` | ❌ a BGM trough sits **higher** than voice material ⇒ guaranteed to misfire |
+| Energy | window median − whole-segment median (relative) | ❌ complete overlap (voice samples +3.8 dB vs BGM samples +3.9 dB) |
+| Spectral shape | `spec_centroid` / `cent_act` (voiced-frame centroid) | ⚠️ blocks high-frequency impacts (clinking glasses, door slams) only, not steady musical tones |
+| Harmonic/noise | `hnr` / autocorrelation / spectral flatness `flat_act` | ⚠️ blocks steady musical tones only, and the threshold drifts with window length |
+| Temporal structure | `zcr` / `gap_ratio` / `n_seg` / discontinuity | ❌ overlaps with instruments |
+| Modulation | 2–8 Hz syllable rate, spectral flux | ❌ no separation observed |
+| External | `webrtcvad` (WebRTC VAD) | ❌ 0.375 accuracy — fundamentally a GMM-energy VAD, the same family as the energy domain |
+| Cross-domain combination | `step` + `cent_act` (+ `flat_act`) | ⚠️ looks effective only at **long window** settings; **shortened to the production window length, TP collapses to 0–3 / 5** ⇒ not evidence |
+
+**Root cause:** steady voice and steady music are **inseparable on any statistic of a 1-second window**.
+It is not that the algorithm is not good enough — there is not enough information. Separating them
+requires time-frequency structure (formant transitions, voiced/unvoiced alternation), which amounts to
+rebuilding a VAD, and VADs measure **worse**.
 
 **✅ Recommendation, ordered by reliability:**
 
@@ -675,7 +713,14 @@ python tools/smoke_nodes.py             # expect 0 failures (node-layer smoke te
 
 **Hundreds of assertions, zero GPU, no models loaded.** Exact counts are intentionally kept in one place
 per assertion set and machine-checked (README.md §8 carries them; per-group detail in
-[`docs/08-testing.md`](docs/08-testing.md)).
+[`docs/08-testing.md`](docs/08-testing.md)). Selected groups, to show what "covered" means here:
+
+| Group | Coverage |
+|---|---|
+| 21 | two-way blending in the overlap region: window-shape weights (smoothstep / hann), derivative 0 at both ends |
+| 26 | **multi-segment concatenation (0.6.7)**: probing / health check (the "audio bypasses TrimAV" criterion) / lossless stream copy for video / per-segment de-priming alignment for audio / fallbacks / history-entry filtering |
+| 27 | **latent tile upscale (0.6.8)**: the compliance boundary for a chosen tile count (each tile ≥ 2·overlap+1) / one tile is the identity / **under a per-frame-independent operator, tiling == whole segment** (stand-in: nearest×2) / the time axis must not move / upstream-convention constants pinned — ⚠️ the real model contains **3D volumetric attention** ⇒ **tiling does change the picture** (measurements in §9); this group pins the stitching math only and does **not** claim "tiling is lossless" |
+| 28 | **audio output dtype contract (0.6.11)**: zero-copy when already f32 / fp16·bf16·f64 all converge to f32 / keys and shapes unchanged / `None` passes through / **incident-reproduction lock** (simulating `VHS_VideoCombine`'s `-f f32le` muxing path: raw dtype in = silence, through this pack's output = bit-exact) / node output contract (every AUDIO return path in TrimAV and AudioSeam is f32, while the **PCM sidecar stays fp16**) |
 
 The command-line concatenation entry point (§7.4) is smoke-tested in the same suite:
 
@@ -685,6 +730,11 @@ python tools/concat_segments.py s1.mp4 s2.mp4 -o film.mp4 --json   # exit 0 = fo
 
 The scripts locate the ComfyUI root automatically; if it lives elsewhere use
 `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`.
+
+Two further zero-GPU checks live in the suite: `tests/test_v3_schema.py` (V3 ↔ V1 field-by-field parity —
+node ids, order, values, combos, outputs, display names) and `tools/assert_default_exit.py` (the default
+exit is V3; it must run in its own process with no environment variables set). Both are described, with
+their per-environment expectations, in [`docs/08-testing.md`](docs/08-testing.md).
 
 ---
 
@@ -753,7 +803,7 @@ called. **External tools (ffmpeg, your own assembly script) read the mp4 and ign
 them entirely, turn off `H3RelayTrimAV.save_pcm` (concatenation then falls back to decoding and says so).
 
 ### 10.5 Can I use MKV / a lossless audio track?
-**MKV can be written** (the host's `SaveVideo` offers `mp4/mkv/webm`) **but it buys nothing**: its audio
+**MKV can be written** (the host's `SaveVideo` has `mp4/mkv/webm` under `format`) **but it buys nothing**: its audio
 codec is hard-coded (`libopus if WEBM else aac`; `CreateVideo` hard-codes aac) ⇒ **the host cannot give you
 a lossless audio track**. Our concatenation goes through PyAV and controls the container, and measured
 **PCM (`pcm_s16le` / `pcm_f32le`) writes straight into mp4** ⇒ default is mp4, the lossless level is also
@@ -897,11 +947,15 @@ are measured, runtime contract guards, audio window lengths) in
 ## 13. Documentation index
 
 The detailed documents are **in Chinese** — they are the source of truth for anything not covered here.
+**`docs/01` and `docs/02` also have English versions** (rows marked 🇬🇧): start there, and follow the links
+into the Chinese documents for anything else.
 
 | File | Content |
 |---|---|
 | [`docs/01-mechanism.md`](docs/01-mechanism.md) | history and trade-offs of both continuation routes · protocol sources · **which lines must stay in the native domain after upscaling (keyframes and refs take opposite attitudes to resolution)** · timing grid · why the head must be trimmed · how the trim amount is measured · runtime contract · audio window lengths |
+| 🇬🇧 [`docs/01-mechanism_EN.md`](docs/01-mechanism_EN.md) | **English version of the above** (same content, full translation) |
 | [`docs/02-parameters.md`](docs/02-parameters.md) | full parameter manual (bridge / TrimAV / Post / AudioSeam / **🔍 latent tile upscale**) |
+| 🇬🇧 [`docs/02-parameters_EN.md`](docs/02-parameters_EN.md) | **English version of the above** (every knob, default and hard constraint) |
 | [`docs/03-sampling-and-design.md`](docs/03-sampling-and-design.md) | sampling-chain trade-offs · this pack's design stance (what should be measured is not left to user configuration) |
 | [`docs/04-canvas-and-widgets.md`](docs/04-canvas-and-widgets.md) | canvas appearance · `advanced` folding · missing `prev_tail` on older graphs |
 | [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md) | complete troubleshooting table · workflow-file self-check · API submission |
