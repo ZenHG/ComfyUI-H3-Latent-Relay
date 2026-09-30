@@ -40,8 +40,27 @@ def _git(*args: str) -> str:
     return p.stdout.decode("utf-8", "replace")
 
 
+def _git_bytes(*args: str) -> bytes:
+    """同 `_git`，但**不解码**。
+
+    🔴 为什么必须分开：`_git` 用 `decode("utf-8", "replace")` 读 stdout —— 对文本无损，
+    但对**二进制**会把非法字节换成 U+FFFD 再编回 UTF-8 ⇒ 内容被改写 ⇒ 假报 DIFF
+    （2026-09-30 实测：仓里第一个二进制文件 `icon.png` 一进来就被这条坑到）。
+    """
+    p = subprocess.run(["git", *args], cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if p.returncode != 0:
+        sys.exit("[FAIL] git 命令失败：%s\n%s" % (" ".join(args), p.stderr.decode("utf-8", "replace")))
+    return p.stdout
+
+
 def _norm(b: bytes) -> bytes:
-    """抹掉 CR，让 CRLF 与 LF 视为同一内容。"""
+    """抹掉 CR，让 CRLF 与 LF 视为同一内容。
+
+    🔴 只对**文本**生效："二进制里 0x0D 0x0A 是数据，不是行尾" —— 抹了就是改内容。
+    判据用「前 8 KB 里有没有 NUL 字节」（PNG / zip / 图片全带 NUL，文本几乎不可能有）。
+    """
+    if b"\x00" in b[:8192]:
+        return b
     return b.replace(b"\r\n", b"\n")
 
 
@@ -58,8 +77,7 @@ def main() -> int:
     files = [f for f in _git("ls-files").splitlines() if f.strip()]
     ok, diff, miss = [], [], []
     for f in files:
-        src = _git("show", "%s:%s" % (args.rev, f))
-        want = _norm(src.encode("utf-8", "surrogateescape"))
+        want = _norm(_git_bytes("show", "%s:%s" % (args.rev, f)))
         path = os.path.join(args.deploy, f.replace("/", os.sep))
         if not os.path.isfile(path):
             miss.append(f)
