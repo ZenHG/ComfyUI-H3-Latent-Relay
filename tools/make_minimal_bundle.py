@@ -13,6 +13,8 @@
 
 所以：**清单 + 交叉校验 + 自验**三件一起做——
 
+0. **打包前闸（fail-closed）**：先跑 `tools/en_sync.py`（英文文档同步闸）——
+   中文源改了、英文没跟上就**不出包**（否则会发出一个英文版已过期的发行物）；
 1. **显式清单**（`MANIFEST_RUNTIME` 等）：人可读、带「为什么」的注释；
 2. **交叉校验**：静态推导「从入口出发真正会被 import 的本包文件」，**必须与清单的运行组逐一相等**
    ⇒ 将来有人新增模块却忘了改清单，这里会**当场报错**；
@@ -368,6 +370,23 @@ def verify_bundle(bundle_dir, expect_source=KIT):
     return True
 
 
+def preflight_en_sync():
+    """打包前跑英文文档同步闸：英文过期 ⇒ **不出包**（否则发行物里的 EN 是旧版）。"""
+    print()
+    print("⓪ 英文文档同步闸（tools/en_sync.py）")
+    r = subprocess.run([sys.executable, os.path.join(KIT, "tools", "en_sync.py")],
+                       capture_output=True, text=True, encoding="utf-8", errors="ignore",
+                       cwd=KIT)
+    tail = (r.stdout or "").strip().splitlines()
+    print("   [%s] %s" % ("OK" if r.returncode == 0 else "FAIL",
+                          tail[-1] if tail else "（无输出）"))
+    if r.returncode != 0:
+        for ln in tail[-12:]:
+            print("      " + ln)
+        print("   ❌ 英文文档未与中文源同步 ⇒ 不出包（先跑 `python tools/en_sync.py` 看差在哪）")
+    return r.returncode == 0
+
+
 def main():
     ap = argparse.ArgumentParser(description="产出最小可运行分发集（清单+交叉校验+自验）")
     ap.add_argument("--out", default=DEFAULT_OUT)
@@ -383,7 +402,10 @@ def main():
     print("=" * 70)
     print("最小可运行分发集 · 清单 %d 个文件" % len(MANIFEST))
     print("=" * 70)
+    ok0 = preflight_en_sync()
     ok1 = verify_manifest()
+    if not ok0:
+        return 1
     ok2 = write_bundle(a.out, a.force)
     if not ok2:
         return 1

@@ -681,6 +681,13 @@ python tools/smoke_nodes.py             # 期望「失败 0」（节点层冒烟
 > （2026-09-25 实测：同一个数字在四处声明，只有一处有机检，另外两处漂了很久没人发现）。
 > ⚠️ **写更正说明时别复述旧的错误数字** —— 那会污染上面这些机检的正则（踩过）。
 
+> 🌐 **改了中文文档就必须同步英文版**（`README.md` ↔ `README_EN.md`、`docs/NN-*.md` ↔ `docs/NN-*_EN.md`）：
+> `review_050` 的 **L13** 会跑 `tools/en_sync.py` 逐节比对 hash —— **源改了、英文没跟上 = 红**（CI 同样红），
+> 而源里**新增的节默认必须译**（要跳译得 `--omit` 写理由，要延后得 `--ack` 带到期日）。
+> 拿任务书：`python tools/en_sync.py --brief 7.3`；改完 `--apply`（只重写机械面）再 `--stamp`。
+> ⚠️ **刻意不机翻**：机翻会把 `0.0007` 这类实测数字与 `settle_frames` 这类标识符**静默改掉**，
+> 而机检只扫中文源 ⇒ 英文版会变成**监管盲区**（错了没人知道，还是发给用户的那一份）。
+
 命令行拼接入口（**给不开画布的用户**，见 §7.4）也在同一份单测里冒烟（26.43/26.44）：
 
 ```bash
@@ -896,6 +903,6 @@ RuntimeError: shape mismatch: value tensor of shape [2392, 96]
 | [`CHANGES.md`](CHANGES.md) | 版本史与每次实测证据 |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 开发环境 · 自测纪律 · 许可条款 |
 | [`SECURITY.md`](SECURITY.md) | 密钥 / 依赖 / 网络行为声明 |
-| [`tools/README.md`](tools/README.md) | 七个脚本的用途与期望值（六个自检/取证 + 一个拼接 CLI） |
+| [`tools/README.md`](tools/README.md) | 十一个脚本的用途与期望值（九个自检/取证 + 一个拼接 CLI + 一个打包器）· **含英文文档同步闸 `en_sync.py`** |
 | [`examples/README.md`](examples/README.md) | 两份可直接打开的工作流：**最小续接演示**（19 节点）与**全流程示例**（45 节点，8 个节点全在场）· 生成器 |
 | [`README_EN.md`](README_EN.md) | **英文精简版**（安装 / 接线 / 8 节点 / 主参数 / 音频缝与拼接 / 排障 / FAQ）—— 深度推导与外链一律回本文件；**本文件仍是唯一真相源** |

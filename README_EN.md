@@ -1,5 +1,7 @@
 # ComfyUI-H3-Latent-Relay
 
+<!-- EN-SYNC src=README.md stamped=2026-09-30 mode=see tools/en_sync.json -->
+
 🌐 **English (this file)** · [中文（默认 / source of truth）](README.md)
 
 A **latent bridge** for MiniMax-H3 multi-segment continuation — a standalone ComfyUI node pack with
@@ -736,6 +738,16 @@ node ids, order, values, combos, outputs, display names) and `tools/assert_defau
 exit is V3; it must run in its own process with no environment variables set). Both are described, with
 their per-environment expectations, in [`docs/08-testing.md`](docs/08-testing.md).
 
+> 🌐 **If you edit the Chinese source you must sync the English version** (`README.md` ↔ `README_EN.md`,
+> `docs/NN-*.md` ↔ `docs/NN-*_EN.md`): `review_050`'s **L13** runs `tools/en_sync.py` and compares a hash
+> per section — **source changed, English lagging = red** (CI too), and **a section newly added to the
+> source must be translated by default** (skipping it requires `--omit` with a reason; deferring requires
+> `--ack` with an expiry date). Get a brief with `python tools/en_sync.py --brief 7.3`, then `--apply`
+> (mechanical face only) and `--stamp`.
+> ⚠️ **Machine translation is deliberately not used**: it silently rewrites measured numbers like `0.0007`
+> and identifiers like `settle_frames`, while the machine checks only read the Chinese source ⇒ the
+> English file would become an **unwatched blind spot** (wrong, and nobody knows — on a file users read).
+
 ---
 
 ## 9. Troubleshooting
@@ -966,5 +978,5 @@ into the Chinese documents for anything else.
 | [`CHANGES.md`](CHANGES.md) | version history with the measurement evidence for each change |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | dev environment · testing discipline · licence terms |
 | [`SECURITY.md`](SECURITY.md) | secrets / dependencies / network behaviour disclosure |
-| [`tools/README.md`](tools/README.md) | the seven scripts and their expected values (six self-check/forensic + one concat CLI) |
+| [`tools/README.md`](tools/README.md) | the eleven scripts and their expected values (nine self-check/forensic + one concat CLI + one bundler) · **including the English-doc sync gate `en_sync.py`** |
 | [`examples/README.md`](examples/README.md) | the two openable workflows: **minimal continuation demo** (19 nodes) and **full-flow example** (45 nodes, all 8 nodes present) · generators |

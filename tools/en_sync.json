@@ -1,0 +1,245 @@
+{
+  "schema": 1,
+  "pairs": {
+    "README.md": {
+      "en": "README_EN.md",
+      "sections": [
+        {
+          "zh": "(preamble)",
+          "en": "(preamble)",
+          "mode": "condensed",
+          "h_en": "59433d33039f0371",
+          "h_src": "c2183406b0378b0d",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "0. 目录",
+          "en": null,
+          "mode": "omit",
+          "h_en": null,
+          "why": "目录/导航表对英文版无意义：英文版节号与中文一一对应，翻一份会多一处要同步的表",
+          "h_src": "cd601a83cfc1da47"
+        },
+        {
+          "zh": "1. 它解决什么问题",
+          "en": "1. What problem does it solve?",
+          "mode": "condensed",
+          "h_en": "f990d22a3a296be0",
+          "h_src": "7f8ba029efa9d2b4",
+          "seeded": "by-number"
+        },
+        {
+          "zh": "2. 安装",
+          "en": "2. Install",
+          "mode": "condensed",
+          "h_en": "4588745a099def89",
+          "h_src": "5e45edcd9a0a4523",
+          "seeded": "by-number"
+        },
+        {
+          "zh": "3. 5 分钟跑通",
+          "en": "3. Five-minute quickstart",
+          "mode": "condensed",
+          "h_en": "581894f8d8a4d144",
+          "h_src": "b7f52afdac4c98d6",
+          "seeded": "by-number"
+        },
+        {
+          "zh": "4. 接线（唯一桥）",
+          "en": "4. Wiring (the one bridge)",
+          "mode": "condensed",
+          "h_en": "ee6ff4921f3140b3",
+          "h_src": "9e622e5e1f072343",
+          "seeded": "by-number"
+        },
+        {
+          "zh": "5. 节点速览",
+          "en": "5. Nodes at a glance",
+          "mode": "condensed",
+          "h_en": "5f252cdb5952301f",
+          "h_src": "85281aeee3d5fa08",
+          "seeded": "by-number"
+        },
+        {
+          "zh": "6. 参数（主旋钮）",
+          "en": "6. Knobs (the main ones)",
+          "mode": "condensed",
+          "h_en": "1ceab2e422d99223",
+          "h_src": "c00cbd1ca3d8aacf",
+          "seeded": "by-number"
+        },
+        {
+          "zh": "7. 音频缝",
+          "en": "7. Audio seam",
+          "mode": "condensed",
+          "h_en": "7765ecc298b70b16",
+          "h_src": "578ec4631806ac94",
+          "seeded": "by-number"
+        },
+        {
+          "zh": "8. 离线自测",
+          "en": "8. Offline self-test",
+          "mode": "condensed",
+          "h_en": "c4914f6a784519d9",
+          "h_src": "02137afd788bd833",
+          "seeded": "by-number"
+        },
+        {
+          "zh": "9. 排障",
+          "en": "9. Troubleshooting",
+          "mode": "condensed",
+          "h_en": "5d83bd4557ae1930",
+          "h_src": "ec1c51229bba5f58",
+          "seeded": "by-number"
+        },
+        {
+          "zh": "10. 常见疑问（FAQ）",
+          "en": "10. FAQ",
+          "mode": "condensed",
+          "h_en": "269621e2d96a05dc",
+          "h_src": "081e46d1d8962342",
+          "seeded": "by-number"
+        },
+        {
+          "zh": "11. 原理与机制",
+          "en": "11. Mechanism",
+          "mode": "condensed",
+          "h_en": "54a04c08b862bccf",
+          "h_src": "a8a4fa6e4e189fed",
+          "seeded": "by-number"
+        },
+        {
+          "zh": "12. 许可与出处",
+          "en": "12. License and attribution",
+          "mode": "condensed",
+          "h_en": "d859b684300e6be2",
+          "h_src": "043b71af116c009e",
+          "seeded": "by-number"
+        },
+        {
+          "zh": "13. 文档索引",
+          "en": "13. Documentation index",
+          "mode": "condensed",
+          "h_en": "ff9972c832ccb6f3",
+          "h_src": "58fc2f1179d80539",
+          "seeded": "by-number"
+        }
+      ],
+      "acks": [],
+      "stamped": "2026-09-30",
+      "src_sha": "67b7cbd41e8639d0"
+    },
+    "docs/01-mechanism.md": {
+      "en": "docs/01-mechanism_EN.md",
+      "sections": [
+        {
+          "zh": "(preamble)",
+          "en": "(preamble)",
+          "mode": "full",
+          "h_en": "18767786e3ef968f",
+          "h_src": "7d0c728cbea0e9c7",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "🧭 两条续接路线：怎么选（实测对比）",
+          "en": "🧭 The two continuation routes: how to choose (measured comparison)",
+          "mode": "full",
+          "h_en": "23d43129d8ed6d15",
+          "h_src": "8558398d5a6fb075",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "协议出处（ComfyUI 原生，无需 monkey patch）",
+          "en": "Protocol sources (native ComfyUI, no monkey patching needed)",
+          "mode": "full",
+          "h_en": "0ed54990b3177dd2",
+          "h_src": "a71c896c837ca165",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "🔍 放大之后：哪条线留在原生域（0.6.8 全流程实测）",
+          "en": "🔍 After upscaling: which line stays in the native domain (measured on the 0.6.8 full flow)",
+          "mode": "full",
+          "h_en": "6be662246d7f4d44",
+          "h_src": "a40e728fe4bdf5a4",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "与像素续接的关系",
+          "en": "Relation to pixel continuation",
+          "mode": "full",
+          "h_en": "ae0947d21dd82654",
+          "h_src": "586d455ac1d6d210",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "时序网格（为什么只有特定帧数可用）",
+          "en": "Timing grid (why only specific frame counts are usable)",
+          "mode": "full",
+          "h_en": "865cb0f191594a9a",
+          "h_src": "d89a0dfe289558ea",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "⚠️ 为什么必须裁头",
+          "en": "⚠️ Why the head must be trimmed",
+          "mode": "full",
+          "h_en": "bc6c04e9e204df98",
+          "h_src": "ffbbd5e0dddf13f2",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "🔍 裁多少帧：不让你配，由节点当场量",
+          "en": "🔍 How many frames to trim: not configurable, measured on the spot by the node",
+          "mode": "full",
+          "h_en": "7d9b1c48f147b6d1",
+          "h_src": "cd847672d78d5150",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "🛡 运行时契约（时序网格护栏）",
+          "en": "🛡 Runtime contract (timing-grid guard rail)",
+          "mode": "full",
+          "h_en": "bb9fd0cd222dcf47",
+          "h_src": "82cb2a3be4aeaa7f",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "🔊 音频窗对齐口径",
+          "en": "🔊 Audio window alignment convention",
+          "mode": "full",
+          "h_en": "153ee1627ce4c4cf",
+          "h_src": "61bcdc26462d6a90",
+          "seeded": "by-position"
+        }
+      ],
+      "acks": [],
+      "stamped": "2026-09-30",
+      "src_sha": "b1bf9cbff8bae77f"
+    },
+    "docs/02-parameters.md": {
+      "en": "docs/02-parameters_EN.md",
+      "sections": [
+        {
+          "zh": "(preamble)",
+          "en": "(preamble)",
+          "mode": "full",
+          "h_en": "9169e919f880810f",
+          "h_src": "495055744a2bdb1b",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "参数",
+          "en": "Parameters",
+          "mode": "full",
+          "h_en": "dec84a35b0962692",
+          "h_src": "3604b541adf51942",
+          "seeded": "by-position"
+        }
+      ],
+      "acks": [],
+      "stamped": "2026-09-30",
+      "src_sha": "7b94112a482cdf02"
+    }
+  }
+}
