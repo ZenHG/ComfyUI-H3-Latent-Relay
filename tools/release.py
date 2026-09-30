@@ -46,6 +46,9 @@ REGISTRY_API = "https://api.comfy.org"
 TOKEN_FILE_DEFAULT = os.path.join(REPO, ".comfy_registry_token")
 
 FAILED: list[str] = []
+# 🔴 命令回显要**脱敏**：`say("$ " + cmd)` 会把 `--token <PAT>` 原样打进日志/终端
+#    （2026-09-30 实跑时真的把 PAT 打出来了）。命令行的透明性不该以泄密为代价。
+SECRETS: list[str] = []
 
 
 # --------------------------------------------------------------------------- 小工具
@@ -53,14 +56,21 @@ def say(msg=""):
     print(msg, flush=True)
 
 
+def _mask(s: str) -> str:
+    for sec in SECRETS:
+        if sec:
+            s = str(s).replace(sec, "***REDACTED***")
+    return str(s)
+
+
 def die(msg, code=1):
-    say("\n🔴 " + msg)
+    say("\n🔴 " + _mask(msg))
     sys.exit(code)
 
 
 def run(cmd, env=None, cwd=None, quiet=False):
     if not quiet:
-        say("  $ " + " ".join(cmd))
+        say("  $ " + " ".join(_mask(c) for c in cmd))
     return subprocess.run(cmd, cwd=cwd or REPO, capture_output=True, text=True,
                           encoding="utf-8", errors="replace", env=env)
 
@@ -139,6 +149,8 @@ def changelog_text(version: str) -> str:
 def token() -> str:
     t = (os.environ.get("COMFY_REGISTRY_PAT") or "").strip()
     if t:
+        _remember(t)
+        say("  Token：%d 字符（来源：环境变量，不回显）" % len(t))
         return t
     p = os.environ.get("COMFY_REGISTRY_PAT_FILE") or TOKEN_FILE_DEFAULT
     if not os.path.isfile(p):
@@ -150,6 +162,7 @@ def token() -> str:
         t = fh.read().strip()
     if len(t) < 16:
         die("Token 文件内容太短（%d 字符）—— 是不是存错了？%s" % (len(t), p))
+    _remember(t)
     # 密钥纪律：发布前**真查**一遍它不会被上传（"我记得加过 .gitignore"不算证据）
     if p == TOKEN_FILE_DEFAULT:
         rel = os.path.relpath(p, REPO).replace("\\", "/")
@@ -159,6 +172,12 @@ def token() -> str:
             die("🔴 Token 文件**没有命中任何忽略规则**（.gitignore 被改坏了？）：%s" % p)
     say("  Token：%d 字符（来源 %s，不回显）" % (len(t), p))
     return t
+
+
+def _remember(t: str) -> None:
+    """把 Token 记进 SECRETS ⇒ 之后所有命令回显都会被脱敏。"""
+    if t and t not in SECRETS:
+        SECRETS.append(t)
 
 
 # --------------------------------------------------------------------------- 步骤
@@ -286,34 +305,40 @@ def verify(f: dict, slug: str) -> None:
     """🔴 这一步是「不遗漏」的关键：**回头查**两边是不是真的这一版，而不是信命令的退出码。"""
     say("\n⑤ 交叉验证（两个渠道 + 本机）")
     ok = True
-    # 5.1 GitHub：远端 main 的 sha == 本地 HEAD
+    # 5.1 GitHub：远端 main 是否**包含**本地 HEAD
+    #     （判据不是"远端 sha == 本地 HEAD"：发布后继续提交开发件是正常的，那不该判红。）
+    run([GIT, "-C", REPO, "fetch", "origin", "main", "--quiet"], quiet=True)
+    anc = git("merge-base", "--is-ancestor", "HEAD", "origin/main", quiet=True).returncode == 0
     r = run(["gh", "api", "repos/%s/commits/main" % slug, "--jq", ".sha"], quiet=True)
     remote = (r.stdout or "").strip()
-    same = remote == f["head"]
-    say("  [%s] GitHub main = %s ｜ 本地 HEAD = %s" % ("OK" if same else "FAIL",
-                                                   remote[:10] or "?", f["head"][:10]))
-    ok &= same
+    say("  [%s] GitHub main = %s ｜ 本地 HEAD = %s%s"
+        % ("OK" if anc else "FAIL", remote[:10] or "?", f["head"][:10],
+           "" if anc else "（本地 HEAD 不是 origin/main 的祖先 ⇒ 渠道一没跟上）"))
+    ok &= anc
     # 5.2 Registry：这个版本真的在线上了
     try:
         vers = http_json("%s/nodes/%s/versions" % (REGISTRY_API, f["name"]))
         got = [v.get("version") for v in vers] if isinstance(vers, list) else []
     except Exception as e:                                     # noqa: BLE001
-        got, e_msg = [], "%s: %s" % (type(e).__name__, e)
-        say("  [FAIL] 读 registry 失败：%s" % e_msg)
+        got = []
+        say("  [FAIL] 读 registry 失败：%s: %s" % (type(e).__name__, e))
         ok = False
     on = f["version"] in got
     say("  [%s] registry 上的版本：%s%s" % ("OK" if on else "FAIL", got or "（空）",
                                           "（含本版 %s）" % f["version"] if on else
                                           "（**缺本版 %s**）" % f["version"]))
     ok &= on
-    # 5.3 本机：dist/ 与部署副本（可选）
+    # 5.3 本机运行时副本（**不是**公开渠道之一 ⇒ 只提示、不判红；`--go` 会顺手同步）
     deploy = os.environ.get("H3RELAY_DEPLOY")
     if deploy and os.path.isdir(deploy):
         r = run([sys.executable, "tools/sync_deploy_check.py", deploy, "--rev", f["head"]])
-        tail = (r.stdout or "").strip().splitlines()
-        say("  [%s] 部署副本：%s" % ("OK" if r.returncode == 0 else "FAIL",
-                                    next((l for l in tail if l.startswith("OK ")), tail[-1:] or [""])[0]))
-        ok &= r.returncode == 0
+        line = next((l.strip() for l in (r.stdout or "").splitlines()
+                     if l.strip().startswith("OK ")), "")
+        if r.returncode == 0:
+            say("  [OK] 部署副本与本地 HEAD 一致（%s）" % line)
+        else:
+            say("  [⚠] 部署副本与本地 HEAD 不一致（%s）—— 本机运行时还在用旧代码；"
+                "`--go` 会自动同步" % (line or "DIFF"))
     elif deploy:
         say("  ⚠️ H3RELAY_DEPLOY 指了但目录不存在，跳过")
     if not ok:
@@ -325,6 +350,29 @@ def verify(f: dict, slug: str) -> None:
         say("✅ 两个渠道都已发布并交叉验证：GitHub %s ｜ registry %s/%s v%s"
             % (f["head"][:10], f["publisher"], f["name"], f["version"]))
     return ok
+
+
+def sync_deploy(deploy: str, head: str = "HEAD") -> None:
+    """把**本机部署副本**铺到指定提交。
+
+    为什么它是发布的一部分：ComfyUI 运行时加载的是 `custom_nodes/` 下那份副本 ——
+    不同步它，等于"registry 上是新版、你机器上跑的还是旧代码"。
+    ⚠️ 判据用 `git show <rev>:<file>` 的**提交态**逐文件比（忽略 CRLF），**不要 `cp -r` 整包**：
+    `custom_nodes` 里留第二份副本会静默覆盖节点定义。
+    """
+    say("\n⑥ 同步本机部署副本")
+    n = 0
+    for rel in (git("ls-files", quiet=True).stdout or "").split():
+        blob = subprocess.run([GIT, "-C", REPO, "show", "%s:%s" % (head, rel)],
+                              capture_output=True).stdout
+        dst = os.path.join(deploy, rel.replace("/", os.sep))
+        cur = open(dst, "rb").read() if os.path.isfile(dst) else None
+        if cur is None or cur.replace(b"\r\n", b"\n") != blob.replace(b"\r\n", b"\n"):
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            with open(dst, "wb") as fh:
+                fh.write(blob)
+            n += 1
+    say("  铺入 %d 个文件（`sync_deploy_check` 会在第 ⑤ 步复核）" % n)
 
 
 # --------------------------------------------------------------------------- 主流程
@@ -361,6 +409,9 @@ def main() -> int:
     else:
         wait_ci(slug)
     publish(f)
+    deploy = os.environ.get("H3RELAY_DEPLOY")
+    if deploy and os.path.isdir(deploy):
+        sync_deploy(deploy, f["head"])
     verify(f, slug)
     return 1 if FAILED else 0
 
