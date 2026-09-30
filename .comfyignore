@@ -19,6 +19,7 @@ CHANGES.md
 CONTRIBUTING.md
 CODE_OF_CONDUCT.md
 SECURITY.md
+RELEASING.md
 
 # —— git 自身的配置（归档里无意义）——
 .gitignore

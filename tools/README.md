@@ -1,10 +1,10 @@
 # tools — 自检与合规取证
 
-十一个脚本：**九个自检/取证**（零 GPU、秒级，提 PR 前至少跑前四个）+ **一个拼接 CLI**（给不开画布的用户）+ **一个打包器**（产出最小分发集）。
+十二个脚本：**九个自检/取证**（零 GPU、秒级，提 PR 前至少跑前四个）+ **一个拼接 CLI**（给不开画布的用户）+ **一个打包器**（产出最小分发集）+ **一个发布器**（两个渠道成对发布 + 交叉验证）。
 
 | 脚本 | 判什么 | 期望 | 怎么跑 |
 |---|---|---|---|
-| `review_050.py` | **文档—代码一致性**：节点清单 / 参数表 / 断言数 / 版本号 / 示例图槽位 / **L13 英文文档同步闸** / **H3j smoke 期望值** / **H3k registry 元数据** | **89/0** | `python tools/review_050.py` |
+| `review_050.py` | **文档—代码一致性**：节点清单 / 参数表 / 断言数 / 版本号 / 示例图槽位 / **L13 英文文档同步闸** / **H3j smoke 期望值** / **H3k registry 元数据** / **H3l 发布规范在位** | **90/0** | `python tools/review_050.py` |
 | `smoke_nodes.py` | **节点层功能冒烟**：续接七件真跑一遍（不是只看 INPUT_TYPES；🔍 放大节点要上游权重，不在冒烟内） | **16/0** | `python tools/smoke_nodes.py` |
 | `check_ui_workflow.py` | **UI 格式工作流 JSON**：槽位下标、连线两端、类型相容、widgets_values 项数、**音画接线**（落盘节点的 `audio` 是否走了「裁重叠/音频缝」的裁后输出） | 问题合计 **0** 条 | `python tools/check_ui_workflow.py examples/minimal_relay_official.json` |
 | `scan_expression_overlap.py` | 🔍 **合规取证**：与第三方包逐函数「表达层重合」扫描 | 人工判读（**只报数、不定性**） | `python tools/scan_expression_overlap.py <对方仓库路径>` |

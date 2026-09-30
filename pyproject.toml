@@ -16,7 +16,7 @@
 #    ④ `PublisherId` 必须与 registry 网站上 @ 后面那串完全一致，否则发布会被拒。
 [project]
 name = "h3-latent-relay"
-version = "0.6.16"
+version = "0.6.17"
 description = "Latent bridge for MiniMax-H3 multi-segment continuation: the previous segment's AV latent is spliced into this segment's conditioning — zero re-encoding."
 readme = "README.md"
 requires-python = ">=3.10"

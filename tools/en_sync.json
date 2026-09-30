@@ -8,8 +8,8 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "condensed",
-          "h_en": "f85db82e15946679",
-          "h_src": "d914e8389f0aadfe",
+          "h_en": "62e3a76d47f1ac4b",
+          "h_src": "638786e481624ef4",
           "seeded": "by-position"
         },
         {
@@ -72,14 +72,14 @@
           "zh": "文档索引",
           "en": "Documentation index",
           "mode": "condensed",
-          "h_en": "e19bd7e1e463eb4c",
-          "h_src": "f7628d2d425c5357",
+          "h_en": "7e774c76fbb2e674",
+          "h_src": "8bdc15503349e9b8",
           "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-09-30",
-      "src_sha": "f528b85122296c12"
+      "src_sha": "ee2d8e81daa77057"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",

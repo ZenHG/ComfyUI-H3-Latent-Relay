@@ -1258,6 +1258,43 @@ ck("H3k Comfy Registry 元数据齐备（name 不带 ComfyUI / license 为 file|
    not _bad_reg, "%d 处：%s" % (len(_bad_reg), _bad_reg[:6]))
 
 # ============================================================================
+# H3l 发布规范在位（2026-09-30 新增）
+# ============================================================================
+# 🔴 为什么需要它：本仓有**两个**发布渠道（GitHub + Comfy Registry），而它们**各自都会静默地成功一半**
+#    （只 push 不发 ⇒ Manager 里还是旧版；只发不 push ⇒ 那版指向的代码在远端不存在）。
+#    规矩写在 `RELEASING.md`（唯一真相源）+ 执行体 `tools/release.py`，但**规范本身也会腐**：
+#    文档被删、执行体语法坏掉、或者规范被推进用户包 —— 这三种都不会有任何迹象。
+#    ⇒ 用四条廉价断言把"规范还在、还成对、还能跑、还没误发"钉住。
+#    ⚠️ 这里**不查网络**（CI 无外网、也不该在 CI 里碰 registry）—— 真正的交叉验证在
+#       `tools/release.py --verify-only` 里，发布后由人跑（见 RELEASING.md §3 第 ⑤ 步）。
+_rel_doc = os.path.join(KIT, "RELEASING.md")
+_rel_tool = os.path.join(KIT, "tools", "release.py")
+_bad_rel = []
+if not os.path.isfile(_rel_doc):
+    _bad_rel.append("缺 RELEASING.md（发布规范正文）")
+else:
+    _rd_txt = open(_rel_doc, encoding="utf-8").read()
+    for _kw, _why in (("GitHub", "渠道一"), ("Comfy Registry", "渠道二"),
+                      ("tools/release.py", "执行体指针")):
+        if _kw not in _rd_txt:
+            _bad_rel.append("RELEASING.md 里没有 %s（%s）" % (_kw, _why))
+if not os.path.isfile(_rel_tool):
+    _bad_rel.append("缺 tools/release.py（规范说自己有执行体，但文件不在）")
+else:
+    try:
+        import ast as _ast
+        _ast.parse(open(_rel_tool, encoding="utf-8").read())
+    except SyntaxError as _e:
+        _bad_rel.append("tools/release.py 语法错误：%s" % _e)
+# 规范是**开发件**：它自己必须留在用户包外面（否则用户会拿到一堆内部流程）
+_ci_txt2 = open(_ci_path, encoding="utf-8").read() if os.path.isfile(_ci_path) else ""
+if "RELEASING.md" not in _ci_txt2:
+    _bad_rel.append(".comfyignore 没排 RELEASING.md（规范不该发给用户）")
+ck("H3l 发布规范在位且成对（RELEASING.md 提到两个渠道 + 指向 tools/release.py；执行体可编译；"
+   "规范本身被 .comfyignore 排除）",
+   not _bad_rel, "%d 处：%s" % (len(_bad_rel), _bad_rel[:6]))
+
+# ============================================================================
 # H3g 本文件**自己的**期望数（2026-09-25 新增）
 # ============================================================================
 # 🔴 **必须是本文件最后一个 ck()**：它算的是「本文件的总检查数」= 此刻已跑数 + 自己这 1 条。

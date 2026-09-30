@@ -10,7 +10,7 @@ not coupled to any third-party H3 node pack.
 
 | Item | Value |
 |---|---|
-| Version | **0.6.16** (8 nodes; the composite bridge `H3RelayCopyBridge` is the **only** bridge) |
+| Version | **0.6.17** (8 nodes; the composite bridge `H3RelayCopyBridge` is the **only** bridge) |
 | License | **MIT** (third-party attribution in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) |
 | Host | **ComfyUI ≥ 0.37.0 with MiniMax-H3 support** (the host itself is GPL-3.0, see License) |
 
@@ -281,6 +281,7 @@ The Chinese documents are the source of truth; `README_EN.md` and the English `d
 | 🇨🇳 [`docs/10-audio-seam-and-concat.md`](docs/10-audio-seam-and-concat.md) | **audio seam & multi-segment concatenation** — Chinese only for now: seam conventions and tuning guide · **dialogue protection** · criterion limits · track levels · sidecars · **script usage without the canvas** |
 | [`CHANGES.md`](CHANGES.md) | version history with the measurement evidence for each change |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | dev environment · testing discipline · **English-doc sync discipline** · licence terms |
+| [`RELEASING.md`](RELEASING.md) | **release policy (single source of truth)**: GitHub + Comfy Registry must be updated as a pair · one command `tools/release.py` · failure handling · key discipline |
 | [`SECURITY.md`](SECURITY.md) | secrets / dependencies / network behaviour disclosure |
-| [`tools/README.md`](tools/README.md) | the eleven scripts and their expected values (nine self-check/forensic + concat CLI + bundler) |
+| [`tools/README.md`](tools/README.md) | the twelve scripts and their expected values (nine self-check/forensic + concat CLI + bundler + **releaser**) |
 | [`examples/README.md`](examples/README.md) | the two openable workflows (minimal continuation 19 nodes / full flow 45 nodes) · generators |

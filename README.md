@@ -7,7 +7,7 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 
 | 项 | 值 |
 |---|---|
-| 版本 | **0.6.16**（8 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
+| 版本 | **0.6.17**（8 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
 | 许可 | **MIT**（第三方出处见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)） |
 | 宿主 | **ComfyUI ≥ 0.37.0，且带 MiniMax-H3 支持**（宿主自身为 GPL-3.0，见 §许可与出处） |
 
@@ -252,7 +252,8 @@ ComfyUI-H3-Latent-Relay/
 | [`docs/10-audio-seam-and-concat.md`](docs/10-audio-seam-and-concat.md) | **音频缝与多段拼接**：缝的口径与调参指南 · **台词保护** · 判据能力边界 · 音轨档位 · 边车 · **不开画布的脚本用法** |
 | [`CHANGES.md`](CHANGES.md) | 版本史与每次实测证据 |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 开发环境 · 自测纪律 · **英文文档同步纪律** · 许可条款 |
+| [`RELEASING.md`](RELEASING.md) | **发布规范（唯一真相源）**：GitHub + Comfy Registry 两个渠道必须成对、一条命令 `tools/release.py`、失败处置、密钥纪律 |
 | [`SECURITY.md`](SECURITY.md) | 密钥 / 依赖 / 网络行为声明 |
-| [`tools/README.md`](tools/README.md) | 十一个脚本的用途与期望值（九个自检/取证 + 拼接 CLI + 打包器） |
+| [`tools/README.md`](tools/README.md) | 十二个脚本的用途与期望值（九个自检/取证 + 拼接 CLI + 打包器 + **发布器**） |
 | [`examples/README.md`](examples/README.md) | 两份可直接打开的工作流（最小续接 19 节点 / 全流程 45 节点）· 生成器 |
 | [`README_EN.md`](README_EN.md) | **英文精简版**（安装 / 接线 / 节点 / 参数 / 排障 / FAQ）—— 深度推导一律外链本文件与 `docs/` |

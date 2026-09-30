@@ -112,12 +112,13 @@ Combo `options` **全序** / outputs 路数与显示名 / `is_output_node` / 显
 
 | 工具 | 判什么 | 期望 |
 |---|---|---|
-| `tools/review_050.py` | 文档—代码一致性（节点清单 / 参数表 / 断言数 / 版本号 / 示例图槽位 / **三条铁律** / **L13 英文文档同步闸** / **H3j smoke 期望值** / **H3k registry 元数据**） | **89/0** |
+| `tools/review_050.py` | 文档—代码一致性（节点清单 / 参数表 / 断言数 / 版本号 / 示例图槽位 / **三条铁律** / **L13 英文文档同步闸** / **H3j smoke 期望值** / **H3k registry 元数据** / **H3l 发布规范在位**） | **90/0** |
 | `tools/smoke_nodes.py` | 节点层功能冒烟（续接七件真跑一遍；🔍 放大节点要上游权重，不在冒烟内） | **16/0** |
 | `tools/assert_default_exit.py` | 默认出口 = V3（契约 1 + 行为 3） | **4/4** |
 | `tools/sync_deploy_check.py` | 部署副本与指定提交的提交态一致 | 全 `OK` |
 | `tools/ci_env_repro.py` | 在本机**复现 CI 环境**跑任意校验脚本（CI 里宿主 `nodes` 导不进来 ⇒ 两套环境期望数不同） | 直传被跑脚本退出码 |
 | `tools/en_sync.py` | **英文文档同步闸**（中文 = 源、`*_EN.md` = 派生物，节级 hash） | 退出码 `0` |
+| `tools/release.py` | **两个渠道成对发布 + 交叉验证**（GitHub push → 等 CI 绿 → registry publish → 回头查两边是不是这一版）。规范正文 = [`RELEASING.md`](../RELEASING.md) | 退出码 `0`（`--verify-only` 只读） |
 
 CI（`.github/workflows/ci.yml`）按顺序跑：**ruff 静态检查 → 回归五件套（`test_relay_core` · `review_050` ·
 `smoke_nodes` · `test_experimental` · `check_ui_workflow`）→ 默认出口断言 → V3 逐字段一致 → JS 词分发 →
