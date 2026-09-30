@@ -1042,19 +1042,28 @@ for _nm, _st in (("input", _decl_in), ("节点数", _decl_nd), ("项数", _decl_
 # 🔴 2026-09-30 收紧：**配对**校验（原判据"值在集合里"就放过 ⇒ 挡不住不可能的组合）。
 #   实证：ci.yml 头部一处写「跳过它 ⇒ 8 节点」、另一处把 CI 那组数写成与它矛盾的样子 ——
 #   集合判据**全程绿**（两个数字各自都在集合里），是后来 CI 才暴露的。
-#   凡同一行同时给出节点数与 input 数、且个数相同（⇒ 可按出现顺序配对）时，配对必须落在真值里。
+#   凡同一行同时给出节点数与 input 数、且个数相同（⇒ 可按出现顺序配对）时，配对必须落在合法配对里。
+#   ⚠️ **合法配对必须写成与环境无关的常量**：CI 里 review_050 的"两种环境"都跑成 7/103
+#      （CI 的"本机"也导不进宿主 `nodes`）⇒ 若拿"本次检测到的配对"当合法集合，
+#      会把声明里的 8/116 判成非法 —— **2026-09-30 实测把这个检查自己弄红了一次**（刚推上去就被打回）。
+#      常量两侧覆盖法：本机跑验到 (8,116) 与 (7,103)，CI 跑验到 (7,103)；两者合起来覆盖全部两项。
 #   ⚠️ 只扫 `_v3_docs`（4 个声明文件）：`exp/`、`LOCAL-*.md`、tests 注释里的是**历史数字**，
 #      它们本来就该保持旧值（改它们反而抹掉历史），不纳入。
-_V3_PAIRS = [(r[1], r[2]) for _nm, r in _v3_envs if r]
+_V3_LEGIT_PAIRS = [(7, 103), (8, 116)]       # (节点数, input 数)：CI 环境 / 本机环境
 for _fn, _txt in _v3_docs.items():
     for _ln in _txt.splitlines():
         _nds = [int(_v) for _v in _re.findall(r"(\d+)\s*个?\s*节点", _ln)]
         _ins = [int(_v) for _v in _re.findall(r"(\d+)\s*个?\s*input", _ln)]
         if _nds and len(_nds) == len(_ins):
             for _a, _b in zip(_nds, _ins):
-                if (_a, _b) not in _V3_PAIRS:
+                if (_a, _b) not in _V3_LEGIT_PAIRS:
                     _bad_v3.append("%s：%d 节点 / %d input 不是合法配对（合法 %s）"
-                                   % (_fn, _a, _b, sorted(_V3_PAIRS)))
+                                   % (_fn, _a, _b, _V3_LEGIT_PAIRS))
+# 常量本身也要被盯着：本次环境检测到的配对必须落在合法集合里（否则真值变了、常量该更新了）
+for _nm, _r in _v3_envs:
+    if _r and (_r[1], _r[2]) not in _V3_LEGIT_PAIRS:
+        _bad_v3.append("本次环境（%s）检测到 %d 节点 / %d input，不在合法配对常量 %s 里"
+                       % (_nm, _r[1], _r[2], _V3_LEGIT_PAIRS))
 ck("H3h V3 机检的真值出现在 ci.yml·docs/08·README·`__init__` 的声明里"
    "（两种环境各一个数，每种最多 2 个取值；**且同行配对必须合法**）",
    not _bad_v3 and _v3_pass > 0, "%d 处：%s" % (len(_bad_v3), _bad_v3[:6]))
