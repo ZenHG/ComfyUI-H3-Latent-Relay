@@ -151,17 +151,19 @@ CI 会跑**六项**（`.github/workflows/ci.yml`）：回归三件套 + 默认�
 python tools/make_minimal_bundle.py --zip     # → dist/ComfyUI-H3-Latent-Relay(.zip)
 ```
 
-**19 文件 / 626 KB**（zip 213 KB），只带：
+**24 文件 / 789 KB**（zip 260 KB），只带：
 
 | 组 | 文件 |
 |---|---|
-| 运行必需（8） | `__init__.py` · `relay_core.py` · `nodes.py` · `layout_contract.py` · `v3/`×4 |
+| 运行必需（12） | `__init__.py` · `relay_core.py` · `nodes.py` · `layout_contract.py` · `v3/`×4 · `exp/history_anchor_v2/`×3 |
 | 前端（2） | `web/relay_kit_chain.js` · `web/relay_kit_prompt.js` |
 | 示例（3） | `examples/` 的两个工作流 + 其 README |
-| 元数据/法律/必读（6） | `requirements.txt` · `pyproject.toml` · `LICENSE` · `licenses/Apache-2.0.txt` · `THIRD-PARTY-NOTICES.md` · `README.md` |
+| 元数据/法律/必读（7） | `requirements.txt` · `pyproject.toml` · `LICENSE` · `licenses/Apache-2.0.txt` · `THIRD-PARTY-NOTICES.md` · `README.md` · `README_EN.md` |
 
-**不带**：`docs/`(9) · `tests/`(4) · `tools/`(10) · `.github/`(4) · `CHANGES.md` ·
-`CONTRIBUTING.md` · `CODE_OF_CONDUCT.md` · `SECURITY.md` · `.gitattributes` · `.gitignore`。
+**不带**：`docs/` · `tests/` · `tools/` · `.github/` · `CHANGES.md` · `CONTRIBUTING.md` ·
+`CODE_OF_CONDUCT.md` · `SECURITY.md` · `.gitattributes` · `.gitignore`（逐项"为什么"由脚本里的
+`EXCLUDED_NOTE` 维护）。⚠️ **上面这组数字以 [`tools/README.md`](../tools/README.md) 为准**
+（同一口径只在一处写具体值 —— 2026-09-30 实测两处曾互相矛盾：626 KB vs 646 KB）。
 
 **这个脚本做三件事，缺一不可**：
 1. **清单与静态 import 推导交叉校验** —— 从 `__init__.py` 递归找出真正会被 import 的本包文件
