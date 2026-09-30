@@ -20,7 +20,7 @@
 |---|---|---|
 | `concat_segments.py` | 把 N 个段文件拼成一条成片（**与画布上 🧩 按钮同一份核心代码**）：画面流拷贝无损 + 音频逐段对齐 + 四项断言 + 退路 | `python tools/concat_segments.py s1.mp4 s2.mp4 -o film.mp4 [--audio aac256\|aac192\|lossless] [--crf 16] [--pcm p1.st - ...] [--json]` |
 
-退出码 0 = 过四项断言。给 **API / 无头 / 批处理** 用户用，见 README §7.4。
+退出码 0 = 过四项断言。给 **API / 无头 / 批处理** 用户用，见 `docs/10` §7.4。
 
 **打包器（不是自检工具，给分发用）**
 

@@ -45,7 +45,7 @@
 
 > 本示例走 **复合桥** `H3RelayCopyBridge`（0.6.0 起**唯一桥**）：第 0 路 `latent` 接 KSampler 的
 > `latent_image`、第 4 路 `conditioning` 接 `positive`，两条并联生效（钉住区不重绘 + 取景钉帧）。
-> 机制与取舍见主 README「接缝处的对话规避与音频处理」与 `CHANGES.md` 0.4.0 / 0.6.0。
+> 机制与取舍见 `docs/10`（音频域全部细节）与 `CHANGES.md` 0.4.0 / 0.6.0。
 
 ## `fullflow_second_pass_latent_upscale_ui.json`
 
@@ -81,7 +81,7 @@
 > `av_delta_ok` 恒真 = **假绿**（2026-09-22 自己踩过）。官方 `CreateVideo + SaveVideo` 单文件带音轨、
 > 零第三方依赖。**代价**：编码档位不可调（想控 crf/码率就换回 VHS，但段文件必须取 `-audio` 那份）。
 
-**怎么用**：① 装齐本包 8 个节点 + KJNodes + 🔍 的放大权重（主 README §2.1）；② 把 `LoadImage` 换成自己的
+**怎么用**：① 装齐本包 8 个节点 + KJNodes + 🔍 的放大权重（主 README §安装·可选）；② 把 `LoadImage` 换成自己的
 参考图、把 Chain 的 `prompts` 格换成自己的 N 段词（**段数与 `segments` 一致**）；
 ③ 点 Chain 上的 **⏩ 连跑** 出 N 段，再点 **🧩 拼成一条**。手动跑就改段号逐段 Queue。
 
@@ -175,6 +175,6 @@ python tools/review_050.py                                    # 期望 I3 通过
 > 确认自检会**报错**。第一版回归钉子就是因为「期望集与实收集共用同一个 `_ty()`」而恒真，
 > 旧实现下依旧报 0 问题 —— 判据不能与被判对象共用同一个函数。
 
-> 🤖 要走 **API 提交**（脚本/程序化）？见主 README「🤖 API 提交」小节；示例图同样可从前端
+> 🤖 要走 **API 提交**（脚本/程序化）？见 `docs/10` §7.4；示例图同样可从前端
 > 「导出（API）」得到 API 格式。Post 的 `settle_auto`（自适应糊区补偿）与 AudioSeam 的
-> `joined`（整片拼接）是 0.5.0 后期新增能力，详见主 README 参数节。
+> `joined`（整片拼接）是 0.5.0 后期新增能力，详见 `docs/02` 参数手册。

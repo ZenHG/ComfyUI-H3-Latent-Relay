@@ -29,7 +29,7 @@
 | `prompt_target` | `""` | 词写进哪一格。留空 = 自动探测；`683` = 该节点上优先级最高的词格；`683.h3_data` = 点名到字段 |
 | `auto_concat` | `false` | ⏩ 连跑结束**自动拼**成片 |
 | `concat_name` | `""` | 成片文件名（不带扩展名）。留空 = 用落盘的 `run_id`；存到 ComfyUI 的 `output/` |
-| `stage_index` | `0` | **现在跑第几段**（0 起算）。它决定 `prompt` 输出口给的是 `prompts` 里的**第几块**。画布上点 ▶/✔/⏩ 时**自动和桥、落盘、读上段 latent 一起改**；脚本里自己改（见 README §7.4） |
+| `stage_index` | `0` | **现在跑第几段**（0 起算）。它决定 `prompt` 输出口给的是 `prompts` 里的**第几块**。画布上点 ▶/✔/⏩ 时**自动和桥、落盘、读上段 latent 一起改**；脚本里自己改（见 `docs/10` §7.4） |
 | `run_id` | `""` | **断点续跑用**：与桥 / 落盘的 `run_id` 填一样。填了之后每跑一段把进度写进段文件同目录的 `_progress.json`；留空 = 不记进度（一个文件都不多写） |
 | `concat_result` | `""` | **不用填**：拼接成功后显示成片路径（可选中复制）。⚠ 单开一格是因为写在 `status` 里会被下一条状态消息冲掉 |
 
@@ -139,7 +139,7 @@ H3RelayChain.prompt ──► 出词节点的 prompt 输入
 
 **不开画布怎么用**：命令行 `python tools/concat_segments.py s1.mp4 s2.mp4 -o film.mp4`
 （与 🧩 按钮**同一份核心代码**），或直接 `from relay_core import assemble_mp4_segments`，
-或 `POST /h3relay/concat`。三者参数对应关系与脚本示例见 README §7.4。
+或 `POST /h3relay/concat`。三者参数对应关系与脚本示例见 `docs/10` §7.4。
 
 **宿主兼容**：`app.queuePrompt` / `api.fetchApi` 是前端内部接口，缺了就**在状态格里明说**
 （不是静默失效）；`add_stream_from_template`（av>=17）缺了则**自动退回重编码**并在报告里写明原因。

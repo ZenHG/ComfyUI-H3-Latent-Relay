@@ -60,7 +60,7 @@
 //   · `H3RelayChain` 从「无输出」变成「按自己的 `stage_index` 输出 `prompts` 的第 k 块」
 //     （新输出口 `prompt` + 新输入口 `stage_index`）。把 `Chain.prompt → 出词节点.prompt`
 //     接上之后，**画布手点与 API 提交图 JSON 走的是同一个节点** —— 脚本用户也拿到了词分发
-//     （此前它只存在于本文件里，`README §7.4` 因此把 API 侧标成 ❌）。
+//     （此前它只存在于本文件里，`docs/10 §7.4` 因此把 API 侧标成 ❌）。
 //   · 本文件**保留**「把词写进目标格」的老路（老图不受影响），但在没接线时于 `status`
 //     里提示一次，引导走节点化那条路。
 //   · 段号推进从三处扩到**四处**（加 Chain 自己）：它决定输出第几块词。
@@ -350,7 +350,7 @@ async function queuePrompt(chainNode, state, stage) {
         setStatus(
             chainNode,
             "⚠ 这个 ComfyUI 前端没有 app.queuePrompt ⇒ ⏩ 连跑 / 自动拼接排队用不了。" +
-                "「🧩 拼成一条」（拼已跑过的段）仍可用；脚本用户见 README §7.4 的 CLI/库调用路。"
+                "「🧩 拼成一条」（拼已跑过的段）仍可用；脚本用户见 docs/10 §7.4 的 CLI/库调用路。"
         );
         return null;
     }
@@ -568,7 +568,7 @@ async function concatFilm(chainNode, state, auto = false) {
     );
     if (typeof api?.fetchApi !== "function") {
         setStatus(chainNode, "⚠ 这个 ComfyUI 前端没有 api.fetchApi ⇒ 画布内拼接用不了。" +
-            "脚本用户请用 tools/concat_segments.py 或直接调 relay_core（README §7.4）。");
+            "脚本用户请用 tools/concat_segments.py 或直接调 relay_core（docs/10 §7.4）。");
         return;
     }
     try {

@@ -9,7 +9,7 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 |---|---|
 | 版本 | **0.6.15**（8 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
 | 许可 | **MIT**（第三方出处见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)） |
-| 宿主 | **ComfyUI ≥ 0.37.0，且带 MiniMax-H3 支持**（宿主自身为 GPL-3.0，见 §许可） |
+| 宿主 | **ComfyUI ≥ 0.37.0，且带 MiniMax-H3 支持**（宿主自身为 GPL-3.0，见 §许可与出处） |
 
 > 🔴 **一条铁律**：**每个功能都有两条用法 —— 画布手动（多数用户）与 API 提交图 JSON，二者必须走同一套节点实现。**
 > 只写在脚本里的功能不算本包的功能（判据见 [`CONTRIBUTING.md`](CONTRIBUTING.md)）。
@@ -54,7 +54,7 @@ anchor 与采样 latent 不同源（会漂）、只能锚第 0 帧。本包直�
 | **带 MiniMax-H3 支持的 ComfyUI ≥ 0.37.0** | ✅ | 需要 `comfy_extras/nodes_minimax_h3.py` 与消费 `minimax_keyframes` / `minimax_refs` 的 `comfy/model_base.py`。装在旧版上节点能注册但**续接静默无效** |
 | `torch` | ✅ | **顶层 import**（缺了整包注册失败），ComfyUI 自带 |
 | `safetensors` | ✅ | 延迟 import（缺了只在落盘那步报错），ComfyUI 自带 |
-| `av >= 17` | 拼接时 | 「拼成一条」与 `tools/concat_segments.py` 需要；缺了会**明确报错**，不会静默退化 |
+| `av >= 17` | 拼接时 | 「拼成一条」与 `tools/concat_segments.py` 需要（宿主自带）。缺模块会**明确报错**并给出安装指引；PyAV 太旧、拿不到流拷贝模板时会**报出原因并退回重编码**（报告里写明），不静默 |
 | 社区节点包 `Comfyui_Minimax_h3_latent_Upscaler` + 其权重 | 🔍 放大节点需要 | 见 §安装·可选 |
 
 `minimax_keyframes` / `minimax_refs` / `resolved_frame_index` 全是 ComfyUI **原生协议**：
@@ -164,18 +164,23 @@ ComfyUI-H3-Latent-Relay/
 ├── nodes.py               # 节点层（8 个节点的输入输出与人话报告），直接 import relay_core
 ├── layout_contract.py     # 布局契约：找不到上游时放行 + 留痕，只在真的不一致时 raise
 ├── v3/                    # V3 外壳（io.ComfyNode + comfy_entrypoint）；V1 走 NODE_CLASS_MAPPINGS
+├── exp/history_anchor_v2/ # E1' 时不变历史锚（顶层 import ⇒ 必需；无 _tiha.json 即不生效）
 ├── web/                   # 前端 JS：🧩 拼接按钮、Chain 词分发（画布用；脚本用户见 docs/10 §7.4）
 ├── examples/              # 两个可直接打开的工作流：最小续接（19 节点）与全流程（45 节点）
 ├── docs/                  # 深度文档 01–10（原理 / 参数 / 采样链 / 画布 / 排障 / 脚本 / Chain / 测试 / 观测 / 音频）
 ├── tests/                 # 离线自测（零 GPU）：413 项断言 + V3 逐字段 + 词分发纯函数
 ├── tools/                 # 自检 / 取证 / 拼接 CLI / 打包器（含英文文档同步闸 en_sync.py）
 ├── licenses/              # 随包分发的第三方许可全文
+├── dist/                  # 打包器的产出（最小分发集 + zip，不入库）
 ├── pyproject.toml         # 元数据（ComfyUI 启动时真读：requires-comfyui / 依赖 / Registry 字段）
-└── requirements.txt       # 供 ComfyUI-Manager 安装依赖
+├── requirements.txt       # 供 ComfyUI-Manager 安装依赖
+└── （顶层还有 README_EN.md · CHANGES.md · CONTRIBUTING.md · SECURITY.md ·
+      CODE_OF_CONDUCT.md · THIRD-PARTY-NOTICES.md · LICENSE · .github/）
 ```
 
-安装后**运行期只用到** `__init__.py` · `relay_core.py` · `nodes.py` · `layout_contract.py` · `v3/` · `web/`
-（`dist/` 里的最小分发集就是这 8 个文件 + 示例 + 元数据）；`docs/` `tests/` `tools/` 都是开发件。
+安装后**运行期真正会被加载的**只有 `__init__.py` · `relay_core.py` · `nodes.py` · `layout_contract.py` ·
+`v3/`（4 文件）· `exp/history_anchor_v2/`（3 文件，被 `nodes.py` 顶层 import，所以必需）· `web/`（2 个 JS）
+—— `dist/` 里的最小分发集就是这些 + 示例 + 元数据；`docs/` `tests/` `tools/` 都是开发件。
 
 ---
 
@@ -193,7 +198,7 @@ ComfyUI-H3-Latent-Relay/
 | 8 | **`🔍 放大在一条链里只做一次**：本包放大节点与第三方渐进采样器（SelfLift 等）内置的那次**是同一件事**，都开 = 同一段 latent 被放大两次 |
 | 9 | **`chunks=1` 才是与上游整段推理一致的唯一路径**：`chunks>1` 会**改画面**（3D 体积注意力被切断），只在 OOM 时升，升完**必须重看缝** |
 | 10 | 🔴 **续接契约取原生域**：`Latent 存` 接在放大**之前**；**二采的 guider 不接桥的 `conditioning`**（网格不同 ⇒ 当场炸） |
-| 11 | ⚠️ **语义以代码与报告为准**：`diagnostics` 默认关（三路纯打印、不参与裁量）；旧文档里的「沉降 1」是 0.5.0 前口径 |
+| 11 | `diagnostics` 默认关（三路纯打印、**不参与裁量**）；想看 DTW / 裁量→跳跃曲线 / 外观漂移就打开它。⚠️ 网上旧文里的「沉降 1」是 0.5.0 前口径 —— **以本页与节点报告为准** |
 | 12 | 🔴 **每个功能的画布路与脚本路必须是同一套节点实现**（见文首铁律）；纯前端能力（🧩 按钮、Chain 面板格）脚本提交 JSON 时**会被忽略**，脚本用户走 [`docs/10`](docs/10-audio-seam-and-concat.md) §7.4 的三条非 UI 路径 |
 
 ---

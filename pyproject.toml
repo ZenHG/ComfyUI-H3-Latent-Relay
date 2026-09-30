@@ -25,6 +25,7 @@ dependencies = [
 # 第三方署名：THIRD-PARTY-NOTICES.md；随包分发的许可全文：LICENSE、licenses/Apache-2.0.txt
 # ⚠️ 运行时宿主 ComfyUI 是 GPL-3.0（不复制其代码，但进程内 import），见 THIRD-PARTY-NOTICES.md §一·C
 [project.urls]
+Repository = "https://github.com/ZenHG/ComfyUI-H3-Latent-Relay"
 Homepage = "https://github.com/ZenHG/ComfyUI-H3-Latent-Relay"
 Issues = "https://github.com/ZenHG/ComfyUI-H3-Latent-Relay/issues"
 
@@ -48,7 +49,9 @@ ignore = [
 [tool.comfy]
 requires-comfyui = ">=0.37.0"
 
-# 若要发布到 Comfy Registry，再取消注释并填上 PublisherId（在 registry.comfy.org 注册后获得）
-# PublisherId = "your-publisher-id"
-# DisplayName = "H3 Relay Kit"
-# Icon = ""
+# —— Comfy Registry 发布所需 ——
+# PublisherId：在 registry.comfy.org 注册发布者后获得的 ID（全局唯一、发布后不可更改）。
+#   必须与网站 @ 后面的 ID 完全一致，否则发布会被拒。
+PublisherId = "zenhg"     # TODO: 改成你自己的 PublisherId
+DisplayName = "H3 Relay Kit"
+# Icon = ""             # 可选：节点图标 URL

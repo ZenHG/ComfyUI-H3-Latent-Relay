@@ -62,7 +62,7 @@ under `output/relay_kit/<run_id>/`). Mechanism and measurements: [`docs/01`](doc
 | **ComfyUI ≥ 0.37.0 with MiniMax-H3 support** | ✅ | needs `comfy_extras/nodes_minimax_h3.py` and a `comfy/model_base.py` that consumes `minimax_keyframes` / `minimax_refs`. On an older ComfyUI the nodes register but **continuation silently does nothing** |
 | `torch` | ✅ | **top-level import** (without it the whole pack fails to register); bundled with ComfyUI |
 | `safetensors` | ✅ | lazy import (only the save step fails if missing); bundled with ComfyUI |
-| `av >= 17` | for concatenation | needed by "concatenate" and `tools/concat_segments.py`; if missing you get an **explicit error**, never a silent downgrade |
+| `av >= 17` | for concatenation | needed by "concatenate" and `tools/concat_segments.py` (bundled with the host). A missing module **errors explicitly** with install instructions; if PyAV is too old to provide the stream-copy template it **reports why and falls back to re-encoding** (stated in the report) — never silent |
 | community pack `Comfyui_Minimax_h3_latent_Upscaler` + its weights | 🔍 upscale node only | see Install · optional |
 
 `minimax_keyframes` / `minimax_refs` / `resolved_frame_index` are all ComfyUI **native protocols**: zero
@@ -183,19 +183,24 @@ ComfyUI-H3-Latent-Relay/
 ├── nodes.py               # node layer (the 8 nodes' inputs, outputs and human-readable reports)
 ├── layout_contract.py     # layout contract: pass through + leave a trace when upstream is missing, raise only on a real mismatch
 ├── v3/                    # V3 shell (io.ComfyNode + comfy_entrypoint); V1 goes through NODE_CLASS_MAPPINGS
+├── exp/history_anchor_v2/ # E1' time-invariant history anchor (top-level import ⇒ required; inert without _tiha.json)
 ├── web/                   # front-end JS: the 🧩 concat button, Chain prompt distribution (canvas only)
 ├── examples/              # two openable workflows: minimal continuation (19 nodes) and full flow (45 nodes)
 ├── docs/                  # deep docs 01–10 (mechanism / parameters / sampling / canvas / troubleshooting / scripting / chain / tests / metrics / audio)
 ├── tests/                 # offline self-test (zero GPU): 413 assertions + V3 parity + prompt-dispatch pure functions
 ├── tools/                 # self-checks / forensic tools / concat CLI / bundler (incl. the en_sync docs gate)
 ├── licenses/              # third-party license texts shipped with the pack
+├── dist/                  # bundler output (minimal distribution set + zip; not tracked)
 ├── pyproject.toml         # metadata (really read by ComfyUI at startup: requires-comfyui / deps / Registry fields)
-└── requirements.txt       # dependencies for ComfyUI-Manager
+├── requirements.txt       # dependencies for ComfyUI-Manager
+└── (top level also has README_EN.md · CHANGES.md · CONTRIBUTING.md · SECURITY.md ·
+     CODE_OF_CONDUCT.md · THIRD-PARTY-NOTICES.md · LICENSE · .github/)
 ```
 
-At runtime only `__init__.py` · `relay_core.py` · `nodes.py` · `layout_contract.py` · `v3/` · `web/` are
-loaded (the minimal distribution set in `dist/` is those 8 files + examples + metadata); `docs/`, `tests/`
-and `tools/` are development-only.
+At runtime only `__init__.py` · `relay_core.py` · `nodes.py` · `layout_contract.py` · `v3/` (4 files) ·
+`exp/history_anchor_v2/` (3 files, imported at the top of `nodes.py`, hence required) · `web/` (2 JS files)
+are actually loaded — the minimal distribution set in `dist/` is exactly those plus examples and metadata;
+`docs/`, `tests/` and `tools/` are development-only.
 
 ---
 
@@ -213,7 +218,7 @@ and `tools/` are development-only.
 | 8 | **🔍 Upscale once per chain**: this pack's upscale node and the one **built into** third-party progressive samplers (SelfLift etc.) are the same operation — enabling both upscales the same latent twice |
 | 9 | **`chunks=1` is the only path consistent with upstream whole-segment inference**: `chunks>1` **changes the picture** (3D volumetric attention is cut); raise it only under OOM and **re-check the seam** |
 | 10 | 🔴 **The continuation contract is taken in the native domain**: LatentSave goes **before** the upscale; the **second pass's guider must not connect the bridge's `conditioning`** (different grid ⇒ it explodes) |
-| 11 | ⚠️ **The code and the reports are authoritative**: `diagnostics` is off by default (three print-only passes, no effect on trimming); older docs' "settle 1" is pre-0.5.0 |
+| 11 | `diagnostics` is off by default (three print-only passes, **no effect on trimming**); enable it for DTW / trim-amount→jump curves / appearance drift. ⚠️ The "settle 1" seen in older posts is pre-0.5.0 — **trust this page and the node reports** |
 | 12 | 🔴 **The canvas path and the script path must be the same node implementation** (see the iron rule at the top); purely front-end capabilities (the 🧩 button, Chain panel fields) **are ignored** when a script submits JSON — script users take the three non-UI paths in [`docs/10`](docs/10-audio-seam-and-concat.md) §7.4 |
 
 ---

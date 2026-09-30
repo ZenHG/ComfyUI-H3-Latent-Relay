@@ -569,7 +569,7 @@ except Exception as e:  # noqa: BLE001
     check("11.12 run 能吃下音轨/画质两个新参数（**kwargs 兜住）", False, repr(e))
 
 # 11.13~11.19 0.6.15 词分发**节点化**（铁律一：UI 与 API 必须同一套实现，且必须基于节点）
-#   背景：0.6.7~0.6.14 词分发只存在于前端 JS（web/relay_kit_prompt.js）⇒ README §7.4
+#   背景：0.6.7~0.6.14 词分发只存在于前端 JS（web/relay_kit_prompt.js）⇒ `docs/10` §7.4
 #   把 API/脚本侧的「词分发」标成 ❌。那正是铁律一禁止的「只有 UI 路径才有的分支（或反过来）」。
 #   0.6.15 把「第 k 段喂第 k 块词」做成 Chain 节点的**输出口** ⇒ 画布连线与 API 提交图 JSON
 #   走同一个节点；核心分块算法在 relay_core（唯一权威实现）。
