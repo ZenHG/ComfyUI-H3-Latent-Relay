@@ -79,8 +79,9 @@ git clone https://github.com/ZenHG/ComfyUI-H3-Latent-Relay.git
 
 Or download the ZIP → unpack → rename the folder to `ComfyUI-H3-Latent-Relay` → put it in `custom_nodes/`.
 
-Or **ComfyUI Manager → Custom Nodes Manager → search `h3-latent-relay`** (the registry pack name differs from
-the repository name because the registry forbids "ComfyUI" in a pack name).
+Or **ComfyUI Manager → Custom Nodes Manager → search `h3-latent-relay`**
+(node page: <https://registry.comfy.org/nodes/h3-latent-relay>). The pack name differs from the repository
+name because the registry forbids "ComfyUI" in a pack name.
 
 **Restart the ComfyUI backend afterwards** (ComfyUI-Manager → *Restart*; otherwise restart the Python
 process) — refreshing the browser alone does not load new nodes. Search the node list for `🔗 H3 续接` (7)

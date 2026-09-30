@@ -32,8 +32,8 @@
           "zh": "安装",
           "en": "Install",
           "mode": "condensed",
-          "h_en": "d653270830582db1",
-          "h_src": "ecd842b9818640a1",
+          "h_en": "87643b50ffd75fb2",
+          "h_src": "8f0a867bad74ab04",
           "seeded": "by-position"
         },
         {
@@ -79,7 +79,7 @@
       ],
       "acks": [],
       "stamped": "2026-09-30",
-      "src_sha": "4b76b5538fd480e4"
+      "src_sha": "f528b85122296c12"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",

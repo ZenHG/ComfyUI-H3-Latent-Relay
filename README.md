@@ -71,8 +71,9 @@ git clone https://github.com/ZenHG/ComfyUI-H3-Latent-Relay.git
 
 或下载 ZIP → 解压 → 文件夹改名为 `ComfyUI-H3-Latent-Relay` → 放进 `custom_nodes/`。
 
-或 **ComfyUI Manager → Custom Nodes Manager → 搜 `h3-latent-relay`**（Comfy Registry 的包名与仓库名
-不同是官方要求：包名不允许带 "ComfyUI"）。
+或 **ComfyUI Manager → Custom Nodes Manager → 搜 `h3-latent-relay`**
+（节点页：<https://registry.comfy.org/nodes/h3-latent-relay>）。包名与仓库名不同是官方要求：
+包名不允许带 "ComfyUI"。
 
 **装完必须重启 ComfyUI 后端**（ComfyUI-Manager 点 *Restart*；没装就重启 Python 进程）——
 仅刷新浏览器不会加载新节点。节点列表里搜 `🔗 H3 续接`（7 个）+ `🔍 H3 潜空间分块放大` 即为全部 8 个。
