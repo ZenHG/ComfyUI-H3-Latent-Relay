@@ -70,7 +70,7 @@ TAIL_INJECTED = {"upload", "lora面板", "视频上传", "音频上传", "image_
 SAVE_LIKE = {"CreateVideo", "SaveVideo", "SaveWEBM", "SaveAnimatedWEBP",
              "VHS_VideoCombine", "banzhangVideoCombine"}
 #   原始音频源：**未裁** —— 它们的音频长度 = 整段 video latent 对应的全长，
-#   而画面会被「裁重叠」砍掉头部 ⇒ 直连落盘节点必然音画不同步。
+#   而画面会被「Trim AV」砍掉头部 ⇒ 直连落盘节点必然音画不同步。
 RAW_AUDIO_SRC = {"VAEDecodeAudio", "LoadAudio", "VHS_LoadAudio", "LoadAudioUpload",
                  "AudioUpload", "LoadAudioFromPath"}
 
@@ -150,7 +150,7 @@ def local_pack_defs(comfyui_root: str = "") -> dict:
             it = cls.INPUT_TYPES()
         except Exception as e:                                    # noqa: BLE001
             # 🔴 2026-09-30 加：**逐节点容错 + 明说跳过**（不是静默）。
-            #   实证（CI 首跑本工具）：`🔍 潜空间分块放大` 的 INPUT_TYPES 会走宿主注册表
+            #   实证（CI 首跑本工具）：`🔍 H3 Relay · Latent Upscale` 的 INPUT_TYPES 会走宿主注册表
             #   ⇒ 宿主 `comfy.model_management` 在 GPU 探测上抛
             #   `AssertionError: Torch not compiled with CUDA enabled`（CI 装的是 CPU-only torch）
             #   ⇒ 整个工具**崩在这里**，一个节点的问题罚掉全部校验。
@@ -368,10 +368,10 @@ def check_av_link(wf):
         if ot in RAW_AUDIO_SRC:
             out.append("node %s %s: `audio` 接的是 **%s**（未裁的原始音频），"
                        "而图里有续接桥 ⇒ 画面裁了音频没裁 ⇒ 音画不同步（每缝 ~0.9s、逐段累积）。"
-                       "改接「裁重叠」的 `[1] audio`（若用了音频缝，则接它的 `[0] audio`）"
+                       "改接「Trim AV」的 `[1] audio`（若用了音频缝，则接它的 `[0] audio`）"
                        % (n["id"], n.get("type"), ot))
         elif ot == "H3RelayTrimAV" and o[1] != 1:
-            out.append("node %s %s: `audio` 接的是「裁重叠」的第 %s 路 —— 那不是音频"
+            out.append("node %s %s: `audio` 接的是「Trim AV」的第 %s 路 —— 那不是音频"
                        "（第 1 路才是 `audio`）" % (n["id"], n.get("type"), o[1]))
     return out
 

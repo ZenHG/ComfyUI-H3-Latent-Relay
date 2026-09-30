@@ -28,7 +28,7 @@
 
 **只有两种情况需要继续往下看**：
 
-1. **画面细节/清晰度**不满意 → 先看下面「采样链」这一刀，再看「参数 → 续接后处理 Post」；
+1. **画面细节/清晰度**不满意 → 先看下面「采样链」这一刀，再看「参数 → Post」；
 2. **缝上还剩极轻微的过渡**、想把最后 1% 也压掉 → 看「两条续接路线：怎么选」与「参数」。
 
 ### 🎛 采样链：两条路的取舍（通用说明，选哪条由你决定）
@@ -83,14 +83,14 @@
 | 显存 / 时间 | 最贵 | **最省** | 中（一采在原生域、二采在高分辨率） |
 | 钉帧（`conditioning` 侧） | ✅ 全程 | ⚠️ 过渡点换锚 | ✅ **一采全程**（二采侧**必须放开**，否则当场炸：`docs/05` §10.9） |
 | 缝区钉住（`latent` 掩码侧） | ✅ | ⚠️ 掩码边界随低分辨相降采样（本节开头那笔账） | ✅（一采侧） |
-| 链外依赖 | — | 需第三方渐进采样器 | 需本包 `🔍 潜空间分块放大`（+ 作者的权重，见主 README §安装·可选） |
+| 链外依赖 | — | 需第三方渐进采样器 | 需本包 `🔍 H3 Relay · Latent Upscale`（+ 作者的权重，见主 README §安装·可选） |
 | 适合 | **画面细节优先** | 显存/时间受限，音频缝比画面更要紧 | 显存只够原生域、又不想接受渐进链的细节上限 |
 
 **走两遍法时的关键纪律**（本文件 §4.1 有完整 12 步）：放大属**交付支路，不进续接契约** ——
 `Latent 存` 要接在放大**之前**，否则下一段拿到的就是放大过的 latent，再过一次放大 = 双倍漂移。
 
 🔴 **② 和 ③ 只能选一个，别串联**：渐进采样器**内置**的那次提升（SelfLift 叫 `latent_upsample`）
-与本包 `🔍 潜空间分块放大` **调用同一个第三方模型、同一份权重、做的是同一件事**
+与本包 `🔍 H3 Relay · Latent Upscale` **调用同一个第三方模型、同一份权重、做的是同一件事**
 （都只吃 24 通道 H3 潜空间权重，都放在 `models/latent_upscale_models/`）。
 两个都开 = 同一段 latent 被放大两次 ⇒ 漂移叠加。
 判据：**同一条链里放大只该发生一次** —— 要么在采样器内部（②），要么作为独立节点夹在两遍之间（③）。
@@ -134,17 +134,17 @@
 
 ```
 ① 出词（官方 MiniMaxH3ReferenceToVideo）        positive + LATENT 两路都出
-② 🔗 续接 Latent 读   ☆ 上一段落盘（段号 −1，自动）
-③ 🔗 续接 拷贝桥      ← ①LATENT + ②context_latent；[3]conditioning → **只喂一采的 guider**
+② 🔗 H3 Relay · Latent Load   ☆ 上一段落盘（段号 −1，自动）
+③ 🔗 H3 Relay · Copy Bridge      ← ①LATENT + ②context_latent；[3]conditioning → **只喂一采的 guider**
 ④ 一采 SamplerCustomAdvanced（原生分辨率，guider ← ③[3]）
-⑤ 🔗 续接 Latent 存   ☆ ← ④ 输出            ★必须接在放大**之前**
-⑥ 🔍 潜空间分块放大   ← ④ → + SetLatentNoiseMask（钉住头 7 个 latent 帧）
+⑤ 🔗 H3 Relay · Latent Save   ☆ ← ④ 输出            ★必须接在放大**之前**
+⑥ 🔍 H3 Relay · Latent Upscale   ← ④ → + SetLatentNoiseMask（钉住头 7 个 latent 帧）
 ⑦ 二采 SamplerCustomAdvanced（在高分辨率上）guider ← **① positive**（🔴 不是 ③[3]，见 `docs/05` §10.9）
 ⑧ VAEDecode ← ⑦ 画面 ／ VAEDecodeAudio ← ④ 音频   ★音频全程不走 SR 与二采
-⑨  续接 音频缝 ← ⑧音频 → 🔗 续接 裁重叠（音画同裁 + 落 PCM 边车）← ⑧画面
-⑩ 🔗 续接 后处理 Post ← ⑨（guide ← 裁重叠[3] prev_tail；20 个旋钮默认全 0 = 逐位直通）
+⑨  续接 音频缝 ← ⑧音频 → 🔗 H3 Relay · Trim AV（音画同裁 + 落 PCM 边车）← ⑧画面
+⑩ 🔗 H3 Relay · Post ← ⑨（guide ← 裁重叠[3] prev_tail；20 个旋钮默认全 0 = 逐位直通）
 ⑪ CreateVideo → SaveVideo（单文件带音轨）
-⑫ 🔗 续接 连跑 Chain：`prompts` 用 `---` 分块 ⇒ 连跑逐段换词（**0.6.15 起把 `Chain.prompt` 连到出词节点的 `prompt`，脚本提交 JSON 也同功能**）；跑完点 🧩 拼成一条 直接出成片
+⑫ 🔗 H3 Relay · Chain：`prompts` 用 `---` 分块 ⇒ 连跑逐段换词（**0.6.15 起把 `Chain.prompt` 连到出词节点的 `prompt`，脚本提交 JSON 也同功能**）；跑完点 🧩 拼成一条 直接出成片
 ```
 
 - 🔴 **二采不接桥的 `conditioning`**：钉帧锚（`minimax_keyframes`）与本段目标**必须同网格**，
@@ -165,7 +165,7 @@
 **第 1 段**：桥 `[2]` 输出 `0` → 裁重叠原样通过；桥不读上下文（直通）。
 **第 2 段起**：填好 `run_id` + `stage_index`，桥自己从
 `output/relay_kit/<run_id>/stage_NNNNN.safetensors` 读上一段。
-想在图上把来源画出来（或断点续跑换源），就接 `🔗 H3 续接 Latent 读`（`[0] context_latent` → 桥 `[1]`）。
+想在图上把来源画出来（或断点续跑换源），就接 `🔗 H3 Relay · Latent Load`（`[0] context_latent` → 桥 `[1]`）。
 
 只要某节点**输出 `CONDITIONING` + `LATENT`**，接法就一样——把它替掉图里的出词节点即可。
 

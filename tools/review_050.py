@@ -35,7 +35,7 @@ OK, BAD = [], []
 def _unwrap(res):
     """节点返回 {"ui": …, "result": …} 时取 result（宿主把 ui 收进 history.outputs）。
 
-    0.6.7 起「裁重叠」/「音频缝」用 ui 键回显 PCM 边车路径 ⇒ 直接 unpack 节点返回的地方
+    0.6.7 起「Trim AV」/「Audio Seam」用 ui 键回显 PCM 边车路径 ⇒ 直接 unpack 节点返回的地方
     必须过这一层（否则报 "expected 3, got 2"）。
     """
     return res["result"] if isinstance(res, dict) and "result" in res else res
@@ -74,7 +74,7 @@ _missing = [n for n in _reg if n not in _init]
 ck("A2 __init__.py 头注释/清单含全部节点", not _missing, "缺=%s" % _missing)
 
 _readme = open(os.path.join(KIT, "README.md"), encoding="utf-8").read()
-# ⚠ README 的「节点」表用**显示名**，且常写成 `🔗 **H3 续接裁重叠**`（加粗把字符串拆开）
+# ⚠ README 的「节点」表用**显示名**，且常写成 `🔗 **H3 Relay · Trim AV**`（加粗把字符串拆开）
 #   ⇒ 必须**去掉 markdown 标记**再比，否则是假阳性。
 _readme_flat = _readme.replace("*", "").replace("`", "")
 _miss_rm = [n for n in _reg if N.NODE_DISPLAY_NAME_MAPPINGS[n] not in _readme_flat]

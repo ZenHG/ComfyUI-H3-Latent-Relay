@@ -1363,7 +1363,7 @@ def audio_seam_patch(audio: Any, bed_audio: Any, patch: float = AUDIO_SEAM_PATCH
             if _safe < int(round(AUDIO_SEAM_PATCH_GUARD_MIN_S * sr)):
                 return audio, ("[H3 Relay] 音频缝：🛡 patch 台词守卫 —— 本段头部台词 @%.2fs 太靠前\n"
                                "           （< 最小保护窗 %.2fs）⇒ patch 自动关闭（0），本段头部原样保留。\n"
-                               "           缝处平滑交回「裁重叠」与出词侧段首留白纪律（docs/06）。"
+                               "           缝处平滑交回「Trim AV」与出词侧段首留白纪律（docs/06）。"
                                % (_onset / float(sr), AUDIO_SEAM_PATCH_GUARD_MIN_S))
             guard_note = ("｜ 🛡 patch 台词守卫：本段头部台词 @%.2fs ⇒ patch 自动 %.2f→%.2fs（避让台词）"
                           % (_onset / float(sr), float(n) / sr, _safe / float(sr)))
@@ -2691,7 +2691,7 @@ def describe_head_jump(images: torch.Tensor, scan: int = 40,
                 "但位置超出自动沉降上限（%d 帧）→ 大概率是本段自己的切镜，不是接缝，不动刀。"
                 % (j, j + 1, jump, baseline, ratio, MAX_SETTLE))
     return ("[H3 Relay] ⚠ 接缝自检：第 %d→%d 帧有突变（%.2f vs 基线 %.2f，比值 %.1f×）\n"
-            "            → 把「续接裁重叠」的 settle_frames 从 -1（自动）改成 %d 再跑"
+            "            → 把「Trim AV」的 settle_frames 从 -1（自动）改成 %d 再跑"
             "（多裁掉突变前那帧）。\n"
             "            别改 trim_frames —— 那一格已被连线接管，前端会藏起来，改不了。"
             % (j, j + 1, jump, baseline, ratio, j + 1))
@@ -3475,7 +3475,7 @@ def drift_curve(stats, ref_idx: int = 0):
 #     是编码器产物、不是错位 ⇒ 拼接必须显式处理，别指望流拷贝替我们校准。
 AV_CONCAT_VIDEO_EXTS = (".mp4", ".m4v", ".mov", ".mkv", ".webm")
 
-# 「裁重叠」回显 PCM 边车用的 ui 键（宿主把它原样收进 history.outputs[node_id]）。
+# 「Trim AV」回显 PCM 边车用的 ui 键（宿主把它原样收进 history.outputs[node_id]）。
 #   用回显而不是"按命名约定去翻目录"：段文件的命名是用户定的（SaveVideo 的 filename_prefix），
 #   本包不该猜；而节点自己写的文件由它自己报路径，最不容易错。
 PCM_UI_KEY = "h3relay_pcm"
@@ -3528,7 +3528,7 @@ def assert_segments_joinable(clips):
     """拼接前的**逐段体检** → ``{"ok","problems","warnings"}``。查三件：
 
       ① 没有视频流 / 帧数为 0；② 各段分辨率·fps·音频规格不一致；③ 音频比视频长**超过 1 帧**
-      （= 该段音频很可能**绕过了「裁重叠」**：画面裁了、音频没裁 ⇒ 每段差 ~0.9s 且逐段累积）。
+      （= 该段音频很可能**绕过了「Trim AV」**：画面裁了、音频没裁 ⇒ 每段差 ~0.9s 且逐段累积）。
     """
     clips = list(clips)
     if not clips:
@@ -3553,7 +3553,7 @@ def assert_segments_joinable(clips):
                                     % (n, label, c.get(k), ref.get(k)))
         if c.get("has_audio") and c.get("fps") and c["a_v_delta"] > 1.0 / c["fps"] + 0.02:
             problems.append(
-                "第 %d 段音频比视频长 %.4fs（> 1 帧 %.4fs）——该段音频很可能**绕过了「裁重叠」**："
+                "第 %d 段音频比视频长 %.4fs（> 1 帧 %.4fs）——该段音频很可能**绕过了「Trim AV」**："
                 "画面裁了头部重叠帧、音频没裁。请把落盘节点的 audio 改接「裁重叠 [1] audio」"
                 "（或经「音频缝 [0] audio」），见主 README「使用方法」。"
                 % (n, c["a_v_delta"], 1.0 / c["fps"]))
@@ -3567,7 +3567,7 @@ LOSSLESS_AUDIO_CODECS = ("pcm_s16le", "pcm_s24le", "pcm_f32le")
 
 
 def _load_pcm_sidecar(path, rate, layout):
-    """读「裁重叠」落的 PCM 边车 → ``numpy (channels, samples) float32``；不可用返回 None。
+    """读「Trim AV」落的 PCM 边车 → ``numpy (channels, samples) float32``；不可用返回 None。
 
     **不可用就返回 None、由调用方退回 mp4 解码路**（不 raise）——边车是加速/提质手段，
     不该因为它被删了/换了采样率就整条链拼不出来。
@@ -3731,7 +3731,7 @@ def concat_mp4_segments(paths, out_path, *, crf=16, preset="medium", audio_bitra
                 # 容器里那份音频的样本数 —— 用来判「边车与落盘音频同源吗」（护栏，见下）。
                 n_cont = int(round(_secs(ain) * rate)) if ain is not None else 0
                 # 🔴 护栏容差：边车必须与**本段落盘音频同源**。
-                #   为什么必须有：音频链上「裁重叠」之后可能还有本包别的音频节点
+                #   为什么必须有：音频链上「Trim AV」之后可能还有本包别的音频节点
                 #   （典型 = 音频缝：patch 长度守恒、**J-cut 会缩短 align 秒**）。
                 #   拿链上更靠前的边车去拼，成片音轨就会**绕过那次处理**（甚至错位）。
                 #   容差怎么定（按容器事实）：段容器音频 = 视频 + priming(~33–53ms) + 尾填充
@@ -4078,7 +4078,7 @@ def pick_video_outputs(outputs):
 
 
 def pick_pcm_outputs(outputs):
-    """从 history 的 ``outputs`` 里挑出**「裁重叠」落的 PCM 边车**（纯函数，便于单测）。
+    """从 history 的 ``outputs`` 里挑出**「Trim AV」落的 PCM 边车**（纯函数，便于单测）。
 
     边车靠节点自己回显（ui 键 ``h3relay_pcm``）带出来 —— **不猜文件名**，也不用去翻目录：
     只要那一段真的是本包节点跑的，路径就在这里；不是（旧版本/被删）就当没有，退回 mp4 解码。

@@ -16,8 +16,8 @@
           "zh": "核心功能",
           "en": "Core features",
           "mode": "condensed",
-          "h_en": "ae37fa10850f7e77",
-          "h_src": "2e95cbeff2bad3b5",
+          "h_en": "fa95e007ad1e37b1",
+          "h_src": "571aa1df426bba46",
           "seeded": "by-position"
         },
         {
@@ -32,16 +32,16 @@
           "zh": "安装",
           "en": "Install",
           "mode": "condensed",
-          "h_en": "87643b50ffd75fb2",
-          "h_src": "8f0a867bad74ab04",
+          "h_en": "9d5da5172363743f",
+          "h_src": "4c011116055e9d9f",
           "seeded": "by-position"
         },
         {
           "zh": "使用方法",
           "en": "Usage",
           "mode": "condensed",
-          "h_en": "ec838f07be14dff6",
-          "h_src": "18d3575de2d06165",
+          "h_en": "0f98e5cfdfc84507",
+          "h_src": "3ea532a19617ef20",
           "seeded": "by-position"
         },
         {
@@ -78,8 +78,8 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-09-30",
-      "src_sha": "238b4ac60ec01bd9"
+      "stamped": "2026-10-01",
+      "src_sha": "8a60acfdbf4b7447"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -113,7 +113,7 @@
           "en": "🔍 After upscaling: which line stays in the native domain (measured on the 0.6.8 full flow)",
           "mode": "full",
           "h_en": "6be662246d7f4d44",
-          "h_src": "a40e728fe4bdf5a4",
+          "h_src": "acd3e56322b18cc6",
           "seeded": "by-position"
         },
         {
@@ -166,8 +166,8 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-09-30",
-      "src_sha": "b1bf9cbff8bae77f"
+      "stamped": "2026-10-01",
+      "src_sha": "997bb34f6092cf08"
     },
     "docs/02-parameters.md": {
       "en": "docs/02-parameters_EN.md",
@@ -185,13 +185,13 @@
           "en": "Parameters",
           "mode": "full",
           "h_en": "d5b7575ab628ec40",
-          "h_src": "13d590265b351956",
+          "h_src": "fc19903c67a42b50",
           "seeded": "by-position"
         }
       ],
       "acks": [],
-      "stamped": "2026-09-30",
-      "src_sha": "8ea0fa51dd6ffe89"
+      "stamped": "2026-10-01",
+      "src_sha": "9e7c5877c65898d2"
     }
   }
 }

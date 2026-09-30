@@ -29,21 +29,24 @@ anchor 与采样 latent 不同源（会漂）、只能锚第 0 帧。本包直�
 | 层 | 节点 | 说明 |
 |---|---|---|
 | **必备 3** | Latent 存 · 拷贝桥（复合桥）· 裁重叠 | 少一个就不叫续接 |
-| **可选 4** | 后处理 Post · 音频缝 · 连跑 Chain · 潜空间分块放大 | 各自独立、**默认全关 = 逐位直通** |
+| **可选 4** | 后处理 Post · 音频缝 · 连跑 Chain · Latent Upscale | 各自独立、**默认全关 = 逐位直通** |
 | **手动接线才用 1** | Latent 读 | 桥自己会从磁盘取源；只在要**显式换源**时才手动接 |
 
 | 节点 | 作用 |
 |---|---|
-| 🔗 **H3 续接 Latent 存** | 本段采样后把 AV latent 落盘到 `output/relay_kit/<run_id>/stage_NNNNN.safetensors` |
-| 🔗 **H3 续接 Latent 读** | 读回上一段（段号 −1），断点续跑可指定 `explicit_path` 换源 |
-| 🔗 **H3 续接 拷贝桥（复合桥）** | 上一段尾 AV latent **逐位拷贝**进本段初始 latent + 噪声掩码（钉住区不重绘）；接 `[16] conditioning` 时**并联**钉帧（管取景）。`mask_mode` 默认 `hard` |
-| 🔗 **H3 续接裁重叠** | 裁掉本段头部的重生成帧（**音画同裁**）——不裁就会在拼接处重播/跳变；`[3]` 输出 `prev_tail` |
-| 🔗 **H3 续接后处理 Post** | **画质域**：跨段统计匹配 / 低频残差 / 色调 / 反卷积 / 高频迁移 / 糊区锐化，全部默认关 |
-| 🔗 **H3 续接音频缝** | **音频域**：把上一段环境声补进本段头部，**长度守恒**（零 A/V 位移），默认关 |
-| 🔍 **H3 潜空间分块放大** | **画质域 · latent 层**：拆 AV 打包 latent → 逐块过学习式 3D 放大器 → 回包。**零去噪、时间维一帧不动、音频原样带回**（需可选上游依赖，见 §安装） |
-| 🔗 **H3 续接连跑 Chain** | 自动连跑控制器：自动推进段号并排队；0.6.7 起还能**换词**（`prompts` 按 `---` 分块）与**拼片**（🧩） |
+| 🔗 **H3 Relay · Latent Save** | 本段采样后把 AV latent 落盘到 `output/relay_kit/<run_id>/stage_NNNNN.safetensors` |
+| 🔗 **H3 Relay · Latent Load** | 读回上一段（段号 −1），断点续跑可指定 `explicit_path` 换源 |
+| 🔗 **H3 Relay · Copy Bridge（复合桥）** | 上一段尾 AV latent **逐位拷贝**进本段初始 latent + 噪声掩码（钉住区不重绘）；接 `[16] conditioning` 时**并联**钉帧（管取景）。`mask_mode` 默认 `hard` |
+| 🔗 **H3 Relay · Trim AV** | 裁掉本段头部的重生成帧（**音画同裁**）——不裁就会在拼接处重播/跳变；`[3]` 输出 `prev_tail` |
+| 🔗 **H3 Relay · Post** | **画质域**：跨段统计匹配 / 低频残差 / 色调 / 反卷积 / 高频迁移 / 糊区锐化，全部默认关 |
+| 🔗 **H3 Relay · Audio Seam** | **音频域**：把上一段环境声补进本段头部，**长度守恒**（零 A/V 位移），默认关 |
+| 🔍 **H3 Relay · Latent Upscale** | **画质域 · latent 层**：拆 AV 打包 latent → 逐块过学习式 3D 放大器 → 回包。**零去噪、时间维一帧不动、音频原样带回**（需可选上游依赖，见 §安装） |
+| 🔗 **H3 Relay · Chain** | 自动连跑控制器：自动推进段号并排队；0.6.7 起还能**换词**（`prompts` 按 `---` 分块）与**拼片**（🧩） |
 
 > **三个域别混挂**：时间轴 = `H3RelayTrimAV`（冻结）／画质域 = `H3RelayPost`／音频域 = `H3RelayAudioSeam`。
+>
+> 节点标签自 **0.6.18** 起是**纯英文**；中文术语 ↔ 标签的对照表见
+> [`docs/04`](docs/04-canvas-and-widgets.md) §术语 ↔ 节点标签对照。
 
 ---
 
@@ -76,9 +79,9 @@ git clone https://github.com/ZenHG/ComfyUI-H3-Latent-Relay.git
 包名不允许带 "ComfyUI"。
 
 **装完必须重启 ComfyUI 后端**（ComfyUI-Manager 点 *Restart*；没装就重启 Python 进程）——
-仅刷新浏览器不会加载新节点。节点列表里搜 `🔗 H3 续接`（7 个）+ `🔍 H3 潜空间分块放大` 即为全部 8 个。
+仅刷新浏览器不会加载新节点。节点列表里搜 `🔗 H3 Relay`（7 个）+ `🔍 H3 Relay · Latent Upscale` 即为全部 8 个。
 
-**可选：用 🔍 潜空间分块放大才需要装**（不装不影响其他 7 个节点，用时会报一条写明仓库与权重地址的错）：
+**可选：用 🔍 H3 Relay · Latent Upscale 才需要装**（不装不影响其他 7 个节点，用时会报一条写明仓库与权重地址的错）：
 
 ```bash
 cd ComfyUI/custom_nodes
@@ -124,7 +127,7 @@ git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git  
 | 最常见的三个翻车点 | 处置 |
 |---|---|
 | 报错「说清是第 N 段却拿不到上一段」 | 两处 `run_id` 必须一字不差；确认第 1 段跑过 |
-| 画面从第 1 帧就开始重播上一段 | 「裁重叠」没接上，或它的 `trim_frames` 没接桥的 `[2]` |
+| 画面从第 1 帧就开始重播上一段 | 「Trim AV」没接上，或它的 `trim_frames` 没接桥的 `[2]` |
 | 换新片子却接了旧片尾巴 | 没换 `run_id`（同名会覆盖同段号文件） |
 
 ### 最小接线
@@ -141,10 +144,10 @@ git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git  
           桥 [3] conditioning ─────────┼──→ 采样器 positive
           桥 [2] trim_frames ──────────┼──→ 裁重叠 [1] trim_frames  ★必须接
                                         │
-                                 采样器 → LATENT ──→ 🔗 续接 Latent 存 [0]
+                                 采样器 → LATENT ──→ 🔗 H3 Relay · Latent Save [0]
                                                  └──→ VAEDecode / VAEDecodeAudio
                                                            ↓
-                               🔗 续接裁重叠 [0] images ← IMAGE ／ [3] audio ← VAEDecodeAudio
+                               🔗 H3 Relay · Trim AV [0] images ← IMAGE ／ [3] audio ← VAEDecodeAudio
                                      │
                                [1] audio（可选经 🔗 音频缝）──────→ CreateVideo → SaveVideo
                                [0] images ───────────────────────↗

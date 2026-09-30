@@ -16,21 +16,21 @@ resolved_frame_index）由 ComfyUI 原生消费。
 AV 打包 latent 适配器）：**未装那个包时本包照常加载**，只有该节点在被使用时报可照做的安装指引。
 
 节点：
-    🔗 H3 续接 Latent 存    H3RelayLatentSave     本段 latent 落盘（下一段的接力棒）
-    🔗 H3 续接 Latent 读    H3RelayLatentLoad     手动连线时读上一段（桥自动取源时不用）
-    🔗 H3 续接 拷贝桥       H3RelayCopyBridge     上一段尾段逐位拷进本段 latent + 噪声掩码（钉住区不重绘）
+    🔗 H3 Relay · Latent Save    H3RelayLatentSave     本段 latent 落盘（下一段的接力棒）
+    🔗 H3 Relay · Latent Load    H3RelayLatentLoad     手动连线时读上一段（桥自动取源时不用）
+    🔗 H3 Relay · Copy Bridge       H3RelayCopyBridge     上一段尾段逐位拷进本段 latent + 噪声掩码（钉住区不重绘）
                                                   **0.6.0 起 = 复合桥**：接上 conditioning 时同时追加钉帧（管取景），
                                                   与 latent 钉住窗（管运动）并联；不接则行为与旧版完全一致
-    🔗 H3 续接裁重叠        H3RelayTrimAV         裁掉钉住区重播帧（音画同裁+接缝自检），并交出 prev_tail
-    🔗 H3 续接后处理 Post   H3RelayPost           画质域后处理（跨段统计匹配/低频残差/直方图+白平衡/反卷积/高频迁移/糊区锐化/自适应糊区补偿；互斥组 + 逐层可审计）
-    🔗 H3 续接音频缝        H3RelayAudioSeam      音频域：上一段环境声补本段头（床声电平对齐，长度守恒，零 A/V 位移）+ joined 整片拼接（J-cut 时间轴守恒）
-    🔗 H3 续接连跑 Chain    H3RelayChain          UI 自动连跑（段号自动推进 + 自动排队 + **词分发**〔按段号输出第 k 块词〕+ **自动拼接成片**）
-    🔍 H3 潜空间分块放大    H3RelayLatentUpscale  画质域：拆 AV 打包 latent → 逐块调学习式 3D 放大器（**零去噪、时间维不动**）→ 回包保留原音频；块数自选、分块==整段
+    🔗 H3 Relay · Trim AV        H3RelayTrimAV         裁掉钉住区重播帧（音画同裁+接缝自检），并交出 prev_tail
+    🔗 H3 Relay · Post   H3RelayPost           画质域后处理（跨段统计匹配/低频残差/直方图+白平衡/反卷积/高频迁移/糊区锐化/自适应糊区补偿；互斥组 + 逐层可审计）
+    🔗 H3 Relay · Audio Seam        H3RelayAudioSeam      音频域：上一段环境声补本段头（床声电平对齐，长度守恒，零 A/V 位移）+ joined 整片拼接（J-cut 时间轴守恒）
+    🔗 H3 Relay · Chain    H3RelayChain          UI 自动连跑（段号自动推进 + 自动排队 + **词分发**〔按段号输出第 k 块词〕+ **自动拼接成片**）
+    🔍 H3 Relay · Latent Upscale    H3RelayLatentUpscale  画质域：拆 AV 打包 latent → 逐块调学习式 3D 放大器（**零去噪、时间维不动**）→ 回包保留原音频；块数自选、分块==整段
 
 后端路由（不是节点；由 Chain 的按钮触发）：
     POST /h3relay/concat    把已跑完的 N 段拼成一条成片（画面流拷贝无损 + 音频逐段对齐 + 断言）
                             音轨档由 Chain 的 `audio_out` 决定（默认 AAC 256k / 可 192k / `pcm_lossless` 母版）；
-                            每段有「裁重叠」落的 **PCM 边车**就直读它 ⇒ 音频代际 2 → 1（无损档零新增）
+                            每段有「Trim AV」落的 **PCM 边车**就直读它 ⇒ 音频代际 2 → 1（无损档零新增）
 
 手把手（UI 三步跑一条链）：
     1. 桥和落盘的 stage_index 填 0，点 Chain 的 ▶ Run —— 第 1 段落盘
@@ -448,7 +448,7 @@ if PromptServer is not None:           # pragma: no branch
         try:
             from . import nodes as _n
             _has = _n._comfy_registry().get(_n._UPSCALER_NODE) is not None
-            _up = "已装" if _has else "未装（可选；只影响 🔍 潜空间分块放大）"
+            _up = "已装" if _has else "未装（可选；只影响 🔍 H3 Relay · Latent Upscale）"
         except Exception as _e:                      # noqa: BLE001
             _up = "未知（%s）" % type(_e).__name__
 

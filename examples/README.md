@@ -3,7 +3,7 @@
 | 文件 | 回答的问题 | 规模 |
 |---|---|---|
 | `minimal_relay_official.json` | 第 2 段要接对**哪些线**（全官方节点 + 本包） | 19 节点 |
-| `fullflow_second_pass_latent_upscale_ui.json` | **一采 → 🔍 潜空间放大 → 二采 → 续接** 整条链路怎么接 | 45 节点 |
+| `fullflow_second_pass_latent_upscale_ui.json` | **一采 → 🔍 H3 Relay · Latent Upscale → 二采 → 续接** 整条链路怎么接 | 45 节点 |
 
 ## `minimal_relay_official.json`
 
@@ -11,19 +11,19 @@
 **「第 2 段要接对哪些线？」**
 
 ```
-4 个官方加载器 → 官方出词节点(MiniMaxH3ImageToVideo) → 🔗 续接 拷贝桥（复合桥）
-              → KSampler → 🔗 续接 Latent 存
-              → VAEDecode / VAEDecodeAudio → 🔗 续接裁重叠 → 🔗 续接后处理 Post
-                                                  ↘ 🔗 续接音频缝
+4 个官方加载器 → 官方出词节点(MiniMaxH3ImageToVideo) → 🔗 H3 Relay · Copy Bridge（复合桥）
+              → KSampler → 🔗 H3 Relay · Latent Save
+              → VAEDecode / VAEDecodeAudio → 🔗 H3 Relay · Trim AV → 🔗 H3 Relay · Post
+                                                  ↘ 🔗 H3 Relay · Audio Seam
               → CreateVideo → SaveVideo
 
 🔗 读上段 latent ──→ 拷贝桥的 context_latent（第 1 段它交「空上下文」→ 桥自动直通）
 ```
 
-图里有一个 `段号`（`PrimitiveInt`）同时喂给「读上段 latent」「桥」「落盘」三处的 `stage_index`，
+图里有一个 `段号`（`PrimitiveInt`）同时喂给「Latent Load」「Copy Bridge」「Latent Save」三处的 `stage_index`，
 所以**跑下一段只需要改这一个数**；画布上还有一个注释框写着步骤，不用回来翻 README。
 
-> 🔴 **为什么必须接「读上段 latent」**（0.6.12 起）：
+> 🔴 **为什么必须接「Latent Load」**（0.6.12 起）：
 > 桥的 `context_latent` 是 **required** ⇒ 不接线会让提交校验**直接失败**
 > （`Required input is missing`）。
 > 也**不能靠"旁路读节点"绕过**：宿主提交前会把 bypass 的节点"溶解"掉、把它的输入接到下游，
@@ -49,23 +49,23 @@
 
 ## `fullflow_second_pass_latent_upscale_ui.json`
 
-**完整流程图（本包 9 个节点都用上）**（0.3MP 一采 → 🔍 潜空间放大 0.4MP → 2 步二采 → 拷贝桥续接下一段），
+**完整流程图（本包 9 个节点都用上）**（0.3MP 一采 → 🔍 H3 Relay · Latent Upscale 0.4MP → 2 步二采 → 拷贝桥续接下一段），
 只回答一个问题：**「加了画质域之后，续接的哪些线要留在原生域？」**
 
 ```
 加载器(UNET/CLIP/视频VAE/音频VAE/LoRA) + 模型补丁链(attention 后端/BSA/chunkFFN/sigma shift)
   → 出词 MiniMaxH3ReferenceToVideo(0.3MP · 6s→158 帧 · 1 张参考图)
-  → 🔗 续接 拷贝桥       第 2 段起：拷上段尾 22 帧 + 钉帧 conditioning
+  → 🔗 H3 Relay · Copy Bridge       第 2 段起：拷上段尾 22 帧 + 钉帧 conditioning
   → 一采 SamplerCustomAdvanced(5 步)
-  → 🔗 续接 Latent 存     ★ 存的是**一采终态 = 原生域**，这才是续接契约
-  → 🔍 潜空间分块放大     26×46 → 30×54 latent（chunks=1，音频流原样带回）
+  → 🔗 H3 Relay · Latent Save     ★ 存的是**一采终态 = 原生域**，这才是续接契约
+  → 🔍 H3 Relay · Latent Upscale     26×46 → 30×54 latent（chunks=1，音频流原样带回）
   → CreateFadeMaskAdvanced + SetLatentNoiseMask   钉住前 7 个 latent 帧(=22 像素帧)
   → 二采 SamplerCustomAdvanced(2 步 @ denoise 0.20)
   → VAEDecode(画面) / VAEDecodeAudio(音频 ★ 接**一采**输出：音频全程不走 SR 与二采)
-  → 🔗 续接 音频缝 → 🔗 续接 裁重叠(音视频同裁 22 帧 + 落 PCM 边车，第 4 路 prev_tail 喂 Post 的 guide)
-  → 🔗 续接 后处理 Post   画质域 20 个旋钮，默认全 0 = 逐位直通（整节点删掉等价）
+  → 🔗 H3 Relay · Audio Seam → 🔗 H3 Relay · Trim AV(音视频同裁 22 帧 + 落 PCM 边车，第 4 路 prev_tail 喂 Post 的 guide)
+  → 🔗 H3 Relay · Post   画质域 20 个旋钮，默认全 0 = 逐位直通（整节点删掉等价）
   → CreateVideo(24fps) → SaveVideo               ★ 官方节点，单文件自带音轨
-  🔗 续接 连跑 Chain      4 段 · 词分发(`---` 分块) · 🧩 拼成一条(包内流拷贝)
+  🔗 H3 Relay · Chain      4 段 · 词分发(`---` 分块) · 🧩 拼成一条(包内流拷贝)
 ```
 
 **本包 8 个节点全在场**（`LatentUpscale` 与 `Post` 都在真实位置上，不是摆设）：
@@ -118,7 +118,7 @@
 并把 **`Chain.prompt` 连到出词节点的 `prompt` 输入**（0.6.15 起词分发是**节点能力** ——
 前端那条"替你写词格"的老路**已删除**，不接这根线会被当场拦下）；
 ③ 落盘从 `VHS_VideoCombine` 换成官方 `CreateVideo + SaveVideo`（理由见上）；
-④ 补上 `🔗 续接 后处理 Post`（默认直通 ⇒ 与不接逐位等价，但示例图该让 8 个节点都在场）。
+④ 补上 `🔗 H3 Relay · Post`（默认直通 ⇒ 与不接逐位等价，但示例图该让 8 个节点都在场）。
 
 ## `make_minimal_workflow.py`
 

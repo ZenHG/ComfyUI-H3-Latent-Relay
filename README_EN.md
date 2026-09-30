@@ -41,17 +41,20 @@ under `output/relay_kit/<run_id>/`). Mechanism and measurements: [`docs/01`](doc
 
 | Node (canvas name) | What it does |
 |---|---|
-| 🔗 **H3 续接 Latent 存** | after sampling, writes this segment's AV latent to `output/relay_kit/<run_id>/stage_NNNNN.safetensors` |
-| 🔗 **H3 续接 Latent 读** | reads the previous segment (stage − 1); `explicit_path` overrides the source when resuming |
-| 🔗 **H3 续接 拷贝桥（复合桥）** | **bit-copies** the previous segment's tail AV latent into this segment's initial latent + a noise mask (the pinned region is not re-drawn); with `[16] conditioning` connected it **also pins keyframes in parallel** (framing). `mask_mode` defaults to `hard` |
-| 🔗 **H3 续接裁重叠** | trims the regenerated head frames (**video and audio together**) — without it the splice point replays or jumps; output `[3]` = `prev_tail` |
-| 🔗 **H3 续接后处理 Post** | **picture domain**: cross-segment statistics matching / low-frequency pull / tone / deconvolution / high-frequency transfer / blur-region sharpening; all off by default |
-| 🔗 **H3 续接音频缝** | **audio domain**: extends the previous segment's ambience into this segment's head, **length-preserving** (zero A/V shift); off by default |
-| 🔍 **H3 潜空间分块放大** | **picture domain · latent level**: unpack the AV-packed latent → tile through a learned 3D upscaler → repack. **Zero denoising, not one frame moved in time, audio carried back untouched** (needs an optional upstream dependency — see Install) |
-| 🔗 **H3 续接连跑 Chain** | auto-run controller: advances stage numbers and queues; since 0.6.7 it also **rotates prompts** (`prompts` split on `---`) and **concatenates** (🧩) |
+| 🔗 **H3 Relay · Latent Save** | after sampling, writes this segment's AV latent to `output/relay_kit/<run_id>/stage_NNNNN.safetensors` |
+| 🔗 **H3 Relay · Latent Load** | reads the previous segment (stage − 1); `explicit_path` overrides the source when resuming |
+| 🔗 **H3 Relay · Copy Bridge（复合桥）** | **bit-copies** the previous segment's tail AV latent into this segment's initial latent + a noise mask (the pinned region is not re-drawn); with `[16] conditioning` connected it **also pins keyframes in parallel** (framing). `mask_mode` defaults to `hard` |
+| 🔗 **H3 Relay · Trim AV** | trims the regenerated head frames (**video and audio together**) — without it the splice point replays or jumps; output `[3]` = `prev_tail` |
+| 🔗 **H3 Relay · Post** | **picture domain**: cross-segment statistics matching / low-frequency pull / tone / deconvolution / high-frequency transfer / blur-region sharpening; all off by default |
+| 🔗 **H3 Relay · Audio Seam** | **audio domain**: extends the previous segment's ambience into this segment's head, **length-preserving** (zero A/V shift); off by default |
+| 🔍 **H3 Relay · Latent Upscale** | **picture domain · latent level**: unpack the AV-packed latent → tile through a learned 3D upscaler → repack. **Zero denoising, not one frame moved in time, audio carried back untouched** (needs an optional upstream dependency — see Install) |
+| 🔗 **H3 Relay · Chain** | auto-run controller: advances stage numbers and queues; since 0.6.7 it also **rotates prompts** (`prompts` split on `---`) and **concatenates** (🧩) |
 
 > **Three domains — do not mix them up:** timeline = `H3RelayTrimAV` (frozen) / picture = `H3RelayPost` /
 > audio = `H3RelayAudioSeam`.
+>
+> Node labels are **English-only** since **0.6.18**; the Chinese term ↔ label mapping is in
+> [`docs/04`](docs/04-canvas-and-widgets.md) (Chinese).
 
 ---
 
@@ -84,8 +87,8 @@ Or **ComfyUI Manager → Custom Nodes Manager → search `h3-latent-relay`**
 name because the registry forbids "ComfyUI" in a pack name.
 
 **Restart the ComfyUI backend afterwards** (ComfyUI-Manager → *Restart*; otherwise restart the Python
-process) — refreshing the browser alone does not load new nodes. Search the node list for `🔗 H3 续接` (7)
-+ `🔍 H3 潜空间分块放大` to see all 8.
+process) — refreshing the browser alone does not load new nodes. Search the node list for `🔗 H3 Relay` (7)
++ `🔍 H3 Relay · Latent Upscale` to see all 8.
 
 **Optional: only needed for 🔍 latent tile upscaling** (not installing it does not affect the other 7
 nodes; using it then raises an error naming the repository and the weights):
@@ -158,10 +161,10 @@ prompt node (official / third-party)
            bridge [3] conditioning ─────┼──→ sampler positive
            bridge [2] trim_frames ──────┼──→ TrimAV [1] trim_frames    ★ MUST be connected
                                         │
-                                  sampler → LATENT ──→ 🔗 续接 Latent 存 [0]
+                                  sampler → LATENT ──→ 🔗 H3 Relay · Latent Save [0]
                                                  └──→ VAEDecode / VAEDecodeAudio
                                                            ↓
-                               🔗 续接裁重叠 [0] images ← IMAGE ／ [3] audio ← VAEDecodeAudio
+                               🔗 H3 Relay · Trim AV [0] images ← IMAGE ／ [3] audio ← VAEDecodeAudio
                                      │
                                [1] audio (optionally via 🔗 音频缝)────→ CreateVideo → SaveVideo
                                [0] images ────────────────────────────↗

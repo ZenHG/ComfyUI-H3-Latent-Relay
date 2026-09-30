@@ -57,7 +57,7 @@
  28. 音频出口 dtype 契约（0.6.11 修静音 bug）：`audio_to_fp32` 的零拷贝快路径、
      fp16/bf16/f64 一律收敛 f32 且逐位无损、键与形状不动、None 直通；
      **事故复现锁**（模拟 VHS 的 `-f f32le` 封装路：原始 dtype 进去 = 数字静音，过本包出口 = 逐位还原）；
-     🛡 节点出口契约（「裁重叠」「音频缝」**全部** AUDIO 返回路都是 f32，
+     🛡 节点出口契约（「Trim AV」「Audio Seam」**全部** AUDIO 返回路都是 f32，
      而**落盘的 PCM 边车保持 fp16** —— 省一半磁盘，组装层读回时自己转）
 """
 
@@ -305,7 +305,7 @@ _spec.loader.exec_module(NODES)
 def unwrap(res):
     """节点返回 `{"ui": …, "result": …}` 时取 result（与宿主行为一致）。
 
-    0.6.7 起「裁重叠」与「音频缝」用 ui 键回显 PCM 边车路径 ⇒ 宿主把 ui 收进
+    0.6.7 起「Trim AV」与「Audio Seam」用 ui 键回显 PCM 边车路径 ⇒ 宿主把 ui 收进
     history.outputs，连线数据仍是 result。**直接调节点函数的测试必须过这一层**，
     否则 `a, b, c = node.fn(...)` 会 unpack 到 dict 的键上（踩过：22.13 报 "expected 3, got 2"）。
     """
@@ -2583,7 +2583,7 @@ else:
     # 26.19~26.31 音频代际 2 → 1（2026-09-22 二轮）：**PCM 边车**
     # ================================================================
     # 动机：段文件的音轨是 AAC（用户落盘那一代）。拼成片若从 mp4 解码再编 = **第二代数损**。
-    # 「裁重叠」手里那份音频**既与画面等长、又还没经过有损编码** ⇒ 它顺手存一份 PCM 边车，
+    # 「Trim AV」手里那份音频**既与画面等长、又还没经过有损编码** ⇒ 它顺手存一份 PCM 边车，
     # 拼接直读 ⇒ 音频只编码一代；配无损档则**零新增代际**。
     import inspect as _ins26
     import folder_paths as _fp26
@@ -2680,7 +2680,7 @@ else:
           (not _rep_spec["ok"]) and any("规格" in p for p in _rep_spec["health"]["problems"]),
           "problems=%s" % _rep_spec["health"]["problems"][:1])
 
-    # —— 26.28~26.31 边车的**生产者**：「裁重叠」回的 ui 键 + 纯函数取回 ——
+    # —— 26.28~26.31 边车的**生产者**：「Trim AV」回的 ui 键 + 纯函数取回 ——
     _opt_t = NODES.H3RelayTrimAV.INPUT_TYPES()["optional"]
     check("26.28 裁重叠新增 save_pcm（默认**开**：只多写一个文件，节点输出与成片逐位不变）",
           "save_pcm" in _opt_t and _opt_t["save_pcm"][1].get("default") is True,
@@ -2935,7 +2935,7 @@ else:
                     "outputs": {
                         "31": {"images": [{"filename": name, "subfolder": "relay_kit/x",
                                            "type": "output"}]},
-                        # 「裁重叠」回显的 PCM 边车（拼接路由靠它取回无损音频）
+                        # 「Trim AV」回显的 PCM 边车（拼接路由靠它取回无损音频）
                         "18": {CORE.PCM_UI_KEY: [{"filename": name.replace(".mp4", ".safetensors"),
                                                   "subfolder": "relay_kit/pcm",
                                                   "type": "output"}]},
@@ -3294,17 +3294,17 @@ check("28.8 ✅ 走本包出口 ⇒ 同一封装路**逐位还原**真波形（�
 _img28 = torch.rand(40, 8, 8, 3)
 _p0_28 = unwrap(NODES.H3RelayTrimAV().trim(_img28, trim_frames=0, fps=24.0,
                                            audio=_a16, save_pcm=False))
-check("28.9 「裁重叠」pin<=0 早退路：第 2 路 audio 出口是 f32（实跑事故就走这条）",
+check("28.9 「Trim AV」pin<=0 早退路：第 2 路 audio 出口是 f32（实跑事故就走这条）",
       _p0_28[1]["waveform"].dtype == torch.float32, str(_p0_28[1]["waveform"].dtype))
 _pd_28 = unwrap(NODES.H3RelayTrimAV().trim(_img28, trim_frames=22, fps=24.0,
                                            settle_frames=0, audio=_a16, save_pcm=False))
-check("28.10 「裁重叠」裁头主路：第 2 路 audio 出口同样是 f32",
+check("28.10 「Trim AV」裁头主路：第 2 路 audio 出口同样是 f32",
       _pd_28[1]["waveform"].dtype == torch.float32, str(_pd_28[1]["waveform"].dtype))
 
 _RID28 = "_unit_audio28"
 try:
     _s28, _l28, _j28 = unwrap(NODES.H3RelayAudioSeam().seam(_a16, _RID28, 0))
-    check("28.11 「音频缝」两路 AUDIO 出口（audio / joined）都是 f32",
+    check("28.11 「Audio Seam」两路 AUDIO 出口（audio / joined）都是 f32",
           _s28["waveform"].dtype == torch.float32
           and _j28["waveform"].dtype == torch.float32,
           "audio=%s joined=%s" % (_s28["waveform"].dtype, _j28["waveform"].dtype))

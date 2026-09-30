@@ -37,49 +37,49 @@ class _Shell(io.ComfyNode):
 
 
 class H3RelayLatentUpscale(_Shell):
-    """🔍 H3 潜空间分块放大：H3 AV 打包 latent 的适配层（零去噪、时间维不动）。"""
+    """🔍 H3 Relay · Latent Upscale：H3 AV 打包 latent 的适配层（零去噪、时间维不动）。"""
 
     _V1_NAME = "H3RelayLatentUpscale"
 
 
 class H3RelayLatentSave(_Shell):
-    """🔗 H3 续接 Latent 存：本段 latent 落盘，它是下一段的「接力棒」。"""
+    """🔗 H3 Relay · Latent Save：本段 latent 落盘，它是下一段的「接力棒」。"""
 
     _V1_NAME = "H3RelayLatentSave"
 
 
 class H3RelayLatentLoad(_Shell):
-    """🔗 H3 续接 Latent 读：手动连线时读上一段（桥自动取源时不必用）。"""
+    """🔗 H3 Relay · Latent Load：手动连线时读上一段（桥自动取源时不必用）。"""
 
     _V1_NAME = "H3RelayLatentLoad"
 
 
 class H3RelayTrimAV(_Shell):
-    """🔗 H3 续接裁重叠：裁掉钉住区重播帧（音画同裁 + 接缝自检），并交出 prev_tail。"""
+    """🔗 H3 Relay · Trim AV：裁掉钉住区重播帧（音画同裁 + 接缝自检），并交出 prev_tail。"""
 
     _V1_NAME = "H3RelayTrimAV"
 
 
 class H3RelayCopyBridge(_Shell):
-    """🔗 H3 续接 拷贝桥：上一段尾段逐位拷进本段 latent + 噪声掩码（钉住区不重绘）。"""
+    """🔗 H3 Relay · Copy Bridge：上一段尾段逐位拷进本段 latent + 噪声掩码（钉住区不重绘）。"""
 
     _V1_NAME = "H3RelayCopyBridge"
 
 
 class H3RelayPost(_Shell):
-    """🔗 H3 续接后处理 Post：画质域（跨段统计匹配 / 低频残差 / 直方图 / 锐化 …）。"""
+    """🔗 H3 Relay · Post：画质域（跨段统计匹配 / 低频残差 / 直方图 / 锐化 …）。"""
 
     _V1_NAME = "H3RelayPost"
 
 
 class H3RelayAudioSeam(_Shell):
-    """🔗 H3 续接音频缝：上一段环境声补本段头 + joined 整片拼接（J-cut 时间轴守恒）。"""
+    """🔗 H3 Relay · Audio Seam：上一段环境声补本段头 + joined 整片拼接（J-cut 时间轴守恒）。"""
 
     _V1_NAME = "H3RelayAudioSeam"
 
 
 class H3RelayChain(_Shell):
-    """🔗 H3 续接连跑 Chain：UI 自动连跑（段号自动推进 + 词分发 + 自动拼接成片）。"""
+    """🔗 H3 Relay · Chain：UI 自动连跑（段号自动推进 + 词分发 + 自动拼接成片）。"""
 
     _V1_NAME = "H3RelayChain"
 

@@ -27,10 +27,10 @@ UI 格式工作流的 ``widgets_values`` 是**按位置**对应前端 widget 槽
 
 【生成的是什么】
     4 个官方加载器 → 官方条件节点（出词 + AV latent）
-                  → 🔗 续接 拷贝桥（复合桥）→ KSampler → 🔗 续接 Latent 存
-                  → VAEDecode / VAEDecodeAudio → 🔗 续接裁重叠 → CreateVideo → SaveVideo
+                  → 🔗 H3 Relay · Copy Bridge（复合桥）→ KSampler → 🔗 H3 Relay · Latent Save
+                  → VAEDecode / VAEDecodeAudio → 🔗 H3 Relay · Trim AV → CreateVideo → SaveVideo
 
-    图里有一个 `段号`（PrimitiveInt）同时喂给「桥」和「落盘」的 stage_index，
+    图里有一个 `段号`（PrimitiveInt）同时喂给「Copy Bridge」和「Latent Save」的 stage_index，
     所以**跑下一段只需要改这一个数**（这才是"正确连线"最省心的形态）。
 """
 from __future__ import annotations
@@ -495,14 +495,14 @@ def build(oi, length=73, width=448, height=768):
     #   （`prompt_outputs_failed_validation / Required input is missing`）。
     #   而且第 1 段**不能靠"旁路读节点"绕过**：宿主提交前会把 bypass 的节点"溶解"掉、
     #   把它的输入接到下游；本节点没有 LATENT 输入 ⇒ 桥的 required 输入会**从 prompt 里消失**。
-    #   ⇒ 正确接法 = **接上「读上段 latent」**：
+    #   ⇒ 正确接法 = **接上「Latent Load」**：
     #       · `stage_index == 0` ⇒ 它交一个「空上下文」，桥识别后自动直通、不裁帧；
     #       · `stage_index ≥ 1` ⇒ 它读上一段落盘文件，桥真续接。
     #   段号仍只有 `① 段号` 一处要改（这里也接到它）。
     load = g.add("H3RelayLatentLoad", pos=[800, 620],
                  links_in={"stage_index": (stage, "INT")},
                  values={"run_id": "relay_demo"},
-                 title="🔗 读上段 latent（第 1 段自动交空上下文→桥直通；第 2 段起读上一段）")
+                 title="🔗 H3 Relay · Latent Load（第 1 段自动交空上下文→桥直通；第 2 段起读上一段）")
 
     bridge = g.add("H3RelayCopyBridge", pos=[800, 40],
                    links_in={"conditioning": (cond, 0), "latent": (cond, "LATENT"),
@@ -510,7 +510,7 @@ def build(oi, length=73, width=448, height=768):
                              "stage_index": (stage, "INT")},
                    values={"context_frames": 22, "mask_mode": "hard", "pin_audio": True,
                            "run_id": "relay_demo"},
-                   title="🔗 续接 拷贝桥（复合桥：第 0 路 latent → 采样器 latent_image，第 4 路 conditioning → positive）")
+                   title="🔗 H3 Relay · Copy Bridge（复合桥：第 0 路 latent → 采样器 latent_image，第 4 路 conditioning → positive）")
 
     sampler = g.add("KSampler", pos=[1180, 40],
                     links_in={"model": (unet, "MODEL"), "positive": (bridge, 3),
@@ -522,7 +522,7 @@ def build(oi, length=73, width=448, height=768):
     g.add("H3RelayLatentSave", pos=[1180, 400],
           links_in={"latent": (sampler, "LATENT"), "stage_index": (stage, "INT")},
           values={"run_id": "relay_demo", "note": ""},
-          title="🔗 落盘本段 latent（下一段的接力棒）")
+          title="🔗 H3 Relay · Latent Save（下一段的接力棒）")
 
     dec_v = g.add("VAEDecode", pos=[1540, 40],
                   links_in={"samples": (sampler, "LATENT"), "vae": (vae_v, "VAE")})
@@ -533,21 +533,21 @@ def build(oi, length=73, width=448, height=768):
                  links_in={"images": (dec_v, "IMAGE"), "audio": (dec_a, "AUDIO"),
                            "trim_frames": (bridge, "trim_frames")},
                  values={"fps": 24.0, "settle_frames": 0},
-                 title="🔗 裁重叠（settle_frames=0：只裁钉住区，缝处无跳）")
+                 title="🔗 H3 Relay · Trim AV（settle_frames=0：只裁钉住区，缝处无跳）")
 
     # 0.5.0：画质域后处理独立成节点（TrimAV 只管时间轴）。全部作用项默认 0 = 逐位直通；
     # guide 接 TrimAV 的第 4 路输出 prev_tail（= 上段末帧），跨段两项才有「缝的另一侧」。
     post = g.add("H3RelayPost", pos=[2260, 40],
                  links_in={"images": (trim, "images"), "guide": (trim, "prev_tail")},
                  values={},
-                 title="🔗 后处理 Post（全默认关 = 直通；要治缝阶跃就把 match_prev 调到 0.5）")
+                 title="🔗 H3 Relay · Post（全默认关 = 直通；要治缝阶跃就把 match_prev 调到 0.5）")
 
     # 0.5.0：音频域同样独立成节点（音频缝不再交给组装层 ffmpeg）。
     # patch_seconds 默认 0 = 逐位直通；第 1 段也必须接（它顺手把第 1 段音频落盘当后段床源）。
     asm = g.add("H3RelayAudioSeam", pos=[2260, 320],
                 links_in={"audio": (trim, "audio")},
                 values={},
-                title="🔗 音频缝（默认关=直通；要治缝处「抽一下」就把 patch_seconds 调 2.0）")
+                title="🔗 H3 Relay · Audio Seam（默认关=直通；要治缝处「抽一下」就把 patch_seconds 调 2.0）")
 
     mk = g.add("CreateVideo", pos=[2620, 40],
                links_in={"images": (post, "images"), "audio": (asm, "audio")},
@@ -596,7 +596,7 @@ def build(oi, length=73, width=448, height=768):
         "\n"
         "没接对的两个典型症状：\n"
         "  · 日志写「静默直通」→ 段号填了 ≥1，但 run_id 与上一段不一致 / 文件不在\n"
-        "  · 画面从第 1 帧就开始重播上一段 → 裁重叠节点没接上，或 trim_frames 没接桥的第 3 路\n"
+        "  · 画面从第 1 帧就开始重播上一段 → Trim AV 节点没接上，或 trim_frames 没接桥的第 3 路\n"
         "\n"
         "模型文件：把上面 4 个加载器的下拉改成你本机的文件即可。"}),
     return g

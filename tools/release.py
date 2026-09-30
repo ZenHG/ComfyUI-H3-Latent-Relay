@@ -181,6 +181,27 @@ def _remember(t: str) -> None:
 
 
 # --------------------------------------------------------------------------- 步骤
+def host_root() -> str:
+    """宿主 ComfyUI 根目录（`review_050` 靠它 `import folder_paths`）。
+
+    优先 `COMFYUI_PATH`；没设就按本仓的位置**上溯定位**（本包装在
+    `<ComfyUI>/custom_nodes/<本包>/` 下时，上两级就是宿主根）。
+    ⚠️ 找不到就**明说**，**绝不传空串** —— 空串是 falsy，会把 `review_050` 自己那条
+    "上溯定位"的兜底一并废掉，报出来的却是一句 `ModuleNotFoundError: folder_paths`
+    （2026-09-30 实测：release.py 因此永远卡在 ①，而门槛其实全绿）。
+    """
+    env = (os.environ.get("COMFYUI_PATH") or "").strip()
+    if env:
+        return env
+    up = os.path.dirname(os.path.dirname(REPO))
+    if os.path.basename(os.path.dirname(REPO)).lower() == "custom_nodes":
+        return up
+    die("找不到宿主 ComfyUI 根目录（review_050 需要它来 import folder_paths）。\n"
+        "    本包不在 `<ComfyUI>/custom_nodes/` 下 ⇒ 用 COMFYUI_PATH=<宿主根> 显式指定，\n"
+        "    例：COMFYUI_PATH=/path/to/ComfyUI python tools/release.py")
+    return ""                                          # pragma: no cover - die 已退出
+
+
 def preflight(f: dict):
     say("\n① 前置（本地）")
     st = git("status", "--short", quiet=True).stdout or ""
@@ -193,10 +214,13 @@ def preflight(f: dict):
         die("版本号不是**四处一致**（H1 口径）：pyproject=%s，不一致的：%s" % (f["version"], bad))
     say("  ✅ 版本号四处一致：%s" % f["version"])
     say("  ✅ 发布目标：%s/%s" % (f["publisher"], f["name"]))
+    host = host_root()
+    say("  ✅ 宿主根：%s" % host)
     # 快门槛（全量门槛由 h3relay_check_all 负责；这里只拦最会翻车的那两项）
+    gate_env = dict(os.environ, COMFYUI_PATH=host)
     for name, cmd in (("review_050（文档—代码一致性）", [sys.executable, "tools/review_050.py"]),
                       ("en_sync（英文文档同步闸）", [sys.executable, "tools/en_sync.py"])):
-        r = run(cmd, env=dict(os.environ, COMFYUI_PATH=os.environ.get("COMFYUI_PATH", "")))
+        r = run(cmd, env=gate_env)
         tail = [ln for ln in (r.stdout or "").splitlines() if ln.startswith("结果")][-1:] \
             or (r.stdout or "").splitlines()[-1:]
         say("  [%s] %s%s" % ("OK" if r.returncode == 0 else "FAIL", name,

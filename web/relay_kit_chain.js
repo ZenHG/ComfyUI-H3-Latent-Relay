@@ -22,13 +22,13 @@
 //     此时**生效的是连线值**，而 Chain 那一格可能还留着上一版的旧词。旧代码只读本机
 //     `widget.value` ⇒ **静默把旧词写进出词节点**（连跑"看着在跑、词其实没换"）。
 //     现在有连线一律沿 link 取上游文本格；取不到就**报错**，绝不静默退回残留值。
-//   · 🔴 **第 1 段什么都不用做**：「读上段 latent」在 `stage_index == 0` 时会**自己交一个
+//   · 🔴 **第 1 段什么都不用做**：「Latent Load」在 `stage_index == 0` 时会**自己交一个
 //     「空上下文」**，桥识别后自动直通（latent 原样过、裁剪帧数输出 0）。
 //     ⚠ **旁路它反而会让整个 prompt 被拒** —— 宿主提交前会把 bypass 的节点"溶解"掉、
 //     把它的输入接到下游；这个节点没有 LATENT 输入 ⇒ 桥的 required `context_latent`
 //     会从 prompt 里消失 ⇒ `Required input is missing`。⇒ Chain **反向接管**：
 //     谁把它旁路了就自动恢复成启用。
-//   · 段号推进从「桥 + 落盘」扩到**「读上段 latent」**：它的 `stage_index` 语义是
+//   · 段号推进从「桥 + 落盘」扩到**「Latent Load」**：它的 `stage_index` 语义是
 //     **本段段号**（节点内按 `stage_index - 1` 取文件），老版本不推它 ⇒ 段 ≥ 1 时它恒停在 0。
 //     现在**三处同步推进**。
 //   · 🔴 **连跑跑完第 1 段就静默停住**（0.6.12 修）：旧代码在 `executing` 事件里读 `detail.node`，
@@ -65,8 +65,8 @@
 //     里提示一次，引导走节点化那条路。
 //   · 段号推进从三处扩到**四处**（加 Chain 自己）：它决定输出第几块词。
 //
-// 0.6.18 —— 连跑控制的两处**静默**错误（2026-09-30 真实事故：拼接成片音画错段）：
-//   · 🔴 **段号推进漏了「音频缝」**：旧代码手写「Chain + 桥 + 落盘 + 读上段 latent」四处，
+// 0.6.18 —— Chain（连跑控制）的两处**静默**错误（2026-09-30 真实事故：拼接成片音画错段）：
+//   · 🔴 **段号推进漏了「Audio Seam」**：旧代码手写「Chain + 桥 + 落盘 + 读上段 latent」四处，
 //     而 `nodes.py` 里带 `stage_index` 的一共**五处**。漏掉的那一类（音频缝）于是永远以
 //     第 1 段自居 ⇒ 连跑第 2 段时它把第 1 段的床文件 `audio_00000.safetensors`
 //     **覆盖成了第 2 段的音频** ⇒ 拼接时第 1 段拿到第 2 段的音轨 ⇒ 成片音画错段。
@@ -124,13 +124,13 @@ const MODE_BYPASS = 4;
  *   ⇒ **成片音画错段**。手写清单迟早再漏一次，所以改成表驱动。
  *
  * 字段：`required` = 必须**恰好 1 个**（否则连跑无从下手）；`liveOnly` = 是否只算启用中的
- *   （「读上段 latent」与「音频缝」都要管被旁路的：前者旁路会让提交校验失败，Chain 要反向接管）。
+ *   （「Latent Load」与「Audio Seam」都要管被旁路的：前者旁路会让提交校验失败，Chain 要反向接管）。
  */
 const STAGE_TYPES = [
     { type: "H3RelayCopyBridge", label: "桥", required: true, liveOnly: true,
-      missing: "「续接 拷贝桥」" },
+      missing: "「Copy Bridge」" },
     { type: "H3RelayLatentSave", label: "落盘", required: true, liveOnly: true,
-      missing: "「续接 Latent 存」" },
+      missing: "「Latent Save」" },
     { type: "H3RelayLatentLoad", label: "读上段 latent", required: false, liveOnly: false },
     { type: "H3RelayAudioSeam", label: "音频缝", required: false, liveOnly: false },
 ];
@@ -396,7 +396,7 @@ function setStage(n, v) {
 }
 
 /**
- * 确保「读上段 latent」处于**启用**状态。
+ * 确保「Latent Load」处于**启用**状态。
  *
  * 🔴 为什么第 1 段**不能**旁路它（2026-09-28 实测定案）：
  *   宿主在提交前会把 **bypass 的节点"溶解"掉**、把它的输入直接接到下游。
@@ -423,7 +423,7 @@ function ensureLoadsEnabled(pair) {
 
 /**
  * 把段号推进到**所有**带 `stage_index` 的节点（Chain 自己 + `STAGE_TYPES` 表里的每一类），
- * 并保证「读上段 latent」启用。
+ * 并保证「Latent Load」启用。
  *
  * 🔴 表驱动（0.6.18）：旧版手写「Chain + 桥 + 落盘 + 读上段」四处，**漏了音频缝**
  *   ⇒ 连跑第 2 段时音频缝仍以 0 号自居、覆盖第 1 段的床文件 ⇒ 拼接音画错段。
@@ -704,7 +704,7 @@ async function startStage(node, state, stage, label, pair) {
         return null;
     }
     const note = restored.length
-        ? `｜ 已恢复「读上段 latent」#${restored.join("、")} 为启用（旁路它会导致提交校验失败）`
+        ? `｜ 已恢复「Latent Load」#${restored.join("、")} 为启用（旁路它会导致提交校验失败）`
         : "";
     const dropNote = dropped.length
         ? `｜已丢弃第 ${dropped.join("、")} 段的旧记录（本轮从第 ${stage + 1} 段重跑）`
