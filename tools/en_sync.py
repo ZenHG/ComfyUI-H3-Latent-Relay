@@ -159,7 +159,7 @@ def seed_mapping(zh_secs, en_secs, has_prev):
     ③ 还是配不上的 ⇒ None（+`--stamp` 会把它标成 todo 或 orphan，逼人做决定）。
     """
     mapping, used_en = {}, set()
-    en_by_num, en_by_head = {}, {h for h, _ in en_secs}
+    en_by_num = {}
     for h, _ in en_secs:
         n = num_of(h)
         if n and n not in en_by_num:
@@ -381,7 +381,8 @@ def cmd_status():
         print("%s  →  %s   [默认档 %s ｜ 上次登记 %s]"
               % (zh_path, en_path, default_mode, mp.get("stamped", "—")))
         try:
-            zh, en = read(zh_path), read(en_path)
+            zh = read(zh_path)
+            read(en_path)          # 顺带验证英文文件可读（缺失/编码错要在这里就报出来）
         except OSError as exc:
             print("   ❌ 读不到：%s" % exc)
             continue

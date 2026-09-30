@@ -1,4 +1,5 @@
-# 回归五件套（CPU-only、零 GPU、秒级）
+# 回归套件（CPU-only、零 GPU、秒级）：
+#   ruff 静态检查 → 回归五件套 → 默认出口断言 → V3 逐字段一致 → JS 词分发 → **分发集构建+自验**
 #
 # 失败时都会以非零退出码退出（tests/test_relay_core.py:1822、tools/review_050.py:864、
 # tools/smoke_nodes.py:236、tools/assert_default_exit.py、tests/test_v3_schema.py），
@@ -6,8 +7,8 @@
 #
 # 期望值：
 #   · 413/0  tests/test_relay_core.py      算法层
-#   ·  87/0  tools/review_050.py           文档—代码一致性（✅ 本数字由**本文件的 H3g 自引用机检**盯着）
-#   ·  15/0  tools/smoke_nodes.py          节点层冒烟
+#   ·  88/0  tools/review_050.py           文档—代码一致性（✅ 本数字由**本文件的 H3g 自引用机检**盯着）
+#   ·  16/0  tools/smoke_nodes.py          节点层冒烟（✅ H3j 自 2026-09-30 起机检）
 #   ·   4/4  tools/assert_default_exit.py  默认出口 = V3（契约 1 + 行为 3；必须单进程、不设环境变量）
 #   ·  70/0  tests/test_v3_schema.py       V3 与 V1 逐字段一致（**本机 8 节点 / 116 个 input**；
 #                                          **CI 63/0 / 7 节点 / 103 input** —— 差一个 Upscale，原因见下）
@@ -20,6 +21,15 @@
 #      · `tests/test_v3_schema.py`  → **H3h**（核本文件 + docs/08 + README + `__init__` 的
 #        节点数 / input 数 / 机检项数三组声明）
 #      · `tools/assert_default_exit.py` → **H3i**（核本文件 + docs/08 + tools/README）
+#      · `tools/smoke_nodes.py`     → **H3j**（2026-09-30 加：此前它是**唯一"多处声明却无机检"的数字**，
+#        实测在 4 个文件里停在旧值而真值为 16/0 —— 修完顺手装机检，防下一次）
+#
+# ⚠️ **已知覆盖缺口（诚实记录，别把它当成已覆盖）**：
+#   1. **只跑一个 Python 版本（3.11）**，而 `requires-python = ">=3.10"`、ruff `target-version = "py310"`
+#      ⇒ 3.10 上的兼容性**没有 CI 覆盖**；加 matrix 会让"装宿主依赖"那一步翻倍（时间成本高），暂缓；
+#   2. **宿主依赖不固定版本**（直接吃宿主 `requirements.txt` 的当前状态）⇒ 上游漂移会造成与本包无关的红（噪声）；
+#   3. `dist/` 被 ruff 排除（它是生成物）—— 但**分发集现在会被真的构建并自验**（见最后一步），
+#      此前它零 CI 覆盖（2026-09-30 实测：打包器缺 `import subprocess`，CI 全绿而真跑 NameError）。
 # 🔴 **为什么 V3 机检有两个数**（2026-09-25 实测钉死，别再猜——我当天猜错过一次、被 CI 打回）：
 #    `H3RelayLatentUpscale.INPUT_TYPES()` 会走到 `_comfy_registry()`，而它**第一步就 `import nodes`**。
 #    · 宿主 `nodes` **可导入**（本机）⇒ 上游节点不在注册表 ⇒ `_upscaler_cls()` 抛 **RuntimeError**
@@ -27,10 +37,14 @@
 #      （宿主自带注册 `latent_upscale_models`）⇒ INPUT_TYPES 不抛 ⇒ **8 节点**。
 #    · 宿主 `nodes` **导不进来**（CI：只 clone 宿主、不装上游包）⇒ `_comfy_registry()` 抛的是
 #      **ModuleNotFoundError**（ImportError 子类）⇒ **只 except RuntimeError ⇒ 穿透** ⇒ INPUT_TYPES 抛
-#      ⇒ V3 entrypoint 逐节点容错跳过它 ⇒ **8 节点**。
+#      ⇒ V3 entrypoint 逐节点容错跳过它 ⇒ **7 节点**。
 #    ⇒ 判据跟着环境走，**两个数并排写是正确形态**，不是漂移。
 #    ⚠️ 别用"只把上游节点从注册表摘掉"模拟 CI —— 那是「装了宿主没装上游包」，仍是 8 节点。
-#       正确复现：`sys.modules["nodes"] = None` 后跑 test_v3_schema ⇒ `63/0 · 8 节点 · 103 input`。
+#       正确复现：`sys.modules["nodes"] = None` 后跑 test_v3_schema ⇒ `63/0 · 7 节点 · 103 input`；
+#       工具版：`python tools/ci_env_repro.py tests/test_v3_schema.py`。
+#    🔴 2026-09-30 补记：这两行曾写成「8 节点」（跨行"跳过它 ⇒ 8 节点"）而**H3h 放过了**——
+#       因为它的判据只查"值在声明集合里"，不查 (节点数, input 数) **配对**。
+#       ⇒ 已把 H3h 收紧为**配对校验**，并修掉本文件这两处（机检的强弱也是被测对象）。
 name: ci
 
 on:
@@ -43,9 +57,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      # ⚠️ 2026-09-30 从 v4 升到 v6：v4 跑在 Node 20 上，而 Node 20 已被 GitHub 标记弃用
+      #    （运行日志里一直在警告"forced to run on Node.js 24"）⇒ 到期会硬失败。
+      #    `allow-unsafe-pr-checkout` 只对 `pull_request_target` / `workflow_run` 必需 ——
+      #    本工作流用的是普通 `pull_request`（只读、无 secrets），不需要那个输入。
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -83,14 +101,17 @@ jobs:
           pip install -q ruff
           ruff check . --exclude dist
 
-      - name: Regression trio
+      - name: Regression suite
         env:
           COMFYUI_PATH: ${{ runner.temp }}/ComfyUI
           PYTHONPATH: ${{ runner.temp }}/ComfyUI
         run: |
           python tests/test_relay_core.py   # 期望 413/0
-          python tools/review_050.py        # 期望 87/0（H3g 自引用机检；含 L13 英文文档同步闸）
-          python tools/smoke_nodes.py       # 期望 15/0
+          python tools/review_050.py        # 期望 88/0（H3g 自引用机检；L13 英文同步闸 + H3j smoke 期望值）
+          python tools/smoke_nodes.py       # 期望 16/0
+          # 这两个此前**只在本地清单里、CI 没跑**（2026-09-30 补齐覆盖缺口）：
+          python tests/test_experimental.py                              # 期望 29/0（实验层）
+          python tools/check_ui_workflow.py examples/minimal_relay_official.json   # 期望「问题合计 0 条」
 
       # 默认出口 = V3（2026-09-24 从 v1 切过来）。**必须单跑一个进程**：
       # test_v3_schema 会把 H3RELAY_NODE_API 写死成 v3，同进程里验不出"默认"。
@@ -114,3 +135,15 @@ jobs:
       # Chain 词分发的纯函数（与浏览器里跑的是同一份 web/relay_kit_prompt.js）
       - name: Chain prompt dispatch (node)
         run: node tests/test_prompt_dispatch.mjs   # 期望 13/0
+
+      # 🔴 2026-09-30 新增：**真的构建一次分发集**（此前它零 CI 覆盖）。
+      #    为什么必须进 CI：用户下载的就是 `dist/` 那个 zip —— 打包器坏了、或
+      #    英文文档没同步（打包器第一步就是 en_sync 前置闸），都必须在**发布前**被拦住，
+      #    而不是等打了包、发了 release 才发现。实证：2026-09-30 打包器缺 `import subprocess`，
+      #    CI 当时**全绿**，是我手动真跑一次才暴露的。
+      #    `--force` 允许覆盖（checkout 里本没有 dist/，写的是仓库外的临时副本也会用同一路径）。
+      - name: Build minimal distribution set
+        env:
+          COMFYUI_PATH: ${{ runner.temp }}/ComfyUI
+          PYTHONPATH: ${{ runner.temp }}/ComfyUI
+        run: python tools/make_minimal_bundle.py --zip --force

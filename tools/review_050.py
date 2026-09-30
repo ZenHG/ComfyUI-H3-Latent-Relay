@@ -1038,8 +1038,25 @@ for _nm, _st in (("input", _decl_in), ("节点数", _decl_nd), ("项数", _decl_
     if len(_st) > 2:                             # 只有两种环境 ⇒ 每个数最多两种取值
         _bad_v3.append("%s 声明了 %d 种取值 %s（本包只有两种环境 ⇒ 最多 2 种）"
                        % (_nm, len(_st), sorted(_st)))
+
+# 🔴 2026-09-30 收紧：**配对**校验（原判据"值在集合里"就放过 ⇒ 挡不住不可能的组合）。
+#   实证：ci.yml 头部一处写「跳过它 ⇒ 8 节点」、另一处把 CI 那组数写成与它矛盾的样子 ——
+#   集合判据**全程绿**（两个数字各自都在集合里），是后来 CI 才暴露的。
+#   凡同一行同时给出节点数与 input 数、且个数相同（⇒ 可按出现顺序配对）时，配对必须落在真值里。
+#   ⚠️ 只扫 `_v3_docs`（4 个声明文件）：`exp/`、`LOCAL-*.md`、tests 注释里的是**历史数字**，
+#      它们本来就该保持旧值（改它们反而抹掉历史），不纳入。
+_V3_PAIRS = [(r[1], r[2]) for _nm, r in _v3_envs if r]
+for _fn, _txt in _v3_docs.items():
+    for _ln in _txt.splitlines():
+        _nds = [int(_v) for _v in _re.findall(r"(\d+)\s*个?\s*节点", _ln)]
+        _ins = [int(_v) for _v in _re.findall(r"(\d+)\s*个?\s*input", _ln)]
+        if _nds and len(_nds) == len(_ins):
+            for _a, _b in zip(_nds, _ins):
+                if (_a, _b) not in _V3_PAIRS:
+                    _bad_v3.append("%s：%d 节点 / %d input 不是合法配对（合法 %s）"
+                                   % (_fn, _a, _b, sorted(_V3_PAIRS)))
 ck("H3h V3 机检的真值出现在 ci.yml·docs/08·README·`__init__` 的声明里"
-   "（两种环境各一个数，每种最多 2 个取值）",
+   "（两种环境各一个数，每种最多 2 个取值；**且同行配对必须合法**）",
    not _bad_v3 and _v3_pass > 0, "%d 处：%s" % (len(_bad_v3), _bad_v3[:6]))
 
 # ============================================================================
@@ -1089,6 +1106,29 @@ ck("L13 英文文档同步闸：`*_EN.md` 与中文源节级一致（en_sync.py�
 if _es.returncode != 0:
     for _ln in (_es.stdout or "").strip().splitlines()[-16:]:
         print("        " + _ln)
+
+# ============================================================================
+# H3j smoke_nodes 的期望数（2026-09-30 新增）
+# ============================================================================
+# 🔴 为什么单列：它此前是**唯一一个"多处声明却没有机检"的数字** —— 实测在 **4 个文件**里
+#   停在 `15/0`，而真值是 `16/0`（同 H3f/H3g/H3i 一个病：同一口径多处声明，只有一处有机检，
+#   其余处漂了没人发现）。发现路径：给 `tools/en_sync.py` 补 ruff 时顺手对账 CI 步骤才看见。
+_sm = subprocess.run([sys.executable, os.path.join(KIT, "tools", "smoke_nodes.py")],
+                     capture_output=True, text=True, encoding="utf-8", errors="replace",
+                     env=dict(os.environ, COMFYUI_PATH=COMFY))
+_m_sm = _re.search(r"通过\s*(\d+)\s*/\s*失败\s*(\d+)", _sm.stdout or "")
+_sm_n = int(_m_sm.group(1)) if _m_sm else -1
+print("      实跑：smoke_nodes 通过 %s / 失败 %s"
+      % (_sm_n, _m_sm.group(2) if _m_sm else "?"))
+_bad_sm = []
+for _fn, _txt in _doc_txt.items():
+    for _ln in _txt.splitlines():
+        if "smoke_nodes" in _ln:
+            for _val in _re.findall(r"(\d+)/0", _ln):
+                if int(_val) != _sm_n:
+                    _bad_sm.append("%s: %s/0（应 %d/0）" % (_fn, _val, _sm_n))
+ck("H3j smoke_nodes 的期望数在 ci.yml·docs/08·tools/README 与实跑一致",
+   not _bad_sm and _sm_n > 0, "%d 处：%s" % (len(_bad_sm), _bad_sm[:6]))
 
 # ============================================================================
 # H3g 本文件**自己的**期望数（2026-09-25 新增）
