@@ -97,3 +97,7 @@ python tools/release.py --verify-only   # 只回答「两边现在同步吗」�
 - ❌ 不用 `git add -A` / `git add -u`（本仓多会话共用工作树，会把别人在飞的文件扫进你的提交）。
 - ❌ 提交信息里带反引号时不用 `git commit -m "…"`（bash 会做命令替换**吃掉内容**）⇒ 一律 `-F <文件>`。
 - ❌ 不让 `.comfyignore` 排掉运行期目录（`exp/` `v3/` `web/` `examples/`）—— H3k 有反向断言。
+- ❌ **不在任何记录里出现凭据值**：提交信息、日志、README、command 回显都不行
+  （值只存在于 `.comfy_registry_token`）。机检 **H3m** 扫受控文件内容 + 最近 50 条提交信息，
+  命中**只报位置、绝不打印值**。⚠️ CI 的 `checkout` 默认 `depth=1` ⇒ CI 里只扫得到当前这一条
+  提交信息，**本地跑才扫到 50 条** —— 别把 CI 绿当成"历史干净"。
