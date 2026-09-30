@@ -1,5 +1,7 @@
 # ComfyUI-H3-Latent-Relay
 
+🌐 **中文（本页，默认与唯一真相源）** · [English (condensed)](README_EN.md)
+
 MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独立使用、**零第三方节点包依赖**的 ComfyUI 节点包。
 只依赖 ComfyUI 自带的 `torch` 与 `safetensors`，不与任何第三方 H3 节点包耦合。
 
@@ -894,3 +896,4 @@ RuntimeError: shape mismatch: value tensor of shape [2392, 96]
 | [`SECURITY.md`](SECURITY.md) | 密钥 / 依赖 / 网络行为声明 |
 | [`tools/README.md`](tools/README.md) | 七个脚本的用途与期望值（六个自检/取证 + 一个拼接 CLI） |
 | [`examples/README.md`](examples/README.md) | 两份可直接打开的工作流：**最小续接演示**（19 节点）与**全流程示例**（45 节点，8 个节点全在场）· 生成器 |
+| [`README_EN.md`](README_EN.md) | **英文精简版**（安装 / 接线 / 8 节点 / 主参数 / 音频缝与拼接 / 排障 / FAQ）—— 深度推导与外链一律回本文件；**本文件仍是唯一真相源** |
