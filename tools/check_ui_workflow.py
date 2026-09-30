@@ -144,15 +144,32 @@ def local_pack_defs(comfyui_root: str = "") -> dict:
     except Exception as e:                                    # noqa: BLE001
         print("  ⚠ 读不到本包本地定义（%r）⇒ 本包节点将退回服务端 schema。" % (e,))
         return {}
-    out = {}
+    out, skipped = {}, []
     for name, cls in mod.NODE_CLASS_MAPPINGS.items():
-        it = cls.INPUT_TYPES()
+        try:
+            it = cls.INPUT_TYPES()
+        except Exception as e:                                    # noqa: BLE001
+            # 🔴 2026-09-30 加：**逐节点容错 + 明说跳过**（不是静默）。
+            #   实证（CI 首跑本工具）：`🔍 潜空间分块放大` 的 INPUT_TYPES 会走宿主注册表
+            #   ⇒ 宿主 `comfy.model_management` 在 GPU 探测上抛
+            #   `AssertionError: Torch not compiled with CUDA enabled`（CI 装的是 CPU-only torch）
+            #   ⇒ 整个工具**崩在这里**，一个节点的问题罚掉全部校验。
+            #   跳过该节点后：它不参与本次槽位校验（报告里列出来），其余节点照常查。
+            skipped.append("%s（%s: %s）"
+                           % (name, type(e).__name__,
+                              (str(e).splitlines() or [""])[0][:90]))
+            continue
         out[name] = {
             "input": {"required": dict(it.get("required") or {}),
                       "optional": dict(it.get("optional") or {})},
             "output": list(cls.RETURN_TYPES),
             "output_name": list(getattr(cls, "RETURN_NAMES", cls.RETURN_TYPES)),
         }
+    if skipped:
+        print("  ⚠ 跳过 %d 个节点（INPUT_TYPES 在当前环境求不出值 ⇒ 不参与本次槽位校验）："
+              % len(skipped))
+        for s in skipped:
+            print("     · %s" % s)
     return out
 
 
