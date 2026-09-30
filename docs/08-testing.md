@@ -70,7 +70,7 @@ node tests/test_prompt_dispatch.mjs      # 期望 13/0
 ## V3 外壳与默认出口（零 GPU、秒级）
 
 ```bash
-COMFYUI_PATH=<根> python tests/test_v3_schema.py        # 本机 70/0（8 节点 / 116 个 input）；CI 63/0（7 节点 / 103 input）
+COMFYUI_PATH=<根> python tests/test_v3_schema.py        # 能拿到宿主注册表 70/0（8 节点 / 116 个 input）；硬挡 63/0（7 节点 / 103 input）
 COMFYUI_PATH=<根> python tools/assert_default_exit.py   # 期望 4/4
 ```
 
@@ -78,19 +78,25 @@ COMFYUI_PATH=<根> python tools/assert_default_exit.py   # 期望 4/4
 Combo `options` **全序** / outputs 路数与显示名 / `is_output_node` / 显示名 / category。
 为什么必须机检：老工作流的 `widgets_values` 是**按位置**存的，参数表错一位就是**用户参数静默错位**（不报错）。
 
-> 🔴 **为什么这台机与 CI 的数是两个**（2026-09-25 实测钉死）：差的那一个节点是
+> 🔴 **为什么会有两个数**（2026-09-25 首测 / **2026-09-30 修正机制**）：差的那一个节点是
 > `H3RelayLatentUpscale`，它的 `INPUT_TYPES()` 会走到 `_comfy_registry()`，而后者**第一步就
-> `import nodes`**。
-> · 宿主 `nodes` **可导入**（本机）⇒ 上游节点不在注册表 ⇒ `_upscaler_cls()` 抛 **RuntimeError**
->   ⇒ `_upscaler_module()` 捕获它（**只** `except RuntimeError`）⇒ 退回 `get_filename_list`
->   （宿主自带注册 `latent_upscale_models`）⇒ 不抛 ⇒ **8 节点 / 116 input**。
-> · 宿主 `nodes` **导不进来**（CI：只 clone 宿主、不装上游包）⇒ 抛的是 **ModuleNotFoundError**
->   （ImportError 子类）⇒ **穿透**（没被捕获）⇒ INPUT_TYPES 抛 ⇒ V3 entrypoint 的逐节点容错
->   跳过它 ⇒ **7 节点 / 103 input**。**这是设计内的降级，不是失败。**
+> `import nodes`**。**分岔点不是"宿主 nodes 能不能 import"，而是那个异常是什么类型**：
+> · 拿到宿主注册表（`import nodes` 成功）⇒ 上游不在注册表 ⇒ `_upscaler_cls()` 抛 **RuntimeError**
+>   ⇒ `_upscaler_module()` **捕获它**（**只** `except RuntimeError`）⇒ 退回 `get_filename_list`
+>   （宿主自带注册 `latent_upscale_models`）⇒ 不抛 ⇒ **8 节点 / 116 input / 70 项**。
+> · `import nodes` 抛 **ImportError**（`sys.modules["nodes"] = None` 这种硬挡）⇒ 类型不是
+>   RuntimeError ⇒ **不吞** ⇒ 穿透 ⇒ INPUT_TYPES 抛 ⇒ 逐节点容错跳过它
+>   ⇒ **7 节点 / 103 input / 63 项**。**这是设计内的降级，不是失败。**
+> · 🔴 `import nodes` 抛 **RuntimeError**（**CI 就是这种**：宿主 import 链里 `torch.cuda` 报
+>   `Found no NVIDIA driver on your system`）⇒ **被吞** ⇒ INPUT_TYPES 成功
+>   ⇒ **8 节点 / 116 input / 70 项**（CI 的直跑与"本机"是同一档）。
 >
-> ⇒ 判据跟着环境走（`_HOST_REGISTRY_OK`），**两个数并排写才是正确形态**。
-> ⚠️ **别用"只把上游节点从注册表摘掉"来模拟 CI** —— 那复现的是「装了宿主、没装上游包」，
-> 那种情况**仍是 8 节点**。正确复现：`sys.modules["nodes"] = None` 后跑该测试。
+> ⇒ 判据由**节点自己的 `INPUT_TYPES()`** 回答（测试的 `2.1`），**不是**由"宿主 nodes 能不能
+>   import"去推 —— 后者在 CI 上会得出**相反**的结论（2026-09-30 实测：探针说"期望 7"、实际 8
+>   ⇒ 假红，而本地 70/0 复现不了）。
+> ⚠️ **别用"只把上游节点从注册表摘掉"来模拟第二档** —— 那复现的是「装了宿主、没装上游包」，
+> 那种情况**仍是 8 节点**。正确复现第二档：`sys.modules["nodes"] = None` 后跑该测试
+> （工具版 `tools/ci_env_repro.py`）。
 > 这组数字已由 `tools/review_050.py` 的 **H3h** 机检（语义 = 「当前环境的真值必须出现在
 > 声明集合里」，并限制每个数最多两种取值）。
 

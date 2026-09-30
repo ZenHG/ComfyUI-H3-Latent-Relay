@@ -77,12 +77,18 @@ sys.modules["server"] = _srvmod
 # nodes.py 的 _comfy_registry() 会 `import nodes` 取宿主注册表（H3RelayLatentUpscale 的
 # INPUT_TYPES 要找上游包）。真实宿主进程里它已在 sys.modules 里；离线环境这里主动拉一次。
 # 拉不到也不假红 —— 见 2.1/2.2 的判据（V3 的 entrypoint 已做逐节点容错，只丢那一个）。
-_HOST_REGISTRY_OK = False
+_HOST_NODES_IMPORT_OK = False
 try:
     import nodes as _host_nodes                        # noqa: E402
-    _HOST_REGISTRY_OK = getattr(_host_nodes, "NODE_CLASS_MAPPINGS", None) is not None
+    _HOST_NODES_IMPORT_OK = getattr(_host_nodes, "NODE_CLASS_MAPPINGS", None) is not None
 except Exception as _e:                                # noqa: BLE001
-    print("  提示：宿主 nodes 模块未能加载（%s: %s）⇒ H3RelayLatentUpscale 的 schema 会被跳过。"
+    # 🔴 这句话以前写的是"⇒ H3RelayLatentUpscale 的 schema 会被跳过" —— **是假的**（2026-09-30 实测）：
+    #    宿主 import 抛的是 **RuntimeError**（如 CI 无 NVIDIA 驱动）时，`_upscaler_module()`
+    #    **按设计吞掉 RuntimeError** ⇒ INPUT_TYPES 照样成功 ⇒ 该节点**在场**。
+    #    只有抛 **ImportError**（如 `sys.modules["nodes"]=None`）才真的被跳过。
+    #    ⇒ 探针只报事实，**不再替 2.1 下结论**（判据在 2.1 处由节点自己回答）。
+    print("  提示：宿主 nodes 模块未能加载（%s: %s）。"
+          "⚠ 这**不等于** Upscale 会缺席 —— 它是否在场由自己的 INPUT_TYPES() 决定（见 2.1）。"
           % (type(_e).__name__, _e))
 
 PASS, FAIL = [], []
@@ -116,34 +122,51 @@ print("[2] 扩展与节点清单")
 _ep = KIT.comfy_entrypoint
 _ext = asyncio.run(_ep()) if asyncio.iscoroutinefunction(_ep) else _ep()
 V3_NODES = asyncio.run(_ext.get_node_list())
-# 🔴 为什么是 **8 或 7**（2026-09-25 实测钉死，别再猜 —— 我当天猜错过一次，被 CI 打回）：
+# 🔴 为什么是 **8 或 7**（2026-09-25 首测 / **2026-09-30 修正机制**，别再猜）：
 #
 #   `H3RelayLatentUpscale.INPUT_TYPES()` 要 `_upscale_model_names()` → `_upscaler_module()`
 #   → `_upscaler_cls()` → `_comfy_registry()`，而后者**第一步就 `import nodes`**。
+#   分岔点**不是"宿主 nodes 能不能 import"，而是那个异常**是什么类型**：
 #
-#   · **宿主 `nodes` 可导入**（本机）⇒ 注册表里没有上游节点 ⇒ `_upscaler_cls()` 抛
+#   · 宿主注册表**拿得到**（`import nodes` 成功）⇒ 注册表里没有上游节点 ⇒ `_upscaler_cls()` 抛
 #     **RuntimeError** ⇒ `_upscaler_module()` **捕获它**（它只 `except RuntimeError`）
 #     ⇒ 退回 `folder_paths.get_filename_list("latent_upscale_models")`
 #     （**宿主自带注册该目录**，`folder_paths.py:43`）⇒ 正常返回（最多给一个占位串）
-#     ⇒ INPUT_TYPES 不抛 ⇒ **8 节点**。
-#   · **宿主 `nodes` 导不进来**（CI：只 clone 宿主、不装上游包，`import nodes` 失败）
-#     ⇒ `_comfy_registry()` 抛的是 **`ModuleNotFoundError`**（ImportError 子类）
-#     ⇒ `_upscaler_module()` **只 except RuntimeError ⇒ 异常穿透** ⇒ INPUT_TYPES 抛
-#     ⇒ V3 entrypoint 的逐节点容错跳过它 ⇒ **7 节点**。
+#     ⇒ INPUT_TYPES 不抛 ⇒ **8 节点 / 116 input / 70 项**。
+#   · `import nodes` 抛 **ImportError**（`sys.modules["nodes"] = None` 这种硬挡）
+#     ⇒ 类型不是 RuntimeError ⇒ `_upscaler_module()` **不吞** ⇒ 异常穿透 ⇒ INPUT_TYPES 抛
+#     ⇒ V3 entrypoint 的逐节点容错跳过它 ⇒ **7 节点 / 103 input / 63 项**。
+#   · 🔴 `import nodes` 抛 **RuntimeError**（**CI 就是这种**：宿主 import 链里
+#     `torch.cuda` 报 `Found no NVIDIA driver on your system`）⇒ **被吞** ⇒
+#     INPUT_TYPES 照样成功 ⇒ **8 节点 / 116 input / 70 项**。
 #
-#   ⇒ 判据**必须跟着环境走**，这正是 `_HOST_REGISTRY_OK` 的用途。
+#   ⇒ 所以"Upscale 在不在"**只由它自己的 INPUT_TYPES() 回答**（2.1 就是这么判的）；
+#     用"宿主 nodes 能不能 import"去推会得到**相反的结论**（2026-09-30 CI 实测：
+#     探针说"不可用 ⇒ 期望 7"、实际 8 ⇒ 假红，而本地 70/0 复现不了）。
+#   ⇒ 两种环境的数字**都合法、都要在文档里声明**：
+#     ① 能拿到宿主注册表（含 import 抛 RuntimeError 被吞）：**8 / 116 / 70**
+#     ② `sys.modules["nodes"] = None` 硬挡：**7 / 103 / 63**
 #
-#   ⚠️ **别用"只把上游节点从注册表里摘掉"来模拟 CI** —— 那复现的是「装了宿主、没装上游包」，
-#      那种情况**仍然是 8 节点**。CI 的条件是「宿主 `nodes` 根本导不进来」。
-#      正确复现法：`sys.modules["nodes"] = None` 后跑本文件
-#      ⇒ 实测 `通过 59（失败 3）／7 节点 · 99 input`，与 CI 日志（run 36116073154）**一字不差**。
-#      探针留档在**本机临时目录**（不入库；路径见本地维护规范文档，公开仓库不放本机路径）。
-#      ⚠️ 0.6.15 加第 9 个节点（`H3RelayConcatSegments`）与 Chain 的 `run_id` 后，两组数字各 +1/+13：
-#         本机 **8 节点 · 116 input**；CI **7 节点 · 103 input**（比 0.6.14 各 +1 input，来自 Chain 的 ）。
-_EXPECT_NODES = 8 if _HOST_REGISTRY_OK else 7
-check("2.1 get_node_list() 返回 %d 个节点（宿主注册表 %s）"
-      % (_EXPECT_NODES, "可用 ⇒ 8 个外壳全在场" if _HOST_REGISTRY_OK
-         else "不可用 ⇒ Upscale 因拿不到宿主注册表而缺席"),
+#   ⚠️ **别用"只把上游节点从注册表里摘掉"来模拟 ②** —— 那复现的是「装了宿主、没装上游包」，
+#      那种情况**仍然是 8 节点**。正确复现法：`sys.modules["nodes"] = None` 后跑本文件
+#      （工具版：`python tools/ci_env_repro.py tests/test_v3_schema.py`）。
+# 🔴 判据必须与被测对象**同源**（2026-09-30 修，CI 实测踩到）：
+#    "Upscale 在不在"只取决于**它自己的 `INPUT_TYPES()` 会不会抛** ——
+#    不是"宿主 nodes 能不能 import"。两者在 CI 上恰好**分叉**：
+#      · 宿主 import 抛 **RuntimeError**（无 NVIDIA 驱动）⇒ 探针说"不可用"；
+#      · 而 `_upscaler_module()` **按设计吞掉 RuntimeError** ⇒ INPUT_TYPES 成功 ⇒ 节点在场。
+#    用探针去**推**节点数 ⇒ 期望 7、实际 8 ⇒ **假红**（本地 70/0 也复现不了）。
+#    现在直接问节点自己；节点数也不再写死 8/7（加节点时不用回来改这里）。
+try:
+    V1.NODE_CLASS_MAPPINGS["H3RelayLatentUpscale"].INPUT_TYPES()
+    _UPSCALE_OK = True
+except Exception as _e:                                # noqa: BLE001
+    _UPSCALE_OK = False
+    print("  提示：H3RelayLatentUpscale.INPUT_TYPES() 抛了（%s: %s）⇒ 它会被逐节点容错跳过。"
+          % (type(_e).__name__, _e))
+_EXPECT_NODES = len(V1.NODE_CLASS_MAPPINGS) - (0 if _UPSCALE_OK else 1)
+check("2.1 get_node_list() 返回 %d 个节点（判据 = Upscale 自己的 INPUT_TYPES() %s）"
+      % (_EXPECT_NODES, "不抛 ⇒ 外壳全在场" if _UPSCALE_OK else "抛 ⇒ 它被容错跳过"),
       len(V3_NODES) == _EXPECT_NODES, "实际 %d" % len(V3_NODES))
 
 V3_BY_ID = {}
@@ -153,9 +176,9 @@ for _n in V3_NODES:
 
 _missing = sorted(set(V1.NODE_CLASS_MAPPINGS) - set(V3_BY_ID))
 _extra = sorted(set(V3_BY_ID) - set(V1.NODE_CLASS_MAPPINGS))
-check("2.2 node_id 集合 == V1 键集合（仅允许 Upscale 因宿主注册表缺席被跳过）",
+check("2.2 node_id 集合 == V1 键集合（仅允许 Upscale 因自己的 INPUT_TYPES() 抛而被跳过）",
       not _extra and (not _missing
-                      or (_missing == ["H3RelayLatentUpscale"] and not _HOST_REGISTRY_OK)),
+                      or (_missing == ["H3RelayLatentUpscale"] and not _UPSCALE_OK)),
       "多出 %s ／ 少了 %s" % (_extra, _missing))
 
 print()
