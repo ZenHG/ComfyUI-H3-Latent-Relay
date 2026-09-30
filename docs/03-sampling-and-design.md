@@ -122,3 +122,67 @@
   这些取决于你的显存、素材与审美，**没有客观最优**，所以本包把它们放上画布并给推荐默认。
 - **默认档就是"无感"档**：照「5 分钟跑通」跑，接缝处应当**看不出来**；
   还看得出来时，按上一节的顺序（先链、后画质域修复、最后掩码/裁量）逐级排查。
+
+---
+
+## 4.1 全流程档：**8 个节点全在场**（`examples/fullflow_second_pass_latent_upscale_ui.json`）（原 README §4.1）
+
+> 由 README（0.6.15 瘦身）搬入，内容与搬入前逐字一致。
+
+上面那张是**最小必备**接法。产线现役的「一采 → 🔍 放大 → 二采 → 续接」把 8 个节点都用上了，
+顺序与两条硬纪律如下（★ = 交付支路，☆ = 续接契约，两者**不是一条线**）：
+
+```
+① 出词（官方 MiniMaxH3ReferenceToVideo）        positive + LATENT 两路都出
+② 🔗 续接 Latent 读   ☆ 上一段落盘（段号 −1，自动）
+③ 🔗 续接 拷贝桥      ← ①LATENT + ②context_latent；[3]conditioning → **只喂一采的 guider**
+④ 一采 SamplerCustomAdvanced（原生分辨率，guider ← ③[3]）
+⑤ 🔗 续接 Latent 存   ☆ ← ④ 输出            ★必须接在放大**之前**
+⑥ 🔍 潜空间分块放大   ← ④ → + SetLatentNoiseMask（钉住头 7 个 latent 帧）
+⑦ 二采 SamplerCustomAdvanced（在高分辨率上）guider ← **① positive**（🔴 不是 ③[3]，见 §10.9）
+⑧ VAEDecode ← ⑦ 画面 ／ VAEDecodeAudio ← ④ 音频   ★音频全程不走 SR 与二采
+⑨  续接 音频缝 ← ⑧音频 → 🔗 续接 裁重叠（音画同裁 + 落 PCM 边车）← ⑧画面
+⑩ 🔗 续接 后处理 Post ← ⑨（guide ← 裁重叠[3] prev_tail；20 个旋钮默认全 0 = 逐位直通）
+⑪ CreateVideo → SaveVideo（单文件带音轨）
+⑫ 🔗 续接 连跑 Chain：`prompts` 用 `---` 分块 ⇒ 连跑逐段换词（**0.6.15 起把 `Chain.prompt` 连到出词节点的 `prompt`，脚本提交 JSON 也同功能**）；跑完点 🧩 拼成一条 直接出成片
+```
+
+- 🔴 **二采不接桥的 `conditioning`**：钉帧锚（`minimax_keyframes`）与本段目标**必须同网格**，
+  一采之后画面已放大 ⇒ 接上当场炸（机理与实测数字见 §10.9）。latent 侧钉住照旧生效。
+- 🔴 **契约取原生域**：`Latent 存` 在放大之前；存成放大后的 ⇒ 下一段再过一次 SR = 双倍漂移。
+- 出段分辨率 = 原生 × 放大系数（本示例 416×736 → 480×864）；**放大属交付支路，不进续接契约**。
+
+**槽位速查**（0 起算）
+| 节点 | 输入 | 输出 |
+|---|---|---|
+| `H3RelayCopyBridge`（复合桥） | `[0] latent` `[1] context_latent` `[2] context_frames` `[16] conditioning` `[17] run_id` `[18] stage_index` | `[0] latent` `[1] report` `[2] trim_frames` `[3] conditioning` |
+| `H3RelayLatentSave` | `[0] latent` `[1] run_id` `[2] stage_index` `[3] note` | `[0] latent` `[1] path` |
+| `H3RelayTrimAV` | `[0] images` `[1] trim_frames` `[2] fps` `[3] audio` `[4] settle_frames` | `[0] images` `[1] audio` `[2] report` `[3] prev_tail` |
+| `H3RelayPost` | `[0] images` `[1] guide` + 20 个旋钮 | `[0] images` `[1] report` |
+| `H3RelayAudioSeam` | `[0] audio` `[1] run_id` `[2] stage_index` `[3] patch_seconds` `[5] fade_seconds` | `[0] audio` `[1] report` `[2] joined` |
+| `H3RelayLatentLoad`（可选） | `[0] run_id` `[1] stage_index` `[2] explicit_path` | `[0] context_latent` `[1] info` |
+
+**第 1 段**：桥 `[2]` 输出 `0` → 裁重叠原样通过；桥不读上下文（直通）。
+**第 2 段起**：填好 `run_id` + `stage_index`，桥自己从
+`output/relay_kit/<run_id>/stage_NNNNN.safetensors` 读上一段。
+想在图上把来源画出来（或断点续跑换源），就接 `🔗 H3 续接 Latent 读`（`[0] context_latent` → 桥 `[1]`）。
+
+只要某节点**输出 `CONDITIONING` + `LATENT`**，接法就一样——把它替掉图里的出词节点即可。
+
+| 用到的节点 | 来自 |
+|---|---|
+| `MiniMaxH3ReferenceToVideo` / `MiniMaxH3ImageToVideo` / `MiniMaxH3AddGuide` | ComfyUI **内置** |
+| `CSGlideCastCS`（出词 + 规格） | `ComfyUI-Banzhang-All`（第三方，**非本包依赖**） |
+| `SelfLiftH3Sampler`（AV 采样器） | `comfyui-SelfLift`（第三方，**非本包依赖**） |
+
+> 📂 **`examples/` 里那两个演示工作流**另需 **KJNodes**（用到 `CreateFadeMaskAdvanced` /
+> `MiniMaxChunkFeedForward`）—— 那是**示例图**的依赖，不是本包的（本包本身零第三方节点包依赖）。
+> 只想要"最小接法"的话用 `minimal_relay_official.json`，它**全官方节点 + 本包**。
+
+可选节点（默认全关 = 逐位直通，删掉照样跑）：**后处理 Post**（画质域）、**音频缝**（音频域）、
+**Chain**（自动连跑，见 [`docs/07-chain.md`](docs/07-chain.md)）。
+
+> 节点在画布上默认只画主旋钮、其余折进 `advanced` 区；旧图看不到 `prev_tail` 输出的处理见
+> [`docs/04-canvas-and-widgets.md`](docs/04-canvas-and-widgets.md)。
+
+---

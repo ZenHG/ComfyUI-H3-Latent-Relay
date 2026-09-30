@@ -202,8 +202,9 @@ def mechanical(zh, en, zh_secs, en_secs):
     elif mz and not me:
         problems.append("英文首部缺 `| Version | **x.y.z** |` 行（中文有版本声明）")
 
-    # M2 文件头同步标记
+    # M2 文件头同步标记（记录源文件与上次同步日；缺了就是"派生物丢了出处"）
     if not MARK_RE.search(en):
+        problems.append("英文缺 `<!-- EN-SYNC … -->` 标记（跑 `--apply` 可补）")
         fixes.append(("marker", "补 `<!-- EN-SYNC … -->` 标记（记录源文件与上次同步日）"))
 
     # M3 链接目标完整性：中文里链到的每个 .md（在英文里要么原样、要么 `_EN` 变体）都应出现

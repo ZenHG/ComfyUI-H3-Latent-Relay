@@ -318,14 +318,17 @@ ck("H3b CONTRIBUTING 的方面数/断言数 == 实跑真值",
    and int(_m_assert.group(1)) == _n_assert,
    "期望 %s 个方面 / %d 项断言" % (_zh(_n_ngroups), _n_assert))
 
-# README 的「离线自测」一节同样要对账（v0.5.0 复查抓到过：README 停在 171/十七个方面）
-_m_r_assert = _re.search(r"\*\*(\d+) 项断言[^*]*\*\*，覆盖(.{1,4})个方面", _readme)
-_m_r_group = _re.search(r"^\| 21 \|", _readme, _re.M)
-print("      README：%s 项断言 / %s 个方面%s"
+# 「离线自测」的计数与 28 组明细表**已随 README 瘦身搬到 docs/08**（2026-09-30 重构）：
+#   机检跟着**内容**走 —— README 只留命令与指针，分组表的真相源是 docs/08。
+#   ⚠️ 别改回读 README：那会让"README 保持薄"这件事每次都把闸弄红（重构时踩过）。
+_d08 = open(os.path.join(KIT, "docs", "08-testing.md"), encoding="utf-8").read()
+_m_r_assert = _re.search(r"\*\*(\d+) 项断言[^*]*\*\*，覆盖(.{1,4})个方面", _d08)
+_m_r_group = _re.search(r"^\| 21 \|", _d08, _re.M)
+print("      docs/08：%s 项断言 / %s 个方面%s"
       % (_m_r_assert.group(1) if _m_r_assert else "?",
          _m_r_assert.group(2) if _m_r_assert else "?",
          "（含第 21 组行）" if _m_r_group else "（**缺第 21 组行**）"))
-ck("H3c README 的断言数/方面数 == 实跑真值，且分组表列到 21",
+ck("H3c docs/08 的断言数/方面数 == 实跑真值，且分组表列到 21",
    bool(_m_r_assert) and int(_m_r_assert.group(1)) == _n_assert
    and _m_r_assert.group(2) == _zh(_n_ngroups) and bool(_m_r_group),
    "期望 %d 项断言 / %s 个方面" % (_n_assert, _zh(_n_ngroups)))
@@ -924,9 +927,12 @@ finally:
     _sh.rmtree(_td, ignore_errors=True)
 
 _rd = open(os.path.join(KIT, "README.md"), encoding="utf-8").read()
-ck("L9 README 的音频缝章节已改口径：节点实现（且不再写「要靠组装层补」）",
-   "要靠组装层补" not in _rd and "续接音频缝" in _rd
-   and "必须在节点里做" in _rd)
+# ⚠️ 2026-09-30 README 瘦身：音频缝那一整节搬进 docs/10 ⇒ 这两条检查**跟着内容走**，
+#    改读新家（README 只留结论与指针）。判据语义一字未改，只是换了查询目标。
+_l10 = open(os.path.join(KIT, "docs", "10-audio-seam-and-concat.md"), encoding="utf-8").read()
+ck("L9 docs/10 的音频缝章节口径：节点实现（且不再写「要靠组装层补」）",
+   "要靠组装层补" not in _l10 and "必须在节点里做" in _l10
+   and "音频缝" in _l10 and "音频缝" in _rd)
 
 # L10 —— 2026-09-21 铁律：UI 与 API 必须同一套节点实现（写在 README 约定块 + CONTRIBUTING 纪律里）
 #   为什么机检它：这条规则若只活在人的记忆里，下一个人照样会去改私有脚本 ——
@@ -939,9 +945,9 @@ ck("L10 双轨铁律在位：UI 与 API 同一套节点实现（README 约定块
 ck("L11 铁律三在位（给建议必须写好/坏两面）+ tile 缺口已**根修**且能力边界仍在",
    "铁律三" in _cg and "不许只说一半" in _cg and "能力边界" in _cg
    and "已知缺口登记" in _cg and "已根修" in _cg)
-ck("L12 README §7.2 判据能力边界与兜底措施在位（能量型边界 + 两条漏检 + 兜底链）",
-   "判据能抓什么、抓不住什么" in _rd and "低电平人声" in _rd and "语音当底噪" in _rd
-   and "兜底措施" in _rd and "最终判定是人耳" in _rd)
+ck("L12 docs/10 §7.2 判据能力边界与兜底措施在位（能量型边界 + 两条漏检 + 兜底链）",
+   "判据能抓什么、抓不住什么" in _l10 and "低电平人声" in _l10 and "语音当底噪" in _l10
+   and "兜底措施" in _l10 and "最终判定是人耳" in _l10)
 
 # ============================================================================
 # H3h V3 机检的「节点数 / input 数 / 项数」在 4 个文件里的一致（2026-09-25 新增）

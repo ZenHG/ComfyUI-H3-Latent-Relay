@@ -8,126 +8,78 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "condensed",
-          "h_en": "59433d33039f0371",
-          "h_src": "c2183406b0378b0d",
+          "h_en": "f5f25f0760da6907",
+          "h_src": "cec907e632965384",
           "seeded": "by-position"
         },
         {
-          "zh": "0. 目录",
-          "en": null,
-          "mode": "omit",
-          "h_en": null,
-          "why": "目录/导航表对英文版无意义：英文版节号与中文一一对应，翻一份会多一处要同步的表",
-          "h_src": "cd601a83cfc1da47"
+          "zh": "核心功能",
+          "en": "Core features",
+          "mode": "condensed",
+          "h_en": "ae37fa10850f7e77",
+          "h_src": "2e95cbeff2bad3b5",
+          "seeded": "by-position"
         },
         {
-          "zh": "1. 它解决什么问题",
-          "en": "1. What problem does it solve?",
+          "zh": "环境依赖",
+          "en": "Requirements",
           "mode": "condensed",
-          "h_en": "f990d22a3a296be0",
-          "h_src": "7f8ba029efa9d2b4",
-          "seeded": "by-number"
+          "h_en": "4c0ec6d07c317b35",
+          "h_src": "2548a74d59524a46",
+          "seeded": "by-position"
         },
         {
-          "zh": "2. 安装",
-          "en": "2. Install",
+          "zh": "安装",
+          "en": "Install",
           "mode": "condensed",
-          "h_en": "4588745a099def89",
-          "h_src": "5e45edcd9a0a4523",
-          "seeded": "by-number"
+          "h_en": "fdd95e90884929ed",
+          "h_src": "3e24e547cf9d956b",
+          "seeded": "by-position"
         },
         {
-          "zh": "3. 5 分钟跑通",
-          "en": "3. Five-minute quickstart",
+          "zh": "使用方法",
+          "en": "Usage",
           "mode": "condensed",
-          "h_en": "581894f8d8a4d144",
-          "h_src": "b7f52afdac4c98d6",
-          "seeded": "by-number"
+          "h_en": "ec838f07be14dff6",
+          "h_src": "18d3575de2d06165",
+          "seeded": "by-position"
         },
         {
-          "zh": "4. 接线（唯一桥）",
-          "en": "4. Wiring (the one bridge)",
+          "zh": "目录结构",
+          "en": "Repository layout",
           "mode": "condensed",
-          "h_en": "ee6ff4921f3140b3",
-          "h_src": "9e622e5e1f072343",
-          "seeded": "by-number"
+          "h_en": "fd113ebee007c6ee",
+          "h_src": "f21d4e6e9d74ff55",
+          "seeded": "by-position"
         },
         {
-          "zh": "5. 节点速览",
-          "en": "5. Nodes at a glance",
+          "zh": "配置与注意事项",
+          "en": "Configuration & hard rules",
           "mode": "condensed",
-          "h_en": "5f252cdb5952301f",
-          "h_src": "85281aeee3d5fa08",
-          "seeded": "by-number"
+          "h_en": "beac26b98e39c876",
+          "h_src": "5b24ec82e3c41d5c",
+          "seeded": "by-position"
         },
         {
-          "zh": "6. 参数（主旋钮）",
-          "en": "6. Knobs (the main ones)",
+          "zh": "许可与出处",
+          "en": "License and attribution",
           "mode": "condensed",
-          "h_en": "1ceab2e422d99223",
-          "h_src": "c00cbd1ca3d8aacf",
-          "seeded": "by-number"
+          "h_en": "90510828d14d6a04",
+          "h_src": "a321bbc5aeca4897",
+          "seeded": "by-position"
         },
         {
-          "zh": "7. 音频缝",
-          "en": "7. Audio seam",
+          "zh": "文档索引",
+          "en": "Documentation index",
           "mode": "condensed",
-          "h_en": "7765ecc298b70b16",
-          "h_src": "578ec4631806ac94",
-          "seeded": "by-number"
-        },
-        {
-          "zh": "8. 离线自测",
-          "en": "8. Offline self-test",
-          "mode": "condensed",
-          "h_en": "c4914f6a784519d9",
-          "h_src": "02137afd788bd833",
-          "seeded": "by-number"
-        },
-        {
-          "zh": "9. 排障",
-          "en": "9. Troubleshooting",
-          "mode": "condensed",
-          "h_en": "5d83bd4557ae1930",
-          "h_src": "ec1c51229bba5f58",
-          "seeded": "by-number"
-        },
-        {
-          "zh": "10. 常见疑问（FAQ）",
-          "en": "10. FAQ",
-          "mode": "condensed",
-          "h_en": "269621e2d96a05dc",
-          "h_src": "081e46d1d8962342",
-          "seeded": "by-number"
-        },
-        {
-          "zh": "11. 原理与机制",
-          "en": "11. Mechanism",
-          "mode": "condensed",
-          "h_en": "54a04c08b862bccf",
-          "h_src": "a8a4fa6e4e189fed",
-          "seeded": "by-number"
-        },
-        {
-          "zh": "12. 许可与出处",
-          "en": "12. License and attribution",
-          "mode": "condensed",
-          "h_en": "d859b684300e6be2",
-          "h_src": "043b71af116c009e",
-          "seeded": "by-number"
-        },
-        {
-          "zh": "13. 文档索引",
-          "en": "13. Documentation index",
-          "mode": "condensed",
-          "h_en": "ff9972c832ccb6f3",
-          "h_src": "58fc2f1179d80539",
-          "seeded": "by-number"
+          "h_en": "e19bd7e1e463eb4c",
+          "h_src": "f7628d2d425c5357",
+          "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-09-30",
-      "src_sha": "67b7cbd41e8639d0"
+      "src_sha": "379552ad5474abd3"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
