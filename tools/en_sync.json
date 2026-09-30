@@ -32,8 +32,8 @@
           "zh": "安装",
           "en": "Install",
           "mode": "condensed",
-          "h_en": "fdd95e90884929ed",
-          "h_src": "3e24e547cf9d956b",
+          "h_en": "eabb4f61927d051b",
+          "h_src": "3a268525985ad336",
           "seeded": "by-position"
         },
         {
@@ -64,8 +64,8 @@
           "zh": "许可与出处",
           "en": "License and attribution",
           "mode": "condensed",
-          "h_en": "90510828d14d6a04",
-          "h_src": "a321bbc5aeca4897",
+          "h_en": "46273c343e296710",
+          "h_src": "6addf6faea7c98f3",
           "seeded": "by-position"
         },
         {
@@ -79,7 +79,7 @@
       ],
       "acks": [],
       "stamped": "2026-09-30",
-      "src_sha": "ad7ce2d038e76d21"
+      "src_sha": "1d5565d9c179ee90"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",

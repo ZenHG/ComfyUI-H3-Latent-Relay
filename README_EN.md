@@ -98,6 +98,16 @@ weights (24-channel), **not** an ESRGAN-style pixel model.
 Both exits have identical node names, input/output order and defaults (machine-checked field by field) ⇒
 **switching needs no graph edits**.
 
+> **Why it must be one or the other**: the host loader is `if the module has NODE_CLASS_MAPPINGS → return` /
+> `elif the module has comfy_entrypoint` ⇒ exporting both means **V3 never takes effect**; in V3 mode this pack
+> therefore sets `NODE_CLASS_MAPPINGS = None` explicitly.
+> **V3's known difference**: the schema is built **at package load time** (V1 is lazy) ⇒ if one node's parameter
+> table fails to build, only **that node is skipped** and logged; everything else still loads (the pack never
+> fails as a whole).
+> **Lower-bound basis**: `web/` mounting relies on the host's `WEB_DIRECTORY`, and metadata relies on
+> `comfy_config` parsing `pyproject.toml` — both verified on **0.37.0**; `requires-python = ">=3.10"` is
+> deliberately conservative (no 3.10-only syntax is used, so relaxing it to 3.9 has no syntax obstacle).
+
 ---
 
 ## Usage
@@ -228,8 +238,11 @@ are actually loaded — the minimal distribution set in `dist/` is exactly those
 - **This pack = MIT** ([`LICENSE`](LICENSE)): commercial use, modification and redistribution allowed;
   keep the copyright notice.
 - Third-party sources and credits: [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) (including the fact
-  that **the runtime host ComfyUI is GPL-3.0**, and our position on it); **for strict compliance use
-  ≥ 0.6.0** (the public history of v0.2.1–v0.5.0 had overlapping expression, since rewritten).
+  that **the runtime host ComfyUI is GPL-3.0**, and our position on it).
+- ⚠️ **About `H3RelayMotionContext` (GPL-3.0)**: its anchor-synthesis part **overlapped in expression** with
+  that pack in the **public history of v0.2.1–v0.5.0**. It was **rewritten wholesale** on 2026-09-19 and the
+  current version contains none of its derived expression; the historical commits were **not rewritten** and
+  can be checked out for review (NOTICES §一·B) ⇒ **for strict compliance use ≥ 0.6.0**.
 - **Model weights are not included**: bring your own MiniMax-H3 weights; their licence and commercial
   terms are set by their provider.
 - Compliance: this is a general-purpose video generation tool. Users must obey local law and the licences
@@ -237,6 +250,8 @@ are actually loaded — the minimal distribution set in `dist/` is exactly those
   the rights of others. MIT provides no warranty of fitness.
 - **This pack is not an official MiniMax product** and is neither affiliated with nor endorsed by MiniMax
   or ComfyUI.
+- When redistributing, keep [`LICENSE`](LICENSE) · [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) ·
+  `licenses/` alongside the pack.
 
 ---
 

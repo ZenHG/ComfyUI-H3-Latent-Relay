@@ -87,6 +87,14 @@ git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git  
 **节点 API 出口：V3（默认）/ V1**（`H3RELAY_NODE_API=v1` 一行回退，改后需重启）。
 两条出口的节点名、输入输出顺序、默认值全部相同（机检逐字段一致）⇒ **切换不需要改图**。
 
+> **为什么只能二选一**：宿主加载顺序是 `if 模块有 NODE_CLASS_MAPPINGS → return` / `elif 模块有 comfy_entrypoint`
+> ⇒ 两套一起导出时 **V3 永不生效**；所以 V3 模式下本包把 `NODE_CLASS_MAPPINGS` 显式置 `None`。
+> **V3 的已知差异**：schema 在**包加载时**构造（V1 是惰性的）⇒ 某个节点的参数表构造失败时只会
+> **跳过那一个节点**并打日志，其余照常加载（不会整包失效）。
+> **下限依据**：`web/` 挂载靠宿主 `WEB_DIRECTORY`、元数据靠 `comfy_config` 解析 `pyproject.toml` ——
+> 两条都在 **0.37.0** 上实测通过；`requires-python = ">=3.10"` 是刻意保守
+> （本包未使用 3.10+ 独有语法，真要放宽到 3.9 亦无语法障碍）。
+
 ---
 
 ## 使用方法
@@ -207,11 +215,15 @@ ComfyUI-H3-Latent-Relay/
 
 - **本包 = MIT**（[`LICENSE`](LICENSE)）：可商用、可修改、可再发布，保留版权声明即可。
 - 第三方出处与署名见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)（含"运行时宿主 ComfyUI 是 GPL-3.0"的
-  事实与立场）；**严格合规请使用 ≥ 0.6.0**（v0.2.1–v0.5.0 的公开历史存在表达层重合，已整体重写）。
+  事实与立场）。
+- ⚠️ **关于 `H3RelayMotionContext`（GPL-3.0）**：其锚位合成段在 **v0.2.1–v0.5.0 的公开历史**里曾与该包构成
+  **表达层重合**，已于 2026-09-19 **整体重写**，当前版本不含其派生表达；历史提交**未改写**、可检出复核
+  （NOTICES §一·B）⇒ **严格合规请使用 ≥ 0.6.0**。
 - **模型权重不含在本包内**：MiniMax-H3 等权重需自备，许可与商用条件由提供方决定。
 - 使用合规：本包是通用视频生成工具，使用者须遵守当地法律与所用模型/素材许可，不得用于伪造肖像、
   传播虚假信息或侵犯他人权利。MIT 不含任何用途担保。
 - **本包非 MiniMax 官方作品**，与 MiniMax、ComfyUI 官方均无隶属或背书关系。
+- 再发布时请一并保留 [`LICENSE`](LICENSE) · [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) · `licenses/`。
 
 ---
 

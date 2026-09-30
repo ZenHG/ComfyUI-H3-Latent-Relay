@@ -81,6 +81,12 @@
 > `av_delta_ok` 恒真 = **假绿**（2026-09-22 自己踩过）。官方 `CreateVideo + SaveVideo` 单文件带音轨、
 > 零第三方依赖。**代价**：编码档位不可调（想控 crf/码率就换回 VHS，但段文件必须取 `-audio` 那份）。
 
+> **示例图只依赖本包 + KJNodes，但接法对任何「输出 `CONDITIONING` + `LATENT`」的出词节点都成立**
+> —— 换掉出词节点即可。常见来源：`MiniMaxH3ReferenceToVideo` / `MiniMaxH3ImageToVideo` /
+> `MiniMaxH3AddGuide` 来自 ComfyUI **内置**；`CSGlideCastCS`（出词 + 规格）来自第三方 `ComfyUI-Banzhang-All`；
+> `SelfLiftH3Sampler`（AV 采样器）来自第三方 `comfyui-SelfLift` —— 后两者**都不是本包的依赖**，
+> 只是"可以替换进来"的件（本包本身**零第三方节点包依赖**）。
+
 **怎么用**：① 装齐本包 8 个节点 + KJNodes + 🔍 的放大权重（主 README §安装·可选）；② 把 `LoadImage` 换成自己的
 参考图、把 Chain 的 `prompts` 格换成自己的 N 段词（**段数与 `segments` 一致**）；
 ③ 点 Chain 上的 **⏩ 连跑** 出 N 段，再点 **🧩 拼成一条**。手动跑就改段号逐段 Queue。
