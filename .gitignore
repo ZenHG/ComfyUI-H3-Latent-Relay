@@ -34,6 +34,9 @@ output/
 tmp/
 
 # ---- 密钥 / 环境变量（绝不入库）----
+# Comfy Registry 发布用 PAT（只在本机；见 CONTRIBUTING「发布」）
+# ⚠️ 行内不能写注释：gitignore 里 `#` 只有**行首**才算注释，写行尾会被当成模式的一部分
+.comfy_registry_token
 .env
 .env.*
 *.local

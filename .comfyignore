@@ -24,6 +24,12 @@ SECURITY.md
 .gitignore
 .gitattributes
 
+# —— 密钥（双保险）——
+# ⚠️ 它本来就**不被 git 跟踪**（.gitignore 里也有），而 `comfy node pack` 只打包
+#    `git ls-files` 的结果 ⇒ 理论上不可能进包。列在这里是为了防「有人 `git add -f`
+#    强塞进来」——那种情况下这一行还能把它从发布包里剔掉。
+.comfy_registry_token
+
 # —— 示例目录里的生成器脚本（只留两个可直接打开的工作流 + 说明）——
 examples/make_minimal_workflow.py
 
