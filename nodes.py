@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 ComfyUI-H3-Latent-Relay contributors
 # 第三方出处与许可见 THIRD-PARTY-NOTICES.md
-"""H3 Relay Kit · 节点层
+"""H3 Latent Relay · 节点层
 
 八个节点（0.6.8 起）：续接七件套 + 一个画质域潜空间放大适配器，覆盖"用作者的续接方式"所需的全部接线：
 
@@ -144,7 +144,7 @@ def _node_errors(*keys):
     return deco
 
 
-CATEGORY = "H3 Relay Kit"
+CATEGORY = "H3 Latent Relay"
 
 # 落盘根目录：ComfyUI/output/relay_kit/
 _RELAY_ROOT = os.path.join(folder_paths.get_output_directory(), "relay_kit")

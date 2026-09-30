@@ -2,7 +2,7 @@
 // Copyright (c) 2026 ComfyUI-H3-Latent-Relay contributors
 // 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 //
-// H3 Relay Kit · Chain 词分发的**纯函数**（前端与离线单测共用同一份）
+// H3 Latent Relay · Chain 词分发的**纯函数**（前端与离线单测共用同一份）
 // 不依赖 ComfyUI 运行时 ⇒ 离线单测（node）直接跑这一份，浏览器里也跑这一份。
 //
 // 🔴 0.6.15 起这个模块**只剩两个函数**。原来还有一套"把词写进出词节点"的辅助

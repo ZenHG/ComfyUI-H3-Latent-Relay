@@ -9,6 +9,7 @@
 >
 > | 版本 | 迁移动作 |
 > |---|---|
+> | 0.6.16 | **无需动作**。只是画布节点菜单里的**分组名**由「H3 Relay Kit」改为「H3 Latent Relay」（图、节点名、连线全未变）；另 registry 元数据就绪（见下） |
 > | 0.6.15 | 🔴 **老图要接一根线才换词**：「词分发」从**前端私活**改成 **Chain 节点的输出口**（那条前端老路**已删除**）—— 把 `Chain.prompt` 连到出词节点的 `prompt` 输入（Chain 会按段号自动取第 k 块）。**没接线时点连跑会被当场拦下并说明**（不会静默不换词）；只跑一段不需要换词的话，`prompts` 留空即可。另新增：Chain 的 `stage_index`、`run_id` + **「⏭ 续跑」**（断点续跑）、`concat_result`（成片路径专用格）、**连跑按钮进度**。**刷新浏览器页面即生效** |
 > | 0.6.14 | **无需动作**。连跑体验补强：①点「⏩ 连跑」时**先验词**（词块不够覆盖最后一段 ⇒ 当场报错，不再白跑前几段）；②连跑中途词不够时**段号不再悬空推进**（与 Approve 对齐：先确认词能写上，再推进段号）。**刷新浏览器页面即生效** |
 > | 0.6.13 | **无需动作**。修「连跑跑完一段就静默停住」的**三处**独立原因：①新版前端 `app.queuePrompt` 返回 `true`（没有 `prompt_id`），旧代码误判「没排上」⇒ 状态机被静默打回 idle；②**整轮命中缓存**时宿主不逐节点发 `executing` ⇒ 「本轮跑过本组」恒判否；③**节点 id 类型错配**（集合存字符串、比对用数字）⇒ 同样恒判否。另修两个会误推进（段号一次跳 2）的坑：空 `executing(NULL)` 与 `execution_success` 双认。**刷新浏览器页面即生效** |
@@ -19,6 +20,42 @@
 > | 0.6.0 | 引用 `H3RelayMotionContext` 的图需改接 `H3RelayCopyBridge`（该节点已删除） |
 > | 0.5.0 | ① `settle_frames` 默认 `-1 → 0`；② 0.5.0 之前存的图，UI 上看不到「裁重叠」新加的第 4 路输出 `prev_tail`（执行不受影响，但接不上 `H3RelayPost` 的 `guide`）⇒ 重加节点或给 JSON 的 `outputs` 末尾补一项 |
 > | 0.3.0 | `settle_frames` 新增（尾缺 ⇒ 取默认，旧工作流无需重连） |
+
+---
+
+## 0.6.16 — 2026-09-30
+
+**面向"发出去"的一版：Comfy Registry 元数据就绪 + 产品名统一。节点行为零变化。**
+
+### 改了什么
+
+- **注册表元数据（`pyproject.toml`）**
+  - `name`：`comfyui-h3-latent-relay` → **`h3-latent-relay`**。这是 registry 的安装 id（`comfy node install h3-latent-relay`）
+    也是它的 URL，**发布后不可改**；官方 Best Practices 明写包名不要带 "ComfyUI" ⇒ 趁未发布改。
+  - `license`：裸 SPDX 字符串 → **`{ file = "LICENSE" }`**。registry 只认 `file` / `text` 两种形态，
+    PEP 639 的 `license = "MIT"` 不在其文档形态里。
+  - `dependencies`：补齐本包**真正 import** 的第三方库（`safetensors` / `av` / `numpy` / `aiohttp`），
+    下限**照抄宿主 `requirements.txt`** ⇒ 与宿主永不冲突。宿主自有的包（`torch` / `comfy-aimdo` …）**刻意不列**。
+  - `classifiers` 补 `Environment :: GPU :: NVIDIA CUDA`；`DisplayName` → **H3 Latent Relay**；新增 `Icon`。
+- **`.comfyignore`（新增）**：`comfy node publish` 默认打包**全部 git 跟踪文件**（68 个，含 docs/tests/tools）
+  ⇒ 显式排掉开发件。实测：**29 个文件 / 858 KB**（zip 301 KB），`exp/` 等运行期目录一个不少。
+- **宿主缺 MiniMax-H3 时显式告警**：`requires-comfyui` **表达不了**"必须带 H3"这个约束 ⇒ 加载时查
+  `comfy_extras/nodes_minimax_h3.py`，缺了在启动日志打**独立一行** ❌，并写进 `/h3relay/health` 的
+  `host_h3` 字段。此前这种情况只有"续接静默无效"（最难排查的一类）。
+- **`icon.png` / `icon.svg`（新增）**：400×400，registry 与 ComfyUI-Manager 的卡片图。
+- **产品名统一**：`H3 Relay Kit` → `H3 Latent Relay`（9 处 / 8 个文件，含画布的节点分类 `CATEGORY`）。
+- **机检新增 H3k**：registry 元数据闸 —— `name` 不带 ComfyUI、`license` 为 file|text 形态、
+  `PublisherId` 非占位、`Icon` 为直链且文件在仓、`.comfyignore` **排开发件而不排运行件**。
+
+### 要不要动你的配置
+
+**不要。** 节点名、输入输出、图连线全未变。唯一可见差异：画布节点菜单里的**分组名**
+由「H3 Relay Kit」变成「H3 Latent Relay」（同一批节点，位置不变）。
+
+### 已知限制
+
+- **尚未发布到 Comfy Registry**：元数据已备齐，但发布要用发布者的 API Key（步骤见 `CONTRIBUTING.md`「发布」）。
+- registry 包里**不含** `docs/` `tests/` `tools/`（按 `.comfyignore`）—— 要看深度文档请从仓库 clone。
 
 ---
 

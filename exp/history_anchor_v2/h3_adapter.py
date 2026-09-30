@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: MIT
-"""E1'（TIHA）↔ H3 Relay Kit 的**适配层**。
+"""E1'（TIHA）↔ H3 Latent Relay 的**适配层**。
 
 职责边界（刻意做窄）：
   · 读 run 目录下的 ``_tiha.json``；

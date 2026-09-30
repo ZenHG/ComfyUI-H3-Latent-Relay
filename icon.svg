@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  H3 Latent Relay · 图标源文件（400×400 方图）
+  渲染：magick -background none -density 400 icon.svg -resize 400x400 icon.png
+  ⚠️ 只用 presentation attribute（不用 CSS class/`<style>`）：ImageMagick/RSVG 都吃得下，
+     各家 registry/Manager 的渲染器也不会挑食。改完**必须重新渲染 icon.png**（那边才是发布物）。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400" role="img"
+     aria-label="H3 Latent Relay">
+  <title>H3 Latent Relay</title>
+
+  <!-- 底板 -->
+  <rect x="0" y="0" width="400" height="400" rx="84" fill="#0F1622"/>
+  <rect x="6" y="6" width="388" height="388" rx="78" fill="none" stroke="#243A56" stroke-width="3"/>
+
+  <!-- 左段：已完成的上一段（偏冷、偏暗） -->
+  <rect x="46" y="140" width="112" height="120" rx="14" fill="#1A2433" stroke="#33465F" stroke-width="3"/>
+  <rect x="62" y="126" width="14" height="10" rx="3" fill="#33465F"/>
+  <rect x="86" y="126" width="14" height="10" rx="3" fill="#33465F"/>
+  <rect x="110" y="126" width="14" height="10" rx="3" fill="#33465F"/>
+  <rect x="62" y="264" width="14" height="10" rx="3" fill="#33465F"/>
+  <rect x="86" y="264" width="14" height="10" rx="3" fill="#33465F"/>
+  <rect x="110" y="264" width="14" height="10" rx="3" fill="#33465F"/>
+  <path d="M92 178 L132 200 L92 222 Z" fill="#4A6285"/>
+
+  <!-- 右段：正在生成的本段（偏亮、青蓝） -->
+  <rect x="242" y="140" width="112" height="120" rx="14" fill="#123147" stroke="#38A3D1" stroke-width="3"/>
+  <rect x="258" y="126" width="14" height="10" rx="3" fill="#38A3D1"/>
+  <rect x="282" y="126" width="14" height="10" rx="3" fill="#38A3D1"/>
+  <rect x="306" y="126" width="14" height="10" rx="3" fill="#38A3D1"/>
+  <rect x="258" y="264" width="14" height="10" rx="3" fill="#38A3D1"/>
+  <rect x="282" y="264" width="14" height="10" rx="3" fill="#38A3D1"/>
+  <rect x="306" y="264" width="14" height="10" rx="3" fill="#38A3D1"/>
+  <path d="M288 178 L328 200 L288 222 Z" fill="#7FD8F5"/>
+
+  <!-- 桥：把上一段的末帧（锚点）钉进本段 conditioning -->
+  <rect x="150" y="182" width="100" height="36" rx="18" fill="#F5A623"/>
+  <rect x="150" y="182" width="100" height="36" rx="18" fill="none" stroke="#FFD37A" stroke-width="3"/>
+  <!-- 桥里的三颗 latent token（时间维网格） -->
+  <circle cx="176" cy="200" r="7" fill="#0F1622"/>
+  <circle cx="200" cy="200" r="7" fill="#0F1622"/>
+  <circle cx="224" cy="200" r="7" fill="#0F1622"/>
+  <!-- 从两段伸向桥的连线 -->
+  <rect x="152" y="196" width="18" height="8" rx="4" fill="#F5A623" opacity="0.55"/>
+  <rect x="230" y="196" width="18" height="8" rx="4" fill="#F5A623" opacity="0.55"/>
+
+  <!-- 脚下：零重编码（一条不经过解码器的直线） -->
+  <rect x="120" y="306" width="160" height="6" rx="3" fill="#2E4763"/>
+  <circle cx="120" cy="309" r="7" fill="#0F1622" stroke="#2E4763" stroke-width="3"/>
+  <circle cx="280" cy="309" r="7" fill="#0F1622" stroke="#2E4763" stroke-width="3"/>
+</svg>

@@ -7,7 +7,7 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 
 | 项 | 值 |
 |---|---|
-| 版本 | **0.6.15**（8 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
+| 版本 | **0.6.16**（8 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
 | 许可 | **MIT**（第三方出处见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)） |
 | 宿主 | **ComfyUI ≥ 0.37.0，且带 MiniMax-H3 支持**（宿主自身为 GPL-3.0，见 §许可与出处） |
 
@@ -70,6 +70,9 @@ git clone https://github.com/ZenHG/ComfyUI-H3-Latent-Relay.git
 ```
 
 或下载 ZIP → 解压 → 文件夹改名为 `ComfyUI-H3-Latent-Relay` → 放进 `custom_nodes/`。
+
+或 **ComfyUI Manager → Custom Nodes Manager → 搜 `h3-latent-relay`**（Comfy Registry 的包名与仓库名
+不同是官方要求：包名不允许带 "ComfyUI"）。
 
 **装完必须重启 ComfyUI 后端**（ComfyUI-Manager 点 *Restart*；没装就重启 Python 进程）——
 仅刷新浏览器不会加载新节点。节点列表里搜 `🔗 H3 续接`（7 个）+ `🔍 H3 潜空间分块放大` 即为全部 8 个。
@@ -180,7 +183,9 @@ ComfyUI-H3-Latent-Relay/
 ├── tools/                 # 自检 / 取证 / 拼接 CLI / 打包器（含英文文档同步闸 en_sync.py）
 ├── licenses/              # 随包分发的第三方许可全文
 ├── dist/                  # 打包器的产出（最小分发集 + zip，不入库）
-├── pyproject.toml         # 元数据（ComfyUI 启动时真读：requires-comfyui / 依赖 / Registry 字段）
+├── pyproject.toml         # 元数据（宿主真读 requires-comfyui/依赖；Comfy Registry 读 name/Icon/PublisherId）
+├── .comfyignore           # `comfy node publish` 打什么包（不写 ⇒ 把 docs/tests/tools 一起推给用户）
+├── icon.png / icon.svg    # Registry / Manager 卡片图标（400×400；`.svg` 是源，`.png` 是发布物）
 ├── requirements.txt       # 供 ComfyUI-Manager 安装依赖
 └── （顶层还有 README_EN.md · CHANGES.md · CONTRIBUTING.md · SECURITY.md ·
       CODE_OF_CONDUCT.md · THIRD-PARTY-NOTICES.md · LICENSE · .github/）

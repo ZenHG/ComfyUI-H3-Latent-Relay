@@ -10,7 +10,7 @@ not coupled to any third-party H3 node pack.
 
 | Item | Value |
 |---|---|
-| Version | **0.6.15** (8 nodes; the composite bridge `H3RelayCopyBridge` is the **only** bridge) |
+| Version | **0.6.16** (8 nodes; the composite bridge `H3RelayCopyBridge` is the **only** bridge) |
 | License | **MIT** (third-party attribution in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) |
 | Host | **ComfyUI ≥ 0.37.0 with MiniMax-H3 support** (the host itself is GPL-3.0, see License) |
 
@@ -78,6 +78,9 @@ git clone https://github.com/ZenHG/ComfyUI-H3-Latent-Relay.git
 ```
 
 Or download the ZIP → unpack → rename the folder to `ComfyUI-H3-Latent-Relay` → put it in `custom_nodes/`.
+
+Or **ComfyUI Manager → Custom Nodes Manager → search `h3-latent-relay`** (the registry pack name differs from
+the repository name because the registry forbids "ComfyUI" in a pack name).
 
 **Restart the ComfyUI backend afterwards** (ComfyUI-Manager → *Restart*; otherwise restart the Python
 process) — refreshing the browser alone does not load new nodes. Search the node list for `🔗 H3 续接` (7)
@@ -201,7 +204,9 @@ ComfyUI-H3-Latent-Relay/
 ├── tools/                 # self-checks / forensic tools / concat CLI / bundler (incl. the en_sync docs gate)
 ├── licenses/              # third-party license texts shipped with the pack
 ├── dist/                  # bundler output (minimal distribution set + zip; not tracked)
-├── pyproject.toml         # metadata (really read by ComfyUI at startup: requires-comfyui / deps / Registry fields)
+├── pyproject.toml         # metadata (the host really reads requires-comfyui / deps; Comfy Registry reads name / Icon / PublisherId)
+├── .comfyignore           # what `comfy node publish` ships (without it docs/tests/tools go to users too)
+├── icon.png / icon.svg    # Registry / Manager card icon (400×400; the `.svg` is the source, `.png` is shipped)
 ├── requirements.txt       # dependencies for ComfyUI-Manager
 └── (top level also has README_EN.md · CHANGES.md · CONTRIBUTING.md · SECURITY.md ·
      CODE_OF_CONDUCT.md · THIRD-PARTY-NOTICES.md · LICENSE · .github/)

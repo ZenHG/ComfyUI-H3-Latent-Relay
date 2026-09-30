@@ -99,7 +99,7 @@ else:
 
 WEB_DIRECTORY = "./web"
 
-__version__ = "0.6.15"
+__version__ = "0.6.16"
 
 
 # ============================================================================
@@ -342,6 +342,15 @@ if PromptServer is not None:           # pragma: no branch
         except Exception as _e:                      # noqa: BLE001
             _up = "未知（%s）" % type(_e).__name__
 
+        # ④ 宿主带不带 MiniMax-H3 —— 缺了的话本包**节点照样注册、图照样搭，但续接静默无效**
+        #    （`requires-comfyui` 表达不了「必须带 H3」这个约束 ⇒ 只能运行时查）。
+        #    判据见 layout_contract.host_h3_status：文件在不在；None = 不在宿主进程里，不下断言。
+        try:
+            from . import layout_contract as _lc2
+            _h3, _h3_why = _lc2.host_h3_status()
+        except Exception as _e:                      # noqa: BLE001
+            _h3, _h3_why = None, "查不出来（%s: %s）" % (type(_e).__name__, _e)
+
         try:
             import torch as _t
             _torch = _t.__version__
@@ -360,6 +369,8 @@ if PromptServer is not None:           # pragma: no branch
             "contract_ok": _c_ok,
             "contract": _c_msgs,
             "upstream_upscaler": _up,
+            "host_h3": _h3,                  # true / false；null = 查不出来（不在宿主进程里）
+            "host_h3_detail": _h3_why,
             "python": _sys.version.split()[0],
             "torch": _torch,
             "os": "%s %s" % (platform.system(), platform.release()),
@@ -417,6 +428,26 @@ def _node_names():
         return []
 
 
+def _host_h3_warning() -> str:
+    """宿主缺 MiniMax-H3 时的一行 ❌（放行，但**大声说**）。
+
+    🔴 为什么单独一行、而不是并进「时序契约」那句：两者**处置完全不同** ——
+      契约不一致是「上游改了网格」（升级宿主后重跑复核），
+      缺 H3 是「宿主根本不支持」（得换宿主）⇒ 混在一句里，用户会照着错的说明书修。
+    只在**确知缺失**（False）时出声；None（查不出来）保持安静，不制造噪音。
+    """
+    try:
+        from . import layout_contract as _lc
+        ok, detail = _lc.host_h3_status()
+    except Exception:                          # noqa: BLE001
+        return ""
+    if ok is False:
+        return ("[H3 Relay] ❌ 宿主没有 MiniMax-H3 支持（%s）"
+                "⇒ 本包节点会正常注册，但**续接不会有任何效果**。"
+                "请把 ComfyUI 更新到带 H3 的版本（≥ 0.37.0）后重启。" % detail)
+    return ""
+
+
 def _load_banner() -> str:
     _names = _node_names()
     n_nodes = len(_names) if _names else -1
@@ -427,8 +458,10 @@ def _load_banner() -> str:
         contract = "✓" if _ok else "**不一致（会产出错位坏片）**"
     except Exception as _e:                 # noqa: BLE001
         contract = "未查（%s）" % type(_e).__name__
-    return ("[H3 Relay] v%s 已加载｜节点 %s 个（出口 %s）｜时序契约 %s"
+    line = ("[H3 Relay] v%s 已加载｜节点 %s 个（出口 %s）｜时序契约 %s"
             % (__version__, n_nodes if n_nodes >= 0 else "?", api, contract))
+    warn = _host_h3_warning()
+    return line + ("\n" + warn if warn else "")
 
 
 try:

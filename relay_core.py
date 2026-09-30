@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 ComfyUI-H3-Latent-Relay contributors
 # 第三方出处与许可见 THIRD-PARTY-NOTICES.md
-"""H3 Relay Kit · 核心算法层（纯张量，零 GPU、零模型、可离线单测）
+"""H3 Latent Relay · 核心算法层（纯张量，零 GPU、零模型、可离线单测）
 
 【这是什么】
 MiniMax-H3 多段续接的 **latent 桥**：把上一段的 AV latent 切出尾段，

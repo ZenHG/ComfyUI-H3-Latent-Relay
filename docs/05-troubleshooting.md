@@ -100,8 +100,8 @@ ComfyUI 不在默认位置时用 `--comfyui /path/to/ComfyUI` 或环境变量 `C
 | 症状 | 原因 | 处置 |
 |---|---|---|
 | 段号 ≥1 却报错拿不到上一段 | `run_id` 不一致 / 上一段没落盘 | 两处 `run_id` 一字不差；确认第 1 段跑过 |
-| 节点列表里一个都没有 | 装的不是带 H3 的 ComfyUI，或没重启后端 | 更新 ComfyUI + 重启 Python 进程。**诊断两步走**：① 看启动日志有没有 `[H3 Relay] v… 已加载｜节点 N 个（出口 …）｜时序契约 …` —— **没有这行 = 包根本没加载**（最常见是 `custom_nodes/` 下嵌套了两层）；② 有这行就 `curl -s 127.0.0.1:8188/h3relay/health`，一次拿到版本/出口模式/节点注册数/时序契约/上游依赖/Python+torch/OS |
-| 续接"看起来没生效" | ComfyUI 版本不含 H3 支持 | 确认 `comfy_extras/nodes_minimax_h3.py` 存在 |
+| 节点列表里一个都没有 | 装的不是带 H3 的 ComfyUI，或没重启后端 | 更新 ComfyUI + 重启 Python 进程。**诊断两步走**：① 看启动日志有没有 `[H3 Relay] v… 已加载｜节点 N 个（出口 …）｜时序契约 …` —— **没有这行 = 包根本没加载**（最常见是 `custom_nodes/` 下嵌套了两层）；② 有这行就 `curl -s 127.0.0.1:8188/h3relay/health`，一次拿到版本/出口模式/节点注册数/时序契约/**宿主有没有 H3**（`host_h3`）/上游依赖/Python+torch/OS |
+| 续接"看起来没生效" | ComfyUI 版本不含 H3 支持 | 确认 `comfy_extras/nodes_minimax_h3.py` 存在。启动日志里会有**独立的一行** ❌ 说明（`[H3 Relay] ❌ 宿主没有 MiniMax-H3 支持…`），`/h3relay/health` 的 `host_h3` 也会是 `false` |
 | 成片接缝处重播上一段 | 裁重叠的 `trim_frames` 没接桥 `[2]` | 按「4. 接线」补线 |
 | **音画越到后面越不同步**（第 3 段起口型明显对不上） | **音频线没走「裁重叠」**：`VAEDecodeAudio` 直连了落盘节点，画面裁了音频没裁 ⇒ 每缝差 ~0.9s 且累积 | 把落盘节点的 `audio` 改接 `裁重叠 [1] audio`（或经 `音频缝 [0] audio`）——见主 README「使用方法」 |
 | **连跑好几段，每段台词却一模一样** | 没填 `prompts`（连跑的默认行为就是**反复提交同一张图**、只改段号 ⇒ 词不换） | 在 Chain 上填 `prompts`（`---` 分块，第 k 块喂第 k 段）再点 ⏩ 连跑；只跑一段时手改 prompt 也行。⚠ **若你是脚本提交 JSON**：还要把 `Chain.prompt` 连到出词节点的 `prompt` 输入（画布那条老路脚本拿不到，见 `docs/10` §7.4） |

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 ComfyUI-H3-Latent-Relay contributors
 # 第三方出处与许可见 THIRD-PARTY-NOTICES.md
-"""H3 Relay Kit 离线单测（零 GPU、零模型、秒级）
+"""H3 Latent Relay 离线单测（零 GPU、零模型、秒级）
 
 跑法（在包目录下）：
     python tests/test_relay_core.py

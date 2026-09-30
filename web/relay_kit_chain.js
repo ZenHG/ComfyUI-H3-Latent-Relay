@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 ComfyUI-H3-Latent-Relay contributors
 // 第三方出处与许可见 THIRD-PARTY-NOTICES.md
-// H3 Relay Kit · Chain 前端
+// H3 Latent Relay · Chain 前端
 // 在 H3RelayChain 节点上提供按钮：Run / Approve / 连跑 / Stop / Reset / 拼成一条。
 // 作用：自动推进同一张图里「读上段 latent + 拷贝桥（复合桥）+ 落盘」的 stage_index，
 //       免去每段手动改数字。

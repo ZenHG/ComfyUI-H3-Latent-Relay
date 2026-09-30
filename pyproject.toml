@@ -5,22 +5,40 @@
 #    段内**。它们曾排在 [project.urls] 之后 ⇒ 按 TOML 规则归属 urls 表 ⇒ 宿主解析器读不到
 #    （`comfy_config/config_parser.py` 读的是 project 段）⇒ 依赖声明与平台标签**从未生效**，从 v0.1 起。
 #    新增字段时请勿再放到 [project.urls] 后面。
+#
+# ⚠️ 发布纪律（2026-09-30，Comfy Registry）—— 下面四条**有机检盯着**（`tools/review_050.py` 的 H3k）：
+#    ① `name` = registry 的 node id = 安装 URL，**发布后不可改** ⇒ 现在就得定死。官方 Best Practices
+#       明写**不要带 "ComfyUI"** ⇒ 旧值 `comfyui-h3-latent-relay` 已改为 `h3-latent-relay`。
+#    ② `license` registry 只认 `{ file = … }` / `{ text = … }`，**不收裸 SPDX 字符串**
+#       （PEP 639 的 `license = "MIT"` 不在官方文档形态里）⇒ 见下方 license 行。
+#    ③ 发布时打包什么由仓库根的 **`.comfyignore`** 决定（默认打包**全部 git 跟踪文件**，
+#       那会把 docs/tests/tools 一起推给用户，并扩大安全扫描面）。
+#    ④ `PublisherId` 必须与 registry 网站上 @ 后面那串完全一致，否则发布会被拒。
 [project]
-name = "comfyui-h3-latent-relay"
-version = "0.6.15"
-description = "MiniMax-H3 多段续接的 latent 桥：上一段 AV latent 直接切尾段钉进本段 conditioning，零重编码。"
+name = "h3-latent-relay"
+version = "0.6.16"
+description = "Latent bridge for MiniMax-H3 multi-segment continuation: the previous segment's AV latent is spliced into this segment's conditioning — zero re-encoding."
 readme = "README.md"
 requires-python = ">=3.10"
-license = "MIT"
+license = { file = "LICENSE" }
 authors = [{ name = "ZenHG" }]
 keywords = ["comfyui", "minimax", "h3", "video", "continuation", "latent"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
     "Topic :: Multimedia :: Video",
+    "Environment :: GPU :: NVIDIA CUDA",
 ]
+# ⚠️ 只声明**本包代码直接 import 的第三方库**，下限**照抄宿主 ComfyUI requirements.txt 的同名 pin**
+#    （av>=17 / numpy>=1.25 / aiohttp>=3.11.8 / safetensors>=0.4.2）⇒ 与宿主**永不冲突**。
+#    宿主自有/代管的包（torch · comfy-aimdo · comfy-kitchen · tqdm …）**刻意不列**：它们由 ComfyUI
+#    自己管（torch 还要按 CUDA 版本挑 wheel），本包代管只会造成版本漂移。
+#    V3 出口缺传递依赖时的处置见 `__init__.py`：**回退 V1 + 出声**（不静默降级）。
 dependencies = [
-    "safetensors>=0.4",
+    "safetensors>=0.4.2",
+    "av>=17.0.0",
+    "numpy>=1.25.0",
+    "aiohttp>=3.11.8",
 ]
 # 第三方署名：THIRD-PARTY-NOTICES.md；随包分发的许可全文：LICENSE、licenses/Apache-2.0.txt
 # ⚠️ 运行时宿主 ComfyUI 是 GPL-3.0（不复制其代码，但进程内 import），见 THIRD-PARTY-NOTICES.md §一·C
@@ -46,12 +64,16 @@ ignore = [
 
 # 宿主版本下限：用**官方字段**（宿主 `comfy_config/config_parser.py` 读 comfy_data["requires-comfyui"]）。
 # ComfyUI 启动时真的会读它 —— 比只写在注释或 README 里强。
+# ⚠️ 它**表达不了「必须带 MiniMax-H3」**（H3 是宿主的 comfy_extras，不是另一个包）⇒ 旧版宿主上本包
+#    照样装得上、节点照样出现，只是**续接静默无效**。补法：加载时查 `comfy_extras/nodes_minimax_h3.py`，
+#    缺了就**打一行 ❌**（`layout_contract.host_h3_status()` + `__init__.py` 的加载摘要 + `/h3relay/health`）。
 [tool.comfy]
 requires-comfyui = ">=0.37.0"
 
 # —— Comfy Registry 发布所需 ——
-# PublisherId：在 registry.comfy.org 注册发布者后获得的 ID（全局唯一、发布后不可更改）。
-#   必须与网站 @ 后面的 ID 完全一致，否则发布会被拒。
-PublisherId = "zenhg"     # TODO: 改成你自己的 PublisherId
-DisplayName = "H3 Relay Kit"
-# Icon = ""             # 可选：节点图标 URL
+# PublisherId：在 registry.comfy.org 注册发布者后获得（全局唯一、**发布后不可更改**）。
+PublisherId = "zenhg"
+DisplayName = "H3 Latent Relay"
+# 与画布的节点分类同名（`nodes.py` 的 CATEGORY）⇒ Manager 卡片与画布菜单一致，利于检索。
+# Icon：registry / Manager 卡片的方图，≤ 400×400、须为公网可取 ⇒ 用 raw 直链（文件随仓提交）。
+Icon = "https://raw.githubusercontent.com/ZenHG/ComfyUI-H3-Latent-Relay/main/icon.png"

@@ -65,6 +65,43 @@ def _comfyui_root() -> str:
         return os.getcwd()
 
 
+def host_h3_status() -> Tuple[Optional[bool], str]:
+    """宿主是否带 MiniMax-H3 支持。返回 (True/False/None, 说明)。
+
+    🔴 为什么需要它：`requires-comfyui = ">=0.37.0"` **表达不了「必须带 H3」** —— H3 是宿主
+      自己的 `comfy_extras`，不是另一个可依赖的包。于是「拿旧版 ComfyUI 装本包」这条路走得通：
+      节点照常注册、图照常搭，**续接却什么也不做**（最坏的失败形态：不报错、结果不对）。
+      ⇒ 加载时就说清，别等用户来问。
+
+    判据 = **文件在不在**，不是「节点注册表里有没有 H3 节点」：加载本包时宿主的 `nodes`
+      模块可能还没建好注册表（`__init__.py` 里专门标注过这个时序坑）⇒ 查注册表会**误报「未装」**。
+      文件存在性零依赖、零时序，而且与 `docs/05-troubleshooting.md` 给用户的排查步骤是同一条。
+
+    None = **查不出来**（非宿主进程，如离线单测 / 纯 pip 环境）—— 那种情况**不下断言**，
+      免得把「我不知道」说成「宿主没有」。
+    """
+    root = _comfyui_root()
+    ce = os.path.join(root, "comfy_extras")
+    # ① 根目录判得出来（宿主进程）⇒ **只看宿主自己那份**，不查 import 系统。
+    #    ⚠️ 顺序有讲究：先查 import 系统会让答案变成「sys.path 上任意一处有没有」——
+    #    实测过：把 base_path 指向一个没有 H3 的假宿主，find_spec 仍能从 sys.path 里
+    #    捞出真宿主那份 ⇒ 报 True。判据必须钉在**宿主根**上，否则这个函数根本测不了。
+    if os.path.isdir(ce):
+        p = os.path.join(ce, "nodes_minimax_h3.py")
+        if os.path.isfile(p):
+            return True, p
+        return False, "缺 %s" % p
+    # ② 根目录判不出来（非宿主进程 / base_path 指向别处）⇒ 退到 import 系统找一次：
+    #    找到算 True；找不到**不下断言**（None）——「我不知道」不等于「宿主没有」。
+    try:
+        spec = importlib.util.find_spec(_UPSTREAM_NODE)
+        if spec is not None and spec.origin and os.path.isfile(spec.origin):
+            return True, spec.origin
+    except Exception:
+        pass
+    return None, "查不到 ComfyUI 根目录（%s）" % root
+
+
 def _extract_frame_per_token() -> Tuple[Optional[Tuple[int, ...]], List[str]]:
     """追着 import 链找 FRAME_PER_TOKEN 的真定义。返回 (定义, 过程消息)。"""
     msgs: List[str] = []

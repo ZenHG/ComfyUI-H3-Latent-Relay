@@ -8,8 +8,8 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "condensed",
-          "h_en": "f5f25f0760da6907",
-          "h_src": "8263ea8842d4a0fc",
+          "h_en": "f85db82e15946679",
+          "h_src": "d914e8389f0aadfe",
           "seeded": "by-position"
         },
         {
@@ -32,8 +32,8 @@
           "zh": "安装",
           "en": "Install",
           "mode": "condensed",
-          "h_en": "eabb4f61927d051b",
-          "h_src": "3a268525985ad336",
+          "h_en": "d653270830582db1",
+          "h_src": "ecd842b9818640a1",
           "seeded": "by-position"
         },
         {
@@ -48,8 +48,8 @@
           "zh": "目录结构",
           "en": "Repository layout",
           "mode": "condensed",
-          "h_en": "0819ed86e59d03a6",
-          "h_src": "2fe91acf9f06490e",
+          "h_en": "407fd291fa49b689",
+          "h_src": "2c77ee7ad89f678f",
           "seeded": "by-position"
         },
         {
@@ -79,7 +79,7 @@
       ],
       "acks": [],
       "stamped": "2026-09-30",
-      "src_sha": "1d5565d9c179ee90"
+      "src_sha": "4b76b5538fd480e4"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",

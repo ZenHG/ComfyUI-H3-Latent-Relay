@@ -334,7 +334,7 @@ ck("H3c docs/08 的断言数/方面数 == 实跑真值，且分组表列到 21",
    "期望 %d 项断言 / %s 个方面" % (_n_assert, _zh(_n_ngroups)))
 
 # nodes.py 模块头注释的节点数（同样踩过「改了清单漏了头注释」）
-_m_doc = _re.search(r'"""H3 Relay Kit · 节点层\s*\n\s*\n(.+?)\n', _src)
+_m_doc = _re.search(r'"""H3 Latent Relay · 节点层\s*\n\s*\n(.+?)\n', _src)
 ck("H3d nodes.py 模块头注释的节点数 == 注册数",
    bool(_m_doc) and _zh(len(_reg)) in _m_doc.group(1),
    "头注释=%r，注册 %d 个" % (_m_doc.group(1)[:24] if _m_doc else "?", len(_reg)))
@@ -1138,6 +1138,124 @@ for _fn, _txt in _doc_txt.items():
                     _bad_sm.append("%s: %s/0（应 %d/0）" % (_fn, _val, _sm_n))
 ck("H3j smoke_nodes 的期望数在 ci.yml·docs/08·tools/README 与实跑一致",
    not _bad_sm and _sm_n > 0, "%d 处：%s" % (len(_bad_sm), _bad_sm[:6]))
+
+# ============================================================================
+# H3k Comfy Registry 元数据闸（2026-09-30 新增）
+# ============================================================================
+# 🔴 为什么需要机检：`comfy node publish` 的几条硬约束里，**两条踩了就不可逆**
+#    （`name` 发布后不能改、`license` 形态不对要被拒要重发），而它们此前只写在 pyproject
+#    的一行注释里 —— **写在注释里的纪律等于没有纪律**（本仓反复踩过：`[project]` 表归属
+#    #11 就是这么从 v0.1 漂到 2026-09 才发现的）。
+# 覆盖：name（不含 ComfyUI / 形态合规）· license（registry 只认 file|text 两种形态）·
+#    PublisherId（非占位）· DisplayName · Icon（https 直链且文件在仓里）·
+#    `.comfyignore`（在位、被 git 跟踪、排了开发件、**没排运行件**）。
+try:
+    import tomllib as _tl
+except ImportError:                       # py3.10 兜底
+    try:
+        import tomli as _tl               # type: ignore
+    except ImportError:
+        _tl = None
+
+_pp_path = os.path.join(KIT, "pyproject.toml")
+_pp = None
+if _tl is not None:
+    with open(_pp_path, "rb") as _fh:
+        _pp = _tl.load(_fh)
+
+_bad_reg = []
+_reg_name = _reg_lic = _reg_pub = _reg_icon = None
+if _pp is None:
+    _bad_reg.append("读不了 pyproject.toml（本检查需 Python ≥3.11 或 `pip install tomli`）")
+else:
+    _pj = _pp.get("project", {})
+    _tk = _pp.get("tool", {}).get("comfy", {})
+    _reg_name = _pj.get("name")
+    _reg_lic = _pj.get("license")
+    _reg_pub = _tk.get("PublisherId")
+    _reg_icon = _tk.get("Icon")
+
+    # ① name：registry 的 node id（**发布后不可改**）；官方 Best Practices 不许带 "ComfyUI"
+    if not _reg_name:
+        _bad_reg.append("缺 [project].name")
+    else:
+        _n = str(_reg_name)
+        if "comfyui" in _n.lower():
+            _bad_reg.append("name 含 'ComfyUI'（官方 Best Practices 明写不要带）")
+        if not _re.fullmatch(r"[a-z0-9][a-z0-9._-]*", _n):
+            _bad_reg.append("name 形态不合规（只能 小写字母/数字/-/_/. 且不以符号开头）：%r" % _n)
+        if len(_n) >= 100:
+            _bad_reg.append("name 超 100 字符")
+        if _re.search(r"[._-]{2,}", _n):
+            _bad_reg.append("name 出现连续特殊字符：%r" % _n)
+
+    # ② license：registry 只认 `{ file = … }` / `{ text = … }`（裸 SPDX 不在其文档形态里）
+    if isinstance(_reg_lic, dict):
+        _lkeys = [k for k in ("file", "text") if k in _reg_lic]
+        if len(_lkeys) != 1:
+            _bad_reg.append("license 必须**恰好**给 file 或 text 之一：%r" % (_reg_lic,))
+        elif _lkeys[0] == "file" and not os.path.isfile(
+                os.path.join(KIT, str(_reg_lic["file"]))):
+            _bad_reg.append("license.file 指向的文件不在仓里：%r" % _reg_lic["file"])
+    else:
+        _bad_reg.append("license 必须是 { file = … } / { text = … } 形态（现为 %r）" % (_reg_lic,))
+
+    # ③ PublisherId（与 registry 网站上 @ 后面那串完全一致）/ DisplayName
+    if not _reg_pub or _re.search(r"todo|your|placeholder|改成|xxx", str(_reg_pub), _re.I):
+        _bad_reg.append("PublisherId 缺失或仍是占位符：%r" % (_reg_pub,))
+    if not _tk.get("DisplayName"):
+        _bad_reg.append("缺 DisplayName")
+
+    # ④ Icon：必须公网可取 ⇒ https 直链，且**文件得真在仓里**（没提交 = raw 直链 404）
+    if not _reg_icon:
+        _bad_reg.append("缺 Icon")
+    else:
+        _i = str(_reg_icon)
+        if not _i.startswith("https://"):
+            _bad_reg.append("Icon 必须是 https 直链：%r" % _i)
+        _icon_file = os.path.basename(_i.split("?")[0])
+        if not os.path.isfile(os.path.join(KIT, _icon_file)):
+            _bad_reg.append("Icon 指向的 %s 不在仓里（提交后 raw 直链才有效）" % _icon_file)
+
+# ⑤ .comfyignore：默认打包**全部 git 跟踪文件** ⇒ 没有它就是把 docs/tests/tools 一起推给用户
+_ci_path = os.path.join(KIT, ".comfyignore")
+_ci_patterns = []
+if not os.path.isfile(_ci_path):
+    _bad_reg.append("缺仓库根 .comfyignore（默认会把 docs/tests/tools 全打进 registry 包）")
+else:
+    with open(_ci_path, encoding="utf-8") as _fh:
+        _ci_patterns = [ln.strip() for ln in _fh
+                        if ln.strip() and not ln.lstrip().startswith("#")]
+    for _must in ("docs", "tests", "tools", ".github"):
+        _forms = {_must, _must + "/", _must + "/**", "/" + _must, "/" + _must + "/"}
+        if not any(_p in _forms for _p in _ci_patterns):
+            _bad_reg.append(".comfyignore 没排 %s/" % _must)
+    # 反向断言：**运行期目录绝不能整块排掉**（整块排 = 用户装完直接 ImportError）。
+    # ⚠️ 判据是「**目录本身**被忽略」，不是「目录下有任何一行被忽略」—— `examples/x.py`
+    #    （排单个生成器脚本）是合法的，`examples/` / `examples/*`（排掉整个目录）才致命。
+    for _keep in ("exp", "v3", "web", "examples"):
+        for _p in _ci_patterns:
+            _parts = [_q for _q in _p.strip("/").split("/") if _q]
+            if _parts and _parts[0] == _keep:
+                _rest = _parts[1:]
+                if not _rest or set(_rest) <= {"*", "**"}:
+                    _bad_reg.append(".comfyignore 整块排掉了运行期目录 %s/（会 ImportError）：%r"
+                                    % (_keep, _p))
+    for _p in _ci_patterns:
+        if _p in ("*", "**", "**/*", "/*", ".*"):
+            _bad_reg.append(".comfyignore 有过宽的模式 %r" % _p)
+    _ci_tracked = subprocess.run(["git", "-C", KIT, "ls-files", "--", ".comfyignore"],
+                                 capture_output=True, text=True,
+                                 encoding="utf-8", errors="replace").stdout.strip()
+    if not _ci_tracked:
+        _bad_reg.append(".comfyignore 未被 git 跟踪 ⇒ 本地与 CI 的打包结果会不一致"
+                        "（官方也要求提交它）")
+
+print("      registry：name=%s ｜ license=%s ｜ PublisherId=%s ｜ Icon=…%s"
+      % (_reg_name, _reg_lic, _reg_pub, (str(_reg_icon) or "?")[-22:]))
+ck("H3k Comfy Registry 元数据齐备（name 不带 ComfyUI / license 为 file|text / PublisherId 非占位"
+   " / Icon 直链且文件在仓 / .comfyignore 排开发件而**不排运行件**）",
+   not _bad_reg, "%d 处：%s" % (len(_bad_reg), _bad_reg[:6]))
 
 # ============================================================================
 # H3g 本文件**自己的**期望数（2026-09-25 新增）

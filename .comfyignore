@@ -1,0 +1,40 @@
+# .comfyignore —— 只影响 `comfy node publish` 打的包，**不影响 git**。
+# 语法 = .gitignore（⚠️ 行内不能写注释：`#` 只有**行首**才算注释，行尾的会被当成模式的一部分）。
+# 语义 = 「在 git 跟踪的文件里，再剔掉匹配这些模式的」。
+#
+# 为什么必须有它：`comfy node publish` 默认打包**全部 git 跟踪文件**（本仓 68 个），
+# 其中大半是开发件（docs/tests/tools/.github）—— 推给用户既没用，还会把 tools/ 里的
+# subprocess / git 调用送进安全扫描面。分发包的真相源是 tools/make_minimal_bundle.py
+# 的清单（24 文件 / 789 KB），本文件让它与 registry 包口径一致。
+# 机检：tools/review_050.py 的 H3k（缺文件或漏排某条 = 红）。
+
+# —— 开发件（对使用者无价值）——
+docs/
+tests/
+tools/
+.github/
+
+# —— 面向开发/升级的根文档（不是安装必读）——
+CHANGES.md
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+SECURITY.md
+
+# —— git 自身的配置（归档里无意义）——
+.gitignore
+.gitattributes
+
+# —— 示例目录里的生成器脚本（只留两个可直接打开的工作流 + 说明）——
+examples/make_minimal_workflow.py
+
+# —— 本仓本地的规范/调研笔记（若被跟踪）——
+LOCAL-*.md
+RESEARCH_*.md
+
+# 🔴 以下**绝不能排**（排了就是 ImportError / 起不来），列在这里是给后来人看的：
+#   exp/                 → nodes.py 顶层 import history_anchor（exp/history_anchor_v2/）
+#                          整个目录一并随包（其中 test_history_anchor.py 是死重量，
+#                          但**不做例外**：运行期目录就该整块走，少一条特例少一个坑）
+#   v3/  web/  examples/ → 出口外壳 / 前端 JS / 示例工作流
+#   LICENSE  licenses/  THIRD-PARTY-NOTICES.md
+#                        → 许可合规，必须随包

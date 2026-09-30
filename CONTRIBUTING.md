@@ -173,6 +173,32 @@ python tests/test_relay_core.py
 - 英文里**不许出现中文源没有的断言数字**（否则英文版就成了第二个真相源）。
 - 加一对文档 = 在 `tools/en_sync.py` 的 `PAIRS` 里加一行。
 
+## 发布（Comfy Registry）
+
+包名（`[project].name`）= registry 的**安装 id 与 URL，发布后不可改**；`license` 形态不对会被**拒收**要重发
+⇒ 这两条现在由 `tools/review_050.py` 的 **H3k** 机检盯着（改坏了当场红，不必等发布才踩）。
+
+**打什么包由仓库根的 `.comfyignore` 决定** —— `comfy node publish` 默认打包**全部 git 跟踪文件**；没有它
+就是把 `docs/` `tests/` `tools/` 一起推给用户（既没用，还把 `tools/` 里的 `subprocess` / git 调用送进安全
+扫描面）。它**只影响 registry 包，不影响 git**。运行期目录（`exp/` `v3/` `web/` `examples/`）一个都不能排
+—— H3k 有反向断言。
+
+发布步骤（**要发布者的 API Key，只在作者机器上跑**）：
+
+```bash
+pip install comfy-cli
+cd <本仓根目录>
+comfy node pack        # 本地预演：产出 node.zip，先看清里面到底有什么（产物已 gitignore）
+comfy node publish     # 版本号取自 pyproject.toml；会提示粘贴 API Key
+```
+
+- 发布者与 API Key 在 <https://registry.comfy.org>（GitHub 登录）创建；`PublisherId` 必须与网站上 `@`
+  后面那串**完全一致**，否则发布被拒（PublisherId 也是**发布后不可改**的）。
+- **发完必须 bump `pyproject.toml` 的 `version`** —— `H1` 机检要求版本号**四处一致**：
+  `__init__.py` / `pyproject.toml` / `CHANGES.md` 顶部 / `README.md` 首部。
+- ⚠️ **不要**挂官方那条「改 pyproject.toml 即自动发布」的 Action：它每次改 pyproject 都会触发，
+  版本没 bump 就会失败，把 CI 变成噪声源。
+
 ## 许可（提 PR 前必读）
 
 - 提交 PR 即表示：你对你提交的代码拥有处分权，并同意以 **MIT** 许可随本仓库一同发布。
