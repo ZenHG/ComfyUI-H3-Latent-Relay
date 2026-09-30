@@ -24,7 +24,11 @@ Thumbs.db
 
 # ---- 构建产物：最小分发集（make_minimal_bundle.py 产出）----
 dist/
-node.zip          # `comfy node pack` 的本地打包产物（预览 registry 会发什么）
+# `comfy node pack` / `comfy node publish` 的本地打包产物（预览 registry 会发什么）
+# 🔴 不写行内注释：`模式  # 注释` 会被当成模式的一部分 ⇒ **静默不忽略**
+#    （2026-09-30 本会话被这条咬了两次：先 .comfy_registry_token，后 node.zip。
+#      第二次是明知道规则还犯 ⇒ 凡是往 ignore 文件加行，加完**必须** `git check-ignore -v <路径>` 验一遍）
+node.zip
 
 # ---- 日志 / 本地缓存 / 测试产物 ----
 *.log
