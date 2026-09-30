@@ -3,8 +3,8 @@
 // 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 // H3 Latent Relay · Chain 前端
 // 在 H3RelayChain 节点上提供按钮：Run / Approve / 连跑 / Stop / Reset / 拼成一条。
-// 作用：自动推进同一张图里「读上段 latent + 拷贝桥（复合桥）+ 落盘」的 stage_index，
-//       免去每段手动改数字。
+// 作用：自动推进同一张图里**所有带 `stage_index` 的节点**（Chain 自己 + `STAGE_TYPES` 表：
+//       拷贝桥 / 落盘 / 读上段 latent / 音频缝）的段号，免去每段手动改数字。
 //
 // 0.6.7 加两件事（**都默认关 = 老图行为逐位不变**）：
 //   · **词分发**：`prompts` 填了词（`---` 分块）时，跑第 k 段前把第 k 块写进出词节点。
@@ -65,6 +65,27 @@
 //     里提示一次，引导走节点化那条路。
 //   · 段号推进从三处扩到**四处**（加 Chain 自己）：它决定输出第几块词。
 //
+// 0.6.18 —— 连跑控制的两处**静默**错误（2026-09-30 真实事故：拼接成片音画错段）：
+//   · 🔴 **段号推进漏了「音频缝」**：旧代码手写「Chain + 桥 + 落盘 + 读上段 latent」四处，
+//     而 `nodes.py` 里带 `stage_index` 的一共**五处**。漏掉的那一类（音频缝）于是永远以
+//     第 1 段自居 ⇒ 连跑第 2 段时它把第 1 段的床文件 `audio_00000.safetensors`
+//     **覆盖成了第 2 段的音频** ⇒ 拼接时第 1 段拿到第 2 段的音轨 ⇒ 成片音画错段。
+//     ⇒ 段号推进改成**表驱动**（`STAGE_TYPES`，单一真相源），并在 status 里点明
+//     「段号同步 #…」，漏驱动哪一类一眼能看出来。手写清单迟早再漏一次。
+//   · 🔴 **段记录跨轮残留 / 空洞被压实**：`stageIds` 只在「⏩ 连跑开始」和「↺ Reset」清空，
+//     ▶ Run / ✔ Approve / ⏭ 续跑都不清 ⇒ 跨轮残留；`collectStageIds` 又把稀疏数组**压紧**
+//     ⇒ 段号→位置的映射丢掉 ⇒ **后面的段被当成前面的段拼进成片**。
+//     ⇒ 记录改成 `{id, seq}`；开跑第 k 段时丢掉 `stage > k` 的记录（后段必 stale）；
+//     上报带**真段号**的 `stages` 字段；**自动拼接遇空洞直接拒拼**（缺段的成片比没有成片更坏），
+//     手动拼接允许但报告里点明缺哪段、哪几段来自更早一轮。
+//   · 🔴 **「点了不知道点上没有」**（GG 2026-09-30 点名）：连跑是几十秒到几分钟的慢过程，
+//     而本节点历史上出现过多次"点了没反应"。⇒ 三条独立通道同时表达阶段：
+//     ① 节点**标题栏顶部色带 + 阶段文字**（canvas 绘制，`drawPhaseBadge`）；
+//     ② `status` 格文字前的**阶段字形**（`say`）；
+//     ③ **按钮文字**：点击瞬间换「⏳ … 已点击」（`flashPressed`），连跑中换带进度条的文案。
+//     另加**防抖**：同一按钮 0.4 秒内重复点击只认第一次（双击 = 白烧一轮 GPU）；
+//     「⏹ Stop」「↺ Reset」不防抖 —— 那是用户的刹车，任何时候都该立刻响应。
+//
 // 效能（0.6.13）：
 //   · **全局监听只注册一份**（模块级 `CHAINS` 集合）。旧写法在每个 Chain 实例的
 //     `onNodeCreated` 里各注册 3 个 `api` 监听 ⇒ 多实例时开销成倍，且**节点被删/复制后
@@ -89,6 +110,116 @@ import { splitPromptBlocks, collectStageIds } from "./relay_kit_prompt.js";
 /** litegraph 的节点模式：0 = Always（启用），4 = Bypass（旁路）。 */
 const MODE_ALWAYS = 0;
 const MODE_BYPASS = 4;
+
+/**
+ * 带「本段段号」（`stage_index` widget）的节点类型 —— **单一真相源**。
+ *
+ * `nodes.py` 里声明了 `stage_index` 的一共五处：Chain 自己（1239）、LatentSave（552）、
+ * LatentLoad（597）、CopyBridge（1476）、AudioSeam（1976）。Chain 自己由 `setStageAll`
+ * 直接推进，其余四类走这张表 —— **漏掉任何一类，那个节点就会永远以第 1 段自居**。
+ *
+ * 🔴 为什么必须收进表里（2026-09-30 真实事故）：旧代码手写三处（桥 / 落盘 / 读上段 latent），
+ *   **漏了音频缝** ⇒ 连跑第 2 段时音频缝仍以 0 号自居，把第 1 段的床文件
+ *   （`audio_00000.safetensors`）**覆盖成了第 2 段的音频** ⇒ 拼接时第 1 段拿到第 2 段的音轨
+ *   ⇒ **成片音画错段**。手写清单迟早再漏一次，所以改成表驱动。
+ *
+ * 字段：`required` = 必须**恰好 1 个**（否则连跑无从下手）；`liveOnly` = 是否只算启用中的
+ *   （「读上段 latent」与「音频缝」都要管被旁路的：前者旁路会让提交校验失败，Chain 要反向接管）。
+ */
+const STAGE_TYPES = [
+    { type: "H3RelayCopyBridge", label: "桥", required: true, liveOnly: true,
+      missing: "「续接 拷贝桥」" },
+    { type: "H3RelayLatentSave", label: "落盘", required: true, liveOnly: true,
+      missing: "「续接 Latent 存」" },
+    { type: "H3RelayLatentLoad", label: "读上段 latent", required: false, liveOnly: false },
+    { type: "H3RelayAudioSeam", label: "音频缝", required: false, liveOnly: false },
+];
+
+// ─────────────────────────── 状态可视化（一眼看出「点上了没有 / 在跑 / 停了 / 错了」） ───────────────────────────
+//
+// 为什么需要它（GG 2026-09-30 点名：「按钮 UI 动效和视觉效果不算明显，不能让用户非常明了地知道
+// 自己已经点击了」）：本节点上「点了没反应」这类问题**出现过多次**，而连跑是**几十秒到几分钟**的
+// 慢过程 —— 用户必须能立刻分辨三件事：① 我这一下点上了没有；② 现在在跑还是停了；③ 正常结束还是出错。
+//
+// ⇒ 用**三条互相独立**的通道表达同一件事（任一通道被前端版本差异吃掉，另两条还在）：
+//   ① 节点**标题栏顶部的状态色带 + 阶段文字**（canvas 绘制，见 `drawPhaseBadge`）；
+//   ② `status` 格文字前的**阶段字形**（🟦/🟩/🟥…，见 `say`）；
+//   ③ **按钮文字**（点击瞬间换「⏳ …已点击」，连跑中换带进度条的文案，见 `flashPressed`）。
+const PHASES = {
+    idle: { glyph: "⚪", color: null, label: "空闲" },
+    queued: { glyph: "🟦", color: "#2563eb", label: "已排队" },
+    running: { glyph: "🟩", color: "#16a34a", label: "连跑中" },
+    done: { glyph: "✅", color: "#0891b2", label: "完成" },
+    stopped: { glyph: "🟧", color: "#d97706", label: "已停止" },
+    warn: { glyph: "⚠️", color: "#d97706", label: "需处理" },
+    error: { glyph: "🟥", color: "#dc2626", label: "出错" },
+};
+
+/** litegraph 标题栏高度（跨版本取值；取不到按 30）。 */
+function titleHeight() {
+    try {
+        return (typeof LiteGraph !== "undefined" && LiteGraph.NODE_TITLE_HEIGHT) || 30;
+    } catch {
+        return 30;
+    }
+}
+
+/**
+ * 在**标题栏**上画阶段色带 + 阶段文字。
+ *
+ * 为什么画标题栏：① 标题栏是 canvas 画的 —— 新版前端把节点体里的 widget 换成 **DOM 层**，
+ * 画在节点体里会被盖住；② 标题栏在最上面，一眼就能看出这个节点在跑 / 停了 / 错了。
+ *
+ * 🔴 为什么**不用 `node.color`**（虽然那是 litegraph 官方字段）：`color` 会被**序列化进工作流文件**
+ * ⇒ 改它等于悄悄改用户的图（脏标记 + 存盘后颜色留在文件里）。画布绘制零副作用。
+ */
+function drawPhaseBadge(ctx, node, phase) {
+    const p = PHASES[phase] ?? PHASES.idle;
+    const w = Number(node?.size?.[0] ?? 0);
+    if (!p.color || !w) return;                    // 空闲 = 什么都不画（不打扰）
+    const th = titleHeight();
+    ctx.save();
+    // ① 色带画在标题栏**下沿**：直边（不越节点的圆角）、又紧贴节点体上边
+    //    —— 新版前端把节点体里的 widget 换成 DOM 层（从 y=0 起），画在 y<0 不会被盖住。
+    ctx.fillStyle = p.color;
+    ctx.fillRect(0, -5, w, 5);
+    // ② 阶段文字右对齐在标题栏里；**放不下就不画**（标题长的节点上绝不叠字）。
+    ctx.font = "bold 12px sans-serif";
+    const badge = `${p.glyph} ${p.label}`;
+    const bw = ctx.measureText(badge).width + 10;
+    ctx.font = "bold 14px sans-serif";              // 与 litegraph 的 NODE_TEXT_SIZE 同档（宁大勿小）
+    const tw = ctx.measureText(String(node?.title ?? "")).width;
+    if (10 + tw + 6 + bw <= w) {
+        ctx.font = "bold 12px sans-serif";
+        ctx.textAlign = "right";
+        ctx.textBaseline = "middle";
+        ctx.lineWidth = 3;                          // 先描边再填充 ⇒ 任何标题底色上都读得清
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
+        ctx.strokeText(badge, w - 6, -th / 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(badge, w - 6, -th / 2);
+    }
+    ctx.restore();
+}
+
+/** 切阶段：写进 `state.phase` 并重绘节点（**只在真的变了才重绘**）。 */
+function setPhase(node, state, phase) {
+    const next = PHASES[phase] ? phase : "idle";
+    if (state) state.phase = next;
+    if (node && node.__h3Phase !== next) {
+        node.__h3Phase = next;
+        node.setDirtyCanvas?.(true, true);
+    }
+}
+
+/**
+ * 写状态行：**阶段字形前缀** + 阶段色带。状态格是单行，前缀是最省位的"一眼可辨"。
+ * 其他不属于某个阶段的临时消息继续用 `setStatus`（不加前缀）。
+ */
+function say(node, state, phase, text) {
+    setPhase(node, state, phase);
+    setStatus(node, `${PHASES[phase]?.glyph ?? ""} ${text}`.trim());
+}
 
 // ─────────────────────────── 图访问（跨前端版本兼容） ───────────────────────────
 
@@ -177,16 +308,13 @@ function findMemberNodes(chainNode, typeName, { liveOnly = true } = {}) {
 }
 
 /**
- * 同分组内的「读上段 latent」节点。
+ * 同分组内、某一类型的「带段号」节点。
  *
- * 为什么 Chain 要管它（0.6.12）：它的 `stage_index` 语义是**本段段号**
- * （`load()` 内部按 `stage_index - 1` 去读文件，见 nodes.py `H3RelayLatentLoad.load`），
- * 所以它必须和桥 / 落盘**同步推进**。老版本只推桥与落盘 ⇒ 它一直停在 0
- * ⇒ 从第 2 段起每段都报「stage_index=0 是第 1 段，没有上一段可续」。
- * 不过滤 `mode`：被旁路的也要一起管（见 `ensureLoadsEnabled`）。
+ * ⚡ `nodesInSameGroup` 内部对每个分组只取一次包围盒；没命中分组就退回全图
+ *   —— 那张兜底正是 `#902 落盘`、`#931 音频缝` 落在分组框**外**时还能被找到的原因。
  */
-function findLoads(chainNode) {
-    return findMemberNodes(chainNode, "H3RelayLatentLoad", { liveOnly: false });
+function findStageNodes(chainNode, spec) {
+    return findMemberNodes(chainNode, spec.type, { liveOnly: spec.liveOnly });
 }
 
 // ─────────────────────────── 状态显示 ───────────────────────────
@@ -294,51 +422,61 @@ function ensureLoadsEnabled(pair) {
 }
 
 /**
- * 把段号同步推进到**四处**（Chain 自己 / 读上段 latent / 桥 / 落盘），并保证读节点启用。
+ * 把段号推进到**所有**带 `stage_index` 的节点（Chain 自己 + `STAGE_TYPES` 表里的每一类），
+ * 并保证「读上段 latent」启用。
  *
- * 🔴 0.6.15 加第一处：Chain 自己也有 `stage_index` 了 —— 它决定节点从 `prompts`
- * 里输出**第几块词**（词分发节点化：UI 连线与 API 提交图 JSON 走同一个节点）。
- * 四处必须一样大，否则"画面上在第 3 段、喂的却是第 2 块词"。
- * 老图没有这一格 ⇒ `setStage` 找不到 widget 会静默跳过（不报错、不影响旧行为）。
+ * 🔴 表驱动（0.6.18）：旧版手写「Chain + 桥 + 落盘 + 读上段」四处，**漏了音频缝**
+ *   ⇒ 连跑第 2 段时音频缝仍以 0 号自居、覆盖第 1 段的床文件 ⇒ 拼接音画错段。
+ * 老图没有某一格时 `setStage` 静默跳过（不报错、不影响旧行为）。
+ *
+ * 返回 `{restored, driven}`：`restored` = 被恢复启用的节点 id，`driven` = 实际写了段号的节点 id
+ * （给 status 与 `__h3Relay.debug()` 用 —— 漏驱动哪一类，一眼能看出来）。
  */
 function setStageAll(chainNode, pair, v) {
     setStage(chainNode, v);
-    setStage(pair.bridge, v);
-    setStage(pair.save, v);
-    for (const n of pair.loads ?? []) setStage(n, v);
-    return ensureLoadsEnabled(pair);
+    for (const n of pair.stageNodes ?? []) setStage(n, v);
+    return { restored: ensureLoadsEnabled(pair), driven: (pair.stageNodes ?? []).map((n) => n.id) };
 }
 
 function findPair(chainNode) {
-    const bridges = findMemberNodes(chainNode, "H3RelayCopyBridge");
-    const saves = findMemberNodes(chainNode, "H3RelayLatentSave");
-    if (bridges.length !== 1 || saves.length !== 1) {
-        // 区分「图里就没有」与「有但被旁路/静音」—— 后者是最常见的误操作（照老文档把桥也旁路了），
-        // 提示必须不一样，否则用户会去翻分组，而真正要做的只是按一下 Ctrl+B。
-        const allB = graphNodes().filter((n) => n.type === "H3RelayCopyBridge");
-        const allS = graphNodes().filter((n) => n.type === "H3RelayLatentSave");
-        const muted = (list, label) => {
-            const ids = list.filter((n) => n.mode !== MODE_ALWAYS).map((n) => n.id);
-            return ids.length ? `${label} #${ids.join("、")}` : "";
-        };
-        let msg = `⚠ 找到 桥×${bridges.length} / 落盘×${saves.length}，需要**恰好各 1 个且都启用**。`;
-        const mutedList = [muted(allB, "桥"), muted(allS, "落盘")].filter(Boolean);
-        if (mutedList.length) {
-            msg += `\n  · 被旁路/静音的：${mutedList.join(" / ")}` +
-                ` ⇒ 选中它们按 Ctrl+B 恢复。（第 1 段**不需要**旁路桥：它会自己直通。）`;
-        }
-        const missing = [
-            allB.length ? "" : "「续接 拷贝桥」",
-            allS.length ? "" : "「续接 Latent 存」",
-        ].filter(Boolean);
-        if (missing.length) {
-            msg += `\n  · 图里还缺：${missing.join("、")}` +
-                ` ⇒ 请把 Chain、桥、落盘放进**同一个分组框**（右键 → 添加分组）。`;
-        }
-        setStatus(chainNode, msg);
+    const found = {};
+    for (const spec of STAGE_TYPES) found[spec.type] = findStageNodes(chainNode, spec);
+    const bad = STAGE_TYPES.filter((s) => s.required && found[s.type].length !== 1);
+    if (bad.length) {
+        setStatus(chainNode, pairError(found, bad));
         return null;
     }
-    return { bridge: bridges[0], save: saves[0], loads: findLoads(chainNode) };
+    const stageNodes = [];
+    for (const spec of STAGE_TYPES) stageNodes.push(...found[spec.type]);
+    return { bridge: found.H3RelayCopyBridge[0], save: found.H3RelayLatentSave[0],
+             loads: found.H3RelayLatentLoad, stageNodes };
+}
+
+/**
+ * 配对失败时给用户的话。区分「图里就没有」与「有但被旁路/静音」——
+ * 后者是最常见的误操作（照老文档把桥也旁路了），提示必须不一样，
+ * 否则用户会去翻分组，而真正要做的只是按一下 Ctrl+B。
+ */
+function pairError(found, bad) {
+    const counts = STAGE_TYPES.filter((s) => s.required)
+        .map((s) => `${s.label}×${found[s.type].length}`).join(" / ");
+    let msg = `⚠ 找到 ${counts}，需要**恰好各 1 个且都启用**。`;
+    const mutedList = bad.map((s) => {
+        const ids = graphNodes()
+            .filter((n) => n.type === s.type && n.mode !== MODE_ALWAYS).map((n) => n.id);
+        return ids.length ? `${s.label} #${ids.join("、")}` : "";
+    }).filter(Boolean);
+    if (mutedList.length) {
+        msg += `\n  · 被旁路/静音的：${mutedList.join(" / ")}` +
+            ` ⇒ 选中它们按 Ctrl+B 恢复。（第 1 段**不需要**旁路桥：它会自己直通。）`;
+    }
+    const missing = bad.filter((s) => !graphNodes().some((n) => n.type === s.type))
+        .map((s) => s.missing).filter(Boolean);
+    if (missing.length) {
+        msg += `\n  · 图里还缺：${missing.join("、")}` +
+            ` ⇒ 请把 Chain、桥、落盘放进**同一个分组框**（右键 → 添加分组）。`;
+    }
+    return msg;
 }
 
 // ─────────────────────────── 排队 / 词分发 ───────────────────────────
@@ -347,9 +485,9 @@ async function queuePrompt(chainNode, state, stage) {
     // 宿主 API 兼容性：`app.queuePrompt` 属于前端内部接口，不同 ComfyUI 版本/嵌入式前端可能有差异。
     //   缺了就别静默——**画布上直接说明**，并指向仍然可用的路径（节点本身与「🧩 拼成一条」不受影响）。
     if (typeof app?.queuePrompt !== "function") {
-        setStatus(
-            chainNode,
-            "⚠ 这个 ComfyUI 前端没有 app.queuePrompt ⇒ ⏩ 连跑 / 自动拼接排队用不了。" +
+        say(
+            chainNode, state, "warn",
+            "这个 ComfyUI 前端没有 app.queuePrompt ⇒ ⏩ 连跑 / 自动拼接排队用不了。" +
                 "「🧩 拼成一条」（拼已跑过的段）仍可用；脚本用户见 docs/10 §7.4 的 CLI/库调用路。"
         );
         return null;
@@ -359,21 +497,25 @@ async function queuePrompt(chainNode, state, stage) {
         const id = typeof res === "string" ? res : (res?.prompt_id ?? null);
         // 按**段号**记（不是 push）：同一段重跑时后一次覆盖前一次 ⇒ 拼接拿到的是"每段最新那一次"，
         // 顺序也天然按段号排；push 会把重跑的段算成两段、拼出一条带重复的片。
-        if (id && state) state.stageIds[stage] = id;
-        setStatus(chainNode, `已排队，采样中…（第 ${stage + 1} 段）`);
+        // 🔴 0.6.18：记录是 `{id, seq}`（`seq` = 属于第几轮）—— 拼接时用它标"这一段来自更早一轮"。
+        if (id && state) state.stageIds[stage] = { id, seq: state.runSeq };
+        say(chainNode, state, "queued", `已排队，采样中…（第 ${stage + 1} 段）`);
         // 🔴 0.6.13 修（2026-09-28 实测：新版前端 app.queuePrompt 返回 **true**，
         //   旧版返回 {prompt_id}，都没有统一形状）：旧代码 `return id` ⇒ boolean 返回时
         //   恒为 null ⇒ 连跑 handler 的 `if (ok === null) state.mode = "idle"` 把状态机
         //   **静默**打回 idle ⇒ 第 1 段跑完就永远停住（status 冻结、无任何报错）。
         //   排队失败的信号是**异常**（下方 catch 已转 ⚠ status）；`res === false` 也算失败。
         //   拿不到 prompt_id 就不记 stageIds ⇒ 拼接自动走「按最近 N 段落盘记录」的兜底路。
-        if (res === false) return null;
+        if (res === false) {
+            say(chainNode, state, "error", "排队被宿主拒了（app.queuePrompt 返回 false）⇒ 没有排队。");
+            return null;
+        }
         // 排队**成功** ⇒ 本组进入「等一轮跑完」态：`stepDone()` 只认置位后的收尾信号，
         // 免得队列提交瞬间宿主先发的空事件（实测 `executing(NULL)` 会紧跟着来）把段号误推。
         if (state) state.awaiting = true;
         return id ?? "queued";
     } catch (err) {
-        setStatus(chainNode, "⚠ 排队失败：" + err.message);
+        say(chainNode, state, "error", "排队失败：" + err.message);
         throw err;
     }
 }
@@ -529,20 +671,54 @@ function withMsg(msg) {
     return msg ? `｜ ${msg}` : "";
 }
 
-/** 开始第 `stage` 段：先保证读节点启用，再查词，最后排队。任一步没过都**不排队**。 */
+/**
+ * 开跑第 `stage` 段 ⇒ **丢掉所有 stage > k 的段记录**，返回被丢掉的段号（1 起算）。
+ *
+ * 为什么：那些记录是"上一轮跑到更后面"留下的，而**续接链上重跑前段 ⇒ 后段必然 stale**
+ * （内容已经不是那条接续链了）。不丢就会拼出"第 1 段是新的、第 2 段是旧的"的片 —— 而且
+ * **一声不响**（这正是 2026-09-30 那次段序错乱的同一类病）。
+ * 保留下来的 k 之前那几段仍然有效（它们没被重跑）⇒ 从第 3 段起连跑不必重跑前两段。
+ *
+ * `length` 赋值即截断；稀疏数组留下的空洞交给 `collectStageIds` 报 `holes`。
+ * 返回值给调用方写进 status —— 丢了什么要说出来，别让用户到拼接时才发现缺段。
+ */
+function dropStaleStages(state, stage) {
+    const dropped = [];
+    for (let k = state.stageIds.length - 1; k > stage; k -= 1) {
+        if (state.stageIds[k]) dropped.push(k + 1);
+    }
+    state.stageIds.length = Math.min(state.stageIds.length, stage + 1);
+    return dropped.reverse();
+}
+
+/**
+ * 开始第 `stage` 段：先丢陈旧段记录，再保证读节点启用，再查词，最后排队。
+ * 任一步没过都**不排队**。
+ */
 async function startStage(node, state, stage, label, pair) {
+    const dropped = dropStaleStages(state, stage);
     const restored = ensureLoadsEnabled(pair);
     const d = checkStagePrompt(node, stage);
     if (!d.ok) {
-        setStatus(node, d.message);
+        say(node, state, "warn", d.message);
         return null;
     }
     const note = restored.length
         ? `｜ 已恢复「读上段 latent」#${restored.join("、")} 为启用（旁路它会导致提交校验失败）`
         : "";
-    setStatus(node, `${label}：stage=${stage} 排队中…` + withMsg(d.message) + note
-        + nodeHintOnce(state, node));
+    const dropNote = dropped.length
+        ? `｜已丢弃第 ${dropped.join("、")} 段的旧记录（本轮从第 ${stage + 1} 段重跑）`
+        : "";
+    say(node, state, "queued",
+        `${label}：stage=${stage} 排队中…` + withMsg(d.message) + note + dropNote
+        + stageNote(pair) + nodeHintOnce(state, node));
     return queuePrompt(node, state, stage);
+}
+
+/** 状态行里点明**实际被驱动了段号的节点**（漏驱动哪一类，一眼能看出来）。 */
+function stageNote(pair) {
+    const ids = (pair?.stageNodes ?? []).map((n) => `#${n.id}`);
+    return ids.length ? `｜段号同步 ${ids.join("、")}` : "";
 }
 
 /** 拼接成片（走后端 /h3relay/concat；包内实现，不依赖外部 ffmpeg）。 */
@@ -551,23 +727,37 @@ async function concatFilm(chainNode, state, auto = false) {
     const runId = pair ? String(widgetValue(pair.bridge, "run_id", "")) : "";
     const seg = Math.round(widgetValue(chainNode, "segments", 0) || 0);
     const outName = String(widgetValue(chainNode, "concat_name", "")).trim();
-    const { ids, holes } = collectStageIds(state.stageIds);
+    const { stages, holes } = collectStageIds(state.stageIds);
+    const ids = stages.map((s) => s.id);
     if (!ids.length && seg <= 0) {
-        setStatus(
-            chainNode,
-            "⚠ 拼接：既没有本轮跑过的段记录，segments 也不是正数 ⇒ 不知道该拼哪几段。" +
+        say(
+            chainNode, state, "warn",
+            "拼接：既没有本轮跑过的段记录，segments 也不是正数 ⇒ 不知道该拼哪几段。" +
                 "把 segments 填成正数，或用 ▶/⏩ 跑过一轮再来。"
         );
         return;
     }
-    setStatus(
-        chainNode,
+    // 哪些段的记录来自**更早一轮**（同一次拼接里混轮 ⇒ 段与段之间可能不接续）。
+    const newest = stages.reduce((m, s) => Math.max(m, s.seq), 0);
+    const older = stages.filter((s) => s.seq !== newest).map((s) => s.stage + 1);
+    // 🔴 0.6.18：**自动拼接遇空洞直接拒拼** —— 缺段的成片比没有成片更坏（会被当成成品发出去）。
+    //   手动「🧩 拼成一条」仍允许拼（用户可能就是要拼现有的这几段），但报告里必须点明缺哪段。
+    if (auto && ids.length && holes.length) {
+        say(chainNode, state, "warn",
+            `自动拼接已跳过：第 ${holes.join("、")} 段没有本轮记录 ⇒ 拼出来会缺段。`
+            + "（要拼现有段请点「🧩 拼成一条」，它会列出缺哪几段。）");
+        return;
+    }
+    say(
+        chainNode, state, "running",
         `🧩 拼接中…（${ids.length ? `本轮 ${ids.length} 段` : `按最近 ${seg} 段落盘记录`}）` +
             `｜音轨 ${String(widgetValue(chainNode, "audio_out", "aac_256k"))}` +
-            (holes.length ? `｜⚠ 第 ${holes.join("、")} 段没有本轮记录，可能漏段` : "")
+            (holes.length ? `｜⚠ 缺第 ${holes.join("、")} 段` : "") +
+            (older.length ? `｜⚠ 第 ${older.join("、")} 段来自更早一轮` : "")
     );
     if (typeof api?.fetchApi !== "function") {
-        setStatus(chainNode, "⚠ 这个 ComfyUI 前端没有 api.fetchApi ⇒ 画布内拼接用不了。" +
+        say(chainNode, state, "warn",
+            "这个 ComfyUI 前端没有 api.fetchApi ⇒ 画布内拼接用不了。" +
             "脚本用户请用 tools/concat_segments.py 或直接调 relay_core（docs/10 §7.4）。");
         return;
     }
@@ -576,6 +766,8 @@ async function concatFilm(chainNode, state, auto = false) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
+                // 0.6.18：带**真段号**上报（段号与位置永不错位）；`prompt_ids` 保留给老后端。
+                stages: stages.map((s) => ({ stage: s.stage, prompt_id: s.id, seq: s.seq })),
                 prompt_ids: ids,
                 chain_node_id: String(chainNode.id),
                 count: seg,
@@ -595,14 +787,16 @@ async function concatFilm(chainNode, state, auto = false) {
         const first = rep.split("\n").map((s) => s.trim()).filter(Boolean)[0] || rep;
         const resultText = data.ok ? (data.out || "(路径见控制台)") : `失败：${first}`;
         setWidgetValue(chainNode, "concat_result", resultText);
-        setStatus(chainNode, data.ok ? `✅ 拼接成功：${resultText}` : `🔴 ${first}`);
+        say(chainNode, state, data.ok ? "done" : "error",
+            data.ok ? `拼接成功：${resultText}` : first);
         notifyUser(data.ok ? "🎬 拼接完成" : "⚠ 拼接失败",
                    data.ok ? `成片：${resultText}` : first,
                    data.ok ? "success" : "error");
         console.info("[H3 Relay Chain] 拼接完整报告：\n" + rep);
     } catch (err) {
         setWidgetValue(chainNode, "concat_result", `失败：${err.message}`);
-        setStatus(chainNode, (auto ? "⚠ 自动拼接请求失败：" : "⚠ 拼接请求失败：") + err.message);
+        say(chainNode, state, "error",
+            (auto ? "自动拼接请求失败：" : "拼接请求失败：") + err.message);
     }
 }
 
@@ -623,8 +817,8 @@ async function startChainRun(node, state, pair, label = "连跑") {
             const last = start + seg - 1;
             if (blocks.length && last >= blocks.length) {
                 const fit = Math.max(1, blocks.length - start);
-                setStatus(node,
-                    `⚠ prompts 只有 ${blocks.length} 块词，连跑会跑到第 ${last + 1} 段 ⇒ 不够。` +
+                say(node, state, "warn",
+                    `prompts 只有 ${blocks.length} 块词，连跑会跑到第 ${last + 1} 段 ⇒ 不够。` +
                     `要么补齐到 ${last + 1} 块，要么把 segments 改成 ${fit}。`);
                 return false;
             }
@@ -633,13 +827,23 @@ async function startChainRun(node, state, pair, label = "连跑") {
     }
     state.mode = "chain";
     state.remaining = seg;
-    state.stageIds = [];
-    state.pairIds = new Set();
+    // 🔴 0.6.18：**不再清空** `stageIds`。旧代码在这里 `= []` ⇒ 从第 3 段开始连跑（前两段已跑过）
+    //   会把第 1、2 段的记录一起抹掉 ⇒ 拼出来的片只有后半段。陈旧的记录由 `startStage` 的
+    //   "丢掉 stage > k" 规则负责 —— 它保住了 k 之前**仍然有效**的那几段。
+    state.runSeq += 1;
+    state.resetPair();          // pairIds 与 pairReady 必须成对重置（只清一个 ⇒ 缓存永不失效）
     state.sawMine = false;
     state.awaiting = false;   // 由 queuePrompt 成功后再置位
-    setStatus(node, `${label}开始：segments=${seg <= 0 ? "∞" : seg}，首段排队中…`);
+    say(node, state, "running", `${label}开始：segments=${seg <= 0 ? "∞" : seg}，首段排队中…`);
     state.onStageChanged?.();          // 按钮立刻变「⏳ 连跑中 …」（明显反馈）
-    const ok = await startStage(node, state, getStage(pair.bridge), label, pair);
+    let ok = null;
+    try {
+        ok = await startStage(node, state, getStage(pair.bridge), label, pair);
+    } catch {
+        // 排队抛错（`queuePrompt` 已写 ⚠ status）—— 这里必须**把模式收回 idle**：
+        // 否则状态机卡在 chain 态，之后每个按钮都被「正在连跑中」挡住，用户只能刷新页面。
+        ok = null;
+    }
     if (ok === null) { state.mode = "idle"; state.onStageChanged?.(); }   // 词分发没过 ⇒ 别停在 chain 态
     return ok !== null;
 }
@@ -666,6 +870,24 @@ function refreshChainLabel(state, node) {
     if (w.label === text) return;
     w.label = text;
     node.setDirtyCanvas?.(true, false);
+}
+
+/**
+ * 点击反馈：**立刻**把按钮文字换成「⏳ … 已点击」，让"我到底点上了没有"当场有答案。
+ *
+ * 用**文字比对**决定是否还原：期间状态机可能已经改过这句（如「⏩ 连跑中 ██ 2/5 · 采样 3/8」），
+ * 只有文字仍是我们写的那句时才还原 —— **绝不覆盖状态机的输出**。
+ */
+function flashPressed(node, w, label) {
+    if (!w) return;
+    const token = `⏳ ${label} · 已点击`;
+    w.label = token;
+    node.setDirtyCanvas?.(true, false);
+    setTimeout(() => {
+        if (w.label !== token) return;          // 已被状态机接管 ⇒ 不抢
+        w.label = label;
+        node.setDirtyCanvas?.(true, false);
+    }, 700);
 }
 
 /**
@@ -700,14 +922,17 @@ let listenersBound = false;
 let hostSendsSuccess = false;
 
 // 诊断出口（**只读快照**，不参与逻辑）：浏览器控制台敲 `__h3Relay.debug()` 就能看到
-// 每个 Chain 组的状态机内部（mode / awaiting / sawMine / pairIds / remaining）。
+// 每个 Chain 组的状态机内部（mode / awaiting / sawMine / pairIds / remaining / 段记录）。
 // 连跑"停住"这类只在真前端才复现的问题，没有这层内部视图只能靠猜——0.6.13 的三处原因
 // （detail 形状 / queuePrompt 返回形状 / id 类型）全靠它挖出来。
 try {
     window.__h3Relay = {
         debug: () => [...CHAINS].map((s) => ({
             mode: s.mode, awaiting: s.awaiting, sawMine: s.sawMine, remaining: s.remaining,
-            pairIds: [...s.pairIds], stageIds: [...(s.stageIds ?? [])],
+            runSeq: s.runSeq, pairIds: [...s.pairIds],
+            // 段记录按段号展开（空洞单列）——"哪段有记录、属于哪一轮"一眼可见。
+            // ⚠ 不在这里调 `findPair`（它会写 status），驱动了哪几处看 status 行「段号同步 #…」。
+            ...collectStageIds(s.stageIds),
         })),
     };
 } catch { /* 非浏览器环境（测试里 import 本文件）忽略 */ }
@@ -761,16 +986,35 @@ app.registerExtension({
             //   executing 事件每执行一个节点都会触发，在里面重算 findPair 等于每节点扫一遍全图。
             const state = {
                 mode: "idle", remaining: 0, sawMine: false, awaiting: false, hinted: false,
-                stageIds: [], pairIds: new Set(),
+                // stageIds：**按段号**存 `{id, seq}`（`seq` = 该记录属于第几轮）——
+                //   `id` = 那段排队拿到的 prompt_id（拼接时按它取回落盘的 mp4）；
+                //   `seq` 用来标"这一段来自更早一轮"（同一次拼接里混轮 ⇒ 段间可能不接续）。
+                //   🔴 是**稀疏数组**：`stageIds[2]` 有值不代表第 1、2 段也有（空洞由
+                //   `collectStageIds` 报出来，绝不压实 —— 压实就是段序错乱的成因）。
+                stageIds: [], runSeq: 0,
+                // phase：阶段（`PHASES` 的键）—— 决定**标题栏色带**与 `status` 字形前缀。
+                phase: "idle",
+                pairIds: new Set(), pairReady: false,
                 btns: {}, lastProgress: "",          // 按钮引用 / 最近一次采样进度文案
                 chainNode: node,
 
                 /** 本组"正在等一轮跑完"（排队成功后置位；`stepDone` 消费掉）。 */
                 armed() { return this.mode === "chain" && this.awaiting; },
 
+                /** 清掉本组「桥/落盘 id 集合」的缓存（下段第一个事件会用新图重建）。 */
+                resetPair() {
+                    this.pairIds = new Set();
+                    this.pairReady = false;
+                },
+
                 /** 惰性算一次本组「桥 + 落盘」的 id 集合（下段第一个事件会用新图重建）。 */
                 refreshPairIds() {
-                    if (this.pairIds.size) return this.pairIds;
+                    // 🔴 用**独立标志**判"算过没有"，不能拿 `pairIds.size` 当判据：
+                    //   配对失败时集合本来就是空的 ⇒ 每个节点事件都重跑一次 `findPair`
+                    //   （4 趟全图 + 逐分组包围盒），而失败路径还会 `setStatus` ⇒
+                    //   `setDirtyCanvas(true, true)` ⇒ **每个节点事件全画布重绘一次**。
+                    if (this.pairReady) return this.pairIds;
+                    this.pairReady = true;
                     const pair = findPair(node);
                     // 🔴 0.6.13：id 一律**字符串化**再存。新版前端 `node.id` 是字符串
                     //   （实测 pairIds=["961","902"]），旧写法 `has(Number(id))` 做的是
@@ -824,7 +1068,8 @@ app.registerExtension({
                     this.mode = "idle";
                     this.awaiting = false;
                     this.onStageChanged();
-                    setStatus(node, "⚠ 执行出错，连跑已停（stage_index 保持当前值，可直接重跑）。");
+                    say(node, this, "error",
+                        "执行出错，连跑已停（stage_index 保持当前值，可直接重跑）。");
                 },
 
                 /** `progress` = 采样步数（**每步都触发** ⇒ 走节流）。 */
@@ -844,12 +1089,20 @@ app.registerExtension({
 
                 /** 一段跑完：推进段号，决定继续还是收尾。 */
                 stepDone() {
-                    if (this.mode !== "chain") return;
+                    if (this.mode !== "chain") {
+                        // 单段模式（▶ Run / ✔ Approve）没有连跑状态机，但"这一段跑完了"同样要给反馈 ——
+                        // 否则色带会一直停在「🟦 已排队」，用户以为还在跑。
+                        if (this.awaiting && this.phase === "queued") {
+                            this.awaiting = false;
+                            say(node, this, "done", "这一段跑完了（▶ / ✔ 单段模式）。");
+                        }
+                        return;
+                    }
                     if (!this.awaiting) return;   // 没在等一轮 ⇒ 旧事件/别组的收尾，不理
                     if (!this.sawMine) return;    // 本轮没执行过本组的桥/落盘 → 别的组的收尾，忽略
                     this.awaiting = false;
                     this.sawMine = false;
-                    this.pairIds = new Set();  // 下段第一个 executing 事件会重建（图改了也自动跟上）
+                    this.resetPair();   // 下段第一个 executing 事件会重建（图改了也自动跟上）
 
                     const pair = findPair(node);
                     if (!pair) { this.mode = "idle"; return; }
@@ -865,7 +1118,8 @@ app.registerExtension({
                         const done = getStage(pair.bridge);
                         this.mode = "idle";
                         this.onStageChanged();          // 按钮还原（明显反馈）
-                        setStatus(node, `✅ 连跑结束，当前段号 ${done}（已落盘，可直接继续 Approve）。`);
+                        say(node, this, "done",
+                            `连跑结束，当前段号 ${done}（已落盘，可直接继续 Approve）。`);
                         if (widgetValue(node, "auto_concat", false)) concatFilm(node, this, true);
                         return;
                     }
@@ -876,12 +1130,13 @@ app.registerExtension({
                     const d = checkStagePrompt(node, next);
                     if (!d.ok) {
                         this.mode = "idle";
-                        setStatus(node, d.message
+                        say(node, this, "warn", d.message
                             + `\n（段号保持 ${getStage(pair.bridge)}，补词后可 Approve 继续。）`);
                         return;
                     }
                     setStageAll(node, pair, next);
-                    setStatus(node, `连跑中：第 ${next + 1} 段排队…（剩余 ${infinite ? "∞" : this.remaining}）`
+                    say(node, this, "running",
+                        `连跑中：第 ${next + 1} 段排队…（剩余 ${infinite ? "∞" : this.remaining}）`
                         + withMsg(d.message));
                     queuePrompt(node, this, next).catch(() => (this.mode = "idle"));
                 },
@@ -899,11 +1154,42 @@ app.registerExtension({
                 return origOnRemoved?.apply(this, arguments);
             };
 
+            // 阶段色带 / 阶段文字（canvas 绘制，见 `drawPhaseBadge`）。
+            // ⚠ 必须 `apply` 原有的钩子 —— 别的扩展（或前端自身）可能也挂在上面。
+            const origOnDrawForeground = node.onDrawForeground;
+            node.onDrawForeground = function (ctx) {
+                const r = origOnDrawForeground?.apply(this, arguments);
+                try {
+                    drawPhaseBadge(ctx, node, state.phase);
+                } catch { /* 画不出来也绝不能影响节点本身 */ }
+                return r;
+            };
+
             // ⚠️ 一律带 `{ serialize: false }`：按钮不该进 widgets_values（否则旧图凭空多出空槽位）。
             // 同时把 widget 存进 `state.btns`：连跑中要把「⏩ 连跑」的文字换成进度（明显反馈）。
-            const addBtn = (label, fn) => {
-                const w = node.addWidget("button", label, null, guard(node, label, fn),
-                                         { serialize: false });
+            //
+            // 🔴 每个按钮回调先做两件**反馈**的事（GG 2026-09-30 点名"点了不知道点上没有"）：
+            //   ① `flashPressed`：文字立刻变「⏳ … 已点击」⇒ 点没点上当场有答案；
+            //   ② 防抖：0.4 秒内的第二次点击**直接忽略**（连跑一次几十秒，双击 = 白烧一轮 GPU）。
+            //      「⏹ Stop」「↺ Reset」**不防抖** —— 那是用户的"刹车"，任何时候都该立刻响应。
+            const addBtn = (label, fn, { debounce = true } = {}) => {
+                let w = null;
+                let lastClick = 0;
+                const run = async (...args) => {
+                    if (debounce) {
+                        const now = Date.now();
+                        if (now - lastClick < 400) {
+                            say(node, state, "warn", `「${label}」在 0.4 秒内被点了两次 ⇒ `
+                                + "第二次已忽略（防白跑一轮）。");
+                            return;
+                        }
+                        lastClick = now;
+                    }
+                    flashPressed(node, w, label);
+                    return fn(...args);
+                };
+                w = node.addWidget("button", label, null, guard(node, label, run),
+                                   { serialize: false });
                 state.btns[label] = w;
                 return w;
             };
@@ -912,11 +1198,12 @@ app.registerExtension({
                 const pair = findPair(node);
                 if (!pair) return;
                 if (state.mode === "chain") {          // 防误点：连跑中再点 Run 会把状态机打回 idle
-                    setStatus(node, "⚠ 正在连跑中 —— 先点「⏹ Stop」，或等这一段跑完。");
+                    say(node, state, "warn", "正在连跑中 —— 先点「⏹ Stop」，或等这一段跑完。");
                     return;
                 }
                 state.mode = "idle";
                 state.awaiting = false;
+                state.runSeq += 1;                  // ▶ = 新一轮（拼接时用来标"更早一轮"）
                 await startStage(node, state, getStage(pair.bridge), "Run", pair);
             });
 
@@ -924,18 +1211,18 @@ app.registerExtension({
                 const pair = findPair(node);
                 if (!pair) return;
                 if (state.mode === "chain") {
-                    setStatus(node, "⚠ 正在连跑中 —— 段号会自动推进，不用点 Approve。"
+                    say(node, state, "warn", "正在连跑中 —— 段号会自动推进，不用点 Approve。"
                         + "想停下来点「⏹ Stop」。");
                     return;
                 }
                 const next = getStage(pair.bridge) + 1;
                 const d = checkStagePrompt(node, next);
-                if (!d.ok) { setStatus(node, d.message); return; }
+                if (!d.ok) { say(node, state, "warn", d.message); return; }
                 setStageAll(node, pair, next);      // 先确认词能写上，再推进段号
                 state.mode = "idle";
                 state.awaiting = false;
-                setStatus(node, `Approve：段号推进到 ${next}，排队中…` + withMsg(d.message));
-                await queuePrompt(node, state, next);
+                // 走 `startStage`（同一入口）⇒ 陈旧段记录、启用态、词检查、排队口径全都一致。
+                await startStage(node, state, next, "Approve", pair);
             });
 
             addBtn("⏩ 连跑（按 segments 自动循环）", async () => {
@@ -953,12 +1240,12 @@ app.registerExtension({
                 if (!pair) return;
                 const runId = String(widgetValue(node, "run_id", "")).trim();
                 if (!runId) {
-                    setStatus(node, "⚠ 续跑要先在 `run_id` 格里填上（与桥 / 落盘的 run_id 填一样）"
+                    say(node, state, "warn", "续跑要先在 `run_id` 格里填上（与桥 / 落盘的 run_id 填一样）"
                         + " —— 它用来找上次的进度文件。");
                     return;
                 }
                 if (typeof api?.fetchApi !== "function") {
-                    setStatus(node, "⚠ 这个 ComfyUI 前端没有 api.fetchApi ⇒ 读不了进度。"
+                    say(node, state, "warn", "这个 ComfyUI 前端没有 api.fetchApi ⇒ 读不了进度。"
                         + "（进度文件在 `output/relay_kit/<run_id>/_progress.json`，可以直接看）");
                     return;
                 }
@@ -968,11 +1255,11 @@ app.registerExtension({
                         `/h3relay/progress?run_id=${encodeURIComponent(runId)}`);
                     prog = await res.json();
                 } catch (err) {
-                    setStatus(node, "⚠ 读进度失败：" + err.message);
+                    say(node, state, "warn", "读进度失败：" + err.message);
                     return;
                 }
                 if (!prog || !prog.ok) {
-                    setStatus(node, "⚠ " + ((prog && prog.error) || "读不到进度"));
+                    say(node, state, "warn", (prog && prog.error) || "读不到进度");
                     return;
                 }
                 const k = Math.max(0, Math.round(prog.stage_index ?? 0));
@@ -982,16 +1269,17 @@ app.registerExtension({
                 await startChainRun(node, state, pair, `⏭ 续跑（上次第 ${k + 1} 段，${when}）`);
             });
 
+            // ⚠ 「刹车」不防抖：用户点 Stop 就该立刻响应。
             addBtn("⏹ Stop（本轮跑完即停）", () => {
                 if (state.mode === "chain") {
                     state.mode = "idle";
                     state.awaiting = false;
                     state.onStageChanged();
-                    setStatus(node, "已请求停止：当前采样跑完后不再推进。");
+                    say(node, state, "stopped", "已请求停止：当前采样跑完后不再推进。");
                 } else {
-                    setStatus(node, "当前没有在连跑。");
+                    say(node, state, "idle", "当前没有在连跑。");
                 }
-            });
+            }, { debounce: false });
 
             addBtn("🧩 拼成一条（把已跑的 N 段拼成成片）", async () => {
                 await concatFilm(node, state, false);
@@ -1002,8 +1290,8 @@ app.registerExtension({
                 if (!pair) return;
                 setStageAll(node, pair, 0);
                 state.stageIds = [];
-                setStatus(node, "已归 0：下一段将作为第 1 段（不续接，只落盘）。");
-            });
+                say(node, state, "idle", "已归 0：下一段将作为第 1 段（不续接，只落盘）。");
+            }, { debounce: false });
 
             return r;
         };

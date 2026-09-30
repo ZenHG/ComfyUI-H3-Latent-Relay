@@ -48,7 +48,10 @@
  26. 多段拼接成片（0.6.7）：探测/体检（含「音频绕过裁重叠」判据）/画面流拷贝无损/
      音频代际 2 → 1（PCM 边车直读 ⇒ 逐位一致；AAC 默认 256k）；
      音频逐段去 priming 对齐/退路（重编码）/history 落盘条目筛选/多生产者候选裁决/
-     PyAV 版本兼容/CLI 入口（合成 mp4 + 合成边车，零 GPU）
+     PyAV 版本兼容/CLI 入口（合成 mp4 + 合成边车，零 GPU）；
+     **0.6.18 段序与边车裁决**：提交图数据流定序（`graph_downstream_rank` 纯函数 +
+     接反了也跟图走 + 无图/有环 ⇒ 拒收全部边车）、并列同源候选取**列表第一个**（不再按
+     长度最接近挑）、落选候选写进报告、段号**不压实**（缺哪段就报哪段）、回扫按真段号排
  27. 画质域 AV latent 分块放大（0.6.8）：块数自选的合规边界（每块 ≥ 2·overlap+1）、
      单块=整段放大恒等、分块边界无跳变、帧数不许被改、上游口径常量不漂移（拆包/回包见节点）
  28. 音频出口 dtype 契约（0.6.11 修静音 bug）：`audio_to_fp32` 的零拷贝快路径、
@@ -2705,6 +2708,43 @@ else:
           == [_ent[0]["filename"]]
           and CORE.pick_pcm_outputs({"7": {"images": [{"filename": "a.mp4", "type": "output"}]}}) == []
           and CORE.pick_pcm_outputs(None) == [])
+
+    # —— 26.59~26.62 提交图数据流定序（纯函数）——
+    #   🔴 它是"哪份边车真进了 mp4"的**唯一证据**：旧代码靠 class_type 白名单猜顺序，
+    #   图里接反就猜错且不报错（2026-09-30 音画错段）。这里锁死它的四条性质。
+    _g_chain = {"1": {"class_type": "A", "inputs": {}},
+                "2": {"class_type": "B", "inputs": {"x": ["1", 0]}},
+                "3": {"class_type": "C", "inputs": {"x": ["2", 0], "y": ["1", 1]}}}
+    _r = CORE.graph_downstream_rank(_g_chain, ["1", "2", "3"])
+    check("26.59 深度定序：最下游排最前（3 → 2 → 1）",
+          list(_r) == ["1", "2", "3"] and _r["3"] < _r["2"] < _r["1"],
+          "%s" % (_r,))
+    _r_rev = CORE.graph_downstream_rank(_g_chain, ["3", "1"])
+    check("26.60 入参顺序不影响结论（只由数据流决定）",
+          _r_rev["3"] < _r_rev["1"], "%s" % (_r_rev,))
+    check("26.61 没有证据时**返回 None**（不编造顺序）：空图 / 候选不在图里 / 有环",
+          CORE.graph_downstream_rank({}, ["1"]) is None
+          and CORE.graph_downstream_rank(_g_chain, ["9"]) is None
+          and CORE.graph_downstream_rank(
+              {"1": {"class_type": "A", "inputs": {"x": ["2", 0]}},
+               "2": {"class_type": "B", "inputs": {"x": ["1", 0]}}}, ["1", "2"]) is None)
+    check("26.62 连线判据要窄：真值列表（如 images: [\"a.png\",\"b.png\"]）**不许**当连线",
+          CORE._link_source(["1", 0]) == "1" and CORE._link_source([1, 2]) == "1"
+          and CORE._link_source(["a.png", "b.png"]) is None
+          and CORE._link_source(["1"]) is None and CORE._link_source("1") is None
+          and CORE._link_source(None) is None)
+    _g_tie = {"1": {"class_type": "A", "inputs": {}}, "2": {"class_type": "B", "inputs": {}}}
+    check("26.63 并列（两条独立分支）⇒ rank 相等，不硬造先后；稳定排序保持入参序",
+          CORE.graph_downstream_rank(_g_tie, ["2", "1"])["2"]
+          == CORE.graph_downstream_rank(_g_tie, ["2", "1"])["1"]
+          and sorted(["2", "1"],
+                     key=lambda n: CORE.graph_downstream_rank(_g_tie, ["2", "1"])[n]) == ["2", "1"])
+    # 🔴 26.68 第 2 轮的边界：畸形提交图（`inputs` 不是 dict）**不许抛** —— 它是纯函数，
+    #   抛异常会把整条拼接路由打成 500（用户只看到"点了没反应"）。
+    check("26.68 畸形节点（inputs 不是 dict / 节点不是 dict）⇒ 当作没有连线，不抛",
+          CORE.graph_downstream_rank({"1": {"class_type": "A", "inputs": ["x"]},
+                                      "2": {"class_type": "B", "inputs": None},
+                                      "3": "not-a-dict"}, ["1", "2", "3"]) == {n: 0 for n in "123"})
     _r_off = NODES.H3RelayTrimAV().trim(images=_img73b, trim_frames=22, fps=24.0, audio=_aud73,
                                         save_pcm=False)
     check("26.31 save_pcm=False ⇒ 不写边车，返回退化成老的四元组（旧图行为不变）",
@@ -2728,10 +2768,40 @@ else:
     _mk_side(_side_good, 321.0)
     _rep_2c = CORE.assemble_mp4_segments([_c1, _c2], os.path.join(_TMP26, "film_2cand.mp4"),
                                          pcm_paths=[[_side_short2, _side_good], None])
-    check("26.36 多候选 ⇒ 选**与落盘音频最接近**的那个（不是「先来先用」）",
+    check("26.36 多候选 ⇒ 过护栏的那份被采用（不是「先来先用」）",
           _rep_2c["ok"] and _rep_2c["alignment"][0]["source"] == "pcm"
           and _rep_2c["alignment"][0]["pcm_file"] == os.path.basename(_side_good),
           "pick=%s" % (_rep_2c["alignment"][0]["pcm_file"],))
+
+    # —— 26.57 🔴 本组最核心的回归：**并列同源候选时取「列表第一个」**（图序优先），
+    #   不再取"与 mp4 音频长度最接近"的那个 —— 长度不是证据，数据流才是。
+    #   真实事故：两份候选长度**完全相同**（段 2 的未裁音频覆盖了段 1 的床文件）
+    #   ⇒ 护栏全放行 ⇒ 旧的 `min(|len − n_cont|)` 选中了错的那份 ⇒ 成片音画错段。
+    #   这里造一个"长度能分辨、但会分辨错"的对照：B 更接近容器音频，A 才是下游那份。
+    _side_prio_a = os.path.join(_TMP26, "pcm_prio_a.safetensors")
+    _side_prio_b = os.path.join(_TMP26, "pcm_prio_b.safetensors")
+    _mk_side(_side_prio_a, 111.0, n=_mk_n + 2500)      # 离容器音频 1444 样本
+    _mk_side(_side_prio_b, 222.0, n=_mk_n + 500)       # 离容器音频  556 样本（旧的会选它）
+    _rep_prio = CORE.assemble_mp4_segments([_c1, _c2], os.path.join(_TMP26, "film_prio.mp4"),
+                                           pcm_paths=[[_side_prio_a, _side_prio_b], None])
+    _al0 = _rep_prio["alignment"][0]
+    check("26.57 并列同源候选 ⇒ 取**列表第一个**（提交图里最下游），不按长度最接近挑",
+          _al0["source"] == "pcm" and _al0["pcm_file"] == os.path.basename(_side_prio_a),
+          "pick=%s" % (_al0["pcm_file"],))
+    check("26.58 并列时**落选的那份写进报告**（选错不再静默）",
+          any(os.path.basename(_side_prio_b) in s and "并列" in s
+              for s in _al0.get("pcm_others", [])),
+          "others=%r" % (_al0.get("pcm_others"),))
+    # 🔴 26.67 第 1 轮的可观测性：**读不出的候选**在"另一份能用"时也必须说出来 ——
+    #   静默丢一个候选 = 把"配错段"的唯一线索抹掉。
+    _rep_broken = CORE.assemble_mp4_segments(
+        [_c1, _c2], os.path.join(_TMP26, "film_brokencand.mp4"),
+        pcm_paths=[[_side_16k, _side_good], None])
+    _al_b = _rep_broken["alignment"][0]
+    check("26.67 有候选读不出、但另一份可用 ⇒ 仍写进报告（不静默丢）",
+          _al_b["source"] == "pcm" and _al_b["pcm_file"] == os.path.basename(_side_good)
+          and any(os.path.basename(_side_16k) in s for s in _al_b.get("pcm_others", [])),
+          "pick=%s others=%r" % (_al_b["pcm_file"], _al_b.get("pcm_others")))
     check("26.37 单字符串形式仍受支持（旧调用方兼容）",
           CORE.assemble_mp4_segments([_c1, _c2], os.path.join(_TMP26, "film_str.mp4"),
                                      pcm_paths=[_side_good, None])["alignment"][0]["source"]
@@ -2876,11 +2946,20 @@ else:
                         "outputs": {}}}
         _q = _FakeQueue(_hist)
 
-        _ids, _ents, _ = _pk._pick_segments(_q, ["p1", "p2"], "7", 0)
-        check("26.15 按 prompt_id 精确取段（顺序保持、能落到文件路径）",
-              _ids == ["p1", "p2"]
-              and _pk._mp4_paths(_ents[0])[0].endswith("a.mp4"),
-              "ids=%s path=%s" % (_ids, _pk._mp4_paths(_ents[0])[:1]))
+        _pairs, _n1, _m1 = _pk._pick_segments(_q, [(0, "p1"), (1, "p2")], "7", 0)
+        check("26.15 按段号精确取段（段号=位置、能落到文件路径）",
+              [p[0] for p in _pairs] == [1, 2] and [p[1] for p in _pairs] == ["p1", "p2"]
+              and _m1 == [] and _pk._mp4_paths(_pairs[0][2])[0].endswith("a.mp4"),
+              "pairs=%s path=%s" % ([(p[0], p[1]) for p in _pairs],
+                                    _pk._mp4_paths(_pairs[0][2])[:1]))
+
+        # 🔴 26.50 本组最核心的回归：**段号不许被压实**（2026-09-30 段序错乱的根因）。
+        #   旧实现把稀疏 id 列表压紧 ⇒ 第 3 段的 id 顶到第 2 段槽 ⇒ 拼出来的片段序是错的。
+        #   现在：段号原样带出，缺的那段单列在 `missing` 里。
+        _p50, _n50, _m50 = _pk._pick_segments(_q, [(0, "p1"), (1, None), (2, "p2")], "7", 0)
+        check("26.50 中间缺一段 ⇒ **不压实**：段 1、3 仍是 1、3，且报出缺第 2 段",
+              [p[0] for p in _p50] == [1, 3] and _m50 == [2] and "第 2 段" in _n50,
+              "stages=%s missing=%s note=%s" % ([p[0] for p in _p50], _m50, _n50))
 
         # 26.49 段文件不在盘上时，路由必须**立刻报**（不进入编码 ⇒ 不白等）
         _e_missing = {"prompt": [None, None, {"7": {"class_type": "H3RelayChain"}}],
@@ -2891,17 +2970,65 @@ else:
               len(_paths) == 1 and str(_paths[0]).replace("\\", "/").endswith("gone.mp4"),
               "%s" % (_paths,))
 
-        _ids2, _e2, _n2 = _pk._pick_segments(_q, [], "7", 5)
-        check("26.16 没给 id 时回扫 history：只认「图里带本 Chain 节点」的提交",
-              _ids2 == ["p1", "p2"] and "2 次" in _n2, _n2)
+        _p2, _n2, _m2 = _pk._pick_segments(_q, [], "7", 5)
+        check("26.16 没给段记录时回扫 history：只认「图里带本 Chain 节点」的提交",
+              [p[1] for p in _p2] == ["p1", "p2"] and "2 次" in _n2, _n2)
 
-        _ids3, _e3, _n3 = _pk._pick_segments(_q, [], "7", 0)
-        check("26.17 既没 id、count 也 ≤ 0 ⇒ 明确说「不知道该拼哪几段」（不瞎拼）",
-              _ids3 == [] and _e3 == [] and "不知道该拼哪几段" in _n3, _n3)
+        _p3, _n3, _m3 = _pk._pick_segments(_q, [], "7", 0)
+        check("26.17 既没段记录、count 也 ≤ 0 ⇒ 明确说「不知道该拼哪几段」（不瞎拼）",
+              _p3 == [] and _m3 == [] and "不知道该拼哪几段" in _n3, _n3)
 
-        _ids4, _e4, _n4 = _pk._pick_segments(_q, ["nope"], "7", 0)
-        check("26.18 给了不存在的 prompt_id ⇒ 命中 0 并说明（重启过后端）",
-              _ids4 == [] and "0/1 段命中" in _n4, _n4)
+        _p4, _n4, _m4 = _pk._pick_segments(_q, [(0, "nope")], "7", 0)
+        check("26.18 给了 history 里没有的 prompt_id ⇒ 命中 0，并**报出缺第 1 段**（不静默丢）",
+              _p4 == [] and _m4 == [1] and "0/1 段命中" in _n4, "%s ｜ missing=%s" % (_n4, _m4))
+
+        # 26.51 回扫路也要按**真段号**排（不能只按时间序）—— `_chain_stage` 从提交图里读
+        _hist2 = {
+            "q1": {"prompt": [None, None, {"7": {"class_type": "H3RelayChain",
+                                                 "inputs": {"stage_index": 2}}}],
+                   "outputs": {}},
+            "q2": {"prompt": [None, None, {"7": {"class_type": "H3RelayChain",
+                                                 "inputs": {"stage_index": 0}}}],
+                   "outputs": {}},
+        }
+        _p5, _n5, _m5 = _pk._pick_segments(_FakeQueue(_hist2), [], "7", 5)
+        check("26.51 回扫按**真段号**排（history 里后写的 stage 0 也要排到前面）+ 报出缺第 2 段",
+              [p[0] for p in _p5] == [1, 3] and _m5 == [2],
+              "stages=%s missing=%s" % ([p[0] for p in _p5], _m5))
+        check("26.52 请求里的 stages 归一化：按段号升序、畸形项丢掉、空串算「无记录」",
+              _pk._normalize_stages({"stages": [{"stage": 3, "prompt_id": "c"},
+                                                {"stage": 1, "prompt_id": ""},
+                                                {"stage": "x", "prompt_id": "z"},
+                                                "nope",
+                                                {"stage": -1, "prompt_id": "d"}]})
+              == [(1, None, None), (3, "c", None)],
+              "%s" % (_pk._normalize_stages({"stages": [{"stage": 3, "prompt_id": "c"},
+                                                        {"stage": 1, "prompt_id": ""},
+                                                        {"stage": "x", "prompt_id": "z"},
+                                                        "nope",
+                                                        {"stage": -1, "prompt_id": "d"}]}),))
+        check("26.53 段号区间缺口的判定：有 None（段号读不出来）⇒ 不瞎报缺口",
+              _pk._stage_gaps([0, 2]) == [2] and _pk._stage_gaps([0, 1, 2]) == []
+              and _pk._stage_gaps([0, None]) == [] and _pk._stage_gaps([]) == [])
+        # 🔴 26.64 第 2 轮的边界：段号来自请求 ⇒ 畸形值不许把 `range` 撑爆（跨度上限 = _MAX_SEG）
+        check("26.64 段号跨度 ≥ _MAX_SEG（畸形值）⇒ 判「无从判」，不建天文数字的 range",
+              _pk._stage_gaps([0, 10 ** 9]) == []
+              and _pk._stage_gaps([0, _pk._MAX_SEG]) == []
+              and _pk._stage_gaps([0, _pk._MAX_SEG - 1]) == list(range(2, _pk._MAX_SEG)),
+              "MAX_SEG=%d" % _pk._MAX_SEG)
+        # 🔴 26.65 第 1 轮的语义：同一段号重复出现 ⇒ 后一次覆盖前一次（与前端 stageIds[k]=… 同语义），
+        #   否则同一段会被拼两次。
+        check("26.65 同段号重复 ⇒ 去重（后一次覆盖前一次），不拼两遍",
+              _pk._normalize_stages({"stages": [{"stage": 0, "prompt_id": "old"},
+                                                {"stage": 1, "prompt_id": "b"},
+                                                {"stage": 0, "prompt_id": "new"}]})
+              == [(0, "new", None), (1, "b", None)],
+              "%s" % (_pk._normalize_stages({"stages": [{"stage": 0, "prompt_id": "old"},
+                                                        {"stage": 1, "prompt_id": "b"},
+                                                        {"stage": 0, "prompt_id": "new"}]}),))
+        check("26.66 seq 原样带出（路由用它写「哪几段来自更早一轮」）",
+              _pk._normalize_stages({"stages": [{"stage": 0, "prompt_id": "a", "seq": 7}]})
+              == [(0, "a", 7)])
 
         # 26.32~26.34 音轨档映射与「每段边车」的取回（纯函数级）
         check("26.32 音轨档映射：默认 aac 256k；192k 可覆盖；无损档 = PCM f32（无码率参数）",
@@ -2913,26 +3040,32 @@ else:
         #   写死**作者机器的输出目录**会让别的用户/Linux CI 必然假红 —— 代码没错，是尺子绑了机器。
         _pcm_expect = os.path.join(_fp26.get_output_directory(),
                                    "relay_kit", "pcm", "a.safetensors").replace("\\", "/")
+        _c33, _n33 = _pk._pcm_candidates(_p2[0][2])
         check("26.33 路由能从 history 取回**该段的 PCM 边车**候选（不猜文件名）",
-              [str(x).replace("\\", "/") for x in _pk._pcm_candidates(_e2[0])] == [_pcm_expect],
-              "cands=%s 期望=%s" % (_pk._pcm_candidates(_e2[0]), _pcm_expect))
+              [str(x).replace("\\", "/") for x in _c33] == [_pcm_expect] and _n33 == "",
+              "cands=%s 期望=%s" % (_c33, _pcm_expect))
         check("26.34 老提交没有边车 ⇒ 候选为空（拼接自动退回 mp4 解码，不报错）",
-              _pk._pcm_candidates(_hist["p9"]) == [] and _pk._pcm_candidates({}) == [])
+              _pk._pcm_candidates(_hist["p9"]) == ([], "")
+              and _pk._pcm_candidates({}) == ([], ""))
 
-        # 26.40 音频链上有**多个**本包音频节点时：候选要按「谁更靠近落盘」排
-        #   （产线接线 = 裁重叠 → 音频缝 → 落盘 ⇒ 音频缝的输出优先）
-        _e_multi = {
-            "prompt": [None, None, {
-                "13": {"class_type": "H3RelayTrimAV"},
-                "18": {"class_type": "H3RelayAudioSeam"},
-            }],
-            "outputs": {
-                "13": {CORE.PCM_UI_KEY: [{"filename": "seg_00001_.safetensors",
-                                          "subfolder": "relay_kit/pcm", "type": "output"}]},
-                "18": {CORE.PCM_UI_KEY: [{"filename": "audio_00001.safetensors",
-                                          "subfolder": "relay_kit/relay", "type": "output"}]},
-            },
-        }
+        # 26.40/26.54 音频链上有**多个**本包音频节点时：候选按**提交图的数据流**排
+        #   （谁在下游谁优先）。🔴 顺序来自图、不来自 class_type 白名单 ——
+        #   2026-09-30 事故就是白名单猜的顺序与图里接的相反 ⇒ 拿错边车 ⇒ 音画错段。
+        def _multi(in_trim=None, in_seam=None):
+            """两个音频节点（13=裁重叠、18=音频缝）+ 各自落一份边车；连线由参数给。"""
+            return {
+                "prompt": [None, None, {
+                    "13": {"class_type": "H3RelayTrimAV", "inputs": dict(in_trim or {})},
+                    "18": {"class_type": "H3RelayAudioSeam", "inputs": dict(in_seam or {})},
+                }],
+                "outputs": {
+                    "13": {CORE.PCM_UI_KEY: [{"filename": "seg_00001_.safetensors",
+                                              "subfolder": "relay_kit/pcm", "type": "output"}]},
+                    "18": {CORE.PCM_UI_KEY: [{"filename": "audio_00001.safetensors",
+                                              "subfolder": "relay_kit/relay", "type": "output"}]},
+                },
+            }
+
         check("26.46 路由取路径优先用节点自报 abs_path，缺了才按 type+subfolder 拼",
               _pk._abs_of({"filename": "a.mp4", "subfolder": "", "type": "output",
                            "abs_path": r"D://outside_out//a.mp4"})
@@ -2943,11 +3076,27 @@ else:
               "abs=%s" % (_pk._abs_of({"filename": "b.mp4", "subfolder": "relay_kit/x",
                                        "type": "output"}),))
 
-        _cands = _pk._pcm_candidates(_e_multi)
-        check("26.40 多候选按音频链排序：音频缝（链后）排在裁重叠之前",
+        _cands, _ = _pk._pcm_candidates(_multi(in_seam={"audio": ["13", 0]}))
+        check("26.40 图里 裁重叠(13) → 音频缝(18) ⇒ 音频缝（下游）排在裁重叠之前",
               len(_cands) == 2 and _cands[0].replace("\\", "/").endswith("relay/audio_00001.safetensors")
               and _cands[1].replace("\\", "/").endswith("pcm/seg_00001_.safetensors"),
               "cands=%s" % (_cands,))
+        _cands_rev, _ = _pk._pcm_candidates(_multi(in_trim={"audio": ["18", 0]}))
+        check("26.54 🔴 图里**接反**了（音频缝 → 裁重叠）⇒ 顺序跟着图走（裁重叠优先），"
+              "不是跟着 class_type 白名单",
+              len(_cands_rev) == 2
+              and _cands_rev[0].replace("\\", "/").endswith("pcm/seg_00001_.safetensors")
+              and _cands_rev[1].replace("\\", "/").endswith("relay/audio_00001.safetensors"),
+              "cands=%s" % (_cands_rev,))
+        # 🔴 多候选但**读不出图** ⇒ 拒收全部（宁可退回 mp4 解码，也绝不配错段）
+        _e_nograph = {"prompt": None,
+                      "outputs": _multi(in_seam={"audio": ["13", 0]})["outputs"]}
+        _cn, _nn = _pk._pcm_candidates(_e_nograph)
+        check("26.55 多候选但提交图读不出来 ⇒ **全部拒收**（安全侧）且写明原因",
+              _cn == [] and "拒收" in _nn, "cands=%s note=%s" % (_cn, _nn))
+        _e_cycle = _multi(in_trim={"audio": ["18", 0]}, in_seam={"audio": ["13", 0]})
+        check("26.56 图有环（读不出下游）⇒ 同样拒收，不给假顺序",
+              _pk._pcm_candidates(_e_cycle)[0] == [])
     except Exception as _e26:  # noqa: BLE001
         check("26.15 路由发现逻辑可离线加载（stub server）", False, repr(_e26))
 

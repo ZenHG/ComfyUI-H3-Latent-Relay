@@ -3641,7 +3641,10 @@ def concat_mp4_segments(paths, out_path, *, crf=16, preset="medium", audio_bitra
 
     ``pcm_paths``：**逐段对齐**的 PCM 边车路径（`裁重叠` 落的无损音频）；给了就**直读 PCM**，
     既不用解 AAC、也不需要去 priming ⇒ 音频代际从 2 降到 1，且无损档下**零新增代际**。
-    缺失/不匹配（采样率、声道、长度）自动退回 mp4 解码路，并在 ``audio_alignment[].source`` 标注。
+    🔴 **每段内部必须按优先级排好**（越靠前 = 提交图里越下游 = 越可能真进 mp4）——
+    本函数取**第一个过长度护栏**的那份；缺失/不匹配（采样率、声道、长度）自动退回 mp4 解码路，
+    并在 ``audio_alignment[].source`` 标注；**其余未采用的候选**（读不出 / 不同源 / 并列落选）
+    记在 ``audio_alignment[].pcm_others`` 并写进报告 —— 选错时不再是静默的。
 
     返回 ``{"out","mode","clips","audio_alignment","warnings","seconds"}``。
     """
@@ -3733,43 +3736,61 @@ def concat_mp4_segments(paths, out_path, *, crf=16, preset="medium", audio_bitra
                 #   拿链上更靠前的边车去拼，成片音轨就会**绕过那次处理**（甚至错位）。
                 #   容差怎么定（按容器事实）：段容器音频 = 视频 + priming(~33–53ms) + 尾填充
                 #   ⇒ 100 ms 足够放过正常段；而"链上更靠前的节点"差的是裁量/align（典型 0.9 s）
-                #   ⇒ 100 ms 能干净分开。（同一节点多候选时另按"最接近"挑，见下。）
+                #   ⇒ 100 ms 能干净分开。
+                #   ⚠ 它是**同源**判据、**不是"更准"判据** —— 见下面挑候选的注释。
                 tol_len = max(int(round(0.1 * rate)), int(round(rate / float(fr))))
                 bad = []
                 cands = pcms[idx] if idx < len(pcms) else None
                 if isinstance(cands, str):
                     cands = [cands]
-                src, head, tail, pick = "aac", 0, 0, ""
+                src, head, tail, pick, others = "aac", 0, 0, "", []
                 pcm, pool = None, []
                 for _c in (cands or []):
                     if not _c:
                         continue
                     _w = _load_pcm_sidecar(_c, rate, layout)
                     pool.append((_w, os.path.basename(str(_c))))
-                _ok = [x for x in pool if x[0] is not None]
-                if _ok:
-                    # 多候选 = 音频链上有多个本包音频节点（如「裁重叠」+「音频缝」）。
-                    # 选**与落盘音频长度最接近**的那个：音频缝的输出才是真进 mp4 的那份。
-                    _w, _n = min(_ok, key=lambda x: abs(int(x[0].shape[1]) - n_cont) if n_cont else 0)
-                    if abs(int(_w.shape[1]) - n_cont) <= tol_len or not n_cont:
-                        pcm, src, pick = _w, "pcm", _n
-                    else:
-                        bad.append("%s: 与 mp4 音频差 %.0f ms"
-                                   % (_n, (int(_w.shape[1]) - n_cont) / rate * 1000.0))
+                # 每个**未采用**的候选都要说得出原因 —— 静默丢一个候选等于把"配错段"的
+                # 线索抹掉（铁律 15：退化分支必须可观测）。两类原因分开写，读报告时一眼可分。
                 for _w, _n in pool:
                     if _w is None:
-                        bad.append("%s: 读不出 / 采样率或声道不符" % _n)
+                        others.append("%s（读不出／采样率或声道不符）" % _n)
+                _ok = [x for x in pool if x[0] is not None]
+                # 过护栏的候选（= 与本段落盘音频同源）。`not n_cont` = 段里压根没有音轨，
+                # 长度无从判 ⇒ 全放行（与旧行为一致，别在这里改变无关语义）。
+                _in = [x for x in _ok
+                       if not n_cont or abs(int(x[0].shape[1]) - n_cont) <= tol_len]
+                if _in:
+                    # 🔴 2026-09-30 定案：取**列表第一个**，不再取"与 mp4 音频长度最接近"的那个。
+                    #   契约 = `pcm_paths` 每段内**已按优先级排好**（越靠前 = 提交图里越下游
+                    #   = 越可能真进 mp4，由 `__init__._pcm_candidates` 用 `graph_downstream_rank` 算）。
+                    #   为什么必须换（真实事故）：两份候选可以**长度完全相同**（段 2 的未裁音频把
+                    #   段 1 的床文件覆盖了，都是 210400 样本）⇒ 护栏全放行 ⇒ 旧的
+                    #   `min(|len − n_cont|)` 于是按"更接近"选中了**错的**那份 ⇒ 成片音画错段。
+                    #   长度不是证据，**数据流才是**。
+                    pcm, src, pick = _in[0][0], "pcm", _in[0][1]
+                    others += ["%s（同源并列，未采用）" % x[1] for x in _in[1:]]
+                    _tol = {id(x) for x in _in}          # 按对象身份判，别拿 ndarray 做 `in` 比较
+                    others += ["%s（与 mp4 音频差 %.0f ms）"
+                               % (x[1], (int(x[0].shape[1]) - n_cont) / rate * 1000.0)
+                               for x in _ok if id(x) not in _tol]
+                else:
+                    bad += ["%s: 与 mp4 音频差 %.0f ms"
+                            % (x[1], (int(x[0].shape[1]) - n_cont) / rate * 1000.0) for x in _ok]
                 if bad and pcm is None:
                     warnings.append("第 %d 段的 PCM 边车被拒收（%s）；该段退回 mp4 解码。"
                                     % (idx + 1, "；".join(bad)))
+                # 采用了某份之后，**其余候选**（读不出 / 不同源 / 并列落选）仍要写进该段报告 ——
+                # 选错时这就是唯一的线索（铁律 15：退化分支必须可观测）。
+                _also = ("；未采用：%s" % "、".join(others)) if (pcm is not None and others) else ""
                 if pcm is not None:
                     got = int(pcm.shape[1])
                     if got >= want:                      # 边车比视频长（沉降帧没裁完）⇒ 从尾截
                         tail = got - want
                         pcm = pcm[:, :want]
-                        note = "PCM 边车（无损源，零新增代际）｜ 尾截 %d 样本" % tail
+                        note = "PCM 边车（无损源，零新增代际）｜ 尾截 %d 样本%s" % (tail, _also)
                     else:
-                        note = "⚠ PCM 边车比视频短 %d 样本，已补静音" % (want - got)
+                        note = "⚠ PCM 边车比视频短 %d 样本，已补静音%s" % (want - got, _also)
                         warnings.append("第 %d 段 PCM 边车比视频短 %d 样本，已补静音。"
                                         % (idx + 1, want - got))
                         pcm = np.concatenate([pcm, np.zeros((pcm.shape[0], want - got),
@@ -3792,7 +3813,7 @@ def concat_mp4_segments(paths, out_path, *, crf=16, preset="medium", audio_bitra
                                                                 dtype=pcm.dtype)], axis=1)
                 align.append({"index": idx, "file": os.path.basename(p), "seg_samples": want,
                               "decoded_samples": got, "prime_drop": head, "tail_drop": tail,
-                              "source": src, "pcm_file": pick})
+                              "source": src, "pcm_file": pick, "pcm_others": others})
                 log("[H3 Relay] 拼接：段 %d 有效时长 %d 帧 = %d 样本，源 %s%s（%d 样本）⇒ %s"
                     % (idx + 1, n_in, want, src,
                        (" " + pick) if pick else "", got, note))
@@ -4076,6 +4097,66 @@ def pick_pcm_outputs(outputs):
                               "subfolder": str(item.get("subfolder") or ""),
                               "type": str(item.get("type") or "output")})
     return found
+
+
+def _link_source(val):
+    """ComfyUI 提交图里的**连线值** = ``[上游节点 id, 输出槽号]``；不是连线就返回 ``None``。
+
+    判据要窄：同一个 dict 里还有 `["a.png", "b.png"]` 这类**真值列表**，
+    只按"长度为 2"放行会把它们当成连线、凭空造出边。槽号必须是 int（连线才有槽号）。
+    """
+    if (isinstance(val, (list, tuple)) and len(val) == 2
+            and isinstance(val[0], (str, int)) and not isinstance(val[0], bool)
+            and isinstance(val[1], int) and not isinstance(val[1], bool)):
+        return str(val[0])
+    return None
+
+
+def graph_downstream_rank(graph, node_ids):
+    """按**提交图的数据流**给一组节点排名：**越下游 = 排名越小 = 越优先**。
+
+    【为什么需要它】拼接要挑「哪份 PCM 边车真进了 mp4」。原先靠 `class_type` 白名单
+    **猜**顺序（假设"音频缝在裁重叠之后"）—— 用户接线与假设相反时它就猜错，
+    而且**不报错**：2026-09-30 真实事故里，段 1 的成片音轨是段 2 的（音画错段）。
+    改读提交图：谁在数据流下游谁优先，接线怎么变都跟着变。
+
+    【算法】入度拓扑 + 最长路：`depth[n]` = 从任一源点到 `n` 的最长路径长度。
+    并列（两条独立分支）时**保持入参顺序**（稳定排序）—— 没有证据就不编造顺序。
+
+    【返回】``{node_id: rank}``；`rank` 是负整数（越小越靠前），不在图里的给 ``1`` 排最后。
+    图不是 dict / 空 / 与候选完全不相交 / **有环** ⇒ 返回 ``None``（**没有证据**，
+    调用方必须按"拒收"处理，不许退回静态猜测 —— 那正是本函数要取代的东西）。
+    **不抛异常**：畸形节点（`inputs` 不是 dict）按"没有连线"处理。
+    """
+    if not isinstance(graph, dict) or not graph:
+        return None
+    ids = [str(n) for n in (node_ids or [])]
+    if not any(n in graph for n in ids):
+        return None
+    indeg = dict.fromkeys(graph, 0)
+    out = {n: [] for n in graph}
+    for nid, node in graph.items():
+        ins = node.get("inputs") if isinstance(node, dict) else None
+        for val in (ins if isinstance(ins, dict) else {}).values():
+            src = _link_source(val)
+            if src is not None and src in indeg and src != nid:
+                out[src].append(nid)
+                indeg[nid] += 1
+    depth = dict.fromkeys(graph, 0)
+    queue = [n for n, d in indeg.items() if not d]
+    seen = 0
+    while queue:
+        n = queue.pop()
+        seen += 1
+        for m in out[n]:
+            if depth[n] + 1 > depth[m]:
+                depth[m] = depth[n] + 1
+            indeg[m] -= 1
+            if not indeg[m]:
+                queue.append(m)
+    if seen != len(graph):
+        return None                       # 有环 ⇒ 这张图读不出"下游"，不给假证据
+    return {n: (-depth[n] if n in depth else 1) for n in ids}
 
 
 # ---------------------------------------------------------------------------

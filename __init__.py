@@ -99,7 +99,7 @@ else:
 
 WEB_DIRECTORY = "./web"
 
-__version__ = "0.6.17"
+__version__ = "0.6.18"
 
 
 # ============================================================================
@@ -132,9 +132,6 @@ if PromptServer is not None:           # pragma: no branch
     AUDIO_OUT = {"aac_256k": ("aac", "256k"), "aac_192k": ("aac", "192k"),
                  "pcm_lossless": ("pcm_f32le", "")}
     _DEFAULT_AUDIO_OUT = "aac_256k"
-    # PCM 边车候选的「离落盘有多近」排序（越大越近）。链上越靠后的音频节点，
-    #   它的输出越可能就是真进 mp4 的那份 ⇒ 优先用它。
-    _PCM_RANK = {"H3RelayAudioSeam": 2, "H3RelayTrimAV": 1}
 
     def _abs_of(p):
         # 优先用节点自报的绝对路径：第三方落盘节点可能存到 ComfyUI output **之外**
@@ -150,48 +147,135 @@ if PromptServer is not None:           # pragma: no branch
         return [_abs_of(p) for p in CORE.pick_video_outputs((entry or {}).get("outputs") or {})]
 
     def _pcm_candidates(entry):
-        """本段的 PCM 边车**候选**（可能多个），按「谁更靠近落盘」排序。
+        """本段的 PCM 边车候选 → ``(paths, note)``；``paths`` **已按优先级排好**。
 
-        音频链上可能有**多个**本包音频节点各落一份边车（典型 = 「裁重叠」在缝之前、
-        「音频缝」在缝之后）。真进 mp4 的是**最后那个** ⇒ 这里把候选按 class_type 排序，
-        由 `relay_core` 再用「与 mp4 音频长度最接近」做最终裁决（数据说话，不靠接线假设）。
+        优先级 = **提交图里的数据流深度**（`CORE.graph_downstream_rank`）：谁在下游谁靠前，
+        因为它才是真进 mp4 的那份。接线怎么变都跟着变 —— 这是本函数存在的全部理由。
+
+        🔴 为什么不再用 `class_type` 白名单猜顺序（2026-09-30 真实事故）：
+          白名单写的是"音频缝在裁重叠之后"，可图里接的是**音频缝 → 裁重叠**（反的）
+          ⇒ 更靠前、未裁的那份被优先 ⇒ 段 1 的成片音轨是段 2 的 ⇒ **音画错段**。
+          白名单是猜的，图不是。
+
+        **多候选但图读不出来**（提交图缺失/有环）⇒ 返回空 = **拒收全部边车**：
+        宁可退到 mp4 解码（音轨多一代 AAC），也绝不配错段。单候选没有歧义 ⇒ 照常给。
         """
         got = CORE.pick_pcm_outputs((entry or {}).get("outputs") or {})
         if not got:
-            return []
+            return [], ""
+        if len(got) == 1:                       # 无歧义：图序与它无关
+            return [_abs_of(got[0])], ""
         ct = (((entry or {}).get("prompt") or [None, None, {}])[2]) or {}
+        rank = CORE.graph_downstream_rank(ct, [p["node"] for p in got])
+        if rank is None:
+            return [], ("♪ PCM 边车 ×%d 但**读不出提交图的数据流** ⇒ 全部拒收"
+                        "（退回 mp4 解码；宁可多一代 AAC，也不配错段）" % len(got))
+        return ([_abs_of(p) for p in sorted(got, key=lambda p: rank.get(str(p["node"]), 1))],
+                "")
 
-        def rank(p):
+    def _chain_node(entry, chain_id):
+        """提交图里本 Chain 的节点 dict（取不到返回 ``None``）。
+
+        用于"没给段记录、只能回扫 history"那条兜底路 —— 光按时间排序会把**重跑过的段**
+        算成两段；有了提交图才能读出真段号，也才谈得上"缺了第几段"。
+        """
+        ct = (((entry or {}).get("prompt") or [None, None, {}])[2]) or {}
+        for k, v in ct.items():
+            if (isinstance(v, dict) and v.get("class_type") == "H3RelayChain"
+                    and (not chain_id or str(k) == str(chain_id))):
+                return v
+        return None
+
+    def _chain_stage(node):
+        """本 Chain 节点的 ``stage_index``；读不出来返回 ``None``（= 段号未知，不瞎猜）。"""
+        try:
+            return int((node.get("inputs") or {}).get("stage_index"))
+        except (TypeError, ValueError):
+            return None
+
+    def _normalize_stages(data):
+        """请求里的 ``stages`` → ``[(stage, prompt_id, seq)]``（按段号升序）。
+
+        ``stages`` = 前端带**真段号**上报的段记录（0.6.18 起）；老的平铺 ``prompt_ids``
+        由调用方兜底。段号是**位置**，不是"第几个非空项" —— 压实正是 2026-09-30
+        那次段序错乱（第 2 段的 id 顶到第 1 段槽）的成因。
+
+        同一段号出现多次 ⇒ **后一次覆盖前一次**（与前端 `stageIds[k] = …` 同语义）；
+        畸形项（非 dict / 段号不是整数 / 段号为负）直接丢掉 —— 丢掉的项不会占位，
+        所以**不会**把后面的段往前挪。
+        """
+        out = {}
+        # ⚠ 先切上限再遍历：请求体是外部输入，10⁶ 条 `stages` 会在切片**之前**被完整走一遍。
+        for it in (data.get("stages") or [])[:_MAX_SEG]:
+            if not isinstance(it, dict):
+                continue
             try:
-                return _PCM_RANK.get(str((ct.get(str(p.get("node"))) or {}).get("class_type")), 0)
-            except Exception:                      # noqa: BLE001
-                return 0
-        return [_abs_of(p) for p in sorted(got, key=rank, reverse=True)]
+                stage = int(it.get("stage"))
+            except (TypeError, ValueError):
+                continue
+            if stage < 0:
+                continue
+            try:
+                seq = int(it.get("seq"))
+            except (TypeError, ValueError):
+                seq = None
+            out[stage] = (str(it.get("prompt_id") or "").strip() or None, seq)
+        return [(s, p, q) for s, (p, q) in sorted(out.items())]
 
-    def _pick_segments(queue, prompt_ids, chain_id, count):
-        """段清单 → ``(ids, entries, note)``。**不猜文件名**：
-        给了 prompt_id 就精确取（前端每段排队回来都记着）；没给就回扫 history，
-        只认「图里带本 Chain 节点」的提交，取最近 count 次。``note`` 是给用户看的"我找了什么"。
+    def _stage_gaps(stages):
+        """段号列表里**区间内缺掉**的段号（1 起算，升序）；无从判 ⇒ 空。
+
+        ⚠ **跨度上限**：段号来自请求，畸形值（如 ``10**9``）会让 `range` 建出天文数字的列表。
+        跨度 ≥ `_MAX_SEG`（一次拼接的段数上限）时直接判"无从判" —— 那本来就不可能是同一次拼接的段号。
+        """
+        have = sorted(s for s in stages if s is not None)
+        if not have or len(have) != len(stages) or have[-1] - have[0] >= _MAX_SEG:
+            return []
+        return [s + 1 for s in range(have[0], have[-1] + 1) if s not in set(have)]
+
+    def _pick_segments(queue, want, chain_id, count):
+        """段清单 → ``(pairs, note, missing)``。
+
+        ``want`` = ``[(stage, prompt_id)]``（按段号升序；``prompt_id`` 为空 = 该段没有记录）。
+        ``pairs`` = ``[(stage_1based, prompt_id, entry)]``；``missing`` = 缺掉的段号（1 起算）。
+
+        🔴 **不压实**：段号与位置一一对应。旧代码把稀疏的 id 列表压紧（`[p for p in ids if …]`）
+        ⇒ 第 2 段的 id 顶到第 1 段槽 ⇒ **拼出来的片段序是错的**（2026-09-30 日志实证）。
+        缺哪段就明说哪段，绝不悄悄往前挪。
         """
         hist = queue.get_history(max_items=_HIST_SCAN) or {}
-        if prompt_ids:
-            ids = [p for p in prompt_ids if p in hist]
-            note = "按 prompt_id 取：%d/%d 段命中" % (len(ids), len(prompt_ids))
-            if len(ids) < len(prompt_ids):
-                note += "；%d 段在 history 里查不到（重启过后端？）" % (len(prompt_ids) - len(ids))
-            return ids, [hist[i] for i in ids], note
+        if want:
+            pairs, unresolved = [], []
+            for stage, pid in want:
+                ent = hist.get(pid) if pid else None
+                if ent is None:
+                    unresolved.append(stage + 1)
+                else:
+                    pairs.append((stage + 1, pid, ent))
+            missing = sorted(set(_stage_gaps([s for s, _ in want]) + unresolved))
+            note = "按段号取：%d/%d 段命中" % (len(pairs), len(want))
+            if missing:
+                note += "；第 %s 段没有可用的记录（重启过后端？）" % "、".join(map(str, missing))
+            return pairs, note, missing
         if count <= 0:
-            return [], [], ("没给 prompt_id，且 count ≤ 0 ⇒ 不知道该拼哪几段。"
-                            "把 Chain 的 segments 填成正数，或用 ▶/⏩ 跑过一轮。")
-        hit = [pid for pid, e in hist.items()
-               if any(isinstance(v, dict) and (
-                   v.get("class_type") == "H3RelayChain"
-                   and (not chain_id or str(k) == str(chain_id)))
-                   for k, v in ((e or {}).get("prompt") or [None, None, {}])[2].items())]
-        ids = hit[-count:]
-        return (ids, [hist[i] for i in ids],
-                "回扫 history：图里带本 Chain 的提交共 %d 次，取最近 %d 次" % (len(hit), len(ids))
-                if hit else "回扫 history：**没有**找到「图里带本 Chain 节点」的提交（后端重启过？）")
+            return [], ("没给段记录，且 count ≤ 0 ⇒ 不知道该拼哪几段。"
+                        "把 Chain 的 segments 填成正数，或用 ▶/⏩ 跑过一轮。"), []
+        found = []
+        for pid, e in hist.items():
+            node = _chain_node(e, chain_id)
+            if node is not None:
+                found.append((_chain_stage(node), pid, e))
+        if not found:
+            return [], "回扫 history：**没有**找到「图里带本 Chain 节点」的提交（后端重启过？）", []
+        # 全都读得出段号才按段排；只要有一个读不出（老提交没有 inputs）就退回 history 顺序
+        # （= 执行顺序，对"没记录只能回扫"这条兜底路是最可靠的代理）—— 不混着排。
+        if all(s is not None for s, _, _ in found):
+            found.sort(key=lambda t: t[0])
+        found = found[-count:]
+        return ([(s + 1 if s is not None else None, pid, e) for s, pid, e in found],
+                "回扫 history：图里带本 Chain 的提交共 %d 次，取最近 %d 次（按段号排）"
+                % (len(found), len(found)),
+                _stage_gaps([s for s, _, _ in found]))
 
     @PromptServer.instance.routes.post("/h3relay/concat")
     async def h3relay_concat(request):  # pragma: no cover - 需要运行中的宿主
@@ -208,21 +292,47 @@ if PromptServer is not None:           # pragma: no branch
         name = str(data.get("out_name") or "").strip() or run_id or "h3relay_final"
         name = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in name) or "h3relay_final"
 
-        ids, entries, note = _pick_segments(
-            PromptServer.instance.prompt_queue,
-            [str(x) for x in (data.get("prompt_ids") or [])][:_MAX_SEG],
+        # 段记录：**优先 `stages`（带真段号，0.6.18 起前端上报）**，退回老的平铺 `prompt_ids`。
+        #   `stages` = `[{"stage": k, "prompt_id": "…", "seq": n}]`（`prompt_id` 可为空 = 该段没记录）。
+        stages_in = _normalize_stages(data)
+        want = [(s, p) for s, p, _ in stages_in][:_MAX_SEG]
+        if not want:
+            want = [(i, str(x)) for i, x in enumerate(data.get("prompt_ids") or [])][:_MAX_SEG]
+        pairs, note, missing = _pick_segments(
+            PromptServer.instance.prompt_queue, want,
             str(data.get("chain_node_id") or ""), count)
         lines = ["[H3 Relay] 拼接请求：%s" % note]
+        if missing:
+            lines.append("  ⚠ **缺第 %s 段**（没有记录 / history 里查不到）⇒ 成片里会是缺段的。"
+                         "要补齐请把那几段重跑一遍再拼。" % "、".join(map(str, missing)))
+        # 同一批里混了**不同轮**的记录（前端每条记录带 `seq`）⇒ 段与段之间可能不接续，
+        # 必须写进报告（交接要求「哪几段来自更早一轮」可见）。
+        _seqs = [q for _, _, q in stages_in if q is not None]
+        if _seqs:
+            _newest = max(_seqs)
+            _older = [s + 1 for s, _, q in stages_in if q != _newest]
+            if _older:
+                lines.append("  ⚠ 第 %s 段的记录来自**更早一轮**（不是最新那轮的产物）⇒ "
+                             "段间可能不接续，拼完请目检缝。" % "、".join(map(str, _older)))
         segs, pcms = [], []
-        for pid, entry in zip(ids, entries):
-            paths, pcm = _mp4_paths(entry), _pcm_candidates(entry)
-            lines.append("  · prompt %s → %d 个视频文件%s%s"
-                         % (str(pid)[:8], len(paths),
-                            ("（%s）" % paths[0]) if paths else "",
-                            ("｜♪ PCM 边车 ×%d" % len(pcm)) if pcm else ""))
-            if paths:
-                segs.append(paths[0])
-                pcms.append(pcm)
+        try:
+            for stage, pid, entry in pairs:
+                paths, (cands, pcm_note) = _mp4_paths(entry), _pcm_candidates(entry)
+                lines.append("  · 段 %s（prompt %s）→ %d 个视频文件%s%s%s"
+                             % (stage if stage is not None else "?", str(pid)[:8], len(paths),
+                                ("（%s）" % paths[0]) if paths else "",
+                                ("｜♪ PCM 边车 ×%d" % len(cands)) if cands else "",
+                                ("｜" + pcm_note) if pcm_note else ""))
+                if paths:
+                    segs.append(paths[0])
+                    pcms.append(cands)
+        except Exception as exc:            # noqa: BLE001
+            # 「从 history 里挑段」这层同样**不许把异常甩成 500** —— 画布上什么都看不到，
+            # 用户只会以为"点了没反应"（同本文件对拼接编码路的要求）。
+            lines.append("  🔴 从 history 解析段文件时出错（%s）：%s"
+                         % (type(exc).__name__, exc))
+            return web.json_response({"ok": False, "report": "\n".join(lines), "out": "",
+                                      "searched": note})
         a_codec, a_bitrate = AUDIO_OUT.get(str(data.get("audio_out") or ""),
                                           AUDIO_OUT[_DEFAULT_AUDIO_OUT])
         try:

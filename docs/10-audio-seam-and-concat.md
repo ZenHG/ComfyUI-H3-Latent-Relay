@@ -59,11 +59,14 @@ Chain 上的 `audio_out` 三档（只影响**成片音轨**，画面一律流拷
 > 边车缺失（旧图、关掉 `save_pcm`、或那次提交没跑「裁重叠」）⇒ 该段自动退回 mp4 解码，
 > 并在拼接报告里**逐段写明音频源**（`PCM` / `AAC`）。代价：该段仍是"二代"。
 >
-> **⚠ 音频链上「裁重叠」之后还有别的音频节点怎么办**（典型 = 本包的 **音频缝**；产线接线就是
-> `裁重叠 → 音频缝 → 落盘`）：真进 mp4 的是**链上最后那个**的输出。所以：
+> **⚠ 音频链上「裁重叠」之后还有别的音频节点怎么办**（典型 = 本包的 **音频缝**）：真进 mp4 的是
+> **链上最下游那个**的输出。所以：
 > ① 「音频缝」也落自己的边车（就是它送进落盘的那份音频，见主 README「核心功能」的节点表）；
-> ② 拼接在多个候选里按「**与 mp4 音频长度最接近**」挑（数据说话，不靠接线假设）；
-> ③ 挑不出同源的（如 J-cut 让音频缝输出短了 0.9 s）⇒ **拒收边车、退回解码**并在报告里说明。
+> ② 拼接**直接读提交图的数据流**给候选排序：谁在下游谁优先 —— **接线怎么变都跟着变**
+>   （不再按节点类型猜顺序；2026-09-30 事故就是"猜的顺序"与图里接的相反 ⇒ 拿错边车 ⇒ 音画错段）；
+> ③ 并列（多份都同源）时取**优先级靠前的那份**，落选的写进报告；**读不出提交图**时
+>   **拒收全部边车、退回解码**（宁可音轨多一代 AAC，也绝不配错段）；
+> ④ 挑不出同源的（如 J-cut 让音频缝输出短了 0.9 s）⇒ **拒收边车、退回解码**并在报告里说明。
 >
 > 边车落盘（约 2 MB/段）失败**不影响本段渲染**，只在日志里提示。
 
@@ -244,12 +247,14 @@ import json, time, urllib.request
 
 BASE = "http://127.0.0.1:8188"
 wf = json.load(open("my_workflow_api.json", encoding="utf-8"))
-CHAIN, BRIDGE, SAVE, LOAD = "958", "961", "902", "960"   # ← 换成你自己图里的节点号
+CHAIN, BRIDGE, SAVE, LOAD, SEAM = "958", "961", "902", "960", "931"   # ← 换成你自己图里的节点号
 SEGMENTS = 3
 
 for k in range(SEGMENTS):
-    for nid in (CHAIN, BRIDGE, SAVE, LOAD):
-        # ⚠ 四处段号必须一样大；老图（0.6.14 及以前）要先给 Chain 补一个 stage_index
+    for nid in (CHAIN, BRIDGE, SAVE, LOAD, SEAM):
+        # ⚠ **五处段号必须一样大**（Chain / 桥 / 落盘 / 读上段 latent / **音频缝**）；
+        #   漏掉音频缝 ⇒ 它把上一段的床文件覆盖成本段音频 ⇒ 拼接时上一段音轨错段（0.6.18 修的）。
+        #   老图（0.6.14 及以前）要先给 Chain 补一个 stage_index。
         wf[nid]["inputs"]["stage_index"] = k
     wf[BRIDGE]["inputs"]["run_id"] = "myfilm"             # 同一个 run_id ⇒ 各段文件进同一目录
     body = json.dumps({"prompt": wf, "client_id": "my-script"}).encode("utf-8")
@@ -270,6 +275,7 @@ for k in range(SEGMENTS):
 python tools/concat_segments.py s1.mp4 s2.mp4 s3.mp4 -o film.mp4 --audio aac256
 # 可选：--audio aac192|lossless   --crf 16   --json
 #        --pcm p1.safetensors p2.safetensors - -     ← 逐段 PCM 边车，顺序=段序，`-` 表示该段没有
+#                                                      （同段可给多份：越靠前越优先 = 越下游）
 ```
 退出码 **0 = 过四项断言**，1 = 没过（片可能已写出，留作取证）。
 
@@ -280,7 +286,8 @@ import sys; sys.path.insert(0, "<ComfyUI>/custom_nodes/ComfyUI-H3-Latent-Relay")
 from relay_core import assemble_mp4_segments
 rep = assemble_mp4_segments(["s1.mp4", "s2.mp4"], "film.mp4",
                             audio_codec="aac", audio_bitrate="256k",
-                            pcm_paths=["p1.safetensors", None])   # 边车可选，缺项填 None
+                            # 边车可选，缺项填 None；同段多份时**越靠前越优先**（越下游越可能真进 mp4）
+                            pcm_paths=["p1.safetensors", None])
 print(rep["ok"], rep["asserts"], rep["report"])
 ```
 
@@ -288,10 +295,14 @@ print(rep["ok"], rep["asserts"], rep["report"])
 
 ```bash
 curl -X POST http://127.0.0.1:8188/h3relay/concat -H "Content-Type: application/json" \
-  -d '{"prompt_ids":["<id1>","<id2>"],"count":0,"out_name":"film","audio_out":"aac_256k","video_crf":16}'
+  -d '{"stages":[{"stage":0,"prompt_id":"<id1>"},{"stage":1,"prompt_id":"<id2>"}],
+       "count":0,"out_name":"film","audio_out":"aac_256k","video_crf":16}'
 ```
-`prompt_ids` 不给时回扫 history（取最近 `count` 次「图里带该 Chain 节点」的提交）；
-`audio_out` 三档 = `aac_256k`（默认）/ `aac_192k` / `pcm_lossless`。
+**段记录用 `stages`**（带**真段号**，0.6.18 起画布按钮就走这条）：`stage` 是段号（0 起算）、
+`prompt_id` 为空表示该段没有记录。段号是**位置** —— 缺哪段就报哪段，**绝不把后面的段往前挪**
+（旧字段 `prompt_ids` 仍接受，但它是平铺的、位置即段号，中间缺一段就会错位）。
+`stages` 不给时回扫 history（取最近 `count` 次「图里带该 Chain 节点」的提交，按提交图里的
+`stage_index` 排序）；`audio_out` 三档 = `aac_256k`（默认）/ `aac_192k` / `pcm_lossless`。
 
 **边车（PCM）路径怎么拿**：脚本里两条路 —— 按段序自己传给 `--pcm`；
 或从 history 取（与路由同一判据，键名固定 `h3relay_pcm`）：
