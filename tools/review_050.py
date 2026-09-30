@@ -961,7 +961,12 @@ ck("L12 docs/10 §7.2 判据能力边界与兜底措施在位（能量型边界 
 #   · 节点数**只在"同一行还有 input"时**才认（README 里"3 节点/18 节点/45 节点"是别的意思）
 #   · 更正说明里**不许复述旧数字**（历史留在 CHANGES.md 与本地审核文档里）
 def _run_v3(ci_env: bool):
-    """跑一次 ``test_v3_schema``，返回 ``(通过, 节点数, input 数)``；抓不到终态行返回 ``None``。
+    """跑一次 ``test_v3_schema``，返回 ``(通过, 节点数, input 数, 失败断言)``；抓不到终态行返回 ``None``。
+
+    🔴 ``失败断言``（2026-09-30 加）：原来是**只**取通过数 ⇒ 一旦某个断言在**某个环境**下不成立，
+    报出来只有一句"真值 69 不在声明 [63, 70] 里" —— **看不出是哪一条断的**，
+    而这条红只在 CI 复现（本地 70/0）⇒ 只能靠"推一版看日志"来猜。现在把子进程的
+    ``[FAIL]`` 行原样带出来 ⇒ 一次就能定位。**报数必须可定位**，这是本仓自己的纪律。
 
     🔴 ``ci_env=True`` 时把 ``sys.modules["nodes"] = None`` **写进子进程**（不是父进程）。
 
@@ -984,13 +989,18 @@ def _run_v3(ci_env: bool):
     _o = (_r.stdout or "") + (_r.stderr or "")
     _m = _re.search(r"通过\s*(\d+)\s*/\s*失败\s*(\d+)\s*（节点\s*(\d+)\s*个，"
                     r"逐项比对的 input\s*(\d+)\s*个）", _o)
-    return (int(_m.group(1)), int(_m.group(3)), int(_m.group(4))) if _m else None
+    if not _m:
+        return None
+    _fails = [ln.strip() for ln in _o.splitlines() if "[FAIL]" in ln]
+    return (int(_m.group(1)), int(_m.group(3)), int(_m.group(4)), _fails)
 
 
 _v3_envs = [("本机", _run_v3(False)), ("CI", _run_v3(True))]
 for _nm, _r in _v3_envs:
     if _r:
-        print("      实跑（%-4s）：test_v3_schema 通过 %d ／%d 节点 · %d input" % ((_nm,) + _r))
+        print("      实跑（%-4s）：test_v3_schema 通过 %d ／%d 节点 · %d input" % ((_nm,) + _r[:3]))
+        for _fl in _r[3][:6]:
+            print("            %s" % _fl)
     else:
         print("      实跑（%-4s）：**抓不到终态行**（脚本可能崩了）" % _nm)
 # H3h 的"脚本至少能跑"用本机那次判（CI 那次在无宿主环境下本来就少一个节点）
@@ -1027,7 +1037,10 @@ for _nm, _r in _v3_envs:
     if not _r:
         _bad_v3.append("%s 环境：test_v3_schema 没跑出终态行（脚本崩了？）" % _nm)
         continue
-    _p, _nd, _in = _r
+    _p, _nd, _in, _fails = _r
+    if _fails:
+        _bad_v3.append("%s：test_v3_schema 有 %d 条断言失败 —— %s"
+                       % (_nm, len(_fails), " ｜ ".join(_fails[:3])))
     if _in not in _decl_in:
         _bad_v3.append("%s：input 真值 %d 不在声明 %s 里" % (_nm, _in, sorted(_decl_in)))
     if _nd not in _decl_nd:

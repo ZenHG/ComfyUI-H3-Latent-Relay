@@ -126,7 +126,12 @@ jobs:
       #    差的那一个 = `H3RelayLatentUpscale`，因为 CI 里宿主 `nodes` 导不进来
       #    ⇒ `_comfy_registry()` 抛 ModuleNotFoundError ⇒ `_upscaler_module()` 只 except
       #    RuntimeError ⇒ 穿透 ⇒ 该节点 schema 构造失败、被逐节点容错跳过。**这是设计内的降级**。
+      # 🔴 `if: always()`（2026-09-30 加）：GitHub 默认**首败即停** ⇒ 上一步一红，
+      #    这一步的输出根本不会出现在日志里（实测：review_050 红了一次，
+      #    "V3 schema parity" 这步的真实输出全被吞掉，只能靠再推一版来猜）。
+      #    它自己失败照样让 job 红 —— `always()` 只影响"跑不跑"，不影响成败判定。
       - name: V3 schema parity (vs V1)
+        if: always()
         env:
           COMFYUI_PATH: ${{ runner.temp }}/ComfyUI
           PYTHONPATH: ${{ runner.temp }}/ComfyUI
