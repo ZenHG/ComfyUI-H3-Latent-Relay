@@ -77,3 +77,6 @@ DisplayName = "H3 Latent Relay"
 # 与画布的节点分类同名（`nodes.py` 的 CATEGORY）⇒ Manager 卡片与画布菜单一致，利于检索。
 # Icon：registry / Manager 卡片的方图，≤ 400×400、须为公网可取 ⇒ 用 raw 直链（文件随仓提交）。
 Icon = "https://raw.githubusercontent.com/ZenHG/ComfyUI-H3-Latent-Relay/main/icon.png"
+# Banner：registry 节点页顶部的横幅，**21:9**、同样须公网可取（也走 raw 直链，文件随仓提交）。
+# ⚠️ 直链要等**这份文件被推到 main** 之后才有效 —— 只提交不推 ⇒ registry 页面上是空图。
+Banner = "https://raw.githubusercontent.com/ZenHG/ComfyUI-H3-Latent-Relay/main/banner.png"

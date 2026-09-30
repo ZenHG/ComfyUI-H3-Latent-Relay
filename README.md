@@ -187,6 +187,7 @@ ComfyUI-H3-Latent-Relay/
 ├── pyproject.toml         # 元数据（宿主真读 requires-comfyui/依赖；Comfy Registry 读 name/Icon/PublisherId）
 ├── .comfyignore           # `comfy node publish` 打什么包（不写 ⇒ 把 docs/tests/tools 一起推给用户）
 ├── icon.png / icon.svg    # Registry / Manager 卡片图标（400×400；`.svg` 是源，`.png` 是发布物）
+├── banner.png / banner.svg # Registry 节点页横幅（21:9 = 1680×720；同样 svg 是源）
 ├── requirements.txt       # 供 ComfyUI-Manager 安装依赖
 └── （顶层还有 README_EN.md · CHANGES.md · CONTRIBUTING.md · SECURITY.md ·
       CODE_OF_CONDUCT.md · THIRD-PARTY-NOTICES.md · LICENSE · .github/）

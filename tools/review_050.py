@@ -1217,6 +1217,16 @@ else:
         if not os.path.isfile(os.path.join(KIT, _icon_file)):
             _bad_reg.append("Icon 指向的 %s 不在仓里（提交后 raw 直链才有效）" % _icon_file)
 
+    # ④b Banner（可选）：给了就必须是 https 直链且**文件在仓里**（否则 registry 顶上挂空图）
+    _banner = _tk.get("Banner")
+    if _banner:
+        _b = str(_banner)
+        if not _b.startswith("https://"):
+            _bad_reg.append("Banner 必须是 https 直链：%r" % _b)
+        _banner_file = os.path.basename(_b.split("?")[0])
+        if not os.path.isfile(os.path.join(KIT, _banner_file)):
+            _bad_reg.append("Banner 指向的 %s 不在仓里（提交后 raw 直链才有效）" % _banner_file)
+
 # ⑤ .comfyignore：默认打包**全部 git 跟踪文件** ⇒ 没有它就是把 docs/tests/tools 一起推给用户
 _ci_path = os.path.join(KIT, ".comfyignore")
 _ci_patterns = []

@@ -48,8 +48,8 @@
           "zh": "目录结构",
           "en": "Repository layout",
           "mode": "condensed",
-          "h_en": "407fd291fa49b689",
-          "h_src": "2c77ee7ad89f678f",
+          "h_en": "54ae421a7b8008d4",
+          "h_src": "3ced3130974f0e3b",
           "seeded": "by-position"
         },
         {
@@ -79,7 +79,7 @@
       ],
       "acks": [],
       "stamped": "2026-09-30",
-      "src_sha": "ee2d8e81daa77057"
+      "src_sha": "01bc2f77f8d49733"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",

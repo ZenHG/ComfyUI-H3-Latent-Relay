@@ -208,6 +208,7 @@ ComfyUI-H3-Latent-Relay/
 ├── pyproject.toml         # metadata (the host really reads requires-comfyui / deps; Comfy Registry reads name / Icon / PublisherId)
 ├── .comfyignore           # what `comfy node publish` ships (without it docs/tests/tools go to users too)
 ├── icon.png / icon.svg    # Registry / Manager card icon (400×400; the `.svg` is the source, `.png` is shipped)
+├── banner.png / banner.svg # Registry node-page banner (21:9 = 1680×720; same source/render split)
 ├── requirements.txt       # dependencies for ComfyUI-Manager
 └── (top level also has README_EN.md · CHANGES.md · CONTRIBUTING.md · SECURITY.md ·
      CODE_OF_CONDUCT.md · THIRD-PARTY-NOTICES.md · LICENSE · .github/)
