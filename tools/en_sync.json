@@ -8,8 +8,8 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "condensed",
-          "h_en": "e25ce7b1e223d643",
-          "h_src": "51a04b3679e09385",
+          "h_en": "ae1a3ad4963d0e4a",
+          "h_src": "33a0744ad3b82f78",
           "seeded": "by-position"
         },
         {
@@ -24,23 +24,23 @@
           "zh": "环境依赖",
           "en": "Requirements",
           "mode": "condensed",
-          "h_en": "fbc8a61ac45a9ad4",
-          "h_src": "21fe7a3179344644",
+          "h_en": "8ef00c24cbbfef21",
+          "h_src": "0c3dcce17ea1da27",
           "seeded": "by-position"
         },
         {
           "zh": "安装",
           "en": "Install",
           "mode": "condensed",
-          "h_en": "9d5da5172363743f",
-          "h_src": "4c011116055e9d9f",
+          "h_en": "eb99bf82ac4716c3",
+          "h_src": "bd5fcf457a23abf7",
           "seeded": "by-position"
         },
         {
           "zh": "使用方法",
           "en": "Usage",
           "mode": "condensed",
-          "h_en": "0f98e5cfdfc84507",
+          "h_en": "7bd0550cdf8647b3",
           "h_src": "3ea532a19617ef20",
           "seeded": "by-position"
         },
@@ -48,16 +48,16 @@
           "zh": "目录结构",
           "en": "Repository layout",
           "mode": "condensed",
-          "h_en": "f08331bd1603d37b",
-          "h_src": "4ff7b62804fd99c6",
+          "h_en": "a259c358909a5dab",
+          "h_src": "144baf6671fb0a40",
           "seeded": "by-position"
         },
         {
           "zh": "配置与注意事项",
           "en": "Configuration & hard rules",
           "mode": "condensed",
-          "h_en": "65e4c44dfc31b7ed",
-          "h_src": "77cce15eadf2f043",
+          "h_en": "89aa3077b4b04808",
+          "h_src": "d40c155bd146df5b",
           "seeded": "by-position"
         },
         {
@@ -78,8 +78,8 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-01",
-      "src_sha": "8a60acfdbf4b7447"
+      "stamped": "2026-10-02",
+      "src_sha": "2deeff5921fb1497"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -166,7 +166,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-01",
+      "stamped": "2026-10-02",
       "src_sha": "997bb34f6092cf08"
     },
     "docs/02-parameters.md": {
@@ -190,7 +190,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-01",
+      "stamped": "2026-10-02",
       "src_sha": "9e7c5877c65898d2"
     }
   }

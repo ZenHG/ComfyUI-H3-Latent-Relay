@@ -16,7 +16,7 @@
 #    ④ `PublisherId` 必须与 registry 网站上 @ 后面那串完全一致，否则发布会被拒。
 [project]
 name = "h3-latent-relay"
-version = "0.6.18"
+version = "0.6.19"
 description = "Latent bridge for MiniMax-H3 multi-segment continuation: the previous segment's AV latent is spliced into this segment's conditioning — zero re-encoding."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -67,8 +67,23 @@ ignore = [
 # ⚠️ 它**表达不了「必须带 MiniMax-H3」**（H3 是宿主的 comfy_extras，不是另一个包）⇒ 旧版宿主上本包
 #    照样装得上、节点照样出现，只是**续接静默无效**。补法：加载时查 `comfy_extras/nodes_minimax_h3.py`，
 #    缺了就**打一行 ❌**（`layout_contract.host_h3_status()` + `__init__.py` 的加载摘要 + `/h3relay/health`）。
+#
+# 🔢 **为什么是 0.35.0（2026-10-02 定，由 git 历史反查得出，不是拍脑袋）**：
+#    本包对宿主最晚的硬依赖是**掩码硬锁机制**，它需要两件东西同时到位：
+#      ① `comfy/ldm/minimax/model.py::mask_row_values` —— 把 noise_mask 转成逐 patch 的 timestep 标签
+#         ⇒ 首次出现 `ff6c8a8af`（#15375 per-token noise masks），**落在 v0.34.0**；
+#      ② `comfy/ldm/minimax/model.py` forward 里的 `out[0] *= denoise_mask / out[1] *= audio_denoise_mask`
+#         —— 把掩码行的**速度场**按掩码缩放（缺它 ⇒ masked rows 的速度预测不准 ⇒ 硬锁数值偏）
+#         ⇒ 首次出现 `421a1c245`（#15988 Fix MiniMax H3 denoise masks），**落在 v0.35.0**。
+#    更早的依赖都更早：`FRAME_PER_TOKEN` / `PackedLayout` / `minimax_keyframes` / `minimax_refs`
+#      = v0.30.0（#15224）；`_scale_audio_slice` = 2026-08-06；`NestedTensor` = 2025-10；
+#      `conditioning_set_values` = 2026-02；`comfy_api` = 2025-07。
+#    **已核实 v0.35.0 → HEAD 之间 `mask_row_values` / `_denoise_mask_values` 未被改动**
+#      （`git log v0.35.0..HEAD -S <sym>` 空），故 v0.35.0 是**充分且必要**的下限。
+#    ⚠️ 旧值 `>=0.37.0` **过高三档**，会让本可用的用户装不上（本包并不依赖 0.36/0.37 的任何特性）。
+#    ⚠️ **将来若要放宽/收紧**：先跑 `git log --oneline -1 -S <符号> -- comfy/` 反查，别凭感觉写。
 [tool.comfy]
-requires-comfyui = ">=0.37.0"
+requires-comfyui = ">=0.35.0"
 
 # —— Comfy Registry 发布所需 ——
 # PublisherId：在 registry.comfy.org 注册发布者后获得（全局唯一、**发布后不可更改**）。

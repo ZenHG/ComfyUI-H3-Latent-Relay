@@ -2,16 +2,22 @@
 // Copyright (c) 2026 ComfyUI-H3-Latent-Relay contributors
 // 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 //
-// Chain 词分发**纯函数**的离线单测（零依赖、零浏览器）：
+// H3 Latent Relay · **前端纯函数**的离线单测（零依赖、零浏览器）：
 //     node tests/test_prompt_dispatch.mjs
 //
-// 覆盖：`---` 分块边界 / 词格探测与优先级 / prompt_target 三种写法 / JSON 格只改 prompt 字段
-//      / 畸形输入一律**拒绝写入**（绝不把用户的 JSON 覆盖掉）。
+// 覆盖两组纯函数（都在 `web/`，前端与单测共用同一份）：
+//   · `relay_kit_prompt.js` —— 词块分块 / 按段号收集段记录
+//   · `relay_kit_sync.js`   —— run_id 跨节点同步（三态裁决 / 广播规划 / 表 ↔ nodes.py 对账）
+// 另有两组**静态扫描**（`chain.js` 依赖浏览器，跑不了单测 ⇒ 用扫描兜住静默失效）：
+//   阶段表 ↔ 相位串、会提交的按钮是否都过 run_id 闸。
 // 对账口径写在 tests/test_relay_core.py 的第 26 组之外 —— 这组只跑 JS，不占 GPU、不进 Python 计数。
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { splitPromptBlocks, collectStageIds } from "../web/relay_kit_prompt.js";
+import {
+    RUN_ID_TYPES, isRunIdType, resolveRunId, planRunIdSync, describeRunIdConflict,
+} from "../web/relay_kit_sync.js";
 
 let pass = 0;
 const fails = [];
@@ -126,6 +132,122 @@ console.log("[7] chain.js 阶段表 ↔ say() 相位串 一致性（静态扫描
         [...keys].every((k) => k === "idle"
             ? /^\s{4}idle: \{ glyph: "[^"]+", color: null/m.test(src)
             : new RegExp(`^\\s{4}${k}: \\{ glyph: "[^"]+", color: "#[0-9a-fA-F]{6}"`, "m").test(src)));
+}
+
+// ---------------------------------------------------------------- 8. run_id 跨节点同步
+// 🔴 为什么必须机检：`run_id` 有**五类节点**各存一份（表在 `web/relay_kit_sync.js`）。
+//   漏掉任何一类 ⇒ 那个节点永远用别的目录名 ⇒ 桥去错的目录找段文件。
+//   这与 2026-09-30 那场真实事故（段号推进漏了「音频缝」⇒ 成片音画错段）**是同一个病**。
+//   所以这里不只测纯函数，还**扫 nodes.py 反查那张表全不全** —— 表是手写的，会漏。
+console.log("");
+console.log("[8] run_id 跨节点同步：三态裁决 / 广播规划 / 表 ↔ nodes.py 对账");
+check("8.1 isRunIdType：认表里那六类，不认无关类型",
+    RUN_ID_TYPES.every((s) => isRunIdType(s.type))
+    && !isRunIdType("KSampler") && !isRunIdType(undefined) && !isRunIdType("H3RelayPost"),
+    RUN_ID_TYPES.length + " 类：" + RUN_ID_TYPES.map((s) => s.type).join("/"));
+
+const M = (...xs) => xs.map(([id, runId], i) => ({ id, type: "H3RelayLatentSave", runId }));
+check("8.2 全组都是同一个名字 ⇒ ok（无需动作）",
+    JSON.stringify(resolveRunId(M(["1", "myfilm"], [2, "myfilm"]))) .startsWith('{"state":"ok"')
+    && resolveRunId(M(["1", "myfilm"], [2, "myfilm"])).ids.length === 2
+    && resolveRunId(M(["1", "myfilm"], [2, "myfilm"])).empty.length === 0);
+check("8.3 唯一非空 + 有空格 ⇒ ok，且点出**哪几格是空的**（这些格要补齐）",
+    JSON.stringify(resolveRunId(M(["1", "myfilm"], [2, "  "], [3, ""])).empty) === "[2,3]"
+    && resolveRunId(M(["1", "myfilm"], [2, ""])).value === "myfilm");
+check("8.4 两个不同的非空名 ⇒ **conflict**（不猜、不自动挑一个）",
+    resolveRunId(M(["1", "a"], [2, "b"])).state === "conflict"
+    && JSON.stringify([...resolveRunId(M(["1", "a"], [2, "b"])).byValue.keys()]) === '["a","b"]');
+check("8.5 全空 ⇒ empty（后端 `_stage_path` 会 raise，前端提前说清）",
+    resolveRunId(M(["1", ""], [2, "   "])).state === "empty"
+    && resolveRunId(M(["1", ""], [2, " "])).empty.length === 2);
+check("8.6 畸形输入不炸（null / undefined / 无 id）",
+    resolveRunId(null).state === "empty" && resolveRunId(undefined).empty.length === 0
+    && resolveRunId([null, { runId: "x" }]).state === "empty");
+check("8.7 空值**不扩散**（清空格子 ≠ 想把全组清空）—— 这正是「误删一个字符」的护栏",
+    JSON.stringify(planRunIdSync(M(["1", "old"], [2, "old"]), "1", "")) ===
+    '{"targets":[],"value":"","reason":"empty"}'
+    && planRunIdSync(M(["1", "old"]), "1", "   ").reason === "empty");
+check("8.8 非空 ⇒ 只列「值不同的」、且**跳过发起者自己**",
+    JSON.stringify(planRunIdSync(M(["1", "old"], [2, "new"], [3, "old"]), "2", "new").targets)
+    === '["1",3]');
+check("8.9 已经全一致 ⇒ reason=`none`（不刷屏、不做无谓写入）",
+    planRunIdSync(M(["1", "same"], [2, "same"]), "1", "same").reason === "none");
+check("8.10 id 一律 `String()` 归一：数字 id 与字符串 id 必须认作同一个",
+    JSON.stringify(planRunIdSync(M([961, "old"], ["902", "old"]), 961, "new").targets) === '["902"]');
+check("8.11 冲突提示点名**哪个节点是哪个名字**（用户能照着改）",
+    describeRunIdConflict(resolveRunId(M(["1", "a"], [2, "b"])), (id) => "落盘#" + id)
+        .includes("落盘#1") && describeRunIdConflict(resolveRunId(M(["1", "a"], [2, "b"])),
+        (id) => "落盘#" + id).includes("落盘#2"));
+
+// —— 静态对账：表（手写）↔ nodes.py（真相源）
+{
+    const pyPath = fileURLToPath(new URL("../nodes.py", import.meta.url));
+    const src = readFileSync(pyPath, "utf-8");
+    const declared = [];
+    let cur = null;
+    for (const line of src.split(/\r?\n/)) {
+        const m = /^class (\w+)/.exec(line);
+        if (m) { cur = m[1]; continue; }
+        // 只认**widget 声明行**（缩进后紧跟 `"run_id": (`）：函数默认参数 `run_id=""` 不算
+        if (cur && /^\s+"run_id":\s*\(/.test(line) && !declared.includes(cur)) declared.push(cur);
+    }
+    const inTable = RUN_ID_TYPES.map((s) => s.type);
+    const missing = declared.filter((c) => !inTable.includes(c));
+    const extra = inTable.filter((c) => !declared.includes(c));
+    check(`8.12 表 ↔ nodes.py 双向对账（nodes.py 声明了 ${declared.length} 个，表里 ${inTable.length} 个）`,
+        declared.length > 0 && missing.length === 0 && extra.length === 0,
+        `nodes.py 有而表里没有：${missing.join("/") || "无"} ｜ 表里有而 nodes.py 没有：${extra.join("/") || "无"}`);
+}
+
+// —— 静态闸：**会提交**的按钮必须都过 `runIdPreflight`
+{
+    const chainSrc = readFileSync(fileURLToPath(new URL("../web/relay_kit_chain.js", import.meta.url)), "utf-8");
+    // 🔴 **白名单式，不是列举式**：列举式（只查已知那四个）对**新加的按钮是瞎的** ——
+    //   那正是"手写清单会漏"的老病（2026-09-30 段号推进漏了音频缝）。这里反过来：
+    //   默认**每个按钮都必须有闸**，只有下面这三个明确不需要（它们不排队提交）。
+    //   用**前缀**匹配：按钮文案末段常会微调（「⏹ Stop（本轮跑完即停）」），前缀不受影响。
+    const NO_GATE_PREFIX = ["⏹ Stop", "🧩 拼成一条", "↺ Reset"];
+    const labels = [...chainSrc.matchAll(/addBtn\("([^"]+)"/g)].map((m) => m[1]);
+    const bad = [];
+    for (const label of labels) {
+        const at = chainSrc.indexOf(`addBtn("${label}"`);
+        const end = chainSrc.indexOf("addBtn(", at + 6);
+        // `end < 0` = 这是最后一个按钮 ⇒ 截到文件尾（`slice(at, -1)` 会少一个字符，别那么写）
+        const body = chainSrc.slice(at, end < 0 ? undefined : end);
+        const needsGate = !NO_GATE_PREFIX.some((p) => label.startsWith(p));
+        if (needsGate && !body.includes("runIdPreflight")) bad.push(label);
+    }
+    check(`8.13 每个「会提交」的按钮都过了 run_id 闸（白名单式：新按钮默认必须有闸；共 ${labels.length} 个按钮）`,
+        labels.length >= 6 && bad.length === 0,
+        bad.length ? "没闸：" + bad.join("、") : labels.join("、"));
+    check("8.14 挂钩入口在（`nodeCreated` 里给带 run_id 的节点钩回调）",
+        /nodeCreated\s*\(node\)\s*\{[\s\S]{0,400}hookRunIdWidget/.test(chainSrc));
+}
+
+// ---------------------------------------------------------------- 9. 自引用：断言数只准有一个真相源
+// 🔴 为什么要这一组：**同一个数字写在三个文件里就一定会漂**（本仓 2026-10-02 亲历：
+//   `LOCAL-维护规范` 的 §六 门槛表漂了 7 天）。`ci.yml` 与 `docs/08` 都要给用户写"期望 N/0"，
+//   而 N 的真正来源是**这份文件实跑出来的数** ⇒ 让它自引用：谁改了测试而没同步那两处，这里就红。
+//   （同款做法见 `tools/review_050.py` 的 H3g 自引用机检。）
+const EXPECTED_CHECKS = 35;   // 含本行这条自检自己
+console.log("");
+console.log("[9] 断言数自引用（ci.yml / docs/08 里写的「期望 N/0」必须等于本文件实跑数）");
+{
+    const decl = [];
+    for (const rel of ["../.github/workflows/ci.yml", "../docs/08-testing.md"]) {
+        const s = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf-8");
+        // ⚠️ 只认**提到本测试文件**的那些行：ci.yml 里还有 `test_relay_core` 432/0 等别的期望值，
+        //    用全文件正则抓 `期望 N/0` 会一股脑抓进来（第一版就是这么假红的）。
+        for (const line of s.split(/\r?\n/)) {
+            if (!line.includes("test_prompt_dispatch")) continue;
+            const m = /(\d+)\s*\/\s*0/.exec(line);
+            if (m) decl.push({ rel, n: Number(m[1]) });
+        }
+    }
+    const shown = decl.map((d) => `${d.rel.split("/").pop()}=${d.n}`).join(" ");
+    check("9.1 ci.yml / docs/08 里写的「N/0」== 本文件实跑数（改测试必须同步这三处）",
+        decl.length >= 2 && decl.every((d) => d.n === EXPECTED_CHECKS),
+        `${shown} ｜ 本文件=${EXPECTED_CHECKS}`);
 }
 
 // ---------------------------------------------------------------- 结果

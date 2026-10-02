@@ -86,6 +86,25 @@
 //     另加**防抖**：同一按钮 0.4 秒内重复点击只认第一次（双击 = 白烧一轮 GPU）；
 //     「⏹ Stop」「↺ Reset」不防抖 —— 那是用户的刹车，任何时候都该立刻响应。
 //
+// 0.6.19 —— `run_id` 也改成**表驱动 + 一处改动广播到全组**（与段号同一套办法）：
+//   · 🔴 问题：`run_id`（这部片子叫什么，决定段文件落 `output/relay_kit/<run_id>/`）
+//     在**六类节点**上各存一份，必须一字不差。此前只靠 tooltip 写「⚠ 必须和 XX 一字不差」
+//     ⇒ 改一处要手动改五处；漏改的那一处会让桥去找**另一个目录**（报错，或更坏：读到上一轮的旧段）。
+//     这正是 `stage_index` 的老病，而它在 0.6.18 已经用表驱动治过 ⇒ 这里复用同一套。
+//     （表在 `web/relay_kit_sync.js`；我第一版手写清单**就漏了「音频缝」**，被 8.12 机检当场抓住。）
+//   · 三条设计决定（都写进了 `relay_kit_sync.js` 的模块注释）：
+//     ① **空值不广播** —— 清空一格 ≠ 想把全组清空（否则误删一个字符就把整部片子的目录名清掉）；
+//     ② **冲突不猜** —— 同组出现两个不同的非空名时列清单给人看，**不自动挑一个**
+//        （自动挑错那次会让段文件落进错的目录，比报错难查得多）；
+//     ③ **同步范围 = 同一个分组框**（一张图放两部片子是正常用法，跨组同步会把另一部改掉）。
+//   · **双保险**（防某一版前端把 widget 回调吃掉 ⇒ 静默失效）：
+//     ① 快路径：包 `run_id` 格的 `callback`，改一处当场广播；
+//     ② 兜底：`▶ Run` / `✔ Approve` / `⏩ 连跑` / `⏭ 续跑` 这四个**会提交**的按钮，
+//        在排队前跑一次 `runIdPreflight()` —— 不是静默补齐，而是**冲突直接不排队**并列出清单。
+//        （现状是排队跑到桥才报"找不到文件"，那时已经白烧了几十秒。）
+//   · Chain 的 `run_id` 默认是空的（可选·续跑用），而桥/落盘的默认是 `relay`
+//     ⇒ **不碰 run_id 的老图一字不变**：preflight 只在"同组内有非空值"时才可能动作。
+//
 // 效能（0.6.13）：
 //   · **全局监听只注册一份**（模块级 `CHAINS` 集合）。旧写法在每个 Chain 实例的
 //     `onNodeCreated` 里各注册 3 个 `api` 监听 ⇒ 多实例时开销成倍，且**节点被删/复制后
@@ -106,6 +125,12 @@ import { api } from "../../scripts/api.js";
 //   词现在由 Chain 节点的 `prompt` 输出口给（铁律一：不允许"两条路各写一遍"）。
 //   `splitPromptBlocks` 仍要（前端做**词块数预检**）；`collectStageIds` 仍要（拼接取段记录）。
 import { splitPromptBlocks, collectStageIds } from "./relay_kit_prompt.js";
+// 🔴 0.6.19：`run_id` 跨节点同步的**纯函数**（表 + 三态裁决 + 广播规划）。
+//   与 `stage_index` 的 `STAGE_TYPES` 同构 —— 那套机制 2026-09-30 治过一次
+//   「手写清单漏一类 ⇒ 成片音画错段」，这里照抄，不再手写。
+import {
+    isRunIdType, runIdSpec, resolveRunId, planRunIdSync, describeRunIdConflict,
+} from "./relay_kit_sync.js";
 
 /** litegraph 的节点模式：0 = Always（启用），4 = Bypass（旁路）。 */
 const MODE_ALWAYS = 0;
@@ -436,6 +461,187 @@ function setStageAll(chainNode, pair, v) {
     setStage(chainNode, v);
     for (const n of pair.stageNodes ?? []) setStage(n, v);
     return { restored: ensureLoadsEnabled(pair), driven: (pair.stageNodes ?? []).map((n) => n.id) };
+}
+
+// ─────────────────────────── run_id 同步（0.6.19） ───────────────────────────
+// 判断逻辑全在 `relay_kit_sync.js`（纯函数、离线可测）；这里只做**画布侧**三件事：
+// 收集同组快照 / 把值写下去 / 把结果说给人听。
+
+/** 广播进行中标志：我们自己写 widget 时压住回调，防自触发回环。 */
+let RUN_ID_SYNCING = false;
+
+/**
+ * 同组内所有带 `run_id` 的节点快照（**同一分组框**，没有分组就全图）。
+ *
+ * 范围与段号推进同源（都走 `nodesInSameGroup`）：一张图里放两部片子是正常用法
+ * （`stage_index` 也是按分组隔离的），跨组同步会把另一部片子的目录名改掉。
+ */
+function runIdMembers(originNode) {
+    const all = graphNodes().filter((n) => isRunIdType(n.type));
+    return nodesInSameGroup(originNode, all)
+        .map((n) => ({ id: n.id, type: n.type, runId: widgetValue(n, "run_id", "") }));
+}
+
+/** 按 id 找回节点（新版前端 id 是字符串、旧版是数字 ⇒ 一律 `String()` 归一）。 */
+function nodeById(id) {
+    return graphNodes().find((n) => String(n.id) === String(id));
+}
+
+/** 冲突提示里的节点称呼：「落盘 #902」。 */
+function runIdNodeName(id) {
+    const n = nodeById(id);
+    if (!n) return `#${id}`;
+    return `${runIdSpec(n.type)?.label ?? n.type} #${n.id}`;
+}
+
+/** 把广播规划真正写下去。返回被改动的 id 列表（便于排查"到底同步了谁"）。 */
+function applyRunIdPlan(plan) {
+    const driven = [];
+    for (const id of plan.targets ?? []) {
+        const n = nodeById(id);
+        const w = n ? findWidget(n, "run_id") : null;
+        if (!w) continue;                       // 节点已被删 / 没有这一格 ⇒ 跳过，不影响其余
+        w.value = plan.value;
+        n.setDirtyCanvas?.(true, true);
+        driven.push(id);
+    }
+    if (driven.length) app?.graph?.change?.();  // 标记图已改（触发前端的"未保存"提示）
+    return driven;
+}
+
+/** 找同组的 Chain 状态（用来把提示写进那个节点的 `status` 格）。 */
+function chainStateNear(n) {
+    for (const s of CHAINS) {
+        if (!s?.chainNode) continue;
+        if (s.chainNode === n || nodesInSameGroup(n, [s.chainNode]).length) return s;
+    }
+    return null;
+}
+
+/**
+ * 同步范围：`"group"` = 命中了分组框；`"graph"` = 没命中 ⇒ 退化为**全图**
+ * （与段号推进同一套兜底语义 —— 但 run_id 改错的代价是**段文件落进另一部片子的目录**，
+ *  所以这一档必须**明说**，不能只写在代码注释里）。
+ */
+function runIdScope(originNode) {
+    for (const g of graphGroups()) {
+        const b = groupBounds(g);
+        if (b && inBounds(originNode, b)) return "group";
+    }
+    return "graph";
+}
+
+/** 范围说明的尾巴（命中分组就说"本组"，否则**点明是全图**）。 */
+function scopeNote(scope) {
+    return scope === "group" ? "" : "；⚠ 没找到分组框 ⇒ 范围是**全图**（若这张图上还有别的片子，请先画分组框）";
+}
+
+/**
+ * 把一句话说给用户：**优先写进同组 Chain 的 `status` 格**（用户已经在看那里），
+ * 同组没有 Chain 就退到控制台 —— 绝不静默吞掉。
+ */
+function notifyRunId(originNode, phase, text) {
+    const st = chainStateNear(originNode);
+    if (st?.chainNode) say(st.chainNode, st, phase, text);
+    else console.info("[H3 Relay Chain] " + text);
+}
+
+/**
+ * 快路径：某格的 `run_id` 被改 ⇒ 非空就广播给同组其余节点。
+ *
+ * 为什么读回调的**第一个参数**而不是 `widget.value`：ComfyUI 的 widget 回调约定首参即新值；
+ * 而"赋值 vs 回调"的先后在个别前端版本里不一样，读 `widget.value` 有拿到**上一个值**的风险
+ * （那会把旧名广播出去）。首参为 `null/undefined` 时才回读 widget。
+ */
+function broadcastRunId(originNode, value) {
+    if (RUN_ID_SYNCING) return null;            // 我们自己写下去的那一次，不递归
+    const members = runIdMembers(originNode);
+    const plan = planRunIdSync(members, originNode.id, value);
+    if (plan.reason === "empty") {
+        // 空值不扩散；但"这一格空了、别处还有名字"这件事不能无声无息。
+        const verdict = resolveRunId(members);
+        if (verdict.state === "ok") {
+            notifyRunId(originNode, "warn",
+                `这一格清空了，但同组还有 ${verdict.ids.length} 个节点是「${verdict.value}」`
+                + " ⇒ 名字不一致会找不到段文件。要清就全部清，要留就填回同一个名字。");
+        }
+        return null;
+    }
+    if (plan.reason === "none") return null;    // 已经全一致：不刷屏
+    RUN_ID_SYNCING = true;
+    let driven = [];
+    try {
+        driven = applyRunIdPlan(plan);
+    } finally {
+        RUN_ID_SYNCING = false;
+    }
+    const scope = runIdScope(originNode);
+    notifyRunId(originNode, scope === "group" ? "done" : "warn",
+        `\`run_id\` 已统一为「${plan.value}」（同步 ${driven.length} 个节点${scopeNote(scope)}）。`);
+    return driven;
+}
+
+/**
+ * 兜底闸：四个**会提交**的按钮在排队前调一次，返回 `true` 才允许排队。
+ *
+ * ① **冲突一律拦住** —— run_id 不一致时跑起来一定坏（桥去错的目录找段文件）；
+ *    拦在排队前，比跑到桥再报错省几十秒，也免得用户以为是模型的问题。
+ * ② 唯一非空但还有空格 ⇒ **补齐**（用户只需要改一处）。
+ * ③ 全空 ⇒ 拦（后端 `_stage_path` 本来就会 raise「run_id 不能为空」，提前把话说清）。
+ */
+function runIdPreflight(node, state) {
+    const members = runIdMembers(node);
+    if (!members.length) return true;           // 图上没有带 run_id 的节点 ⇒ 不管
+    const verdict = resolveRunId(members);
+    if (verdict.state === "conflict") {
+        say(node, state, "warn", describeRunIdConflict(verdict, runIdNodeName));
+        return false;
+    }
+    if (verdict.state === "empty") {
+        say(node, state, "warn", "同组的 `run_id` 全是空的 ⇒ 段文件没有目录可落"
+            + "（后端会直接报「run_id 不能为空」）。请在桥 / 落盘 / 读上段 latent / 裁重叠"
+            + " / 本节点任一处填上这部片子的名字。");
+        return false;
+    }
+    if (verdict.empty.length) {                 // 唯一非空 + 还有空格 ⇒ 补齐
+        const driven = applyRunIdPlan(planRunIdSync(members, null, verdict.value));
+        if (driven.length) {
+            const scope = runIdScope(node);
+            notifyRunId(node, scope === "group" ? "done" : "warn",
+                `\`run_id\` 还没填的 ${driven.length} 个节点已补齐为「${verdict.value}」`
+                + `${scopeNote(scope)}。`);
+        }
+    }
+    return true;
+}
+
+/**
+ * 给一个节点的 `run_id` 格挂上同步回调（幂等）。
+ *
+ * 包一层而不是**换掉**原回调：ComfyUI 自己也在这条链上挂了东西
+ * ⇒ 换掉等于把它们丢了。
+ */
+function hookRunIdWidget(node) {
+    if (!isRunIdType(node?.type)) return false;
+    const w = findWidget(node, "run_id");
+    if (!w) return false;                       // widgets 还没建好 ⇒ 交给调用方重试
+    if (w.__h3RunIdHook) return true;           // 幂等：重复挂钩会让一次改动触发 N 次广播
+    w.__h3RunIdHook = true;
+    const orig = w.callback;
+    w.callback = function (value, ...rest) {
+        const r = typeof orig === "function" ? orig.apply(this, [value, ...rest]) : undefined;
+        if (!RUN_ID_SYNCING) {
+            try {
+                const now = value == null ? widgetValue(node, "run_id", "") : value;
+                broadcastRunId(node, now);
+            } catch (err) {
+                // 同步失败**不许影响这一格的值** —— 那是用户刚敲进去的东西。
+                console.warn("[H3 Relay Chain] run_id 同步出错（这一格的值不受影响）：", err);
+            }
+        }
+        return r;
+    };
+    return true;
 }
 
 function findPair(chainNode) {
@@ -971,6 +1177,25 @@ function bindGlobalListeners() {
 app.registerExtension({
     name: "H3RelayKit.Chain",
 
+    /**
+     * 0.6.19：给每个带 `run_id` 的节点（六类，见 `relay_kit_sync.js` 的 `RUN_ID_TYPES`）挂上同步回调。
+     *
+     * 为什么在这里而不是 `beforeRegisterNodeDef`：后者是**按类型**调的，拿不到具体实例的 widget；
+     * `nodeCreated` 时该实例的 widgets 已经建好（它晚于 `onNodeCreated`）。
+     * 少数前端版本若仍取不到 widget，下一拍重试一次 —— 宁可晚一拍，也不要静默不挂钩。
+     */
+    nodeCreated(node) {
+        if (!isRunIdType(node?.type)) return;
+        if (hookRunIdWidget(node)) return;
+        setTimeout(() => {
+            try {
+                hookRunIdWidget(node);
+            } catch (err) {
+                console.warn("[H3 Relay Chain] 挂 run_id 同步钩子失败（这一格仍能正常填）：", err);
+            }
+        }, 0);
+    },
+
     beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData.name !== "H3RelayChain") return;
 
@@ -1201,6 +1426,7 @@ app.registerExtension({
                     say(node, state, "warn", "正在连跑中 —— 先点「⏹ Stop」，或等这一段跑完。");
                     return;
                 }
+                if (!runIdPreflight(node, state)) return;   // 0.6.19：名字不一致不许排队
                 state.mode = "idle";
                 state.awaiting = false;
                 state.runSeq += 1;                  // ▶ = 新一轮（拼接时用来标"更早一轮"）
@@ -1215,6 +1441,7 @@ app.registerExtension({
                         + "想停下来点「⏹ Stop」。");
                     return;
                 }
+                if (!runIdPreflight(node, state)) return;   // 0.6.19：名字不一致不许排队
                 const next = getStage(pair.bridge) + 1;
                 const d = checkStagePrompt(node, next);
                 if (!d.ok) { say(node, state, "warn", d.message); return; }
@@ -1228,6 +1455,7 @@ app.registerExtension({
             addBtn("⏩ 连跑（按 segments 自动循环）", async () => {
                 const pair = findPair(node);
                 if (!pair) return;
+                if (!runIdPreflight(node, state)) return;   // 0.6.19：名字不一致不许排队
                 await startChainRun(node, state, pair, "连跑");
             });
 
@@ -1238,6 +1466,9 @@ app.registerExtension({
             addBtn("⏭ 续跑（从上次跑到的那段继续）", async () => {
                 const pair = findPair(node);
                 if (!pair) return;
+                // 0.6.19：先跑闸 —— 它顺带把本节点（Chain）的 `run_id` 从同组的唯一非空值补齐，
+                // 否则下面那句"续跑要先在 run_id 格里填上"会白拦一次（默认是空的）。
+                if (!runIdPreflight(node, state)) return;
                 const runId = String(widgetValue(node, "run_id", "")).trim();
                 if (!runId) {
                     say(node, state, "warn", "续跑要先在 `run_id` 格里填上（与桥 / 落盘的 run_id 填一样）"

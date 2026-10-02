@@ -7,9 +7,9 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 
 | 项 | 值 |
 |---|---|
-| 版本 | **0.6.18**（8 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
+| 版本 | **0.6.19**（8 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
 | 许可 | **MIT**（第三方出处见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)） |
-| 宿主 | **ComfyUI ≥ 0.37.0，且带 MiniMax-H3 支持**（宿主自身为 GPL-3.0，见 §许可与出处） |
+| 宿主 | **ComfyUI ≥ 0.35.0，且带 MiniMax-H3 支持**（宿主自身为 GPL-3.0，见 §许可与出处） |
 
 > 🔴 **一条铁律**：**每个功能都有两条用法 —— 画布手动（多数用户）与 API 提交图 JSON，二者必须走同一套节点实现。**
 > 只写在脚本里的功能不算本包的功能（判据见 [`CONTRIBUTING.md`](CONTRIBUTING.md)）。
@@ -54,7 +54,7 @@ anchor 与采样 latent 不同源（会漂）、只能锚第 0 帧。本包直�
 
 | 依赖 | 必需？ | 说明 |
 |---|---|---|
-| **带 MiniMax-H3 支持的 ComfyUI ≥ 0.37.0** | ✅ | 需要 `comfy_extras/nodes_minimax_h3.py` 与消费 `minimax_keyframes` / `minimax_refs` 的 `comfy/model_base.py`。装在旧版上节点能注册但**续接静默无效** |
+| **带 MiniMax-H3 支持的 ComfyUI ≥ 0.35.0** | ✅ | 需要 `comfy_extras/nodes_minimax_h3.py` 与消费 `minimax_keyframes` / `minimax_refs` 的 `comfy/model_base.py`。装在旧版上节点能注册但**续接静默无效** |
 | `torch` | ✅ | **顶层 import**（缺了整包注册失败），ComfyUI 自带 |
 | `safetensors` | ✅ | 延迟 import（缺了只在落盘那步报错），ComfyUI 自带 |
 | `av >= 17` | 拼接时 | 「拼成一条」与 `tools/concat_segments.py` 需要（宿主自带）。缺模块会**明确报错**并给出安装指引；PyAV 太旧、拿不到流拷贝模板时会**报出原因并退回重编码**（报告里写明），不静默 |
@@ -98,9 +98,12 @@ git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git  
 > ⇒ 两套一起导出时 **V3 永不生效**；所以 V3 模式下本包把 `NODE_CLASS_MAPPINGS` 显式置 `None`。
 > **V3 的已知差异**：schema 在**包加载时**构造（V1 是惰性的）⇒ 某个节点的参数表构造失败时只会
 > **跳过那一个节点**并打日志，其余照常加载（不会整包失效）。
-> **下限依据**：`web/` 挂载靠宿主 `WEB_DIRECTORY`、元数据靠 `comfy_config` 解析 `pyproject.toml` ——
-> 两条都在 **0.37.0** 上实测通过；`requires-python = ">=3.10"` 是刻意保守
-> （本包未使用 3.10+ 独有语法，真要放宽到 3.9 亦无语法障碍）。
+> **下限依据（2026-10-02 由 git 历史反查重定）**：下限 = **`>=0.35.0`**，由本包**最晚的硬依赖**决定 ——
+> 掩码硬锁需要宿主 `mask_row_values`（#15375，v0.34.0 起）**且** forward 里把掩码行速度场按掩码缩放
+> （#15988，v0.35.0 起）；其余依赖都更早（**H3 支持本身 = v0.30.0**）。已核实 v0.35.0 → 最新之间这两处未被改动。
+> 元数据侧 `web/` 挂载（`WEB_DIRECTORY`，2023 起）与 `comfy_config` 解析 `pyproject.toml`（2025-06 起）
+> 在 v0.35.0 已具备 ⇒ **功能与元数据两个层面同时成立**。
+> `requires-python = ">=3.10"` 是刻意保守（本包未使用 3.10+ 独有语法，真要放宽到 3.9 亦无语法障碍）。
 
 ---
 
@@ -180,7 +183,7 @@ ComfyUI-H3-Latent-Relay/
 ├── layout_contract.py     # 布局契约：找不到上游时放行 + 留痕，只在真的不一致时 raise
 ├── v3/                    # V3 外壳（io.ComfyNode + comfy_entrypoint）；V1 走 NODE_CLASS_MAPPINGS
 ├── exp/history_anchor_v2/ # E1' 时不变历史锚（顶层 import ⇒ 必需；无 _tiha.json 即不生效）
-├── web/                   # 前端 JS：🧩 拼接按钮、Chain 词分发（画布用；脚本用户见 docs/10 §7.4）
+├── web/                   # 前端 JS：🧩 拼接按钮、Chain 面板、`run_id` 一处改全组（画布用；脚本用户见 docs/10 §7.4）
 ├── examples/              # 两个可直接打开的工作流：最小续接（19 节点）与全流程（45 节点）
 ├── docs/                  # 深度文档 01–10（原理 / 参数 / 采样链 / 画布 / 排障 / 脚本 / Chain / 测试 / 观测 / 音频）
 ├── tests/                 # 离线自测（零 GPU）：432 项断言 + V3 逐字段 + 词分发纯函数
@@ -197,7 +200,7 @@ ComfyUI-H3-Latent-Relay/
 ```
 
 安装后**运行期真正会被加载的**只有 `__init__.py` · `relay_core.py` · `nodes.py` · `layout_contract.py` ·
-`v3/`（4 文件）· `exp/history_anchor_v2/`（3 文件，被 `nodes.py` 顶层 import，所以必需）· `web/`（2 个 JS）
+`v3/`（4 文件）· `exp/history_anchor_v2/`（3 文件，被 `nodes.py` 顶层 import，所以必需）· `web/`（3 个 JS）
 —— `dist/` 里的最小分发集就是这些 + 示例 + 元数据；`docs/` `tests/` `tools/` 都是开发件。
 
 ---
@@ -206,7 +209,7 @@ ComfyUI-H3-Latent-Relay/
 
 | # | 硬纪律 |
 |---|---|
-| 1 | **`run_id` 三处一字不差**（读上段 latent / 桥 / 落盘），段号顺序跑、**别跳段** |
+| 1 | **`run_id` 六处必须一字不差**（落盘 / 桥 / 读上段 latent / 裁重叠 / 音频缝 / 连跑）。**画布上只改一处，同组的其余格会自动跟随**（名字冲突时会拦下连跑并列清单，不猜）；脚本提交 JSON 请把这一格写成同一个变量（见 [`docs/10`](docs/10-audio-seam-and-concat.md) §7.4）。段号顺序跑、**别跳段** |
 | 2 | **第 1 段什么都不用做**：桥会自动直通；`context_latent` 是必填，**别拔线、别旁路** |
 | 3 | 🔴 **音频必须走裁重叠（或音频缝）的输出**，不能把 `VAEDecodeAudio` 直连落盘节点（否则每缝差 ~0.9 s 且累积） |
 | 4 | **`context_frames` 只认 `5+17k`**（5/22/39/56/73/90/107/124），须小于本段帧数；越界**直接报错不吸附** |
@@ -217,7 +220,7 @@ ComfyUI-H3-Latent-Relay/
 | 9 | **`chunks=1` 才是与上游整段推理一致的唯一路径**：`chunks>1` 会**改画面**（3D 体积注意力被切断），只在 OOM 时升，升完**必须重看缝** |
 | 10 | 🔴 **续接契约取原生域**：`Latent 存` 接在放大**之前**；**二采的 guider 不接桥的 `conditioning`**（网格不同 ⇒ 当场炸） |
 | 11 | `diagnostics` 默认关（三路纯打印、**不参与裁量**）；想看 DTW / 裁量→跳跃曲线 / 外观漂移就打开它。⚠️ 网上旧文里的「沉降 1」是 0.5.0 前口径 —— **以本页与节点报告为准** |
-| 12 | 🔴 **每个功能的画布路与脚本路必须是同一套节点实现**（见文首铁律）；纯前端能力（🧩 按钮、Chain 面板格）脚本提交 JSON 时**会被忽略**，脚本用户走 [`docs/10`](docs/10-audio-seam-and-concat.md) §7.4 的三条非 UI 路径 |
+| 12 | 🔴 **每个功能的画布路与脚本路必须是同一套节点实现**（见文首铁律）；纯前端能力（🧩 按钮、Chain 面板格、**`run_id` 一处改全组同步**）脚本提交 JSON 时**会被忽略**，脚本用户走 [`docs/10`](docs/10-audio-seam-and-concat.md) §7.4 的三条非 UI 路径 |
 
 ---
 

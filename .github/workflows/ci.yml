@@ -13,7 +13,7 @@
 #   ·  70/0  tests/test_v3_schema.py       V3 与 V1 逐字段一致（两种环境各一个数，原因见下：
 #                                          能拿到宿主注册表 ⇒ **8 节点 / 116 个 input**；
 #                                          `sys.modules["nodes"]=None` 硬挡 ⇒ **7 节点 / 103 input**）
-#   ·  13/0  tests/test_prompt_dispatch.mjs  Chain 词分发纯函数（node）
+#   ·  期望 35/0  tests/test_prompt_dispatch.mjs  前端纯函数（词分发 + run_id 同步）（node）
 # 改动后若这些数字变了，请同步 CONTRIBUTING.md「方面数/断言数」、tests 头注释 **以及本文件**。
 # ⚠️ 本文件曾是**已知盲区**（自己漂移过：停在 384；`assert_default_exit` 的期望值与第 11 行
 #    自相矛盾 3/3 vs 4/4；`review_050` 的执行行写 82 而真值 83）。2026-09-25 已收口：
@@ -147,7 +147,7 @@ jobs:
 
       # Chain 词分发的纯函数（与浏览器里跑的是同一份 web/relay_kit_prompt.js）
       - name: Chain prompt dispatch (node)
-        run: node tests/test_prompt_dispatch.mjs   # 期望 13/0
+        run: node tests/test_prompt_dispatch.mjs   # 期望 35/0
 
       # 🔴 2026-09-30 新增：**真的构建一次分发集**（此前它零 CI 覆盖）。
       #    为什么必须进 CI：用户下载的就是 `dist/` 那个 zip —— 打包器坏了、或

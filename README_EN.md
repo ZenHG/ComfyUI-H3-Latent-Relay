@@ -10,9 +10,9 @@ not coupled to any third-party H3 node pack.
 
 | Item | Value |
 |---|---|
-| Version | **0.6.18** (8 nodes; the composite bridge `H3RelayCopyBridge` is the **only** bridge) |
+| Version | **0.6.19** (8 nodes; the composite bridge `H3RelayCopyBridge` is the **only** bridge) |
 | License | **MIT** (third-party attribution in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) |
-| Host | **ComfyUI ≥ 0.37.0 with MiniMax-H3 support** (the host itself is GPL-3.0, see License) |
+| Host | **ComfyUI ≥ 0.35.0 with MiniMax-H3 support** (the host itself is GPL-3.0, see License) |
 
 > 🔴 **One iron rule**: **every feature has two usage paths — canvas by hand (most users) and graph JSON
 > submitted to the API — and both must go through the same node implementation.** A feature that only
@@ -62,7 +62,7 @@ under `output/relay_kit/<run_id>/`). Mechanism and measurements: [`docs/01`](doc
 
 | Dependency | Required? | Notes |
 |---|---|---|
-| **ComfyUI ≥ 0.37.0 with MiniMax-H3 support** | ✅ | needs `comfy_extras/nodes_minimax_h3.py` and a `comfy/model_base.py` that consumes `minimax_keyframes` / `minimax_refs`. On an older ComfyUI the nodes register but **continuation silently does nothing** |
+| **ComfyUI ≥ 0.35.0 with MiniMax-H3 support** | ✅ | needs `comfy_extras/nodes_minimax_h3.py` and a `comfy/model_base.py` that consumes `minimax_keyframes` / `minimax_refs`. On an older ComfyUI the nodes register but **continuation silently does nothing** |
 | `torch` | ✅ | **top-level import** (without it the whole pack fails to register); bundled with ComfyUI |
 | `safetensors` | ✅ | lazy import (only the save step fails if missing); bundled with ComfyUI |
 | `av >= 17` | for concatenation | needed by "concatenate" and `tools/concat_segments.py` (bundled with the host). A missing module **errors explicitly** with install instructions; if PyAV is too old to provide the stream-copy template it **reports why and falls back to re-encoding** (stated in the report) — never silent |
@@ -111,9 +111,14 @@ Both exits have identical node names, input/output order and defaults (machine-c
 > **V3's known difference**: the schema is built **at package load time** (V1 is lazy) ⇒ if one node's parameter
 > table fails to build, only **that node is skipped** and logged; everything else still loads (the pack never
 > fails as a whole).
-> **Lower-bound basis**: `web/` mounting relies on the host's `WEB_DIRECTORY`, and metadata relies on
-> `comfy_config` parsing `pyproject.toml` — both verified on **0.37.0**; `requires-python = ">=3.10"` is
-> deliberately conservative (no 3.10-only syntax is used, so relaxing it to 3.9 has no syntax obstacle).
+> **Lower-bound basis (re-derived 2026-10-02 from git history)**: the floor is **`>=0.35.0`**, set by the
+> pack's latest hard dependency — the mask hard-lock needs the host's `mask_row_values` (#15375, v0.34.0+)
+> **and** the forward pass scaling masked-row velocities by the mask (#15988, v0.35.0+); every other
+> dependency is older (**H3 support itself is v0.30.0**). Verified neither changed between v0.35.0 and HEAD.
+> On the metadata side, `web/` mounting (`WEB_DIRECTORY`, since 2023) and `comfy_config` parsing
+> `pyproject.toml` (since 2025-06) both exist in v0.35.0 ⇒ **the floor holds for behaviour *and* metadata**.
+> `requires-python = ">=3.10"` is deliberately conservative (no 3.10-only syntax is used, so relaxing it
+> to 3.9 has no syntax obstacle).
 
 ---
 
@@ -136,7 +141,7 @@ The log should show `钉住 22 帧` / `裁首 N 帧 = 钉住 22 + 沉降 0` / `�
 | Key parameter | Segment 1 | From segment 2 | Set on |
 |---|---|---|---|
 | `stage_index` | `0` | `1`, `2`… | **LatentLoad + bridge + LatentSave** (all three must match; Chain syncs them) |
-| `run_id` | one film name, e.g. `myfilm` | **character-identical to segment 1** | LatentLoad + bridge + LatentSave |
+| `run_id` | one film name, e.g. `myfilm` | **character-identical to segment 1** | all **six** nodes that carry it (Chain / bridge / LatentSave / LatentLoad / TrimAV / AudioSeam) — on the canvas, editing one field syncs the rest of its group |
 | `context_frames` | `22` | `22` (leave alone) | bridge (pin window; only 5/22/39/56/73/90/107/124) |
 | `settle_frames` | — (segment 1 trims nothing) | keep `0` | TrimAV (`0` = no settle trimming, which is the recommendation) |
 | `seam_ghost` / `settle_sharpen` | — | keep `0` | TrimAV / Post |
@@ -201,7 +206,7 @@ ComfyUI-H3-Latent-Relay/
 ├── layout_contract.py     # layout contract: pass through + leave a trace when upstream is missing, raise only on a real mismatch
 ├── v3/                    # V3 shell (io.ComfyNode + comfy_entrypoint); V1 goes through NODE_CLASS_MAPPINGS
 ├── exp/history_anchor_v2/ # E1' time-invariant history anchor (top-level import ⇒ required; inert without _tiha.json)
-├── web/                   # front-end JS: the 🧩 concat button, Chain prompt distribution (canvas only)
+├── web/                   # front-end JS: the 🧩 concat button, Chain panel, `run_id` one-field-syncs-the-group (canvas only)
 ├── examples/              # two openable workflows: minimal continuation (19 nodes) and full flow (45 nodes)
 ├── docs/                  # deep docs 01–10 (mechanism / parameters / sampling / canvas / troubleshooting / scripting / chain / tests / metrics / audio)
 ├── tests/                 # offline self-test (zero GPU): 432 assertions + V3 parity + prompt-dispatch pure functions
@@ -218,7 +223,7 @@ ComfyUI-H3-Latent-Relay/
 ```
 
 At runtime only `__init__.py` · `relay_core.py` · `nodes.py` · `layout_contract.py` · `v3/` (4 files) ·
-`exp/history_anchor_v2/` (3 files, imported at the top of `nodes.py`, hence required) · `web/` (2 JS files)
+`exp/history_anchor_v2/` (3 files, imported at the top of `nodes.py`, hence required) · `web/` (3 JS files)
 are actually loaded — the minimal distribution set in `dist/` is exactly those plus examples and metadata;
 `docs/`, `tests/` and `tools/` are development-only.
 
@@ -228,7 +233,7 @@ are actually loaded — the minimal distribution set in `dist/` is exactly those
 
 | # | Hard rule |
 |---|---|
-| 1 | **`run_id` must match character-identically in all three places** (LatentLoad / bridge / LatentSave); run segments in order, **never skip** |
+| 1 | **`run_id` must match character-identically across all six places** (LatentSave / bridge / LatentLoad / TrimAV / AudioSeam / Chain). **On the canvas, editing one field auto-syncs the rest of the group** (a name conflict blocks the run and lists which node holds which name — it never guesses); a script submitting JSON should write that field from a single variable (see [`docs/10`](docs/10-audio-seam-and-concat.md) §7.4). Run segments in order, **never skip** |
 | 2 | **Segment 1 needs nothing special**: the bridge passes through; `context_latent` is required — **do not unplug or bypass it** |
 | 3 | 🔴 **Audio must come from TrimAV (or AudioSeam) output**; never wire `VAEDecodeAudio` directly into the save node (~0.9 s per seam, accumulating) |
 | 4 | **`context_frames` only accepts `5+17k`** (5/22/39/56/73/90/107/124) and must be smaller than the segment length; out-of-range values **raise instead of snapping** |
@@ -239,7 +244,7 @@ are actually loaded — the minimal distribution set in `dist/` is exactly those
 | 9 | **`chunks=1` is the only path consistent with upstream whole-segment inference**: `chunks>1` **changes the picture** (3D volumetric attention is cut); raise it only under OOM and **re-check the seam** |
 | 10 | 🔴 **The continuation contract is taken in the native domain**: LatentSave goes **before** the upscale; the **second pass's guider must not connect the bridge's `conditioning`** (different grid ⇒ it explodes) |
 | 11 | `diagnostics` is off by default (three print-only passes, **no effect on trimming**); enable it for DTW / trim-amount→jump curves / appearance drift. ⚠️ The "settle 1" seen in older posts is pre-0.5.0 — **trust this page and the node reports** |
-| 12 | 🔴 **The canvas path and the script path must be the same node implementation** (see the iron rule at the top); purely front-end capabilities (the 🧩 button, Chain panel fields) **are ignored** when a script submits JSON — script users take the three non-UI paths in [`docs/10`](docs/10-audio-seam-and-concat.md) §7.4 |
+| 12 | 🔴 **The canvas path and the script path must be the same node implementation** (see the iron rule at the top); purely front-end capabilities (the 🧩 button, Chain panel fields, **the `run_id` one-field-syncs-the-group behaviour**) **are ignored** when a script submits JSON — script users take the three non-UI paths in [`docs/10`](docs/10-audio-seam-and-concat.md) §7.4 |
 
 ---
 
