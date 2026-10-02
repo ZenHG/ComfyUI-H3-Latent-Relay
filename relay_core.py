@@ -334,6 +334,20 @@ class RelayPlan:
         return line
 
 
+#: 声锚尾窗的**时域标准差下限** —— 低于它 = 这个锚没有内容（静音 / 常量 / 空）。
+#:
+#: 判据为什么是"时域方差"而不是"幅值"：`MiniMaxH3AudioVAE.encode` 返回的是**归一化**
+#: latent（`(z − mean) / std`）⇒ 静音/常量输入编码出来是**常量场** ⇒ 时域 std ≈ 0。
+#: 🔴 **零 ≠ 静音**：归一化空间的原点是 VAE 的**均值点**（"平均音色"），不是"无声"；
+#:    所以"接一个全零 latent 当空锚"在语义上并不成立（2026-10-02 实测踩到过）。
+#:
+#: 标定（2026-10-02，零 GPU，`safetensors.torch.load_file`）：**40 份真实产物** stage 文件的
+#: 尾 37 步实测 `std_max ∈ [0.391, 1.332]`（中位 0.675）；全零 latent = **0.0000**。
+#: ⇒ 取 `1e-2` = 比真实最小值低 **39×**，与"零"之间有足够判别带（真声锚不可能误伤）。
+#: ⚠️ 换底模/换音频 VAE 后若发现误伤，按同法重新标定，别凭感觉改。
+VOICE_ANCHOR_MIN_STD = 1e-2
+
+
 def _voice_anchor_audio(voice_anchor: Any) -> torch.Tensor:
     """从声锚输入取音频流，规范成 [B,C,2,T]。
 
@@ -371,6 +385,13 @@ def _voice_anchor_tail(voice_anchor: Any, a_frames: int) -> Tuple[torch.Tensor, 
     取窗逻辑与 ``audio_tail_from_latent`` 相同（向上拓宽到整步、要多少给多少），
     但**直接作用于音频张量** —— 不走 ``audio_from_latent``（那会把 VAEEncodeAudio
     的纯音频 latent 误判成 video-only）。
+
+    🔴 **内容守卫（0.6.20 补）**：切出来的尾窗还要过一道 fail-closed 检查 ——
+    含 `NaN/Inf`、或**时域标准差 < `VOICE_ANCHOR_MIN_STD`**（= 常量场 ⇒ 静音/空锚）一律 raise。
+    为什么必须有：声锚的作用是「把**本段说话人**的嗓音当条件」，一个没有内容的锚钉进去 =
+    既丢掉音频连续性、又什么都没换来，而**模型不会报错**（症状只在成片里）。
+    实测踩点（2026-10-02）：把出词节点的 `LATENT`（空的 AV latent）接到 `voice_anchor`
+    ⇒ 全零锚静默生效。⚠️ 想**关**声锚请**拔线**，不要接空 latent。
     """
     a = _voice_anchor_audio(voice_anchor)
     total_t = int(a.shape[-1])
@@ -379,7 +400,26 @@ def _voice_anchor_tail(voice_anchor: Any, a_frames: int) -> Tuple[torch.Tensor, 
     take = min(want, total_t)
     if take < 1:
         raise ValueError("声锚音频为空（总长 %d 步）。" % total_t)
-    return a[:1].narrow(-1, total_t - take, take).clone(), take, raw_steps
+    tail = a[:1].narrow(-1, total_t - take, take).clone()
+    if not bool(torch.isfinite(tail).all()):
+        raise ValueError(
+            "声锚含 NaN/Inf —— 不是可用的音频 latent。请检查上游（LoadAudio → VAEEncodeAudio）。")
+    # `unbiased=False`：take=1 时无偏 std 是 NaN（会静默漏过），无偏口径下它是 0 ⇒ 正确地被拒。
+    spread = float(tail.std(dim=-1, unbiased=False).max())
+    if spread < VOICE_ANCHOR_MIN_STD:
+        _why = ("这个张量**全为零** —— 很可能是把出词节点的 `LATENT` 输出接到了 `voice_anchor`："
+                "那是**空的 AV latent**，不含任何语音。"
+                if float(tail.abs().max()) == 0.0 else
+                "这个张量在时域上是常量 ⇒ 静音/无声内容，钉进去等于白丢音频连续性。")
+        raise ValueError(
+            "声锚没有内容：尾 %d 步的时域标准差 = %.5f < %.5f（下限）。\n"
+            "    · 声锚要的是**本段说话人的真实语音**（`LoadAudio → VAEEncodeAudio` 的 latent，"
+            "≥0.9 秒干净语音）；\n"
+            "    · %s\n"
+            "    · 想**关掉**声锚 ⇒ 把 `voice_anchor` 这根线**拔掉**（不接 = 逐位同旧版），"
+            "不要接一个空的 latent。"
+            % (take, spread, VOICE_ANCHOR_MIN_STD, _why))
+    return tail, take, raw_steps
 
 
 def plan_relay(

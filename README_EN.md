@@ -10,7 +10,7 @@ not coupled to any third-party H3 node pack.
 
 | Item | Value |
 |---|---|
-| Version | **0.6.19** (8 nodes; the composite bridge `H3RelayCopyBridge` is the **only** bridge) |
+| Version | **0.6.20** (8 nodes; the composite bridge `H3RelayCopyBridge` is the **only** bridge) |
 | License | **MIT** (third-party attribution in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) |
 | Host | **ComfyUI ≥ 0.35.0 with MiniMax-H3 support** (the host itself is GPL-3.0, see License) |
 
@@ -202,7 +202,10 @@ When dialogue alternates speakers per segment, the bridge feeds the previous spe
 (measured: same character F0 drift +15%, spectral centroid +27%). Fix = feed a **voice anchor of the
 current segment's speaker** into the optional `voice_anchor` input of `Copy Bridge`
 (`LoadAudio → VAEEncodeAudio`): not connected = bit-identical to the old behaviour; connected = timbre
-locked and clipping disappears (measured: distance-to-baseline shrunk to 1/5). Implementation /
+locked and clipping disappears (measured: distance-to-baseline shrunk to 1/5).
+⚠️ **A content-less anchor raises on the spot** (all-zero / constant / silent / NaN) — it never fails
+silently. **To turn the anchor off, unplug the wire** — do not feed it an empty latent (in particular
+not the prompt node's `LATENT`, which is an empty AV latent). Implementation /
 limitations (BGM, emotion, multi-speaker segments) / fallbacks in
 [`docs/07-chain.md`](docs/07-chain.md) §声锚; bundled auto-collector `tools/voice_bank.py`
 (optional ASR dialogue guard — works without funasr too).
@@ -222,7 +225,7 @@ ComfyUI-H3-Latent-Relay/
 ├── web/                   # front-end JS: the 🧩 concat button, Chain panel, `run_id` one-field-syncs-the-group (canvas only)
 ├── examples/              # two openable workflows: minimal continuation (19 nodes) and full flow (45 nodes)
 ├── docs/                  # deep docs 01–10 (mechanism / parameters / sampling / canvas / troubleshooting / scripting / chain / tests / metrics / audio)
-├── tests/                 # offline self-test (zero GPU): 442 assertions + V3 parity + prompt-dispatch pure functions
+├── tests/                 # offline self-test (zero GPU): 447 assertions + V3 parity + prompt-dispatch pure functions
 ├── tools/                 # self-checks / forensic tools / concat CLI / bundler (incl. the en_sync docs gate)
 ├── licenses/              # third-party license texts shipped with the pack
 ├── dist/                  # bundler output (minimal distribution set + zip; not tracked)
@@ -298,7 +301,7 @@ The Chinese documents are the source of truth; `README_EN.md` and the English `d
 | [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md) | **complete troubleshooting table** · **FAQ** · workflow-file self-check · API submission |
 | [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md) | prompt-side discipline: head padding · dialogue-safe timing · last-frame anchor chaining |
 | [`docs/07-chain.md`](docs/07-chain.md) | the Chain auto-run controller (prompts / concat / resume) |
-| [`docs/08-testing.md`](docs/08-testing.md) | offline self-test: 28 assertion groups (442 assertions) · tool inventory |
+| [`docs/08-testing.md`](docs/08-testing.md) | offline self-test: 29 assertion groups (447 assertions) · tool inventory |
 | [`docs/09-metrics.md`](docs/09-metrics.md) | reference ranges for observables (DTW residual / appearance drift) · self-calibration |
 | 🇨🇳 [`docs/10-audio-seam-and-concat.md`](docs/10-audio-seam-and-concat.md) | **audio seam & multi-segment concatenation** — Chinese only for now: seam conventions and tuning guide · **dialogue protection** · criterion limits · track levels · sidecars · **script usage without the canvas** |
 | [`CHANGES.md`](CHANGES.md) | version history with the measurement evidence for each change |

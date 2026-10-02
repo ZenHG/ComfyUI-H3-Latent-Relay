@@ -7,7 +7,7 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 
 | 项 | 值 |
 |---|---|
-| 版本 | **0.6.19**（8 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
+| 版本 | **0.6.20**（8 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
 | 许可 | **MIT**（第三方出处见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)） |
 | 宿主 | **ComfyUI ≥ 0.35.0，且带 MiniMax-H3 支持**（宿主自身为 GPL-3.0，见 §许可与出处） |
 
@@ -177,6 +177,8 @@ git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git  
 （实测同一角色 F0 漂 +15%、谱质心漂 +27%）。解法 = 给 `Copy Bridge` 的**可选输入
 `voice_anchor`** 接上「本段说话人」的音频锚（`LoadAudio → VAEEncodeAudio`）：
 不接 = 逐位同旧版；接了 = 音色锁定且削顶消失（实测离基准距离缩到 1/5）。
+⚠️ **接错的锚会当场报错**（全零 / 常量 / 静音 / NaN 一律 raise，不静默）——
+**想关掉声锚请拔线，不要接一个空 latent**（尤其别把出词节点的 `LATENT` 接过来，那是空的 AV latent）。
 实现 / 局限（BGM、情绪、一段多人）/ 兜底措施详见
 [`docs/07-chain.md`](docs/07-chain.md) §声锚；配套自动采集器 `tools/voice_bank.py`
 （可选 ASR 台词守卫，没装 funasr 也能用）。
@@ -196,7 +198,7 @@ ComfyUI-H3-Latent-Relay/
 ├── web/                   # 前端 JS：🧩 拼接按钮、Chain 面板、`run_id` 一处改全组（画布用；脚本用户见 docs/10 §7.4）
 ├── examples/              # 两个可直接打开的工作流：最小续接（19 节点）与全流程（45 节点）
 ├── docs/                  # 深度文档 01–10（原理 / 参数 / 采样链 / 画布 / 排障 / 脚本 / Chain / 测试 / 观测 / 音频）
-├── tests/                 # 离线自测（零 GPU）：442 项断言 + V3 逐字段 + 词分发纯函数
+├── tests/                 # 离线自测（零 GPU）：447 项断言 + V3 逐字段 + 词分发纯函数
 ├── tools/                 # 自检 / 取证 / 拼接 CLI / 打包器（含英文文档同步闸 en_sync.py）
 ├── licenses/              # 随包分发的第三方许可全文
 ├── dist/                  # 打包器的产出（最小分发集 + zip，不入库）
@@ -264,7 +266,7 @@ ComfyUI-H3-Latent-Relay/
 | [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md) | **完整排障表** · **常见疑问 FAQ** · 工作流文件自检 · API 提交 |
 | [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md) | 出词纪律：段首缓冲 · 台词安全时刻 · 末帧锚链 · 音频缝配套 |
 | [`docs/07-chain.md`](docs/07-chain.md) | Chain 自动连跑（换词 / 拼片 / 断点续跑） |
-| [`docs/08-testing.md`](docs/08-testing.md) | 离线自测：28 组断言明细（442 项）· 工具清单 |
+| [`docs/08-testing.md`](docs/08-testing.md) | 离线自测：29 组断言明细（447 项）· 工具清单 |
 | [`docs/09-metrics.md`](docs/09-metrics.md) | 观测量参考区间（DTW 残留 / 外观漂移）· 怎么自校准 |
 | [`docs/10-audio-seam-and-concat.md`](docs/10-audio-seam-and-concat.md) | **音频缝与多段拼接**：缝的口径与调参指南 · **台词保护** · 判据能力边界 · 音轨档位 · 边车 · **不开画布的脚本用法** |
 | [`CHANGES.md`](CHANGES.md) | 版本史与每次实测证据 |

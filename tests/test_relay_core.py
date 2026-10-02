@@ -59,6 +59,11 @@
      **事故复现锁**（模拟 VHS 的 `-f f32le` 封装路：原始 dtype 进去 = 数字静音，过本包出口 = 逐位还原）；
      🛡 节点出口契约（「Trim AV」「Audio Seam」**全部** AUDIO 返回路都是 f32，
      而**落盘的 PCM 边车保持 fp16** —— 省一半磁盘，组装层读回时自己转）
+ 29. 声锚 `voice_anchor`（0.6.19 新增；**0.6.20 补内容守卫**）：不接 ⇒ 逐位不变（回归）、
+     纯音频张量 / NestedTensor 两种形态都取到尾窗、`audio_ref` 与钉住的音频前缀**同源**、
+     锚短于窗 ⇒ 全长取用 + notes 警告、`pin_audio=False` ⇒ 忽略并写明、
+     🔴 **内容守卫**（0.6.20）：全零 / 常量 / 静音 / NaN / 单步 一律 **raise**（不静默），
+     且真实尺度（实测下限附近）**不被误伤**（反向自证）
 """
 
 import importlib.util
@@ -3390,6 +3395,50 @@ try:
 except ValueError as _e29:
     check("29.10 声锚形态非法 ⇒ raise（文案可读）",
           "voice_anchor" in str(_e29), str(_e29).splitlines()[0][:80])
+
+# 29.11~29.15 内容守卫（0.6.20 补）：**没有内容的锚必须当场 raise**，不许静默生效。
+# 依据：`MiniMaxH3AudioVAE.encode` 返回**归一化** latent（`(z−mean)/std`）⇒「有没有内容」
+# 看**时域方差**、不看幅值。实测踩点（2026-10-02）：把出词节点的 LATENT（空 AV latent）
+# 接到 voice_anchor ⇒ 全零锚静默生效（报错节点不报，症状只在成片里）。
+_va_zero = {"samples": torch.zeros(1, 2, 2, 37)}
+try:
+    CORE.plan_relay(_tgt29, _prv29, trim_frames=22, voice_anchor=_va_zero)
+    check("29.11 全零锚 ⇒ raise（不许静默当作有锚）", False, "未抛异常")
+except ValueError as _e29b:
+    check("29.11 全零锚 ⇒ raise，且文案点名「全为零」+ 指路 voice_anchor",
+          "全为零" in str(_e29b) and "voice_anchor" in str(_e29b),
+          str(_e29b).splitlines()[0][:90])
+
+_va_const = {"samples": torch.full((1, 2, 2, 37), 0.7)}       # 非零，但时域上毫无变化
+try:
+    CORE.plan_relay(_tgt29, _prv29, trim_frames=22, voice_anchor=_va_const)
+    check("29.12 常量锚（非零但时域零变化）⇒ raise", False, "未抛异常")
+except ValueError as _e29c:
+    check("29.12 常量锚（非零但时域零变化）⇒ raise，文案点名「常量」",
+          "常量" in str(_e29c), str(_e29c).splitlines()[0][:90])
+
+_va_nan = {"samples": torch.full((1, 2, 2, 37), float("nan"))}
+try:
+    CORE.plan_relay(_tgt29, _prv29, trim_frames=22, voice_anchor=_va_nan)
+    check("29.13 NaN 锚 ⇒ raise", False, "未抛异常")
+except ValueError as _e29d:
+    check("29.13 NaN 锚 ⇒ raise，文案点名 NaN",
+          "NaN" in str(_e29d), str(_e29d).splitlines()[0][:90])
+
+_va_one = {"samples": torch.randn(1, 2, 2, 1)}    # 单步：**无偏** std 是 NaN ⇒ 会静默漏过
+try:
+    CORE.plan_relay(_tgt29, _prv29, trim_frames=22, voice_anchor=_va_one)
+    check("29.14 单步锚 ⇒ raise（无偏 std 的 NaN 陷阱）", False, "未抛异常")
+except ValueError as _e29e:
+    check("29.14 单步锚 ⇒ raise（无偏 std 的 NaN 陷阱）",
+          "声锚" in str(_e29e), str(_e29e).splitlines()[0][:90])
+
+# 29.15 反向自证：守卫不能误伤**真实尺度**的锚 —— 取实测真实产物尾窗 std 的下限附近（0.4）
+_va_real = {"samples": torch.randn(1, 2, 2, 37) * 0.4}
+check("29.15 真实产物尺度（std≈0.4，实测下限附近）不被守卫误伤（反向自证）",
+      CORE.plan_relay(_tgt29, _prv29, trim_frames=22,
+                      voice_anchor=_va_real).audio_ref["ref_audio_t"] == 37,
+      "std=%.3f" % float(_va_real["samples"].std(dim=-1, unbiased=False).max()))
 
 
 print()
