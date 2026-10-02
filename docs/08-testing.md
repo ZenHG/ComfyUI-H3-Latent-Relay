@@ -136,6 +136,7 @@ Combo `options` **全序** / outputs 路数与显示名 / `is_output_node` / 显
 | `tools/ci_env_repro.py` | 在本机**复现 CI 环境**跑任意校验脚本（CI 里宿主 `nodes` 导不进来 ⇒ 两套环境期望数不同） | 直传被跑脚本退出码 |
 | `tools/en_sync.py` | **英文文档同步闸**（中文 = 源、`*_EN.md` = 派生物，节级 hash） | 退出码 `0` |
 | `tools/release.py` | **两个渠道成对发布 + 交叉验证**（GitHub push → 等 CI 绿 → registry publish → 回头查两边是不是这一版）。规范正文 = [`RELEASING.md`](../RELEASING.md) | 退出码 `0`（`--verify-only` 只读） |
+| `tools/voice_bank.py` | **声库采集器**（不是自检）：从已渲染段采集某角色的声锚，喂 Copy Bridge 的 `voice_anchor`。可选 ASR 台词守卫（装了 funasr 才启用，没装回退能量法） | 人工判读（`OK` / `跳过`） |
 
 CI（`.github/workflows/ci.yml`）按顺序跑：**ruff 静态检查 → 回归五件套（`test_relay_core` · `review_050` ·
 `smoke_nodes` · `test_experimental` · `check_ui_workflow`）→ 默认出口断言 → V3 逐字段一致 → JS 词分发 →

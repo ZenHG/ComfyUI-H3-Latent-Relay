@@ -40,8 +40,8 @@
           "zh": "使用方法",
           "en": "Usage",
           "mode": "condensed",
-          "h_en": "e6a4855d59798aaf",
-          "h_src": "3934dfad00a97650",
+          "h_en": "77ad9005c57257f8",
+          "h_src": "992db0bf1557b9ea",
           "seeded": "by-position"
         },
         {
@@ -72,14 +72,14 @@
           "zh": "文档索引",
           "en": "Documentation index",
           "mode": "condensed",
-          "h_en": "3bf961c6695b173d",
-          "h_src": "4d37a3bf1a444df7",
+          "h_en": "81c860d538272e2d",
+          "h_src": "c0c5e0d8eb6f9b91",
           "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-10-02",
-      "src_sha": "285caf2ba32ed6a9"
+      "src_sha": "21c5ed1ebac03f9c"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",

@@ -509,13 +509,30 @@ function applyRunIdPlan(plan) {
     return driven;
 }
 
-/** 找同组的 Chain 状态（用来把提示写进那个节点的 `status` 格）。 */
+/**
+ * 找同组的 Chain 状态（用来把提示写进那个节点的 `status` 格）。
+ *
+ * 🔴 别用 `nodesInSameGroup(n, [s.chainNode]).length` 当判据（0.6.19 修）：
+ *    该函数在**没有分组命中**时会兜底返回**入参本身**（`return all`）⇒ 传 `[chainNode]`
+ *    进去，长度**恒 ≥ 1** ⇒ 判据恒真 ⇒ 永远命中 `CHAINS` 里的**第一个** Chain。
+ *    一张图放两部片子（两组）时，提示会写到**另一部片子的 Chain** 上 ——
+ *    与「同步范围 = 同一个分组框」这条设计决定直接矛盾（那正是本机制要防的越界）。
+ *    ⇒ 同组判定必须**双向显式**（两个节点都落在同一个分组框内）。
+ *
+ * 兜底：没有任何分组框、且图上只有**一条** Chain 时无歧义 ⇒ 仍写它的 status
+ *      （否则单链用户的提示会掉进控制台）；多条 Chain 又分不出组 ⇒ 返回 `null`，
+ *      由 `notifyRunId` 退到控制台（**不猜**）。
+ */
 function chainStateNear(n) {
-    for (const s of CHAINS) {
-        if (!s?.chainNode) continue;
-        if (s.chainNode === n || nodesInSameGroup(n, [s.chainNode]).length) return s;
+    const live = CHAINS.filter((s) => s?.chainNode);
+    for (const s of live) {
+        if (s.chainNode === n) return s;
+        for (const g of graphGroups()) {
+            const b = groupBounds(g);
+            if (b && inBounds(n, b) && inBounds(s.chainNode, b)) return s;
+        }
     }
-    return null;
+    return live.length === 1 ? live[0] : null;
 }
 
 /**

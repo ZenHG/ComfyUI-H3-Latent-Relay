@@ -2,7 +2,7 @@
 # ruff: noqa: UP031, BLE001, UP009
 """voice_bank —— H3 长链声锚（voice anchor）声库：采集 / 查询 / 管理。
 
-背景（2026-10-02 实测，见 I:\\_handover\\E1-TIHA-验证状态与三臂实测）：
+背景（2026-10-02 实测）：
     H3 拷贝桥把上一段的音频尾作为 audio_ref ⇒ **上段说话人的嗓音会成为
     本段嗓音的生成条件**。台词逐段换人时音色交叉污染（周砚 F0 114→131、
     谱质心 1028→1308）。给「本段说话人」的声锚后离基准距离缩到 1/5。
@@ -31,10 +31,10 @@
                                   "voiced_s": 0.86, "collected": "2026-10-02T14:20"}, ...}
     <bank_dir>/<角色名>.wav    自动采集的锚（手动文件同名时它就是手动锚本身）
 
-CLI：
-    python voice_bank.py collect <mp4> --name 周砚 --bank I:/voices
-    python voice_bank.py lookup  周砚 --bank I:/voices
-    python voice_bank.py list   --bank I:/voices
+CLI（`<声库目录>` 用你自己的路径，例如 `./voices`）：
+    python voice_bank.py collect <mp4> --name 周砚 --bank <声库目录>
+    python voice_bank.py lookup  周砚 --bank <声库目录>
+    python voice_bank.py list   --bank <声库目录>
 """
 
 from __future__ import annotations

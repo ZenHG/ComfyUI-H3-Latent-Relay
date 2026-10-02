@@ -126,7 +126,8 @@ Both exits have identical node names, input/output order and defaults (machine-c
 
 ### Five-minute quickstart
 
-> Fast path: open [`examples/minimal_relay_official.json`](examples/README.md) and point the 4 loader
+> Fast path: open [`examples/minimal_relay_official.json`](examples/minimal_relay_official.json)
+> (notes in [`examples/README.md`](examples/README.md)) and point the 4 loader
 > dropdowns at your local model files.
 
 **Segment 1**: ① set `stage_index` to `0` → ② type a prompt into the official prompt node → ③ Queue.
@@ -148,7 +149,7 @@ The log should show `钉住 22 帧` / `裁首 N 帧 = 钉住 22 + 沉降 0` / `�
 
 | The three most common ways to break it | Fix |
 |---|---|
-| Error "segment N cannot find the previous segment" | both `run_id` values must be identical; confirm segment 1 ran |
+| Error "segment N cannot find the previous segment" | all **six** `run_id` values must be identical (on the canvas, editing one field auto-syncs the rest of its group; if it does not, see [`docs/05`](docs/05-troubleshooting.md)); confirm segment 1 ran |
 | The output replays the previous segment from frame 1 | TrimAV is not connected, or its `trim_frames` is not wired to bridge `[2]` |
 | A new film picks up an old film's tail | `run_id` was not changed (same name ⇒ same file names) |
 
@@ -304,5 +305,5 @@ The Chinese documents are the source of truth; `README_EN.md` and the English `d
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | dev environment · testing discipline · **English-doc sync discipline** · licence terms |
 | [`RELEASING.md`](RELEASING.md) | **release policy (single source of truth)**: GitHub + Comfy Registry must be updated as a pair · one command `tools/release.py` · failure handling · key discipline |
 | [`SECURITY.md`](SECURITY.md) | secrets / dependencies / network behaviour disclosure |
-| [`tools/README.md`](tools/README.md) | the twelve scripts and their expected values (nine self-check/forensic + concat CLI + bundler + **releaser**) |
+| [`tools/README.md`](tools/README.md) | the thirteen scripts and their expected values (nine self-check/forensic + concat CLI + bundler + **releaser** + **voice-bank collector**) |
 | [`examples/README.md`](examples/README.md) | the two openable workflows (minimal continuation 19 nodes / full flow 45 nodes) · generators |

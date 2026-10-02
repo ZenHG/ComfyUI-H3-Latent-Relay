@@ -111,7 +111,7 @@ git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git  
 
 ### 5 分钟跑通
 
-> 懒人路线：打开 [`examples/minimal_relay_official.json`](examples/README.md)，把 4 个加载器的下拉改成你本机的模型文件。
+> 懒人路线：打开 [`examples/minimal_relay_official.json`](examples/minimal_relay_official.json)（说明见 [`examples/README.md`](examples/README.md)），把 4 个加载器的下拉改成你本机的模型文件。
 
 **第 1 段**：① 「段号」填 `0` → ② 在官方出词节点填 prompt → ③ 点 Queue。
 （**什么都不用做**：段号 0 时桥自动直通。别为了"没有上一段"去拔线或旁路——`context_latent` 是必填。）
@@ -122,14 +122,14 @@ git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git  
 | 关键参数 | 第 1 段 | 第 2 段起 | 填在哪 |
 |---|---|---|---|
 | `stage_index`（段号） | `0` | `1`、`2`… | **读上段 latent + 桥 + 落盘**（三处必须一样大；用 Chain 会自动同步） |
-| `run_id` | 同一个片子名，如 `myfilm` | **与第 1 段一字不差** | 读上段 latent + 桥 + 落盘 |
+| `run_id` | 同一个片子名，如 `myfilm` | **与第 1 段一字不差** | **六处**（落盘 / 桥 / 读上段 latent / 裁重叠 / 音频缝 / 连跑）；画布上**只改一处，同组其余格自动跟随** |
 | `context_frames` | `22` | `22`（不用动） | 桥（钉住窗，只认 5/22/39/56/73/90/107/124） |
 | `settle_frames` | —（首段不裁） | 保持 `0` | 裁重叠（`0` = 不裁沉降，默认即推荐） |
 | `seam_ghost` / `settle_sharpen` | — | 保持 `0` | 裁重叠 / 后处理 Post |
 
 | 最常见的三个翻车点 | 处置 |
 |---|---|
-| 报错「说清是第 N 段却拿不到上一段」 | 两处 `run_id` 必须一字不差；确认第 1 段跑过 |
+| 报错「说清是第 N 段却拿不到上一段」 | **六处** `run_id` 必须一字不差（画布上改一处即自动同步同组其余格；不同步时见 [`docs/05`](docs/05-troubleshooting.md)）；确认第 1 段跑过 |
 | 画面从第 1 帧就开始重播上一段 | 「Trim AV」没接上，或它的 `trim_frames` 没接桥的 `[2]` |
 | 换新片子却接了旧片尾巴 | 没换 `run_id`（同名会覆盖同段号文件） |
 
@@ -271,6 +271,6 @@ ComfyUI-H3-Latent-Relay/
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 开发环境 · 自测纪律 · **英文文档同步纪律** · 许可条款 |
 | [`RELEASING.md`](RELEASING.md) | **发布规范（唯一真相源）**：GitHub + Comfy Registry 两个渠道必须成对、一条命令 `tools/release.py`、失败处置、密钥纪律 |
 | [`SECURITY.md`](SECURITY.md) | 密钥 / 依赖 / 网络行为声明 |
-| [`tools/README.md`](tools/README.md) | 十二个脚本的用途与期望值（九个自检/取证 + 拼接 CLI + 打包器 + **发布器**） |
+| [`tools/README.md`](tools/README.md) | 十三个脚本的用途与期望值（九个自检/取证 + 拼接 CLI + 打包器 + **发布器** + **声库采集器**） |
 | [`examples/README.md`](examples/README.md) | 两份可直接打开的工作流（最小续接 19 节点 / 全流程 45 节点）· 生成器 |
 | [`README_EN.md`](README_EN.md) | **英文精简版**（安装 / 接线 / 节点 / 参数 / 排障 / FAQ）—— 深度推导一律外链本文件与 `docs/` |
