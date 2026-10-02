@@ -29,12 +29,10 @@ from . import history_anchor as TIHA
 #: run 目录下的开关文件名。**文件不存在 = 关**（主干逐位不变）
 CONFIG_NAME = "_tiha.json"
 
-#: ``_tiha.json`` 里允许出现的键（其余键忽略；这里列出来便于交叉核对与预检）
-KNOWN_KEYS = (
-    "depth", "window_frames", "spatial_scale", "max_refs", "max_refs_per_seg",
-    "pool", "top_q", "min_rel", "min_spread_k", "consensus_mode", "center",
-    "normalize", "dedup_sim", "nms_radius", "anchor_max_sim",
-)
+#: ``_tiha.json`` 里允许出现的键 —— **别名，不在这里重定义**（2026-10-02 合并）。
+#: 唯一真相源 = ``history_anchor.KNOWN_CONFIG_KEYS``（理由见那边的注记）：
+#: 白名单与 ``precheck_tiha`` 各写一份时，「预检预测的生产行为」会与生产分叉。
+KNOWN_KEYS = TIHA.KNOWN_CONFIG_KEYS
 
 #: 历史窗口：从 ``stage_index - 2`` 起往回取（与旧 E1 的取段规则一致）
 FIRST_BACK = 2
@@ -86,19 +84,31 @@ def build_refs(
     if raw is None:
         return []                                   # 关（主干逐位不变）
 
+    # 🔴 未知键必须出声（2026-10-02 审核新增）。
+    #    原实现用 `if k in raw and hasattr(cfg, k)` 白名单赋值 ⇒ **多写的键被静默忽略**，
+    #    拼错一个字母（如 `window_frame` 少个 s）就退回默认值，而日志里没有任何迹象 ——
+    #    与《规范》§二·A「宿主忽略未声明的输入键」是同一形态。
+    #    这里**只警告不 raise**：白名单会随版本增长，硬拒会让老配置在新版本上直接报错。
+    unknown = sorted(k for k in raw if k not in KNOWN_KEYS)
+    if unknown:
+        _log("E1'：⚠ _tiha.json 含**未知键** %s ⇒ 已忽略（本次跑的是这些键的**默认值**）。"
+             "合法键见 h3_adapter.KNOWN_KEYS。" % unknown)
+
     want_depth = int(raw.get("depth", 0)) if depth is None else int(depth)
     if want_depth <= 0:
         return []
 
     # —— 找历史段（先按段号筛掉「与外观锚同源」的，**再**读盘：避免白读 6 MB）——
     a_idx = int(ref_anchor_stage)
+    # 🔴 「与锚同源」的判定**不在本文件实现**（2026-10-02 合并）：原先这里自己写了一遍
+    #    `idx == a_idx`，而 `history_anchor.filter_duplicate_sources` 里还有一份
+    #    ⇒ 同一规则两份实现（《规范》§二·D）。现在统一走唯一的 `drop_anchor_stage`。
+    cand = [int(stage_index) - k for k in range(FIRST_BACK, FIRST_BACK + want_depth)]
+    cand, dropped = TIHA.drop_anchor_stage([i for i in cand if i >= 0], a_idx)
+    if dropped:
+        _log("E1'：与外观锚同源 ⇒ 不读不用：%s" % dropped)
     picks, missing = [], []
-    for k in range(FIRST_BACK, FIRST_BACK + want_depth):
-        idx = int(stage_index) - k
-        if idx < 0:
-            break
-        if idx == a_idx:
-            continue                                # 与外观锚同源 ⇒ 不读、不用
+    for idx in cand:                                # 先筛后读 ⇒ 省掉白读的 6 MB（P1-2）
         p = stage_path_fn(run_id, idx)
         if os.path.isfile(p):
             picks.append(idx)
@@ -112,7 +122,20 @@ def build_refs(
         _log("E1'：可用历史段 %d < 2（跨段共识无参照）⇒ 不出锚块。" % len(picks))
         return []
 
-    hist = [video_fn(load_fn(stage_path_fn(run_id, i))) for i in picks]
+    # 🔴 读盘失败必须带**文件路径**再抛（2026-10-02）。`os.path.isfile` 只能证明"文件在"，
+    #    证不了"写完了 / 没坏"；半写文件会让 safetensors 抛一句与"哪一段"无关的报错，
+    #    而这条异常会直接冒泡成"整段渲染失败"（《规范》§二·E：报错节点 ≠ 出错位置）。
+    #    这里只**补上下文**，不吞异常 —— 吞掉就变成"以为开着 TIHA、其实没开"。
+    hist = []
+    for i in picks:
+        p = stage_path_fn(run_id, i)
+        try:
+            hist.append(video_fn(load_fn(p)))
+        except Exception as exc:                    # noqa: BLE001
+            raise RuntimeError(
+                "E1'（TIHA）读历史段 stage%d 失败：%s ⇒ %s（文件可能半写/损坏；"
+                "删掉该段重跑，或把 depth 调小以避开这一段）"
+                % (i, p, exc)) from exc
 
     anchor_v = video_fn(anchor_latent) if anchor_latent is not None else None
 

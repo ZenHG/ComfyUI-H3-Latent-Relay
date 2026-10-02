@@ -13,7 +13,7 @@ python tests/test_relay_core.py
 `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。也支持 `pytest tests/`
 （找不到 ComfyUI 根目录时自动 skip，不会崩）。
 
-**432 项断言，零 GPU、不加载模型**，覆盖二十八个方面：
+**442 项断言，零 GPU、不加载模型**，覆盖二十八个方面：
 
 ### 计数与声明的纪律（原 README §8 的两条注，随瘦身搬入）
 
@@ -22,7 +22,7 @@ python tests/test_relay_core.py
   **其余一律写「失败 0」** —— 写死数字**必然漂移**（2026-09-25 实测：同一个数字在四处声明，
   只有一处有机检，另外两处漂了很久没人发现）。
 - ⚠️ **写更正说明时别复述旧的错误数字** —— 那会污染上面这些机检的正则（踩过）。
-- 本文这行的「432 项断言 / 二十八个方面」+ 下面表格的 `| 21 |` 行由 **H3c** 机检（2026-09-30 起，
+- 本文这行的「442 项断言 / 二十八个方面」+ 下面表格的 `| 21 |` 行由 **H3c** 机检（2026-09-30 起，
   README 瘦身后判据从 README 移到本文件）。
 
 | 组 | 覆盖 |
@@ -81,7 +81,7 @@ node tests/test_prompt_dispatch.mjs      # 期望 35/0
 ## V3 外壳与默认出口（零 GPU、秒级）
 
 ```bash
-COMFYUI_PATH=<根> python tests/test_v3_schema.py        # 能拿到宿主注册表 70/0（8 节点 / 116 个 input）；硬挡 63/0（7 节点 / 103 input）
+COMFYUI_PATH=<根> python tests/test_v3_schema.py        # 能拿到宿主注册表 70/0（8 节点 / 117 个 input）；硬挡 63/0（7 节点 / 104 input）
 COMFYUI_PATH=<根> python tools/assert_default_exit.py   # 期望 4/4
 ```
 
@@ -94,13 +94,13 @@ Combo `options` **全序** / outputs 路数与显示名 / `is_output_node` / 显
 > `import nodes`**。**分岔点不是"宿主 nodes 能不能 import"，而是那个异常是什么类型**：
 > · 拿到宿主注册表（`import nodes` 成功）⇒ 上游不在注册表 ⇒ `_upscaler_cls()` 抛 **RuntimeError**
 >   ⇒ `_upscaler_module()` **捕获它**（**只** `except RuntimeError`）⇒ 退回 `get_filename_list`
->   （宿主自带注册 `latent_upscale_models`）⇒ 不抛 ⇒ **8 节点 / 116 input / 70 项**。
+>   （宿主自带注册 `latent_upscale_models`）⇒ 不抛 ⇒ **8 节点 / 117 input / 70 项**。
 > · `import nodes` 抛 **ImportError**（`sys.modules["nodes"] = None` 这种硬挡）⇒ 类型不是
 >   RuntimeError ⇒ **不吞** ⇒ 穿透 ⇒ INPUT_TYPES 抛 ⇒ 逐节点容错跳过它
->   ⇒ **7 节点 / 103 input / 63 项**。**这是设计内的降级，不是失败。**
+>   ⇒ **7 节点 / 104 input / 63 项**。**这是设计内的降级，不是失败。**
 > · 🔴 `import nodes` 抛 **RuntimeError**（**CI 就是这种**：宿主 import 链里 `torch.cuda` 报
 >   `Found no NVIDIA driver on your system`）⇒ **被吞** ⇒ INPUT_TYPES 成功
->   ⇒ **8 节点 / 116 input / 70 项**（CI 的直跑与"本机"是同一档）。
+>   ⇒ **8 节点 / 117 input / 70 项**（CI 的直跑与"本机"是同一档）。
 >
 > ⇒ 判据由**节点自己的 `INPUT_TYPES()`** 回答（测试的 `2.1`），**不是**由"宿主 nodes 能不能
 >   import"去推 —— 后者在 CI 上会得出**相反**的结论（2026-09-30 实测：探针说"期望 7"、实际 8

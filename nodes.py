@@ -1489,6 +1489,17 @@ class H3RelayCopyBridge:
                     "advanced": True, "default": 5, "min": 1, "max": 64, "step": 1,
                     "tooltip": "外观锚取该段**开头**多少帧（取头不取尾）。",
                 }),
+                # ⚠ 0.6.1 声锚 —— 追加在**最后**（守 widgets_values 按位对槽）
+                "voice_anchor": ("LATENT", {
+                    "tooltip": "【可选·声锚】**本段说话人**的音频锚（LoadAudio → VAEEncodeAudio 的 latent）。\n"
+                               "提供时：钉住的音频前缀与 audio_ref 都改用声锚尾窗，**不再取上一段音频尾**。\n"
+                               "治的是「台词逐段换人 ⇒ 上一段说话人的嗓音污染本段音色」\n"
+                               "（2026-10-02 实测：周砚 F0 114→131、谱质心 1028→1308；给声锚后离基准 1/5）。\n"
+                               "· 声锚选与目标台词情绪相近的干净语音片段（≥0.9 秒，峰值建议 ≤0.9）；\n"
+                               "· 有 BGM/环境垫乐时请把垫乐混进声锚里 —— 锚替换的是整个音频尾窗；\n"
+                               "· pin_audio=False 时本输入被忽略（report 会写明）；\n"
+                               "· 不接 = 行为与旧版完全一致。",
+                }),
             },
         }
 
@@ -1512,7 +1523,8 @@ class H3RelayCopyBridge:
                window_shape=CORE.WINDOW_SHAPE_DEFAULT,
                anchor_latent=None, anchor_blend=1.0,
                conditioning=None, run_id="relay", stage_index=0,
-               ref_anchor_latent=None, ref_anchor_stage=-1, ref_anchor_frames=5):
+               ref_anchor_latent=None, ref_anchor_stage=-1, ref_anchor_frames=5,
+               voice_anchor=None):
         CONTRACT.enforce()
         # 0.6.0：Latent 桥（H3RelayMotionContext）已删除，本节点成为**唯一桥**。
         # 原 Latent 桥「段号>=1 却无来源 -> 必须 raise（不得静默直通）」是反坏片关键守卫，
@@ -1549,6 +1561,7 @@ class H3RelayCopyBridge:
             blend_top=float(blend_top), blend_tokens=int(blend_tokens),
             blend_shape=str(blend_shape),
             anchor_latent=anchor_latent, anchor_blend=float(anchor_blend),
+            voice_anchor=voice_anchor,
         )
 
         # —— 0.6.0 复合桥：接上 conditioning 时，**同时**在 conditioning 上追加钉帧 ——
@@ -1577,6 +1590,7 @@ class H3RelayCopyBridge:
                 audio_frames=None,
                 anchor_latent=ref_anchor_latent,
                 anchor_frames=int(ref_anchor_frames),
+                voice_anchor=voice_anchor,
             )
             # 🧪 E1'（TIHA）时不变历史锚 —— **默认关**。
             #

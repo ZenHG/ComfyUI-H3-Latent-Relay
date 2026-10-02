@@ -80,8 +80,26 @@ __all__ = [
     "assemble_block",
     "build_history_anchor_refs",
     "filter_duplicate_sources",
+    "drop_anchor_stage",
+    "KNOWN_CONFIG_KEYS",
     "H3Grid",
 ]
+
+#: ``_tiha.json`` 允许出现的键 —— **唯一真相源**（2026-10-02 下沉到这里）。
+#:
+#: 为什么必须下沉：白名单原先在 ``h3_adapter.KNOWN_KEYS`` 与 ``precheck_tiha._KEYS``
+#: 各写一份（**外加 precheck 里内联的第三份**）。三份内容一致时无害，但一旦改一处，
+#: 「预检预测的生产行为」就与「生产行为」分叉 —— 而预检的**全部**意义就是预测生产。
+#: 放这里是因为 ``history_anchor`` 被生产侧（``h3_adapter``）与预检侧
+#: （``precheck_tiha``）**都能 import**；后两者之间做不到（``h3_adapter`` 用包内相对导入）。
+#:
+#: 与 ``TIHAConfig`` 字段集的关系由单测机检：``KNOWN_CONFIG_KEYS`` 必须**全是真字段**
+#: （否则白名单赋值会静默忽略它），且两侧引用必须**相等**。
+KNOWN_CONFIG_KEYS: Tuple[str, ...] = (
+    "depth", "window_frames", "spatial_scale", "max_refs", "max_refs_per_seg",
+    "pool", "top_q", "min_rel", "min_spread_k", "consensus_mode", "center",
+    "normalize", "dedup_sim", "nms_radius", "anchor_max_sim",
+)
 
 # ============================================================================
 # H3 时间网格（与 relay_core 同源；独立一份以便零依赖单测）
@@ -121,8 +139,13 @@ class H3Grid:
     def snap_steps(cls, frames: int) -> int:
         """向下吸附到能整除的 token 数（窗口用，允许非 GUIDE_RUNS 值）。
 
-        任意 token 数都给出合法前缀和（1 / 5 / 9 / 13 / 17 / 21 / 25 …），
-        ``GUIDE_RUNS`` 只是其中"5+17k"这一族被选作产线约定值。
+        ``FRAME_PER_TOKEN`` 的前缀和是 **1 / 5 / 9 / 13 / 17 / 18 / 22 / 26 / 30 …**
+        —— 🔴 **不是等差**：第 6 个 token 取到 ``FRAME_PER_TOKEN[5 % 5] = 1``，只覆盖 1 帧。
+        （2026-10-02 实测更正：本文档此前写「…/ 17 / 21 / 25 …」是**错的**。）
+
+        ✅ 实测：产线 ``GUIDE_RUNS``（1/5/22/39/56/73/90/107/124）**全部**落在该网格上
+        ⇒ **产线值不会被下取**；只有非网格值才会（如实测 21 → 18 帧）。
+        ⚠️ 下取本身是**静默**的 ⇒ 调用方 ``build_history_anchor_refs`` 会在下取时日志出声。
         """
         n = int(frames)
         s = cls.steps_for_frames(n)
@@ -202,17 +225,24 @@ class TIHAConfig:
     且这类帧本来就是"最没有特征"的，落选是正确行为。"""
 
     # —— 门控（本模块相对旧 E1 的核心增量）——
-    min_spread: float = 0.02
-    """🔴 段级门控：段内共识分的极差（max-min）下限。低于此值 = 该段**没有可区分的
-    时不变帧**（整段都在动 / 或整段都一个样）⇒ **整段出局**。
-    旧 E1 没有这一条 ⇒ 无效参考也硬塞，副作用全吃、收益为零。"""
-
     min_spread_k: float = 3.0
     """🔴 **段级门控**：段内共识分的**极差**必须 ≥ ``k × 噪声尺度``。
+    低于此值 = 该段**没有可区分的时不变帧**（整段都在动 / 或整段都一个样）⇒ **整段出局**。
+    旧 E1 没有这一条 ⇒ 无效参考也硬塞，副作用全吃、收益为零。
 
-    ``噪声尺度 = 2.5 / sqrt(d)``，``d = C·pool²`` 是签名维度 —— 这是**纯随机
-    帧**之间余弦极差的理论上界（d 维单位向量，T 次采样，max−min ≈ 5σ，
-    σ = 1/√d）。即**"这段里根本没有任何可区分的时不变帧"时长什么样**。
+    🔴 **2026-10-02 清理**：旧的绝对阈值字段 ``min_spread: float = 0.02`` 已删 ——
+    它**全仓零使用**（只活在定义处），且**不在** ``h3_adapter.KNOWN_KEYS`` 白名单里
+    ⇒ 既不可配置也不生效。它的职能已由本字段的「``k × 噪声尺度``」**分辨率无关版**取代
+    （绝对阈值随 pool / 通道数 / 底模漂 ⇒ 换分辨率会静默失效）。
+
+    ``噪声尺度 = 2.5 / sqrt(d)``，``d = C·pool²`` 是签名维度 —— 它是**纯随机
+    帧**之间余弦极差在「签名是 d 维单位向量」这一**理想化假设**下的**参照尺度**
+    （max−min ≈ 5σ，σ = 1/√d）。即**"这段里根本没有任何可区分的时不变帧"大概长什么样**。
+
+    🔴 **它是参照，不是严格上界**（2026-10-02 按 P2-5 更正）：``pool`` 边长不整除
+    输入尺寸时，``adaptive_avg_pool2d`` 走**变窗口**（相邻窗有重叠）⇒ 签名的
+    **有效自由度 ≠ d** ⇒ ``2.5/√d`` 只是**近似**。本常数由**实测标定**（见下方
+    e1t 实测），**不要当成理论保证**；换底模 / 换 ``pool`` 时应重新标定。
 
     为什么用这个而不是拍一个绝对数：绝对数随 ``pool`` / 通道数 / 底模漂，
     换个分辨率就静默失效。用噪声尺度做单位 ⇒ **分辨率无关、底模无关**。
@@ -345,7 +375,11 @@ def frame_matrix(video: torch.Tensor, pool: int = 6,
 
 
 def noise_scale(dim: int) -> float:
-    """**纯随机帧**之间余弦极差的理论上界，用作段级门控的标尺。
+    """**纯随机帧**之间余弦极差的**参照尺度**，用作段级门控的标尺。
+
+    ⚠️ 是"参照"不是"严格上界"（2026-10-02 P2-5 更正）：池化变窗口会让签名的
+    有效自由度偏离 ``d`` ⇒ 本值是**近似**，常数由实测标定。
+    完整说明见 ``TIHAConfig.min_spread_k`` 的注记。
 
     d 维单位随机向量两两余弦 ≈ ``N(0, 1/d)`` ⇒ σ = ``1/√d``；T 次取样的
     max−min 约 5σ（T 的对数依赖很弱，忽略）⇒ ``噪声尺度 = 2.5/√d``。
@@ -488,20 +522,38 @@ def suppress_neighbors(cands: List[TIHACandidate], radius: int) -> List[TIHACand
     return kept
 
 
+def drop_anchor_stage(indices: Sequence[int],
+                      anchor_stage: int) -> Tuple[List[int], List[int]]:
+    """剔除与**全局外观锚同段**的段号 —— 「与锚同源」判定的**唯一实现**（2026-10-02 合并）。
+
+    为什么单独抽出来：生产路径原先在 ``h3_adapter`` 里**自己写了一遍**同一个判断
+    （目的是"读盘前就筛掉"，见 P1-2），而 ``filter_duplicate_sources`` 里还留着一份
+    ⇒ 同一规则两份实现（《规范》§二·D「孪生体」）。两份**当前恰好等价**，但改一处就打架，
+    而打架的后果是"预检说会出 N 块、生产实际出 M 块" —— 预检的价值直接归零。
+
+    ``indices`` 按**由近到远**给；返回 ``(kept, dropped)``，两者都保持输入顺序。
+    """
+    a = int(anchor_stage)
+    kept: List[int] = []
+    dropped: List[int] = []
+    for i in indices:
+        (dropped if int(i) == a else kept).append(int(i))
+    return kept, dropped
+
+
 def filter_duplicate_sources(pairs: Sequence[Tuple[int, Any]],
                              anchor_stage: int) -> Tuple[List[Tuple[int, Any]], List[int]]:
-    """剔除与**全局外观锚同段**的历史级（沿用旧 E1 的正确设计）。
+    """剔除与**全局外观锚同段**的历史级，保留 ``(段号, latent)`` 配对。
 
-    ``pairs`` = ``[(stage_index, latent), ...]``（由近到远）。
-    返回 ``(kept, skipped)``。
+    ``pairs`` = ``[(stage_index, latent), ...]``（由近到远）。返回 ``(kept, skipped)``。
+
+    ⚠️ 本函数是 :func:`drop_anchor_stage` 的**配对保留薄壳** —— 判定不在这里重复实现。
+    保留 latent 是为了让预检 / 离线验证脚本能继续按段号索引载体；
+    **生产路径不该用它**：生产要在**读盘前**就筛掉（P1-2 的优化），那时手上还没有 latent。
     """
-    kept, skipped = [], []
-    for idx, lat in pairs:
-        if int(idx) == int(anchor_stage):
-            skipped.append(int(idx))
-        else:
-            kept.append((int(idx), lat))
-    return kept, skipped
+    _, dropped = drop_anchor_stage([int(i) for i, _ in pairs], anchor_stage)
+    drop_set = set(dropped)
+    return [(int(i), lat) for i, lat in pairs if int(i) not in drop_set], dropped
 
 
 # ============================================================================
@@ -628,6 +680,15 @@ def build_history_anchor_refs(
         return out
 
     window_tokens = H3Grid.snap_steps(int(cfg.window_frames))
+    # 🔴 下取必须出声（2026-10-02）。`snap_steps` 是**向下吸附**：非网格值会被悄悄改小
+    #    （实测 21 → 18 帧），而 `window_frames` 是**实验参数** —— 静默改小等于
+    #    "我以为是 21 帧、实际跑了 18 帧"，与 §二·A「不报错，只是行为不对」同形态。
+    #    ✅ 实测产线 GUIDE_RUNS（1/5/22/39/56/73/90/107/124）**全部**在网格上 ⇒ 正常路径不触发。
+    _wf_actual = H3Grid.frames_for_steps(window_tokens)
+    if log is not None and _wf_actual != int(cfg.window_frames):
+        log("E1'：⚠ window_frames=%d **不在帧网格上** ⇒ 下取到 %d 帧（%d token）。"
+            "产线 GUIDE_RUNS（1/5/22/39/56/…）都在网格上，不受影响。"
+            % (int(cfg.window_frames), _wf_actual, window_tokens))
 
     # 1) 帧签名 + 跨段全局中心化（实测必需，见 TIHAConfig.center）
     mats = [frame_matrix(v, pool=int(cfg.pool), normalize=bool(cfg.normalize))

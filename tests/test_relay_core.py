@@ -3318,6 +3318,80 @@ finally:
         shutil.rmtree(_d28, ignore_errors=True)
 
 
+# ============ 组29：声锚 voice_anchor（0.6.1）—— audio_ref/音频前缀源替换 ============
+# 背景（2026-10-02 实测）：audio_ref = 上段音频尾 ⇒ 上段说话人的嗓音成为本段
+# 嗓音的生成条件 ⇒ 台词逐段换人时音色交叉污染（周砚 F0 114→131、谱质心 1028→1308）。
+# 声锚 = 显式提供"本段说话人"的音频 latent，两处（audio_ref + 钉住的音频前缀）同源替换。
+
+print()
+print("=" * 78)
+print("29) 声锚 voice_anchor（audio_ref / 音频前缀源替换）")
+print("=" * 78)
+
+_va_video = torch.randn(1, 4, 6, 8, 8)
+_va_audio = torch.randn(1, 2, 2, 37)          # 22 帧 ⇒ 37 步，正好一个窗
+_va_plain = {"samples": _va_audio.clone()}    # VAEEncodeAudio 形态：纯 4 维张量
+_va_nested = {"samples": CORE._nested_pair(_va_video, _va_audio)}
+
+_tgt29 = av_latent(12, seed=11)
+_prv29 = av_latent(12, seed=12)
+
+# 29.1 回归：不接声锚 ⇒ 与旧行为逐位一致
+_outA, _trimA, _repA = CORE.build_continue_latent(_tgt29, _prv29, 22)
+_outB, _trimB, _repB = CORE.build_continue_latent(_tgt29, _prv29, 22, voice_anchor=None)
+check("29.1 不接 voice_anchor ⇒ 输出逐位不变（回归）",
+      torch.equal(CORE.video_from_latent(_outA), CORE.video_from_latent(_outB))
+      and torch.equal(CORE.audio_from_latent(_outA), CORE.audio_from_latent(_outB)))
+
+# 29.2 纯音频形态（VAEEncodeAudio）：audio_ref 用声锚尾窗
+_plA = CORE.plan_relay(_tgt29, _prv29, trim_frames=22, voice_anchor=_va_plain)
+_arA = _plA.audio_ref["audio_latent"]
+check("29.2 声锚（纯 4 维张量形态）⇒ audio_ref 尾窗 = 声锚本身（37 步）",
+      _arA.shape[-1] == 37 and torch.equal(_arA, _va_audio[:1, ..., -37:]),
+      "take=%d" % _plA.audio_ref["ref_audio_t"])
+check("29.3 声锚生效写进 notes（不静默）",
+      any("声锚生效" in n for n in _plA.notes))
+
+# 29.4 AV 联合形态：取第 2 条流
+_plB = CORE.plan_relay(_tgt29, _prv29, trim_frames=22, voice_anchor=_va_nested)
+check("29.4 声锚（NestedTensor 形态）⇒ audio_ref 同样取到声锚尾窗",
+      torch.equal(_plB.audio_ref["audio_latent"], _va_audio[:1, ..., -37:]))
+
+# 29.5 钉住的音频前缀同源替换（两处只改一处会打架）
+_outC, _trimC, _repC = CORE.build_continue_latent(_tgt29, _prv29, 22, voice_anchor=_va_plain)
+_auC = CORE.audio_from_latent(_outC)
+check("29.5 音频前缀 = 声锚尾窗（不再取上一段音频尾）",
+      torch.equal(_auC[..., :37], _va_audio[:1, ..., -37:]),
+      _repC[-70:])
+check("29.6 report 里写明「音频前缀改用声锚」（不静默）",
+      "声锚" in _repC)
+
+# 29.7 plan_relay 与 build_continue_latent 同源（同一声锚 ⇒ 同一尾窗）
+check("29.7 audio_ref 与钉住的音频前缀取的是**同一份**声锚尾窗",
+      torch.equal(_plA.audio_ref["audio_latent"], _auC[..., :37]))
+
+# 29.8 声锚短于窗口 ⇒ 全长取用 + notes 警告（不静默、不崩溃）
+_va_short = {"samples": _va_audio[:1, :, :, :10].clone()}
+_plC = CORE.plan_relay(_tgt29, _prv29, trim_frames=22, voice_anchor=_va_short)
+check("29.8 声锚 10 步 < 窗 37 步 ⇒ take=10 全长取用 + 警告进 notes",
+      _plC.audio_ref["ref_audio_t"] == 10
+      and any("声锚音频只有" in n for n in _plC.notes))
+
+# 29.9 pin_audio=False + 声锚 ⇒ 声锚被忽略且 report 写明（不静默）
+_outD, _trimD, _repD = CORE.build_continue_latent(_tgt29, _prv29, 22,
+                                                  pin_audio=False, voice_anchor=_va_plain)
+check("29.9 pin_audio=False + 声锚 ⇒ report 显式写「被忽略」",
+      "忽略" in _repD)
+
+# 29.10 非法形态 ⇒ raise（报错要能看懂）
+try:
+    CORE.plan_relay(_tgt29, _prv29, trim_frames=22, voice_anchor="not-a-latent")
+    check("29.10 声锚形态非法 ⇒ raise", False, "未抛异常")
+except ValueError as _e29:
+    check("29.10 声锚形态非法 ⇒ raise（文案可读）",
+          "voice_anchor" in str(_e29), str(_e29).splitlines()[0][:80])
+
+
 print()
 print("=" * 78)
 print("结果：通过 %d / 失败 %d" % (len(PASS), len(FAIL)))

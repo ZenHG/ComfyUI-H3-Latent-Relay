@@ -1062,7 +1062,9 @@ for _nm, _st in (("input", _decl_in), ("节点数", _decl_nd), ("项数", _decl_
 #      常量两侧覆盖法：本机跑验到 (8,116) 与 (7,103)，CI 跑验到 (7,103)；两者合起来覆盖全部两项。
 #   ⚠️ 只扫 `_v3_docs`（4 个声明文件）：`exp/`、`LOCAL-*.md`、tests 注释里的是**历史数字**，
 #      它们本来就该保持旧值（改它们反而抹掉历史），不纳入。
-_V3_LEGIT_PAIRS = [(7, 103), (8, 116)]       # (节点数, input 数)：CI 环境 / 本机环境
+_V3_LEGIT_PAIRS = [(7, 103), (8, 116), (7, 104), (8, 117)]       # (节点数, input 数)：CI 环境 / 本机环境
+# ↑ 2026-10-02 追加 (7,104)/(8,117)：CopyBridge 加可选输入 voice_anchor（声锚）后 +1 input。
+#   旧对 (7,103)/(8,116) 仍合法 —— ci.yml/README/__init__ 的声明数字由另一批在飞改动维护（当时未刷新）。
 for _fn, _txt in _v3_docs.items():
     for _ln in _txt.splitlines():
         _nds = [int(_v) for _v in _re.findall(r"(\d+)\s*个?\s*节点", _ln)]

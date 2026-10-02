@@ -377,6 +377,136 @@ else:
               rc3 == 3, "退出码=%d" % rc3)
         check("T18.6 未审文案显式写「未审 ≠ 通过」", "未审 ≠ 通过" in out3)
 
+# ---------------------------------------------------------------- T19 覆盖缺口（P2-6）
+print("\n[T19] 覆盖缺口：consensus_mode=earlier 与 center=False"
+      "（P2-6；两处此前均为 0 覆盖）")
+
+# T19.1~T19.3 `_ref_indices` 三模式语义（纯函数直测）
+#   历史按「由近到远」排列（0 = 最近）⇒ later = 下标更小，earlier = 下标更大。
+check("T19.1 `later` 对最近的一段无参照（没有更近的段了）",
+      HA._ref_indices(0, 3, "later") == [],
+      "i=0 → %s" % HA._ref_indices(0, 3, "later"))
+check("T19.2 `earlier` 对最近段给出两个更远的参照，对最远段为空",
+      HA._ref_indices(0, 3, "earlier") == [1, 2]
+      and HA._ref_indices(2, 3, "earlier") == [],
+      "i=0 → %s ｜ i=2 → %s" % (HA._ref_indices(0, 3, "earlier"),
+                                HA._ref_indices(2, 3, "earlier")))
+check("T19.3 `both` = 除自己外全部（与 i=0 时的 earlier 同集合）",
+      HA._ref_indices(0, 3, "both") == [1, 2])
+
+# T19.4~T19.5 两个零覆盖开关：跑得通，且块结构合法
+seg_c, seg_d = make_seg(27, 91), make_seg(27, 92)
+seg_d[0, :, 13] = seg_c[0, :, 6]          # 造一处跨段复现，保证有候选可挑
+_refs_e = HA.build_history_anchor_refs(
+    [seg_c, seg_d], HA.TIHAConfig(depth=2, window_frames=5, consensus_mode="earlier"))
+check("T19.4 consensus_mode='earlier' 可运行且返回 list",
+      isinstance(_refs_e, list), "出块 %d" % len(_refs_e))
+_refs_nc = HA.build_history_anchor_refs(
+    [seg_c, seg_d], HA.TIHAConfig(depth=2, window_frames=5, center=False))
+check("T19.5 center=False 可运行；块结构合法（kind=video + latent + `_exp_score`）",
+      isinstance(_refs_nc, list)
+      and all(d.get("kind") == "video" and "latent" in d and "_exp_score" in d
+              for d in _refs_nc),
+      "出块 %d（center=False）" % len(_refs_nc))
+
+# ---------------------------------------------------------------- T20 配置契约与边界（10-02 审核）
+print("\n[T20] 配置白名单契约 + 组块/打分边界（2026-10-02 多维度审核）")
+
+import dataclasses as _dc
+import os as _os
+import re as _re
+_HERE = _os.path.dirname(_os.path.abspath(HA.__file__))
+
+
+def _grab_keys(path, varname):
+    """从源码文本里抽一个字符串元组常量。
+
+    不 import —— ``h3_adapter`` 是相对导入（无包上下文），``precheck_tiha`` 顶层有执行代码。
+    用 ``(?<![A-Za-z_])`` 前视，避免 ``_KEYS`` 误匹配到 ``KNOWN_KEYS`` 里的 ``_KEYS``。
+    """
+    src = open(path, encoding="utf-8").read()
+    m = _re.search(r"(?<![A-Za-z_])" + varname + r"\s*=\s*\((.*?)\)", src, _re.S)
+    return set(_re.findall(r"\"([a-z_]+)\"", m.group(1))) if m else set()
+
+
+_fields = {f.name for f in _dc.fields(HA.TIHAConfig)}
+# 唯一真相源：**直接读模块常量**（旧版从源码文本抽 —— 两侧都改成别名后，文本抽法只会得空集 ⇒ 假绿）
+_known = set(HA.KNOWN_CONFIG_KEYS)
+_ad_src = open(_os.path.join(_HERE, "h3_adapter.py"), encoding="utf-8").read()
+_pre_src = open(_os.path.join(_HERE, "precheck_tiha.py"), encoding="utf-8").read()
+_ad_lit = _grab_keys(_os.path.join(_HERE, "h3_adapter.py"), "KNOWN_KEYS")
+_pre_lit = _grab_keys(_os.path.join(_HERE, "precheck_tiha.py"), "_KEYS")
+
+check("T20.1 `KNOWN_CONFIG_KEYS` 全是真字段（含不存在的键 ⇒ 白名单赋值会**静默忽略**它）",
+      bool(_known) and _known <= _fields, "多余 = %s" % sorted(_known - _fields))
+check("T20.2 白名单**只有一份真相源**：生产侧与预检侧都不再自带字面量副本"
+      "（各写一份 ⇒ 预检预测的生产行为会与生产分叉）",
+      _ad_lit == set() and _pre_lit == set()
+      and "KNOWN_KEYS = TIHA.KNOWN_CONFIG_KEYS" in _ad_src
+      and "_KEYS = HA.KNOWN_CONFIG_KEYS" in _pre_src,
+      "adapter 字面量=%d ｜ precheck 字面量=%d" % (len(_ad_lit), len(_pre_lit)))
+check("T20.3 死字段 `min_spread` 已删（10-02 清理：零使用且不可配置）",
+      "min_spread" not in _fields and "min_spread_k" in _fields)
+
+# T20.4 组块边界回贴：用**可辨识内容**（第 t 个 token 全填 t+1）断言窗口确实含目标 token
+_v = torch.zeros(1, 24, 10, 8, 8)
+for _t in range(10):
+    _v[0, :, _t] = float(_t + 1)
+_blk0 = HA.assemble_block(_v, 0, 3)          # token=0, w=3 ⇒ start=clamp(−1)=0 ⇒ 窗口 [0,3)
+_blk9 = HA.assemble_block(_v, 9, 3)          # token=9, w=3 ⇒ start=9−1=8  ⇒ 窗口 [8,10)
+check("T20.4 assemble_block 边界回贴：token=0 ⇒ [0,3)、token=T−1=9 ⇒ **[8,10)**"
+      "（回贴到边界内，不越界且**含**目标 token）",
+      float(_blk0[0, 0, 0, 0, 0]) == 1.0 and float(_blk0[0, 0, 2, 0, 0]) == 3.0
+      and float(_blk9[0, 0, 0, 0, 0]) == 8.0 and float(_blk9[0, 0, 2, 0, 0]) == 10.0,
+      "blk0 首/末 = %.0f/%.0f ｜ blk9 首/末 = %.0f/%.0f"
+      % (float(_blk0[0, 0, 0, 0, 0]), float(_blk0[0, 0, 2, 0, 0]),
+         float(_blk9[0, 0, 0, 0, 0]), float(_blk9[0, 0, 2, 0, 0])))
+
+# T20.5 无参照段 ⇒ 全零（不除零），且必被段级门控淘汰
+_m2 = [HA.frame_matrix(torch.randn(1, 24, 8, 8, 8), pool=2) for _ in range(2)]
+_s2 = HA.consensus_scores(_m2, mode="later")
+check("T20.5 `later` 下第 0 段无参照 ⇒ 分数全零（不除零；全零 ⇒ 段级门控必淘汰）",
+      _s2[0].numel() > 0 and float(_s2[0].abs().max()) == 0.0,
+      "shape=%s max=%.4f" % (tuple(_s2[0].shape), float(_s2[0].abs().max())))
+
+# ---------------------------------------------------------------- T21 孪生实现合并（10-02 审核）
+print("\n[T21] 「与外观锚同源」判定只有一份实现 + precheck 排除表契约")
+
+_cand = [5, 4, 3, 2, 1]
+_kept, _dropped = HA.drop_anchor_stage(_cand, 3)
+check("T21.1 `drop_anchor_stage` 剔除同源段且**保序**（由近到远不能被打乱）",
+      _kept == [5, 4, 2, 1] and _dropped == [3], "kept=%s dropped=%s" % (_kept, _dropped))
+
+_pairs = [(i, "L%d" % i) for i in _cand]
+_k2, _d2 = HA.filter_duplicate_sources(_pairs, 3)
+check("T21.2 `filter_duplicate_sources` 是它的**配对薄壳**（判定同源、载体不丢、保序）",
+      [i for i, _ in _k2] == _kept and _d2 == _dropped
+      and [lat for _, lat in _k2] == ["L5", "L4", "L2", "L1"],
+      "kept=%s" % [(i, lat) for i, lat in _k2])
+
+_exp_m = _re.search(r"_explicit = \((.*?)\)", _pre_src, _re.S)
+_exp = set(_re.findall(r"\"([a-z_]+)\"", _exp_m.group(1))) if _exp_m else set()
+check("T21.3 precheck 的 `_explicit` 排除表 ⊆ 白名单"
+      "（排除表里写了不存在的键 ⇒ 那条无声失效）",
+      bool(_exp) and _exp <= _known, "多余 = %s" % sorted(_exp - _known))
+
+# ---------------------------------------------------------------- T22 帧网格（10-02 实测更正）
+print("\n[T22] 帧网格：产线值不下取 / 网格非等差（docstring 曾写错）")
+
+_bad_snap = []
+for _g in HA.H3Grid.GUIDE_RUNS:
+    if HA.H3Grid.frames_for_steps(HA.H3Grid.snap_steps(_g)) != _g:
+        _bad_snap.append(_g)
+check("T22.1 产线 GUIDE_RUNS **全部**落在帧网格上（⇒ 产线值不会被静默下取）",
+      not _bad_snap, "被下取的 = %s" % _bad_snap)
+check("T22.2 帧网格**非等差**：6 token = 18 帧（不是 21）·7 token = 22 帧·snap(21) = 6",
+      HA.H3Grid.frames_for_steps(6) == 18
+      and HA.H3Grid.frames_for_steps(7) == 22
+      and HA.H3Grid.snap_steps(21) == 6,
+      "6 token=%d ｜ 7 token=%d ｜ snap(21)=%d"
+      % (HA.H3Grid.frames_for_steps(6), HA.H3Grid.frames_for_steps(7),
+         HA.H3Grid.snap_steps(21)))
+
 # ============================================================================
 print("\n" + "=" * 78)
 print("通过 %d / 失败 %d" % (len(PASS), len(FAIL)))

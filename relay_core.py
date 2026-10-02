@@ -334,6 +334,54 @@ class RelayPlan:
         return line
 
 
+def _voice_anchor_audio(voice_anchor: Any) -> torch.Tensor:
+    """从声锚输入取音频流，规范成 [B,C,2,T]。
+
+    接受三种形态（对齐用户最自然的接线方式）：
+      - ``VAEEncodeAudio`` 输出：``{'samples': [B,C,2,T]}`` 纯张量（**主流**）
+      - AV 联合 latent（NestedTensor / streams）：取第 2 条流
+      - list/tuple 已拆流
+    """
+    samples = voice_anchor.get("samples") if isinstance(voice_anchor, dict) else voice_anchor
+    nested = getattr(samples, "tensors", None)
+    if nested is not None:
+        parts = [t for t in nested if torch.is_tensor(t)]
+    elif isinstance(samples, (tuple, list)):
+        parts = [t for t in samples if torch.is_tensor(t)]
+    elif torch.is_tensor(samples):
+        parts = [samples]
+    else:
+        raise ValueError("voice_anchor 形态不认识：%r" % type(samples))
+    if len(parts) >= 2:
+        a = parts[1]
+    elif len(parts) == 1 and parts[0].ndim == 4:
+        a = parts[0]                      # 纯音频 latent（VAEEncodeAudio 的 [B,C,2,T]）
+    else:
+        raise ValueError("voice_anchor 里找不到音频流（拿到 %d 条流）。" % len(parts))
+    if a.ndim == 3:
+        a = a.unsqueeze(0)
+    if a.ndim != 4:
+        raise ValueError("voice_anchor 音频流期望 [B,C,2,T]，得到 %s。" % (tuple(a.shape),))
+    return a
+
+
+def _voice_anchor_tail(voice_anchor: Any, a_frames: int) -> Tuple[torch.Tensor, int, float]:
+    """切声锚的尾窗，返回 ``(tail, take, raw_steps)``。
+
+    取窗逻辑与 ``audio_tail_from_latent`` 相同（向上拓宽到整步、要多少给多少），
+    但**直接作用于音频张量** —— 不走 ``audio_from_latent``（那会把 VAEEncodeAudio
+    的纯音频 latent 误判成 video-only）。
+    """
+    a = _voice_anchor_audio(voice_anchor)
+    total_t = int(a.shape[-1])
+    raw_steps = int(a_frames) / float(FPS) * AUDIO_HZ
+    want = int(math.ceil(raw_steps - 1e-9))
+    take = min(want, total_t)
+    if take < 1:
+        raise ValueError("声锚音频为空（总长 %d 步）。" % total_t)
+    return a[:1].narrow(-1, total_t - take, take).clone(), take, raw_steps
+
+
 def plan_relay(
     latent: Any,
     context_latent: Any,
@@ -342,6 +390,7 @@ def plan_relay(
     settle_frames: int = 0,
     anchor_latent: Optional[Any] = None,
     anchor_frames: int = 5,
+    voice_anchor: Optional[Any] = None,
 ) -> RelayPlan:
     """生成续接计划。
 
@@ -425,8 +474,26 @@ def plan_relay(
 
     a_frames = int(audio_frames) if audio_frames else trim_frames
     src_total_frames = pixel_frames(int(src.shape[2]))
-    tail, rt, overhang, raw_steps, grid_off = audio_tail_from_latent(
-        context_latent, a_frames, src_total_frames)
+    overhang, grid_off = 0.0, False
+    if voice_anchor is not None:
+        # 0.6.1 声锚（voice anchor）：audio_ref 改用**指定说话人**的音频尾窗。
+        # 动机（2026-10-02 实测）：audio_ref = 上段音频尾 ⇒ 上段说话人的嗓音
+        # 成为**本段嗓音的生成条件** —— 台词逐段换人时音色交叉污染
+        # （周砚 F0 114→131、谱质心 1028→1308）。给声锚后离基准距离缩到 1/5。
+        # 静默降级纪律：声锚短于窗就取全长，并把「用了声锚」写进 notes 让 report 可见。
+        tail, rt, raw_steps = _voice_anchor_tail(voice_anchor, a_frames)
+        if rt < int(math.ceil(a_frames / float(FPS) * AUDIO_HZ - 1e-9)):
+            plan.notes.append(
+                "⚠ 声锚音频只有 %d 步（窗口要 %d 步）⇒ 已按全长取用；"
+                "建议声锚 ≥ %.2f 秒。" % (rt, int(math.ceil(
+                    a_frames / float(FPS) * AUDIO_HZ)), a_frames / float(FPS)))
+        plan.notes.append(
+            "声锚生效：audio_ref 改用 voice_anchor 尾 %d 步（约 %.2f 秒），"
+            "不再取上一段音频尾 —— 用于跨说话人续接时锁定本段说话人音色。"
+            % (int(rt), int(rt) / AUDIO_HZ))
+    else:
+        tail, rt, overhang, raw_steps, grid_off = audio_tail_from_latent(
+            context_latent, a_frames, src_total_frames)
     if grid_off:
         plan.notes.append(
             "⚠ 音频栅格与视频帧数偏差超出半整步（上段 %d 帧，音频栅格换算后与之对不上），"
@@ -2953,6 +3020,7 @@ def build_continue_latent(
     window_shape: str = WINDOW_SHAPE_DEFAULT,
     anchor_latent: Optional[Any] = None,
     anchor_blend: float = 1.0,
+    voice_anchor: Optional[Any] = None,
 ) -> Tuple[Dict[str, Any], int, str]:
     """0.4.0 拷贝桥：把上一段 AV 尾部**逐位拷贝**进本段初始 latent + 噪声掩码。
 
@@ -3014,16 +3082,25 @@ def build_continue_latent(
 
     audio = None
     rt = 0
+    va_desc = ""
     if pin_audio:
         # 只有真的要钉音频时才要求 target 带音频流——pin_audio=False
         # 必须允许纯视频 latent 走通（参数语义）。
         audio = audio_from_latent(target).clone()
-        a_tail, rt, _overhang, _raw, _grid_off = audio_tail_from_latent(
-            prev, int(frames), pixel_frames(int(pv.shape[2])))
+        if voice_anchor is not None:
+            # 0.6.1 声锚：钉住的音频前缀同样改用声锚尾窗（与 plan_relay 的
+            # audio_ref 同源 —— 两处读的都是"上段尾"，只改一处会打架）。
+            a_tail, rt, _raw = _voice_anchor_tail(voice_anchor, int(frames))
+            va_desc = "；音频前缀改用声锚（voice_anchor）尾 %d 步" % int(rt)
+        else:
+            a_tail, rt, _overhang, _raw, _grid_off = audio_tail_from_latent(
+                prev, int(frames), pixel_frames(int(pv.shape[2])))
         rt = max(0, min(int(rt), int(audio.shape[-1]) - 1))
         if rt > 0:
             audio[..., :rt] = a_tail[..., :rt].to(device=audio.device, dtype=audio.dtype)
     else:
+        if voice_anchor is not None:
+            va_desc = "；⚠ voice_anchor 已接但 pin_audio=False ⇒ 本段不钉音频，声锚被忽略"
         try:
             audio = audio_from_latent(target)     # 有则原样保留（不拷贝、不改动）
         except ValueError:
@@ -3067,10 +3144,10 @@ def build_continue_latent(
     out["noise_mask"] = vmask
     report = (
         "[H3 Relay] 拷贝桥：写入 %d 步（%d 帧）视频尾 + %d 音频 tick（上下文用%s）；"
-        "掩码 %s%s；trim=%d"
+        "掩码 %s%s%s；trim=%d"
         % (steps, covered, rt,
            "" if audio is not None else "／本段无音频流", mask_desc, stats_desc,
-           covered)
+           va_desc, covered)
     )
     return out, int(covered), report
 

@@ -84,10 +84,10 @@ def _default_relay_root() -> str:
                 % (comfy, _HERE))
     return os.path.join(comfy, "output", "relay_kit")
 
-# 配置文件里允许出现的键（多写的键会被忽略，但这里列出来便于交叉核对）
-_KEYS = ("depth", "window_frames", "spatial_scale", "max_refs", "max_refs_per_seg",
-         "pool", "top_q", "min_rel", "min_spread_k", "consensus_mode", "center",
-         "normalize", "dedup_sim", "nms_radius", "anchor_max_sim")
+# 配置文件里允许出现的键 —— **不在这里重定义**（2026-10-02 合并）。
+# 唯一真相源 = `history_anchor.KNOWN_CONFIG_KEYS`：预检的职责就是"预测生产行为"，
+# 白名单一旦与生产侧各写一份，预测就会失真（《规范》§二·D「孪生体」）。本脚本已 import HA。
+_KEYS = HA.KNOWN_CONFIG_KEYS
 
 
 class Fail(Exception):
@@ -117,7 +117,12 @@ def main() -> int:
                          "由脚本位置反推（不写死本机路径）。")
     ap.add_argument("--run", required=True)
     ap.add_argument("--stage", type=int, required=True, help="本段段号（0 起）")
-    ap.add_argument("--anchor-stage", type=int, default=0)
+    # ⚠️ 默认必须与母版 `#961 CopyBridge.ref_anchor_stage` 的默认一致（= **-1**）。
+    #    2026-10-02 实测踩到：默认 0 会把 stage0 当成「与外观锚同源」剔掉 ⇒ stage3 只剩 1 段历史
+    #    ⇒ 误报「可用历史段 < 2 ⇒ E1' 不出块，行为等同关闭」；而真跑其实出 **2 块**
+    #    （实跑证据：`m1wf5` / `m1wf22` 两臂各出 2 块，+8.5% / +29.8% token）。
+    #    ⇒ 预检的默认值与生产默认值不一致 = 预检自己制造假警报（§二·D 孪生体同源问题）。
+    ap.add_argument("--anchor-stage", type=int, default=-1)
     args = ap.parse_args()
     if not args.root:
         try:
@@ -222,15 +227,19 @@ def main() -> int:
 
     # ---------- 4) 实跑（真 latent，零 GPU）----------
     print("\n[4] 实跑 build_history_anchor_refs（真 latent、零 GPU）")
+    # 这 4 个键在上面已**特殊处理**（depth 有默认回退 / spatial_scale 先按可行值试算）
+    # ⇒ 从白名单里排除掉再**全量**灌入。原先这里是手写的 11 键清单 ——
+    # 漏一个键就会"预检用默认值试算、生产用真值" ⇒ 预测失真（2026-10-02 换掉）。
+    _explicit = ("depth", "window_frames", "spatial_scale", "max_refs")
     cfg = HA.TIHAConfig(
         depth=int(depth),
         window_frames=int(raw.get("window_frames", HA.TIHAConfig.window_frames)),
         spatial_scale=want_s if want_s == max_s else max_s,     # 先按可行值试算，好给出"改完长什么样"
         max_refs=int(raw.get("max_refs", depth)),
     )
-    for k in ("max_refs_per_seg", "pool", "top_q", "min_rel", "min_spread_k",
-              "consensus_mode", "center", "normalize", "dedup_sim",
-              "nms_radius", "anchor_max_sim"):
+    for k in HA.KNOWN_CONFIG_KEYS:
+        if k in _explicit:
+            continue
         if k in raw:
             setattr(cfg, k, raw[k])
     try:

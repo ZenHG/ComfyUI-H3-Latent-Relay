@@ -40,16 +40,16 @@
           "zh": "使用方法",
           "en": "Usage",
           "mode": "condensed",
-          "h_en": "7bd0550cdf8647b3",
-          "h_src": "3ea532a19617ef20",
+          "h_en": "e6a4855d59798aaf",
+          "h_src": "3934dfad00a97650",
           "seeded": "by-position"
         },
         {
           "zh": "目录结构",
           "en": "Repository layout",
           "mode": "condensed",
-          "h_en": "a259c358909a5dab",
-          "h_src": "144baf6671fb0a40",
+          "h_en": "cdfa900d5e5d71c3",
+          "h_src": "9ebcd0ae9b7cbd78",
           "seeded": "by-position"
         },
         {
@@ -72,14 +72,14 @@
           "zh": "文档索引",
           "en": "Documentation index",
           "mode": "condensed",
-          "h_en": "7d0b22f27b614348",
-          "h_src": "6a04065ad30ab362",
+          "h_en": "3bf961c6695b173d",
+          "h_src": "4d37a3bf1a444df7",
           "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-10-02",
-      "src_sha": "2deeff5921fb1497"
+      "src_sha": "285caf2ba32ed6a9"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
