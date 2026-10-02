@@ -61,6 +61,9 @@ PREFERRED = {
         "minimax_h3_video_vae_int8_convrot.safetensors",   # 视频 VAE（第 1 个 VAELoader）
         "minimax_h3_audio_vae_fp32.safetensors",           # 音频 VAE（第 2 个 VAELoader）
     ],
+    # 声锚样本（LoadAudio 的下拉值）。⚠️ 这是**示例占位名** —— 换成你自己的角色语音文件
+    # （放进 `ComfyUI/input/` 再在下拉里选）；不想用声锚就把桥的 `voice_anchor` 那根线拔掉。
+    "anchor_audio": "anchor_zy.wav",
 }
 
 PROMPT_PLACEHOLDER = (
@@ -504,10 +507,26 @@ def build(oi, length=73, width=448, height=768):
                  values={"run_id": "relay_demo"},
                  title="🔗 H3 Relay · Latent Load（第 1 段自动交空上下文→桥直通；第 2 段起读上一段）")
 
+    # —— 0.6.20：**声锚默认接好**（跨说话人续接锁定音色）——
+    # 为什么默认接：`audio_ref` = 上一段音频尾 ⇒ **上段说话人的嗓音会成为本段嗓音的生成条件**，
+    #   台词逐段换人时音色交叉污染（实测同一角色 F0 漂 +15%、谱质心 漂 +27%）。
+    # 接法固定是这一条：`LoadAudio → VAEEncodeAudio → 桥的 voice_anchor`。
+    #   🔴 **别接 `context_latent`**：那是「上一段的 AV latent」，拿它当声锚 = 锚源就是默认的
+    #      「上一段音频尾」⇒ 看着像开了，其实是空转（还会绕过音频栅格对账）。
+    # 不想用 ⇒ **把 `voice_anchor` 这根线拔掉**（不接 = 逐位同旧版，零迁移成本）。
+    # 接错也不会出坏片：0.6.20 起「全零 / 常量 / 静音 / NaN」的锚**当场报错**（fail-closed）。
+    anchor_audio = g.add("LoadAudio", pos=[40, 840],
+                         values={"audio": PREFERRED["anchor_audio"]},
+                         title="🎙 声锚源：本段说话人的一段干净语音（≥0.9 秒）—— 换成你自己的角色语音")
+    anchor_vae = g.add("VAEEncodeAudio", pos=[420, 840],
+                       links_in={"audio": (anchor_audio, "AUDIO"), "vae": (vae_a, "VAE")},
+                       title="🎙 声锚 → 音频 VAE（输出接「复合桥」的 voice_anchor）")
+
     bridge = g.add("H3RelayCopyBridge", pos=[800, 40],
                    links_in={"conditioning": (cond, 0), "latent": (cond, "LATENT"),
                              "context_latent": (load, "context_latent"),
-                             "stage_index": (stage, "INT")},
+                             "stage_index": (stage, "INT"),
+                             "voice_anchor": (anchor_vae, "LATENT")},
                    values={"context_frames": 22, "mask_mode": "hard", "pin_audio": True,
                            "run_id": "relay_demo"},
                    title="🔗 H3 Relay · Copy Bridge（复合桥：第 0 路 latent → 采样器 latent_image，第 4 路 conditioning → positive）")
@@ -592,7 +611,17 @@ def build(oi, length=73, width=448, height=768):
         "音频缝（0.5.0 新增，整节点也可以删掉）：\n"
         "  patch_seconds 默认 0 = 逐位直通。缝处音频「抽一下 / 静音一瞬」就调 2.0：\n"
         "  把本段头 2 秒换成上一段最静窗环境声（长度守恒，不动时间轴）。\n"
-        "  ⚠ 第 1 段也要接（要它把第 1 段音频落盘，第 2 段的床源就是它）；段号顺序跑。\n"
+        "  ⚠ 第 1 段也要接（要它把第 1 段落盘音频，第 2 段的床源就是它）；段号顺序跑。\n"
+        "\n"
+        "声锚（0.6.19 新增；**本示例默认已接好**）：\n"
+        "  路径：LoadAudio（左下的「🎙 声锚源」）→ VAEEncodeAudio → 桥的 voice_anchor。\n"
+        "  为什么接：不接时 audio_ref = **上一段音频尾** ⇒ 上段说话人的嗓音会污染本段音色；\n"
+        "  台词逐段换人时尤其明显（实测同一角色 F0 漂 +15%、谱质心漂 +27%）。\n"
+        "  你要做的：把 LoadAudio 换成**本段说话人**的一段干净语音（≥0.9 秒，情绪与台词相近）。\n"
+        "  不想用：**把 voice_anchor 那根线拔掉**（不接 = 逐位同旧版，图/参数都不用改）。\n"
+        "  接错不会出坏片：0.6.20 起「全零 / 常量 / 静音 / NaN」的锚**当场报错**（不静默）。\n"
+        "  🔴 别把 context_latent 接到 voice_anchor —— 那是「上一段的 AV latent」，\n"
+        "     拿它当声锚 = 锚源就是默认的「上一段音频尾」⇒ 看着像开了，其实是空转。\n"
         "\n"
         "没接对的两个典型症状：\n"
         "  · 日志写「静默直通」→ 段号填了 ≥1，但 run_id 与上一段不一致 / 文件不在\n"

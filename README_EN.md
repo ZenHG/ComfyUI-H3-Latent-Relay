@@ -203,10 +203,28 @@ When dialogue alternates speakers per segment, the bridge feeds the previous spe
 current segment's speaker** into the optional `voice_anchor` input of `Copy Bridge`
 (`LoadAudio → VAEEncodeAudio`): not connected = bit-identical to the old behaviour; connected = timbre
 locked and clipping disappears (measured: distance-to-baseline shrunk to 1/5).
-⚠️ **A content-less anchor raises on the spot** (all-zero / constant / silent / NaN) — it never fails
-silently. **To turn the anchor off, unplug the wire** — do not feed it an empty latent (in particular
-not the prompt node's `LATENT`, which is an empty AV latent). Implementation /
-limitations (BGM, emotion, multi-speaker segments) / fallbacks in
+
+🔵 **Both example workflows ship with the voice anchor already connected**
+(`LoadAudio → VAEEncodeAudio → the bridge's voice_anchor`). The only thing you have to do is
+**point that `LoadAudio` at your own character voice** (≥0.9 s of clean speech, emotion close to the
+line; drop the file into `ComfyUI/input/` and pick it from the dropdown). `tools/voice_bank.py` can
+collect anchors automatically from already-rendered segments.
+
+**A wrong anchor can never produce a bad film — four fallbacks:**
+
+| Situation | Behaviour |
+|---|---|
+| **You do not want it / have no clip ready** | **Just unplug the `voice_anchor` wire** = bit-identical to the old behaviour (no graph or parameter change, zero migration cost) |
+| A **content-less** anchor (all-zero / constant / silent / contains NaN) | 🔴 **Raises on the spot** (fail-closed since 0.6.20). The message names the reason and tells you "unplug it to turn it off" — it **never fails silently into a bad film** |
+| Anchor shorter than the window | Takes the full anchor + a `report` reminder (≥0.9 s recommended) |
+| `pin_audio=False` | The anchor is ignored and the `report` says so (degradation is visible) |
+
+⚠️ **One common mis-wiring**: **never feed `context_latent` into `voice_anchor`** — that is the
+*previous segment's AV latent*, so using it as the anchor just sets the anchor source back to the
+default "previous segment's audio tail" ⇒ **it looks enabled but is a no-op** (and it bypasses the
+audio-grid reconciliation). The anchor source must be **this segment's speaker**.
+
+Implementation / limitations (BGM, emotion, multi-speaker segments) in
 [`docs/07-chain.md`](docs/07-chain.md) §声锚; bundled auto-collector `tools/voice_bank.py`
 (optional ASR dialogue guard — works without funasr too).
 
@@ -223,7 +241,7 @@ ComfyUI-H3-Latent-Relay/
 ├── v3/                    # V3 shell (io.ComfyNode + comfy_entrypoint); V1 goes through NODE_CLASS_MAPPINGS
 ├── exp/history_anchor_v2/ # E1' time-invariant history anchor (top-level import ⇒ required; inert without _tiha.json)
 ├── web/                   # front-end JS: the 🧩 concat button, Chain panel, `run_id` one-field-syncs-the-group (canvas only)
-├── examples/              # two openable workflows: minimal continuation (19 nodes) and full flow (45 nodes)
+├── examples/              # two openable workflows: minimal continuation (21 nodes) and full flow (47 nodes)
 ├── docs/                  # deep docs 01–10 (mechanism / parameters / sampling / canvas / troubleshooting / scripting / chain / tests / metrics / audio)
 ├── tests/                 # offline self-test (zero GPU): 447 assertions + V3 parity + prompt-dispatch pure functions
 ├── tools/                 # self-checks / forensic tools / concat CLI / bundler (incl. the en_sync docs gate)
@@ -309,4 +327,4 @@ The Chinese documents are the source of truth; `README_EN.md` and the English `d
 | [`RELEASING.md`](RELEASING.md) | **release policy (single source of truth)**: GitHub + Comfy Registry must be updated as a pair · one command `tools/release.py` · failure handling · key discipline |
 | [`SECURITY.md`](SECURITY.md) | secrets / dependencies / network behaviour disclosure |
 | [`tools/README.md`](tools/README.md) | the thirteen scripts and their expected values (nine self-check/forensic + concat CLI + bundler + **releaser** + **voice-bank collector**) |
-| [`examples/README.md`](examples/README.md) | the two openable workflows (minimal continuation 19 nodes / full flow 45 nodes) · generators |
+| [`examples/README.md`](examples/README.md) | the two openable workflows (minimal continuation 21 nodes / full flow 47 nodes) · generators |

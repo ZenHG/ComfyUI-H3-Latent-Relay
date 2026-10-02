@@ -1,8 +1,8 @@
 {
   "id": "5a7b0c66-c5dc-4161-8b6f-af601c8fb0f8",
   "revision": 0,
-  "last_node_id": 1013,
-  "last_link_id": 203,
+  "last_node_id": 1015,
+  "last_link_id": 206,
   "nodes": [
     {
       "id": 126,
@@ -243,7 +243,8 @@
           "type": "VAE",
           "links": [
             24,
-            75
+            75,
+            205
           ]
         }
       ],
@@ -1515,6 +1516,11 @@
           "shape": 7,
           "type": "LATENT",
           "link": null
+        },
+        {
+          "name": "voice_anchor",
+          "type": "LATENT",
+          "link": 206
         },
         {
           "localized_name": "context_frames",
@@ -4637,6 +4643,88 @@
         "baseline": "robust",
         "cross_seg_ack": false
       }
+    },
+    {
+      "id": 1014,
+      "type": "LoadAudio",
+      "pos": [
+        40,
+        1560
+      ],
+      "size": [
+        320,
+        100
+      ],
+      "flags": {},
+      "order": 45,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "audio",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "audio"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "links": [
+            204
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadAudio"
+      },
+      "title": "🎙 声锚源：本段说话人的一段干净语音（≥0.9 秒）—— 换成你自己的角色语音",
+      "widgets_values": [
+        "anchor_zy.wav"
+      ]
+    },
+    {
+      "id": 1015,
+      "type": "VAEEncodeAudio",
+      "pos": [
+        420,
+        1560
+      ],
+      "size": [
+        320,
+        100
+      ],
+      "flags": {},
+      "order": 46,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "link": 204
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 205
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            206
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VAEEncodeAudio"
+      },
+      "title": "🎙 声锚 → 音频 VAE（输出接「复合桥 #961」的 voice_anchor）",
+      "widgets_values": null
     }
   ],
   "links": [
@@ -5119,6 +5207,30 @@
       992,
       8,
       "STRING"
+    ],
+    [
+      204,
+      1014,
+      0,
+      1015,
+      0,
+      "AUDIO"
+    ],
+    [
+      205,
+      179,
+      0,
+      1015,
+      1,
+      "VAE"
+    ],
+    [
+      206,
+      1015,
+      0,
+      961,
+      5,
+      "LATENT"
     ]
   ],
   "groups": [

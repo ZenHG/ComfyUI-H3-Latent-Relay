@@ -1,8 +1,8 @@
 {
   "id": "h3-relay-minimal",
   "revision": 0,
-  "last_node_id": 19,
-  "last_link_id": 27,
+  "last_node_id": 21,
+  "last_link_id": 30,
   "nodes": [
     {
       "id": 1,
@@ -41,7 +41,7 @@
           "name": "MODEL",
           "type": "MODEL",
           "links": [
-            9
+            12
           ]
         }
       ],
@@ -141,7 +141,7 @@
           "type": "VAE",
           "links": [
             2,
-            16
+            19
           ]
         }
       ],
@@ -181,7 +181,8 @@
           "name": "VAE",
           "type": "VAE",
           "links": [
-            18
+            6,
+            21
           ]
         }
       ],
@@ -222,8 +223,8 @@
           "type": "INT",
           "links": [
             4,
-            8,
-            14
+            11,
+            17
           ]
         }
       ],
@@ -310,14 +311,14 @@
           "type": "CONDITIONING",
           "links": [
             3,
-            7
+            9
           ]
         },
         {
           "name": "LATENT",
           "type": "LATENT",
           "links": [
-            5
+            7
           ]
         }
       ],
@@ -357,7 +358,7 @@
           "name": "CONDITIONING",
           "type": "CONDITIONING",
           "links": [
-            11
+            14
           ]
         }
       ],
@@ -411,7 +412,7 @@
           "name": "context_latent",
           "type": "LATENT",
           "links": [
-            6
+            8
           ]
         },
         {
@@ -432,10 +433,10 @@
     },
     {
       "id": 9,
-      "type": "H3RelayCopyBridge",
+      "type": "LoadAudio",
       "pos": [
-        800,
-        40
+        40,
+        840
       ],
       "size": [
         320,
@@ -446,14 +447,96 @@
       "mode": 0,
       "inputs": [
         {
+          "name": "audio",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "audio"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "links": [
+            5
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadAudio"
+      },
+      "title": "🎙 声锚源：本段说话人的一段干净语音（≥0.9 秒）—— 换成你自己的角色语音",
+      "widgets_values": [
+        "anchor_zy.wav"
+      ]
+    },
+    {
+      "id": 10,
+      "type": "VAEEncodeAudio",
+      "pos": [
+        420,
+        840
+      ],
+      "size": [
+        320,
+        100
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "link": 5
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 6
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            10
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VAEEncodeAudio"
+      },
+      "title": "🎙 声锚 → 音频 VAE（输出接「复合桥」的 voice_anchor）",
+      "widgets_values": null
+    },
+    {
+      "id": 11,
+      "type": "H3RelayCopyBridge",
+      "pos": [
+        800,
+        40
+      ],
+      "size": [
+        320,
+        100
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
           "name": "latent",
           "type": "LATENT",
-          "link": 5
+          "link": 7
         },
         {
           "name": "context_latent",
           "type": "LATENT",
-          "link": 6
+          "link": 8
         },
         {
           "name": "anchor_latent",
@@ -463,12 +546,17 @@
         {
           "name": "conditioning",
           "type": "CONDITIONING",
-          "link": 7
+          "link": 9
         },
         {
           "name": "ref_anchor_latent",
           "type": "LATENT",
           "link": null
+        },
+        {
+          "name": "voice_anchor",
+          "type": "LATENT",
+          "link": 10
         },
         {
           "name": "context_frames",
@@ -585,7 +673,7 @@
         {
           "name": "stage_index",
           "type": "INT",
-          "link": 8,
+          "link": 11,
           "widget": {
             "name": "stage_index"
           }
@@ -612,7 +700,7 @@
           "name": "latent",
           "type": "LATENT",
           "links": [
-            12
+            15
           ]
         },
         {
@@ -624,14 +712,14 @@
           "name": "trim_frames",
           "type": "INT",
           "links": [
-            21
+            24
           ]
         },
         {
           "name": "conditioning",
           "type": "CONDITIONING",
           "links": [
-            10
+            13
           ]
         }
       ],
@@ -660,7 +748,7 @@
       ]
     },
     {
-      "id": 10,
+      "id": 12,
       "type": "KSampler",
       "pos": [
         1180,
@@ -671,28 +759,28 @@
         100
       ],
       "flags": {},
-      "order": 9,
+      "order": 11,
       "mode": 0,
       "inputs": [
         {
           "name": "model",
           "type": "MODEL",
-          "link": 9
+          "link": 12
         },
         {
           "name": "positive",
           "type": "CONDITIONING",
-          "link": 10
+          "link": 13
         },
         {
           "name": "negative",
           "type": "CONDITIONING",
-          "link": 11
+          "link": 14
         },
         {
           "name": "latent_image",
           "type": "LATENT",
-          "link": 12
+          "link": 15
         },
         {
           "name": "sigmas",
@@ -753,9 +841,9 @@
           "name": "LATENT",
           "type": "LATENT",
           "links": [
-            13,
-            15,
-            17
+            16,
+            18,
+            20
           ]
         }
       ],
@@ -774,7 +862,7 @@
       ]
     },
     {
-      "id": 11,
+      "id": 13,
       "type": "H3RelayLatentSave",
       "pos": [
         1180,
@@ -785,13 +873,13 @@
         100
       ],
       "flags": {},
-      "order": 10,
+      "order": 12,
       "mode": 0,
       "inputs": [
         {
           "name": "latent",
           "type": "LATENT",
-          "link": 13
+          "link": 16
         },
         {
           "name": "run_id",
@@ -804,7 +892,7 @@
         {
           "name": "stage_index",
           "type": "INT",
-          "link": 14,
+          "link": 17,
           "widget": {
             "name": "stage_index"
           }
@@ -841,90 +929,10 @@
       ]
     },
     {
-      "id": 12,
+      "id": 14,
       "type": "VAEDecode",
       "pos": [
         1540,
-        40
-      ],
-      "size": [
-        320,
-        100
-      ],
-      "flags": {},
-      "order": 11,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "samples",
-          "type": "LATENT",
-          "link": 15
-        },
-        {
-          "name": "vae",
-          "type": "VAE",
-          "link": 16
-        }
-      ],
-      "outputs": [
-        {
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            19
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "VAEDecode"
-      },
-      "widgets_values": null
-    },
-    {
-      "id": 13,
-      "type": "VAEDecodeAudio",
-      "pos": [
-        1540,
-        260
-      ],
-      "size": [
-        320,
-        100
-      ],
-      "flags": {},
-      "order": 12,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "samples",
-          "type": "LATENT",
-          "link": 17
-        },
-        {
-          "name": "vae",
-          "type": "VAE",
-          "link": 18
-        }
-      ],
-      "outputs": [
-        {
-          "name": "AUDIO",
-          "type": "AUDIO",
-          "links": [
-            20
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "VAEDecodeAudio"
-      },
-      "widgets_values": null
-    },
-    {
-      "id": 14,
-      "type": "H3RelayTrimAV",
-      "pos": [
-        1900,
         40
       ],
       "size": [
@@ -936,19 +944,99 @@
       "mode": 0,
       "inputs": [
         {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 18
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 19
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            22
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VAEDecode"
+      },
+      "widgets_values": null
+    },
+    {
+      "id": 15,
+      "type": "VAEDecodeAudio",
+      "pos": [
+        1540,
+        260
+      ],
+      "size": [
+        320,
+        100
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 20
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 21
+        }
+      ],
+      "outputs": [
+        {
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "links": [
+            23
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VAEDecodeAudio"
+      },
+      "widgets_values": null
+    },
+    {
+      "id": 16,
+      "type": "H3RelayTrimAV",
+      "pos": [
+        1900,
+        40
+      ],
+      "size": [
+        320,
+        100
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [
+        {
           "name": "images",
           "type": "IMAGE",
-          "link": 19
+          "link": 22
         },
         {
           "name": "audio",
           "type": "AUDIO",
-          "link": 20
+          "link": 23
         },
         {
           "name": "trim_frames",
           "type": "INT",
-          "link": 21,
+          "link": 24,
           "widget": {
             "name": "trim_frames"
           }
@@ -1135,14 +1223,14 @@
           "name": "images",
           "type": "IMAGE",
           "links": [
-            22
+            25
           ]
         },
         {
           "name": "audio",
           "type": "AUDIO",
           "links": [
-            24
+            27
           ]
         },
         {
@@ -1154,7 +1242,7 @@
           "name": "prev_tail",
           "type": "IMAGE",
           "links": [
-            23
+            26
           ]
         }
       ],
@@ -1189,7 +1277,7 @@
       ]
     },
     {
-      "id": 15,
+      "id": 17,
       "type": "H3RelayPost",
       "pos": [
         2260,
@@ -1200,18 +1288,18 @@
         100
       ],
       "flags": {},
-      "order": 14,
+      "order": 16,
       "mode": 0,
       "inputs": [
         {
           "name": "images",
           "type": "IMAGE",
-          "link": 22
+          "link": 25
         },
         {
           "name": "guide",
           "type": "IMAGE",
-          "link": 23
+          "link": 26
         },
         {
           "name": "match_prev",
@@ -1379,7 +1467,7 @@
           "name": "images",
           "type": "IMAGE",
           "links": [
-            25
+            28
           ]
         },
         {
@@ -1416,7 +1504,7 @@
       ]
     },
     {
-      "id": 16,
+      "id": 18,
       "type": "H3RelayAudioSeam",
       "pos": [
         2260,
@@ -1427,13 +1515,13 @@
         100
       ],
       "flags": {},
-      "order": 15,
+      "order": 17,
       "mode": 0,
       "inputs": [
         {
           "name": "audio",
           "type": "AUDIO",
-          "link": 24
+          "link": 27
         },
         {
           "name": "run_id",
@@ -1561,7 +1649,7 @@
           "name": "audio",
           "type": "AUDIO",
           "links": [
-            26
+            29
           ]
         },
         {
@@ -1598,7 +1686,7 @@
       ]
     },
     {
-      "id": 17,
+      "id": 19,
       "type": "CreateVideo",
       "pos": [
         2620,
@@ -1609,18 +1697,18 @@
         100
       ],
       "flags": {},
-      "order": 16,
+      "order": 18,
       "mode": 0,
       "inputs": [
         {
           "name": "images",
           "type": "IMAGE",
-          "link": 25
+          "link": 28
         },
         {
           "name": "audio",
           "type": "AUDIO",
-          "link": 26
+          "link": 29
         },
         {
           "name": "fps",
@@ -1660,7 +1748,7 @@
           "name": "VIDEO",
           "type": "VIDEO",
           "links": [
-            27
+            30
           ]
         }
       ],
@@ -1675,7 +1763,7 @@
       ]
     },
     {
-      "id": 18,
+      "id": 20,
       "type": "SaveVideo",
       "pos": [
         2620,
@@ -1686,13 +1774,13 @@
         100
       ],
       "flags": {},
-      "order": 17,
+      "order": 19,
       "mode": 0,
       "inputs": [
         {
           "name": "video",
           "type": "VIDEO",
-          "link": 27
+          "link": 30
         },
         {
           "name": "filename_prefix",
@@ -1745,7 +1833,7 @@
       ]
     },
     {
-      "id": 19,
+      "id": 21,
       "type": "Note",
       "pos": [
         420,
@@ -1756,7 +1844,7 @@
         100
       ],
       "flags": {},
-      "order": 18,
+      "order": 20,
       "mode": 0,
       "inputs": [
         {
@@ -1774,7 +1862,7 @@
       },
       "title": "怎么用",
       "widgets_values": [
-        "【最小续接演示 · 官方节点 + ComfyUI-H3-Latent-Relay】\n\n第 1 段：\n  ① 段号 = 0，填好 prompt → 点 Queue。\n  日志会打印「读上段 latent：第 1 段无上一段 → 交空上下文」\n  和「复合桥：无 context_latent -> 直通（独立段，不续接）」，裁重叠不裁。\n\n第 2 段：\n  只改两处：\n  ① 段号 = 1（桥与落盘会自动跟着走，不用手改第二处）\n  ② prompt 换成第 2 段要拍的内容（开头直接接住上一段的动作/机位）\n  再点 Queue。\n  日志应出现：\n    [H3 Relay] latent 桥续接：钉住 22 帧 / 7 步 …\n    [H3 Relay] 裁首 22 帧 = 钉住 22 + 沉降 0 ｜ 手动指定\n    [H3 Relay] 后处理：全部关闭（直通）\n    [H3 Relay] 音频缝：第 1 段无缝可补 → 直通｜本段音频已落盘 …\n    [H3 Relay] 接缝自检：前 40 帧无突变 … → 起点干净。\n\n只看这三件事就算跑通：\n  · 「钉住 22 帧」= 上一段尾部已接进来\n  · 「裁首 N 帧 = 钉住 22 + 沉降 0」= 接缝处理已生效（0.5.0 起默认不裁沉降）\n  · 「起点干净」= 没有跳变，可以拼\n\n后处理 Post（0.5.0 新增，整节点可以删掉）：\n  20 个旋钮**全部默认关 = 逐位直通**，不接它行为与 0.4.x 一致。\n  最省的一档试法：match_prev = 0.5（段头色档/曝光对齐上段末帧，治缝上亮度阶跃）。\n\n音频缝（0.5.0 新增，整节点也可以删掉）：\n  patch_seconds 默认 0 = 逐位直通。缝处音频「抽一下 / 静音一瞬」就调 2.0：\n  把本段头 2 秒换成上一段最静窗环境声（长度守恒，不动时间轴）。\n  ⚠ 第 1 段也要接（要它把第 1 段音频落盘，第 2 段的床源就是它）；段号顺序跑。\n\n没接对的两个典型症状：\n  · 日志写「静默直通」→ 段号填了 ≥1，但 run_id 与上一段不一致 / 文件不在\n  · 画面从第 1 帧就开始重播上一段 → Trim AV 节点没接上，或 trim_frames 没接桥的第 3 路\n\n模型文件：把上面 4 个加载器的下拉改成你本机的文件即可。"
+        "【最小续接演示 · 官方节点 + ComfyUI-H3-Latent-Relay】\n\n第 1 段：\n  ① 段号 = 0，填好 prompt → 点 Queue。\n  日志会打印「读上段 latent：第 1 段无上一段 → 交空上下文」\n  和「复合桥：无 context_latent -> 直通（独立段，不续接）」，裁重叠不裁。\n\n第 2 段：\n  只改两处：\n  ① 段号 = 1（桥与落盘会自动跟着走，不用手改第二处）\n  ② prompt 换成第 2 段要拍的内容（开头直接接住上一段的动作/机位）\n  再点 Queue。\n  日志应出现：\n    [H3 Relay] latent 桥续接：钉住 22 帧 / 7 步 …\n    [H3 Relay] 裁首 22 帧 = 钉住 22 + 沉降 0 ｜ 手动指定\n    [H3 Relay] 后处理：全部关闭（直通）\n    [H3 Relay] 音频缝：第 1 段无缝可补 → 直通｜本段音频已落盘 …\n    [H3 Relay] 接缝自检：前 40 帧无突变 … → 起点干净。\n\n只看这三件事就算跑通：\n  · 「钉住 22 帧」= 上一段尾部已接进来\n  · 「裁首 N 帧 = 钉住 22 + 沉降 0」= 接缝处理已生效（0.5.0 起默认不裁沉降）\n  · 「起点干净」= 没有跳变，可以拼\n\n后处理 Post（0.5.0 新增，整节点可以删掉）：\n  20 个旋钮**全部默认关 = 逐位直通**，不接它行为与 0.4.x 一致。\n  最省的一档试法：match_prev = 0.5（段头色档/曝光对齐上段末帧，治缝上亮度阶跃）。\n\n音频缝（0.5.0 新增，整节点也可以删掉）：\n  patch_seconds 默认 0 = 逐位直通。缝处音频「抽一下 / 静音一瞬」就调 2.0：\n  把本段头 2 秒换成上一段最静窗环境声（长度守恒，不动时间轴）。\n  ⚠ 第 1 段也要接（要它把第 1 段落盘音频，第 2 段的床源就是它）；段号顺序跑。\n\n声锚（0.6.19 新增；**本示例默认已接好**）：\n  路径：LoadAudio（左下的「🎙 声锚源」）→ VAEEncodeAudio → 桥的 voice_anchor。\n  为什么接：不接时 audio_ref = **上一段音频尾** ⇒ 上段说话人的嗓音会污染本段音色；\n  台词逐段换人时尤其明显（实测同一角色 F0 漂 +15%、谱质心漂 +27%）。\n  你要做的：把 LoadAudio 换成**本段说话人**的一段干净语音（≥0.9 秒，情绪与台词相近）。\n  不想用：**把 voice_anchor 那根线拔掉**（不接 = 逐位同旧版，图/参数都不用改）。\n  接错不会出坏片：0.6.20 起「全零 / 常量 / 静音 / NaN」的锚**当场报错**（不静默）。\n  🔴 别把 context_latent 接到 voice_anchor —— 那是「上一段的 AV latent」，\n     拿它当声锚 = 锚源就是默认的「上一段音频尾」⇒ 看着像开了，其实是空转。\n\n没接对的两个典型症状：\n  · 日志写「静默直通」→ 段号填了 ≥1，但 run_id 与上一段不一致 / 文件不在\n  · 画面从第 1 帧就开始重播上一段 → Trim AV 节点没接上，或 trim_frames 没接桥的第 3 路\n\n模型文件：把上面 4 个加载器的下拉改成你本机的文件即可。"
       ]
     }
   ],
@@ -1813,167 +1901,167 @@
     ],
     [
       5,
-      6,
-      1,
       9,
       0,
-      "LATENT"
+      10,
+      0,
+      "AUDIO"
     ],
     [
       6,
-      8,
+      4,
       0,
-      9,
+      10,
       1,
-      "LATENT"
+      "VAE"
     ],
     [
       7,
       6,
+      1,
+      11,
       0,
+      "LATENT"
+    ],
+    [
+      8,
+      8,
+      0,
+      11,
+      1,
+      "LATENT"
+    ],
+    [
       9,
+      6,
+      0,
+      11,
       3,
       "CONDITIONING"
     ],
     [
-      8,
+      10,
+      10,
+      0,
+      11,
+      5,
+      "LATENT"
+    ],
+    [
+      11,
       5,
       0,
-      9,
-      19,
+      11,
+      20,
       "INT"
     ],
     [
-      9,
+      12,
       1,
       0,
-      10,
+      12,
       0,
       "MODEL"
     ],
     [
-      10,
-      9,
+      13,
+      11,
       3,
-      10,
+      12,
       1,
       "CONDITIONING"
     ],
     [
-      11,
+      14,
       7,
       0,
-      10,
+      12,
       2,
       "CONDITIONING"
     ],
     [
-      12,
-      9,
-      0,
-      10,
-      3,
-      "LATENT"
-    ],
-    [
-      13,
-      10,
-      0,
-      11,
-      0,
-      "LATENT"
-    ],
-    [
-      14,
-      5,
-      0,
-      11,
-      2,
-      "INT"
-    ],
-    [
       15,
-      10,
+      11,
       0,
       12,
-      0,
+      3,
       "LATENT"
     ],
     [
       16,
-      3,
-      0,
       12,
-      1,
-      "VAE"
-    ],
-    [
-      17,
-      10,
       0,
       13,
       0,
       "LATENT"
     ],
     [
-      18,
-      4,
+      17,
+      5,
       0,
       13,
-      1,
-      "VAE"
+      2,
+      "INT"
     ],
     [
-      19,
+      18,
       12,
       0,
       14,
       0,
-      "IMAGE"
+      "LATENT"
     ],
     [
-      20,
-      13,
+      19,
+      3,
       0,
       14,
       1,
-      "AUDIO"
+      "VAE"
+    ],
+    [
+      20,
+      12,
+      0,
+      15,
+      0,
+      "LATENT"
     ],
     [
       21,
-      9,
-      2,
-      14,
-      2,
-      "INT"
+      4,
+      0,
+      15,
+      1,
+      "VAE"
     ],
     [
       22,
       14,
       0,
-      15,
+      16,
       0,
       "IMAGE"
     ],
     [
       23,
-      14,
-      3,
       15,
-      1,
-      "IMAGE"
-    ],
-    [
-      24,
-      14,
-      1,
-      16,
       0,
+      16,
+      1,
       "AUDIO"
     ],
     [
+      24,
+      11,
+      2,
+      16,
+      2,
+      "INT"
+    ],
+    [
       25,
-      15,
+      16,
       0,
       17,
       0,
@@ -1982,16 +2070,40 @@
     [
       26,
       16,
-      0,
+      3,
       17,
+      1,
+      "IMAGE"
+    ],
+    [
+      27,
+      16,
+      1,
+      18,
+      0,
+      "AUDIO"
+    ],
+    [
+      28,
+      17,
+      0,
+      19,
+      0,
+      "IMAGE"
+    ],
+    [
+      29,
+      18,
+      0,
+      19,
       1,
       "AUDIO"
     ],
     [
-      27,
-      17,
+      30,
+      19,
       0,
-      18,
+      20,
       0,
       "VIDEO"
     ]

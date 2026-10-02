@@ -177,9 +177,25 @@ git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git  
 （实测同一角色 F0 漂 +15%、谱质心漂 +27%）。解法 = 给 `Copy Bridge` 的**可选输入
 `voice_anchor`** 接上「本段说话人」的音频锚（`LoadAudio → VAEEncodeAudio`）：
 不接 = 逐位同旧版；接了 = 音色锁定且削顶消失（实测离基准距离缩到 1/5）。
-⚠️ **接错的锚会当场报错**（全零 / 常量 / 静音 / NaN 一律 raise，不静默）——
-**想关掉声锚请拔线，不要接一个空 latent**（尤其别把出词节点的 `LATENT` 接过来，那是空的 AV latent）。
-实现 / 局限（BGM、情绪、一段多人）/ 兜底措施详见
+
+🔵 **两个示例图里声锚默认已经接好**（`examples/` 的 `LoadAudio → VAEEncodeAudio → 桥的 voice_anchor`）——
+你要做的只有一件事：**把那个 `LoadAudio` 换成你自己的角色语音**（≥0.9 秒干净语音，情绪与台词相近；
+文件放进 `ComfyUI/input/` 再在下拉里选）。用 `tools/voice_bank.py` 可以从已渲染的段里自动采集。
+
+**接错也不会出坏片 —— 四道兜底**：
+
+| 情形 | 行为 |
+|---|---|
+| **不想用 / 没准备好语音** | **把 `voice_anchor` 那根线拔掉** = 逐位同旧版（图与参数都不用改，零迁移成本） |
+| 接了个**没有内容**的锚（全零 / 常量 / 静音 / 含 NaN） | 🔴 **当场报错**（0.6.20 起 fail-closed），报错文案点名原因并告诉你"想关就拔线"——**绝不静默出坏片** |
+| 锚比窗口短 | 取锚全长 + `report` 提醒（建议 ≥0.9 秒） |
+| `pin_audio=False` | 声锚被忽略，`report` 里写明（降级可见） |
+
+⚠️ **一个常见的错接**：**别把 `context_latent` 接到 `voice_anchor`** —— 那是「上一段的 AV latent」，
+拿它当锚等于把锚源设回默认的「上一段音频尾」⇒ **看着像开了，其实是空转**（还会绕过音频栅格对账）。
+锚源必须是**本段说话人**的语音。
+
+实现 / 局限（BGM、情绪、一段多人）详见
 [`docs/07-chain.md`](docs/07-chain.md) §声锚；配套自动采集器 `tools/voice_bank.py`
 （可选 ASR 台词守卫，没装 funasr 也能用）。
 
@@ -196,7 +212,7 @@ ComfyUI-H3-Latent-Relay/
 ├── v3/                    # V3 外壳（io.ComfyNode + comfy_entrypoint）；V1 走 NODE_CLASS_MAPPINGS
 ├── exp/history_anchor_v2/ # E1' 时不变历史锚（顶层 import ⇒ 必需；无 _tiha.json 即不生效）
 ├── web/                   # 前端 JS：🧩 拼接按钮、Chain 面板、`run_id` 一处改全组（画布用；脚本用户见 docs/10 §7.4）
-├── examples/              # 两个可直接打开的工作流：最小续接（19 节点）与全流程（45 节点）
+├── examples/              # 两个可直接打开的工作流：最小续接（21 节点）与全流程（47 节点）
 ├── docs/                  # 深度文档 01–10（原理 / 参数 / 采样链 / 画布 / 排障 / 脚本 / Chain / 测试 / 观测 / 音频）
 ├── tests/                 # 离线自测（零 GPU）：447 项断言 + V3 逐字段 + 词分发纯函数
 ├── tools/                 # 自检 / 取证 / 拼接 CLI / 打包器（含英文文档同步闸 en_sync.py）
@@ -274,5 +290,5 @@ ComfyUI-H3-Latent-Relay/
 | [`RELEASING.md`](RELEASING.md) | **发布规范（唯一真相源）**：GitHub + Comfy Registry 两个渠道必须成对、一条命令 `tools/release.py`、失败处置、密钥纪律 |
 | [`SECURITY.md`](SECURITY.md) | 密钥 / 依赖 / 网络行为声明 |
 | [`tools/README.md`](tools/README.md) | 十三个脚本的用途与期望值（九个自检/取证 + 拼接 CLI + 打包器 + **发布器** + **声库采集器**） |
-| [`examples/README.md`](examples/README.md) | 两份可直接打开的工作流（最小续接 19 节点 / 全流程 45 节点）· 生成器 |
+| [`examples/README.md`](examples/README.md) | 两份可直接打开的工作流（最小续接 21 节点 / 全流程 47 节点）· 生成器 |
 | [`README_EN.md`](README_EN.md) | **英文精简版**（安装 / 接线 / 节点 / 参数 / 排障 / FAQ）—— 深度推导一律外链本文件与 `docs/` |
