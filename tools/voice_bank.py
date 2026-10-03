@@ -277,15 +277,39 @@ _SELFTEST_CASES = [
     ("[Shot 1] <Subject 1> 走:<d>[zh]甲</d> [Shot 2] <Subject 2> 说:<d>[zh]乙</d>", ["Subject 1", "Subject 2"]),
 ]
 
+#: 台词守卫的窗口定位用例：``(ref, hyp, 期望是否通过, 说明)``
+#: 🔴 关键在**第 3 条** —— 台词念错/不在转写里时必须**仍然拒**（原功能不放松）。
+_BW_CASES = [
+    ("我拿的只看了一眼", "账本少了三页我拿的只看了一眼都别解释先听我说", True,
+     "多人段里定位单句（修前 CER=1.75 被误拒）"),
+    ("丙丁", "甲乙丙丁戊己", True, "窗口滑到中间命中"),
+    ("我拿的只看了一眼", "账本少了三页都别解释先听我说", False,
+     "🔴 台词不在转写里 ⇒ 必须拒（守卫生效）"),
+    ("甲乙丙", "甲乙丙", True, "整段就是这一句"),
+    ("完全不一样的台词内容", "账本少了三页我拿的只看了一眼", False,
+     "🔴 内容不符 ⇒ 必须拒"),
+]
+
 
 def _selftest() -> int:
     bad = 0
+    print("① 说话人解析（取每个 <d> 最近的前驱说话人标记，按开口顺序去重）")
     for txt, want in _SELFTEST_CASES:
         got = speakers_in_order(txt)
         ok = got == want
         bad += 0 if ok else 1
         print("  [%s] %-52s → %s" % ("OK" if ok else "FAIL", txt[:52], got))
-    print("  自检：%d/%d 通过" % (len(_SELFTEST_CASES) - bad, len(_SELFTEST_CASES)))
+    print("② 台词守卫的窗口定位（多人段里找单句；**原功能不放松**）")
+    for ref, hyp, want_ok, why in _BW_CASES:
+        c, i0, i1 = best_window_cer(ref, hyp)
+        got_ok = c <= ASR_CER_MAX
+        ok = got_ok == want_ok
+        bad += 0 if ok else 1
+        print("  [%s] %-30s vs %-38s CER=%.2f 命中「%s」 期望%s ⇒ %s"
+              % ("OK" if ok else "FAIL", ref[:30], hyp[:38], c, hyp[i0:i1][:20],
+                 "过" if want_ok else "拒", why))
+    n = len(_SELFTEST_CASES) + len(_BW_CASES)
+    print("  自检：%d/%d 通过" % (n - bad, n))
     return 0 if bad == 0 else 1
 
 
@@ -299,12 +323,59 @@ def _asr_model():
     return _ASR_SINGLETON
 
 
-def _asr_verify(mp4: str, line: str):
-    """台词守卫：funasr 转写整段 → 与台词原文比对 CER。
+def best_window_cer(ref: str, hyp: str):
+    """在 ``hyp`` 里找与 ``ref`` 最贴的**一段连续窗口**，返回 ``(cer, i0, i1)``。
 
-    返回 ``(ok, cer, span_seconds 或 None, 转写文本)``。
-    span = 台词第一个字起点 → 最后一个字终点（模型给的是 10ms 粒度），
-    能拿到 ⇒ 精确按台词裁锚；拿不到 ⇒ None（调用方回退能量法）。
+    🔴 为什么必须按窗口找（2026-10-03 实测踩到）：**一段里可能有多个人说话**，
+    ASR 转写必然把**别人的台词**也转进来 ⇒ 拿"整段 vs 单句"比 CER 会把**合格**语音判成不合格
+    （实测：三句连读 ⇒ `CER=1.75 > 0.35` ⇒ 锚被拒，**多说话人段永远采不出锚**）。
+
+    口径：窗口长度固定 = ``len(ref)``（长度差本身就是编辑距离的一部分）。
+    在 ``hyp`` 上滑一遍取 CER 最小的那个窗口 ⇒ 该窗口就是这句台词在整段里的位置。
+
+    ✅ **原功能不放松**：台词念错 / 胡言乱语时，**任何**窗口对 ``ref`` 的 CER 都高
+    ⇒ 仍然被拒（调用方判 ``cer <= ASR_CER_MAX``）。
+    """
+    if not ref or not hyp:
+        return 1.0, 0, 0
+    n = len(ref)
+    best, bi = None, 0
+    for i in range(max(1, len(hyp) - n + 1)):
+        c = cer(ref, hyp[i:i + n])
+        if best is None or c < best:
+            best, bi = c, i
+    return best, bi, min(bi + n, len(hyp))
+
+
+def _voiced_spans_in(mp4: str, w0: float, w1: float):
+    """**只在 [w0, w1] 这段窗口内**找连续有声区间（返回绝对秒）。
+
+    为什么需要它：多说话人段里 ``longest_voiced_span(mp4)`` 取的是**整段**最长有声段
+    ⇒ 很可能是**别人**的台词 ⇒ 拿它去修本句的尾巴 = 修到别人身上。
+    """
+    raw = _load_mono(mp4)
+    try:
+        x = _read_raw(raw)
+    finally:
+        try:
+            os.remove(raw)
+        except OSError:
+            pass
+    a0, a1 = max(0, int(w0 * SR)), min(len(x), int(w1 * SR))
+    seg = x[a0:a1]
+    w, hop = int(WIN_S * SR), int(HOP_S * SR)
+    if len(seg) < w:
+        return []
+    amps = [float(abs(seg[i:i + w]).mean()) for i in range(0, len(seg) - w, hop)]
+    return [(w0 + s, w0 + t) for s, t in _voiced_spans([a > VOICED_AMP for a in amps], HOP_S)]
+
+
+def _asr_verify(mp4: str, line: str):
+    """台词守卫：funasr 转写整段 → **按窗口定位这一句** → 与台词原文比 CER。
+
+    返回 ``(ok, cer, span_seconds 或 None, 整段转写, 命中窗口文本)``。
+    span = 命中窗口首字起点 → 末字终点（模型给的是 10ms 粒度）；
+    拿不到（逐字时间戳与转写字符对不上）⇒ None，调用方回退能量法。
     CER > ASR_CER_MAX ⇒ 不通过（模型念了别的东西/胡言乱语 ⇒ 绝不给它当锚）。
     """
     import os
@@ -319,14 +390,15 @@ def _asr_verify(mp4: str, line: str):
             pass
     res = (r or [{}])[0]
     text = "".join(x.get("text", "") for x in (r or [])).replace(" ", "").strip()
-    ts = res.get("timestamp")
+    ts = res.get("timestamp") or []
+    hyp, ref = norm_text(text), norm_text(line)
+    c, i0, i1 = best_window_cer(ref, hyp)
     span = None
-    if ts:
-        # timestamp = [[start_ms, end_ms], ...] 逐字 ⇒ 首字起点~末字终点
-        span = (ts[0][0] / 1000.0, ts[-1][1] / 1000.0)
-    ref = norm_text(line)
-    c = cer(ref, norm_text(text)) if (ref and text) else 1.0
-    return (c <= ASR_CER_MAX), c, span, text
+    if ts and len(ts) == len(text):
+        # ⚠ 逐字时间戳必须与转写字符**一一对应**才敢用；对不上 ⇒ 不给 span（回退能量法），
+        #   绝不用错位的时间戳去裁锚。
+        span = (ts[i0][0] / 1000.0, ts[min(i1, len(ts)) - 1][1] / 1000.0)
+    return (c <= ASR_CER_MAX), c, span, text, (hyp[i0:i1] if hyp else "")
 
 
 def norm_text(s: str) -> str:
@@ -377,7 +449,7 @@ def collect(mp4: str, name: str, bank_dir: str, force: bool = False,
     asr_span = None
     if line:
         try:
-            ok, c, asr_span, text = _asr_verify(mp4, line)
+            ok, c, asr_span, text, hit_txt = _asr_verify(mp4, line)
         except Exception as e:
             # ⚠ 真回退：守卫**不可用**（funasr 缺失等）≠ 守卫**不通过**。
             # 这里必须继续走能量法；只有 ASR 跑通且 CER 超标才拒收。
@@ -386,19 +458,23 @@ def collect(mp4: str, name: str, bank_dir: str, force: bool = False,
             line = ""
         else:
             if not ok:
-                return None, ("🔴 台词守卫不通过：CER=%.2f > %.2f（转写「%s」vs 期待「%s」）"
-                              "⇒ 语音不合格，绝不入锚" % (c, ASR_CER_MAX, text[:40], line[:40]))
+                return None, ("🔴 台词守卫不通过：CER=%.2f > %.2f"
+                              "（最贴的一段窗口「%s」vs 期待「%s」；整段转写「%s」）"
+                              "⇒ 语音不合格，绝不入锚"
+                              % (c, ASR_CER_MAX, hit_txt[:30], line[:30], text[:40]))
 
     if asr_span:
         t1 = asr_span[1]
         t0 = max(asr_span[0], t1 - ANCHOR_MAX_S)
         # 🔴 ASR 窗 ∩ 能量证据：实测 funasr 时间戳会带**尾随噪声词**
         #    （S1 末字"止于 4.17s"而能量人声止于 1.90s ⇒ 直接裁 ⇒ 尾部全静音）。
-        #    能量证据（同一段的有声检测）在人声终点上更可信 ⇒ 取两者交集。
-        _hit = longest_voiced_span(mp4)
-        if _hit is None:
-            return None, "ASR 认为有台词但能量检测全静音 ⇒ 数据矛盾，不采集"
-        _e1 = _hit[1]
+        #    能量证据在人声终点上更可信 ⇒ 取两者交集。
+        #    ⚠️ 能量证据必须**限定在本句窗口内**取：多说话人段里整段最长有声段
+        #       很可能是**别人**的台词（2026-10-03 修）。
+        _spans_in = _voiced_spans_in(mp4, asr_span[0], asr_span[1])
+        if not _spans_in:
+            return None, "ASR 认为有台词但本句窗口内能量检测全静音 ⇒ 数据矛盾，不采集"
+        _e1 = _spans_in[-1][1]
         if t1 > _e1 + 0.10:
             t1 = _e1 + 0.05            # 收到能量证据的人声末尾（留 50ms 余量）
             t0 = max(t0, t1 - ANCHOR_MAX_S)
