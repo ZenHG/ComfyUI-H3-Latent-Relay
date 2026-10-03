@@ -41,6 +41,15 @@
 - `nodes.py` 的 `voice_anchor` tooltip、`README`（中英）、`docs/07` §声锚 新增「一段内多人怎么锚」小节：
   先把**作用域**写死 —— 锚回答的**只有一个问题**「缝上接着说的那个人是谁」，
   锚窗只覆盖**缝区**（~0.9 秒，由 `context_frames` 换算）。
+- `README`（中英）新增 `### 提示词里跟本包有关的两件事`：**只写本包真正管的两件事** ——
+  ① 声锚（含一张「执行靠 `voice_anchor` 输入 / 判据靠提示词 / 段内换人靠 `<Subject N>`」的关系表）；
+  ② 接缝处的台词时机三件纪律（段首缓冲 / 台词安全时刻 / 末帧锚链），机制与公式指向 `docs/06` 不重复。
+  ⚠️ **通用出词方法论（最小格式结构、一镜到底、非近景人脸、正向描述、正文语种、段长）不进 README** ——
+  那是出词侧的职责，不是本包的；混进来会让读者分不清"哪些是本包管的"。
+  📌 **最小格式的权威定义**（别记错）：`subject_definitions` + 正文（`[Shot N]` 直接跟在后面）
+  + 【项目影像规格】 + `overall_soundscape` + `non_diegetic_music`；**砍掉的是**
+  `summary` / `retention_analysis` / `detailed_description` 三个标签
+  （判据 = 这三个标签都不出现 ⇒ 最小格式，见 `check_h3_prompts.py` 的 `MINIMAL`）。
 
 ### 三条规则（可由 prompt 机检，不用猜）
 
