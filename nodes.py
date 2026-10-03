@@ -2113,9 +2113,53 @@ class H3RelayAudioSeam:
                                "   **主防线是 `patch_seconds ≤ 1.2`**（对齐出词侧段首留白纪律）。\n"
                                "   详见 docs/10 §7.3.1「台词保护：缩短 patch 才是主防线」。",
                 }),
+                "declick_ratio": ("FLOAT", {
+                    "default": CORE.AUDIO_DECLICK_RATIO, "min": 0.0, "max": 50.0, "step": 0.5,
+                    "tooltip": "【组 4 · 孤立瞬态抑制】**判据：局部峰值 / 背景底噪 的倍数**。\n"
+                               "0 = 关（逐位直通）。建议 4.0。\n"
+                               "做什么：掐掉「**背景极静处**冒出来的一声短脉冲」（听感像无缘无故的「滴」）。\n"
+                               "🔴 判据判的是**它周围有多静**（背景 < `declick_quiet_dbfs`），不是它本身多响 ——\n"
+                               "   因为语音的辅音（p/t/k）也是短促脉冲，只看响度会连台词一起掐。\n"
+                               "⚠️ 只动那一处（两端各 2ms 淡变），其余内容逐位不动；长度守恒。\n"
+                               "⚠️ 报告会打印「抑制了几处 + 位置 + 抑制前后量级」——没动就不报。",
+                }),
+                "declick_quiet_dbfs": ("FLOAT", {"advanced": True,
+                    "default": CORE.AUDIO_DECLICK_QUIET_DBFS,
+                    "min": -80.0, "max": -20.0, "step": 1.0,
+                    "tooltip": "【组 4 · 孤立瞬态抑制】**背景必须低于这个电平**（dBFS）才动手。\n"
+                               "默认 −50。实测：「滴」处背景 −56 dBFS ⇒ 命中；\n"
+                               "语音辅音处背景 ≈ −35 dBFS ⇒ 不命中（这就是它不误伤台词的原因）。\n"
+                               "⚠️ 调高（如 −40）会更激进、可能碰到轻辅音；调低（如 −60）更保守。",
+                }),
+                "declick_max_len_ms": ("FLOAT", {
+                    "default": CORE.AUDIO_DECLICK_MAX_LEN_MS,
+                    "min": 1.0, "max": 200.0, "step": 1.0,
+                    "tooltip": "【组 4 · 孤立瞬态抑制】**多宽算「一声」**（毫秒）。默认 50。\n"
+                               "🔴 这是**误伤 / 漏治的取舍旋钮** —— 按你的素材自己选：\n"
+                               "    · 10  ≈ 严格：只治 ≤10ms 的极短脉冲（实测「滴」宽 **8ms** ⇒ 仍治得到）；\n"
+                               "    · 50  = 宽泛（默认）：连 15~30ms 的「嗒 / 啪」也治，\n"
+                               "            **代价**是可能削到真实的短促音效（如碰杯、按键）；\n"
+                               "    · 100+ = 激进：几乎任何短促瞬态都治，不建议（容易削内容）。\n"
+                               "⚠️ 旧版本这个值写死 **2ms** ⇒ 把 8ms 的「滴」判成「不是一声」**直接漏掉**\n"
+                               "   （这才是「还是有滴」的主因，已修）。\n"
+                               "⚠️ 三道闸里 `declick_ratio` / `declick_quiet_dbfs` 才是主角，本值只是安全阀。",
+                }),
+                "cut_head_frames": ("INT", {"advanced": True,
+                    "default": 0, "min": 0, "max": 9999, "step": 1,
+                    "tooltip": "【组 4 · 孤立瞬态抑制】**本段会被裁掉多少帧**（= 桥的 `context_frames`）。\n"
+                               "🔴 为什么需要：本节点工作在**未裁**音频上（上游 `VAEDecodeAudio` 直连），\n"
+                               "   而**产物是裁后的**（`Trim AV` 在它下游）⇒ 「裁出来的孤立峰」在本节点眼里\n"
+                               "   **不孤立**（前面还有上一段的语音 ⇒ 背景不静 ⇒ 不命中），\n"
+                               "   但在成片里它前面什么都没有 ⇒ 听感就是「无缘无故一声滴」。\n"
+                               "   填了它，抑制器就会把该处当「新文件头」来判 ⇒ 命中。\n"
+                               "⚠️ 填 0 = 不启用该修正（坐标不齐 ⇒ 段首那个滴治不到）。\n"
+                               "⚠️ 一般由跑批脚本自动填（= 桥的 `context_frames`），不用手改。\n"
+                               "🔴 换算按 **24 fps**（本包 `FPS` 常量）—— 若你的 `Trim AV` 用了别的 fps，\n"
+                               "   请自行折算：`填入值 = 帧数 × 你的fps ÷ 24`。\n"
+                               "   报告里会打印实际使用的换算（`裁帧边界 @x.xxxs`），对不上一眼能看出来。",
+                }),
             },
         }
-
     RETURN_TYPES = ("AUDIO", "STRING", "AUDIO")
     RETURN_NAMES = ("audio", "report", "joined")
     FUNCTION = "seam"
@@ -2178,7 +2222,9 @@ class H3RelayAudioSeam:
              bed_select=CORE.AUDIO_SEAM_BED_SELECT,
              join_curve="qsin", join_prime_ms=CORE.AUDIO_ENCODER_PRIME_MS,
              join_cross_ms=0.0, join_segment_seconds=0.0, join_align_seconds=0.0,
-             patch_guard=True, patch_guard_layers=CORE.AUDIO_SEAM_PATCH_GUARD_LAYERS):
+             patch_guard=True, patch_guard_layers=CORE.AUDIO_SEAM_PATCH_GUARD_LAYERS,
+             declick_ratio=4.0, declick_quiet_dbfs=-50.0, cut_head_frames=0,
+             declick_max_len_ms=None):
         me = _audio_stage_path(run_id, int(stage_index))
         idx = int(stage_index)
         patch = float(patch_seconds or 0.0)
@@ -2214,11 +2260,25 @@ class H3RelayAudioSeam:
                                                      _raw_wf.shape[-1] - _an) if _raw_lead else \
                     _raw_wf[..., _an:]
                 audio = {"waveform": _shaped.to(_raw_dt), "sample_rate": _raw_sr}
+        # 🆕 组 4 · 孤立瞬态抑制（declick，2026-10-03）
+        # 动机：模型会在**无台词区**生成孤立短脉冲（实测段2 @0.930s，峰值 0.0095 = −40 dBFS，
+        #   而背景仅 −60 dBFS ⇒ 在安静背景里突出成「无缘无故的一声滴」，GG 耳检定性为伪影）。
+        # 🔴 与 `patch_seconds` 的关系：**独立但必须排在 patch 之后**（2026-10-04 修正）：
+        #   patch 是「整段替换头部 N 秒」⇒ 若 declick 先做，**它对头部的处理会被 patch 整段盖掉**
+        #   （实测「滴」在 0.930s，正好落在 patch 窗内 ⇒ 白做，且.report 看着像治了）。
+        #   ⇒ 两个分支都在**最终送出的那份音频**上做（直通档 = `audio`；补丁档 = `out`）。
+        #   实现在 `CORE.declick_on_segment`（核心层，可单测）。
         if idx <= 0 or patch <= 0.0:
+            # 政策（范围闸 / fallback / 裁帧边界换算）在 `CORE.declick_gate`，
+            # 这里只接线 —— 目的是让那三条分支进得了单测（原先在闭包里是零覆盖）。
+            audio, _dc_rep = CORE.declick_on_segment(
+                audio, declick_ratio, declick_quiet_dbfs, cut_head_frames,
+                declick_max_len_ms)
+            _dc_note = ("\n" + _dc_rep) if _dc_rep else ""
             CORE.save_audio(audio, me, note=note)
             why = "第 1 段无缝可补" if idx <= 0 else "补丁关（patch_seconds=0）"
-            line = ("[H3 Relay] 音频缝：%s → 直通｜本段音频已落盘（供后段当床源）：%s"
-                    % (why, me))
+            line = ("[H3 Relay] 音频缝：%s → 直通｜本段音频已落盘（供后段当床源）：%s%s"
+                    % (why, me, _dc_note))
             _j, _jn = self._joined(run_id, idx, join_curve, join_prime_ms, join_cross_ms,
                                   join_segment_seconds, join_align_seconds)
             if _jn.startswith("（joined"):
@@ -2267,8 +2327,13 @@ class H3RelayAudioSeam:
                                          target_audio=target,
                                          stage_index=idx, patch_guard=bool(patch_guard),
                                          patch_guard_layers=int(patch_guard_layers or 0))
+        # 🔴 declick 排在 patch **之后**：patch 会整段替换头部 ⇒ 先做 declick 会被它盖掉。
+        out, _dc_rep = CORE.declick_on_segment(
+            out, declick_ratio, declick_quiet_dbfs, cut_head_frames,
+            declick_max_len_ms)
+        _dc_note = ("\n" + _dc_rep) if _dc_rep else ""
         CORE.save_audio(out, me, note=note)
-        line = rep + ("｜已落盘（供后段当床源）：%s" % me)
+        line = rep + ("｜已落盘（供后段当床源）：%s" % me) + _dc_note
         if target is None:
             line += "｜ ⚠ 上一段音频文件缺失 ⇒ 电平目标退回床源尾部（不够准）"
         _j, _jn = self._joined(run_id, idx, join_curve, join_prime_ms, join_cross_ms,

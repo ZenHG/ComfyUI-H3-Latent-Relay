@@ -7,7 +7,7 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 
 | 项 | 值 |
 |---|---|
-| 版本 | **0.6.21**（8 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
+| 版本 | **0.6.22**（8 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
 | 许可 | **MIT**（第三方出处见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)） |
 | 宿主 | **ComfyUI ≥ 0.35.0，且带 MiniMax-H3 支持**（宿主自身为 GPL-3.0，见 §许可与出处） |
 
@@ -224,6 +224,17 @@ python tools/voice_bank.py advise --bank <声库> --prompt-file 段N.md --prev-f
 | 锚比窗口短 | 取锚全长 + `report` 提醒（建议 ≥0.9 秒） |
 | `pin_audio=False` | 声锚被忽略，`report` 里写明（降级可见） |
 
+**声锚的局限（逐条说清，别踩）**：
+
+| 局限 | 说明 |
+|---|---|
+| 🔴 **占用 1 个「音频参考」额度** | 官方参考节点 `MiniMaxH3ReferenceToVideo` 的 `ref_audios` 上限是 **3 个**；本包在 `stage_index ≥ 1` 时**恒定占 1 个**（声锚尾窗 **或** 上一段音频尾，二选一）。你把这 3 个填满 ⇒ 模型侧看到 **4 个**音频参考 —— 模型**不报错**（它对个数不做校验），但**超出官方口径、我们未实测**。⚠️ **本包这 1 个没有「完全不用」的开关**（不接声锚时用的是上一段音频尾）⇒ 要腾额度只能**自己减少参考节点的 `ref_audio` 槽位**。画布上桥节点的**标题**会直接挂警告，`report` 里给权威数字。详见 [`docs/07`](docs/07-chain.md) §音频参考额度 |
+| **锚替换整个音频尾窗** | 尾窗里的 BGM / 环境垫乐也会被换掉。有垫乐就**把垫乐混进声锚**再接 |
+| **音色 / 语速 / 情绪会被部分钉住** | 锚不是「只偷音色」—— 情绪与节奏也会跟随。请选与目标台词**情绪相近**的干净片段 |
+| **一段内多人只锚第一个** | `audio_ref` 只有一个窗 ⇒ 只锚「缝上接着说的那个人」；段内后续换人靠 prompt 的 `<Subject N>` |
+| **声锚时长** | 尾窗要 0.925 秒 ⇒ 锚 **≥0.9 秒**（短了按全长取用并在 `report` 提醒）；建议 1–4 秒 |
+| **`pin_audio=False` 时被忽略** | `report` 里写明（降级可见，不静默） |
+
 ⚠️ **一个常见的错接**：**别把 `context_latent` 接到 `voice_anchor`** —— 那是「上一段的 AV latent」，
 拿它当锚等于把锚源设回默认的「上一段音频尾」⇒ **看着像开了，其实是空转**（还会绕过音频栅格对账）。
 锚源必须是**本段说话人**的语音。
@@ -237,7 +248,7 @@ python tools/voice_bank.py advise --bank <声库> --prompt-file 段N.md --prev-f
 python tools/voice_bank.py advise --bank <声库> --prompt-file 段N.md --prev-file 段N-1.md
 ```
 
-实现 / 局限（BGM、情绪、一段多人）详见
+实现细节与更多说明（**音频参考额度**、BGM、情绪、一段多人）详见
 [`docs/07-chain.md`](docs/07-chain.md) §声锚；配套自动采集器 `tools/voice_bank.py`
 （可选 ASR 台词守卫，没装 funasr 也能用）。
 
@@ -256,7 +267,7 @@ ComfyUI-H3-Latent-Relay/
 ├── web/                   # 前端 JS：🧩 拼接按钮、Chain 面板、`run_id` 一处改全组（画布用；脚本用户见 docs/10 §7.4）
 ├── examples/              # 两个可直接打开的工作流：最小续接（21 节点）与全流程（47 节点）
 ├── docs/                  # 深度文档 01–10（原理 / 参数 / 采样链 / 画布 / 排障 / 脚本 / Chain / 测试 / 观测 / 音频）
-├── tests/                 # 离线自测（零 GPU）：447 项断言 + V3 逐字段 + 词分发纯函数
+├── tests/                 # 离线自测（零 GPU）：483 项断言 + V3 逐字段 + 词分发纯函数
 ├── tools/                 # 自检 / 取证 / 拼接 CLI / 打包器（含英文文档同步闸 en_sync.py）
 ├── licenses/              # 随包分发的第三方许可全文
 ├── dist/                  # 打包器的产出（最小分发集 + zip，不入库）
@@ -324,7 +335,7 @@ ComfyUI-H3-Latent-Relay/
 | [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md) | **完整排障表** · **常见疑问 FAQ** · 工作流文件自检 · API 提交 |
 | [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md) | 出词纪律：段首缓冲 · 台词安全时刻 · 末帧锚链 · 音频缝配套 |
 | [`docs/07-chain.md`](docs/07-chain.md) | Chain 自动连跑（换词 / 拼片 / 断点续跑） |
-| [`docs/08-testing.md`](docs/08-testing.md) | 离线自测：29 组断言明细（447 项）· 工具清单 |
+| [`docs/08-testing.md`](docs/08-testing.md) | 离线自测：31 组断言明细（483 项）· 工具清单 |
 | [`docs/09-metrics.md`](docs/09-metrics.md) | 观测量参考区间（DTW 残留 / 外观漂移）· 怎么自校准 |
 | [`docs/10-audio-seam-and-concat.md`](docs/10-audio-seam-and-concat.md) | **音频缝与多段拼接**：缝的口径与调参指南 · **台词保护** · 判据能力边界 · 音轨档位 · 边车 · **不开画布的脚本用法** |
 | [`CHANGES.md`](CHANGES.md) | 版本史与每次实测证据 |

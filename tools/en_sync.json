@@ -8,8 +8,8 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "condensed",
-          "h_en": "b4c607e05097acbc",
-          "h_src": "a44c174e98af5aa4",
+          "h_en": "763b45411c033406",
+          "h_src": "0932a9348807554b",
           "seeded": "by-position"
         },
         {
@@ -40,16 +40,16 @@
           "zh": "使用方法",
           "en": "Usage",
           "mode": "condensed",
-          "h_en": "67a3225fd5701eee",
-          "h_src": "1860ee7799d74c54",
+          "h_en": "1c9c9ccc17b12b3c",
+          "h_src": "066b4f8856d3f6da",
           "seeded": "by-position"
         },
         {
           "zh": "目录结构",
           "en": "Repository layout",
           "mode": "condensed",
-          "h_en": "c625d72aeb3a3af1",
-          "h_src": "ac443c873667f059",
+          "h_en": "8438c87ba7db3892",
+          "h_src": "cf8620cd667cc6a7",
           "seeded": "by-position"
         },
         {
@@ -72,14 +72,14 @@
           "zh": "文档索引",
           "en": "Documentation index",
           "mode": "condensed",
-          "h_en": "789f8a552009c809",
-          "h_src": "36d951718f553e19",
+          "h_en": "39dfb5367f3a67c3",
+          "h_src": "f1c95d9b6d7490ed",
           "seeded": "by-position"
         }
       ],
       "acks": [],
-      "stamped": "2026-10-03",
-      "src_sha": "8fa0547b4d6669e3"
+      "stamped": "2026-10-04",
+      "src_sha": "4939b7a8688329e4"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -166,7 +166,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-03",
+      "stamped": "2026-10-04",
       "src_sha": "997bb34f6092cf08"
     },
     "docs/02-parameters.md": {
@@ -184,14 +184,14 @@
           "zh": "参数",
           "en": "Parameters",
           "mode": "full",
-          "h_en": "d5b7575ab628ec40",
-          "h_src": "fc19903c67a42b50",
+          "h_en": "8fffb42806802fa8",
+          "h_src": "e7ec87f5c91a026f",
           "seeded": "by-position"
         }
       ],
       "acks": [],
-      "stamped": "2026-10-03",
-      "src_sha": "9e7c5877c65898d2"
+      "stamped": "2026-10-04",
+      "src_sha": "26c7e3dba26d02cb"
     }
   }
 }

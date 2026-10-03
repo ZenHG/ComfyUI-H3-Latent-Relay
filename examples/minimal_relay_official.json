@@ -1642,6 +1642,38 @@
           "widget": {
             "name": "patch_guard_layers"
           }
+        },
+        {
+          "name": "declick_ratio",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "declick_ratio"
+          }
+        },
+        {
+          "name": "declick_quiet_dbfs",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "declick_quiet_dbfs"
+          }
+        },
+        {
+          "name": "declick_max_len_ms",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "declick_max_len_ms"
+          }
+        },
+        {
+          "name": "cut_head_frames",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "cut_head_frames"
+          }
         }
       ],
       "outputs": [
@@ -1682,6 +1714,10 @@
         0.0,
         0.0,
         true,
+        0,
+        4.0,
+        -50.0,
+        50.0,
         0
       ]
     },

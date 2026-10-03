@@ -13,7 +13,7 @@ python tests/test_relay_core.py
 `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。也支持 `pytest tests/`
 （找不到 ComfyUI 根目录时自动 skip，不会崩）。
 
-**447 项断言，零 GPU、不加载模型**，覆盖二十九个方面：
+**483 项断言，零 GPU、不加载模型**，覆盖三十一个方面：
 
 ### 计数与声明的纪律（原 README §8 的两条注，随瘦身搬入）
 
@@ -22,7 +22,7 @@ python tests/test_relay_core.py
   **其余一律写「失败 0」** —— 写死数字**必然漂移**（2026-09-25 实测：同一个数字在四处声明，
   只有一处有机检，另外两处漂了很久没人发现）。
 - ⚠️ **写更正说明时别复述旧的错误数字** —— 那会污染上面这些机检的正则（踩过）。
-- 本文这行的「447 项断言 / 二十九个方面」+ 下面表格的 `| 21 |` 行由 **H3c** 机检（2026-09-30 起，
+- 本文这行的「483 项断言 / 三十一个方面」+ 下面表格的 `| 21 |` 行由 **H3c** 机检（2026-09-30 起，
   README 瘦身后判据从 README 移到本文件）。
 
 | 组 | 覆盖 |
@@ -56,11 +56,15 @@ python tests/test_relay_core.py
 | 27 | **画质域 AV latent 分块放大（0.6.8）**：块数→块长换算（ceil 不多出空块）、spans 无缝覆盖（首块 0 起 / 末块 T 止 / 相邻块必重叠或正好平铺）、`overlap=0` 平铺、**每块 ≥ 2·overlap+1 的 fail-closed**（超限直接报错并给出**最大合法块数**，绝不偷改参数）、**分块 == 整段**（max\|Δ\| = 5.96e-08）、`chunks=1` 与整段放大逐位相同、**时间维一帧不许变**、秩不对/拿错尺子一律 raise、上游口径常量（`overlap=5` / 默认块长 32）不许漂移；**适配层 5 条**：AV 打包 latent 拆包→逐块→回包、音频流原样带回不碰、NestedTensor 输入不许炸、报告字段（请求块数→实际块数/T/显存峰值/耗时）、未装上游时报可照做的安装指引（不静默降级）。fake 放大器 = nearest×2（逐帧独立 ⇒ 有解析解），零 GPU |
 | 28 | **音频出口 dtype 契约（0.6.11）**：`audio_to_fp32` 的零拷贝快路径（已是 f32 ⇒ 返回原对象）/ fp16·bf16·f64 一律收敛 f32 且逐位无损 / 键与形状不动 / `None` 直通；**事故复现锁**（逐字模拟 `VHS_VideoCombine` 的 `-f f32le` 封装路：原始 dtype 进去必掉到 <1e-6 = 编码后数字静音，过本包出口则逐位还原）；节点出口契约（「Trim AV」两条返回路 + 「Audio Seam」两条返回路的 AUDIO 都是 f32，而**落盘的 PCM 边车保持 fp16**） |
 | 29 | **声锚 `voice_anchor`（0.6.19 新增 / 0.6.20 补内容守卫）**：不接 ⇒ 逐位不变（回归）；纯音频张量（`VAEEncodeAudio`）与 AV 联合（NestedTensor，取第 2 条流）**两种形态**都取到尾窗；`audio_ref` 与「钉住的音频前缀」**同源**（只改一处会打架）；锚短于窗 ⇒ 全长取用 + `report` 提醒；`pin_audio=False` ⇒ 忽略并写明；🔴 **内容守卫（0.6.20）**：尾窗含 `NaN/Inf`、或**时域标准差 < `1e-2`**（常量场 = 静音/空锚）⇒ **直接 raise**（文案点名「全为零」/「常量」），且**真实尺度不被误伤**（反向自证：实测下限附近仍通过）。判据依据 = 归一化 latent 空间里「有没有内容」看**方差**不看幅值；**零 ≠ 静音**（零是 VAE 的**均值点**） |
+| 30 | **孤立瞬态抑制 declick（0.6.21 新增）**：`ratio=0` ⇒ 逐位直通（老图不受影响）；段首孤立峰与「静背景里的一声滴」⇒ **压到邻域背景电平**（不挖静音洞）；台词区**逐位不动**；三种形状 `[T]`/`[1,T]`/`[1,1,T]` 长度守恒且形状还原；dtype 保真（fp16 进 fp16 出）；范围闸外的峰不许碰；🔴 **裁帧边界**（本节点工作在未裁音频上、产物是裁后的）⇒ 边界必须淡入、且边界之后的峰**仍在范围内**被命中（范围 fallback 从**边界**起算 —— 旧口径从头算 ⇒ pin=22 帧时治不到真凶，已用一条反向断言锁住）；`limit_n=0` 不许静默失效；全零 ⇒ 无事件；🔴 **节点层政策**（`declick_gate`：台词起点 / 24fps 裁帧边界 / fallback 补偿，2026-10-04 从 `nodes.py` 闭包搬入 ⇒ 从**零覆盖**变成 6 条断言，判据与宿主实测的 `范围 = 前 1.408s` 逐字对账）；🔴 **与 patch 的顺序**（先 patch 后 declick ⇒ 床源换进来的内容也会被治，反之既被 patch 盖掉、又从没被 declick 看过 ⇒ 三条断言锁死） |
+
+| 31 | **音频参考额度（0.6.22）**：官方 `ref_audios` 3 槽 vs 本包**恒占 1 个**（声锚 / 上一段尾窗，二选一）⇒ 3+1=4 时 **report 必须点名超上限**（不许静默）；2+1=3 提示「正好用满」；`kind="video"` 的外观锚**不占音频额度**；无官方块 ⇒ 0 且不报警 |
 
 ## 前端纯函数的单测（node 跑、零依赖）
 
 ```bash
 node tests/test_prompt_dispatch.mjs      # 期望 35/0
+node tests/test_audio_ref_budget.mjs     # 期望 34/0
 ```
 
 覆盖 `web/` 里**与浏览器跑同一份**的纯函数，外加两组**静态扫描**
@@ -68,6 +72,10 @@ node tests/test_prompt_dispatch.mjs      # 期望 35/0
 
 - `relay_kit_prompt.js` —— `---` 分块边界（两横线不算分隔 / CRLF / 空块丢弃）、
   按段号收集段记录（「同一段重跑不许在成片里算成两段」，且**空洞绝不压实**）；
+- `relay_kit_refs.js`（0.6.22 新增）—— **官方 3 个音频参考槽 vs 本包恒占 1 个**：
+  槽位名识别（🔴 必须认 Autogrow 的前缀形态 `ref_audios.ref_audio_N` —— 不认就是
+  **计数恒 0、警告永不出现的静默失效**）、三态裁决（越界 / 安全 / **未知**，未知不许退化成 0）、
+  标题后缀**幂等**（状态来回切也不残留），并静态扫描「纯模块不许 import `app`／壳不许自己重写判据」；
 - `relay_kit_sync.js`（0.6.19 新增）—— `run_id` 同步的**三态裁决 / 广播规划 / 冲突文案**，
   并**扫 `nodes.py` 反查那张节点表全不全**。手写清单会漏一类，而漏掉的那类是**静默失效**
   —— 这正是 2026-09-30「段号推进漏了音频缝 ⇒ 成片音画错段」那个病；
@@ -82,7 +90,7 @@ node tests/test_prompt_dispatch.mjs      # 期望 35/0
 ## V3 外壳与默认出口（零 GPU、秒级）
 
 ```bash
-COMFYUI_PATH=<根> python tests/test_v3_schema.py        # 能拿到宿主注册表 70/0（8 节点 / 117 个 input）；硬挡 63/0（7 节点 / 104 input）
+COMFYUI_PATH=<根> python tests/test_v3_schema.py        # 能拿到宿主注册表 70/0（8 节点 / 121 个 input）；硬挡 63/0（7 节点 / 108 input）
 COMFYUI_PATH=<根> python tools/assert_default_exit.py   # 期望 4/4
 ```
 
@@ -95,13 +103,13 @@ Combo `options` **全序** / outputs 路数与显示名 / `is_output_node` / 显
 > `import nodes`**。**分岔点不是"宿主 nodes 能不能 import"，而是那个异常是什么类型**：
 > · 拿到宿主注册表（`import nodes` 成功）⇒ 上游不在注册表 ⇒ `_upscaler_cls()` 抛 **RuntimeError**
 >   ⇒ `_upscaler_module()` **捕获它**（**只** `except RuntimeError`）⇒ 退回 `get_filename_list`
->   （宿主自带注册 `latent_upscale_models`）⇒ 不抛 ⇒ **8 节点 / 117 input / 70 项**。
+>   （宿主自带注册 `latent_upscale_models`）⇒ 不抛 ⇒ **8 节点 / 121 input / 70 项**。
 > · `import nodes` 抛 **ImportError**（`sys.modules["nodes"] = None` 这种硬挡）⇒ 类型不是
 >   RuntimeError ⇒ **不吞** ⇒ 穿透 ⇒ INPUT_TYPES 抛 ⇒ 逐节点容错跳过它
->   ⇒ **7 节点 / 104 input / 63 项**。**这是设计内的降级，不是失败。**
+>   ⇒ **7 节点 / 108 input / 63 项**。**这是设计内的降级，不是失败。**
 > · 🔴 `import nodes` 抛 **RuntimeError**（**CI 就是这种**：宿主 import 链里 `torch.cuda` 报
 >   `Found no NVIDIA driver on your system`）⇒ **被吞** ⇒ INPUT_TYPES 成功
->   ⇒ **8 节点 / 117 input / 70 项**（CI 的直跑与"本机"是同一档）。
+>   ⇒ **8 节点 / 121 input / 70 项**（CI 的直跑与"本机"是同一档）。
 >
 > ⇒ 判据由**节点自己的 `INPUT_TYPES()`** 回答（测试的 `2.1`），**不是**由"宿主 nodes 能不能
 >   import"去推 —— 后者在 CI 上会得出**相反**的结论（2026-09-30 实测：探针说"期望 7"、实际 8

@@ -597,6 +597,21 @@ def _partition_anchors(anchors, zone_end):
     return inside, outside
 
 
+def count_official_audio_refs(conditioning) -> int:
+    """数 conditioning 里**已存在的**音频参考块（官方 ``ref_audios`` 通道写进来的）。
+
+    🔴 为什么后端也要数：前端提示只覆盖**画布**用法（脚本提交 / API 用户看不到画布）⇒
+    report 是**权威口径**，前端是**显性补充**。两边说同一件事、数字同源（都按 `kind="audio"` 数）。
+    多个 conditioning 条目时取**最多**的那个（官方节点只写一个条目，取 max 最不容易低估）。
+    """
+    best = 0
+    for _emb, extra in (conditioning or ()):
+        for blk in ((extra or {}).get("minimax_refs") or ()):
+            if isinstance(blk, dict) and blk.get("kind") == "audio":
+                best += 1
+    return best
+
+
 def apply_relay(conditioning, plan: RelayPlan):
     """把续接计划写进 conditioning —— 本包与 ComfyUI 原生协议之间的唯一出口。
 
@@ -637,6 +652,22 @@ def apply_relay(conditioning, plan: RelayPlan):
 
     if plan.audio_ref is not None or plan.anchor_ref is not None:
         refs = [r for r in (plan.audio_ref, plan.anchor_ref) if r is not None]
+        # 📌 音频额度**在注入之前**数（官方块此刻还在 conditioning 里）⇒ 报告里的数字是「本段总共几个」。
+        #    外观锚是 `kind="video"`，不占音频额度 ⇒ 只数 `kind="audio"`。
+        _off = count_official_audio_refs(conditioning)
+        _own = 1 if plan.audio_ref is not None else 0
+        _tot = _off + _own
+        if _tot > AUDIO_REF_OFFICIAL_MAX:
+            plan.notes.append(
+                "🔴 音频参考 **%d 个**，超过官方 `ref_audios` 上限 %d（官方 %d + 本包 %d）。\n"
+                "           模型层不拦（refs 是变长累加），但**超出官方口径、我们未实测** ⇒ "
+                "画面/音色可能与官方建议范围不同。\n"
+                "           要腾额度：把参考节点的 `ref_audio_*` 槽位减下来 —— "
+                "本包这 1 个是**续接音频**（声锚 / 上一段尾窗，二选一，**没有「完全不用」的开关**）。"
+                % (_tot, AUDIO_REF_OFFICIAL_MAX, _off, _own))
+        elif _tot == AUDIO_REF_OFFICIAL_MAX and _own:
+            plan.notes.append("音频参考 %d 个，正好用满官方上限 %d（官方 %d + 本包 %d）。"
+                              % (_tot, AUDIO_REF_OFFICIAL_MAX, _off, _own))
         out = node_helpers.conditioning_set_values(
             out, {"minimax_refs": refs}, append=True
         )
@@ -847,6 +878,47 @@ def trim_audio_head(audio: Any, frames: int, fps: float = FPS) -> Any:
 AUDIO_SEAM_PATCH: float = 0.0    # 头部补丁秒数（0 = 关，逐位直通）
 AUDIO_SEAM_TILE: float = 0.0     # 补丁床瓦片秒数（0 = 整窗直取 N 秒）
 AUDIO_SEAM_FADE: float = 0.25    # 补丁边界交叉淡变宽度（秒）
+#: `declick_transients` 的**范围闸 fallback**（秒）：当调用方拿不到「台词起点」
+#: （`_speech_onset_in_head` 返回 0/None）时退回这个上界。
+#: 依据 = 产线纪律「前 1.2s 无词」（见 `patch_seconds` 的 tooltip）⇒ 1.2s 是安全上界。
+#: 🔴 **绝不能退化成「不限范围」** —— 那会让 declick 扫到台词区（2026-10-03 实测：
+#:    onset=0 ⇒ 出 8 处、台词区峰值被削 4.8%）。
+AUDIO_DECLICK_FALLBACK_S: float = 1.2
+#: 🔴 `declick_gate` 的**裁帧边界保护下界**（秒）：允许动手的范围**至少**要盖过
+#: 「裁帧边界 + 这么长」。理由：接缝那一声「滴」= 裁帧点切断波形 ⇒ 半波形，**它恒在 `cut` 处**。
+#:   而原来的范围闸用「头部首个有声 run」划线，那个 run 在 **pin 区（上一段尾巴）里**
+#:   ⇒ 线被画在 `cut` **之前** ⇒ 滴**被挡在门外、逐位直通**，报告却只写「未命中」（静默漏治）。
+#:   `cut` 之后才是新段内容，「上一段语音在哪」对划这条线没有意义。
+#: 取 0.05s：滴本体 ≤2ms + 两端淡变 2ms ⇒ 富余两个量级；又短到不会伸进新段首句台词。
+#: ⚠️ 若 `cut = 0`（第 1 段 / 未传 `cut_head_frames`）⇒ 本保护**不生效** ⇒ 退回原行为。
+AUDIO_DECLICK_CUT_GUARD_S: float = 0.05
+#: `declick_gate` 探测「台词起点」的窗长（秒）。要够长才覆盖得到起点
+#: （实测本例「滴」0.930s、台词 1.33s ⇒ 3.0s 富余）。短窗 ⇒ 起点测不到 ⇒ 退 fallback。
+#: 2026-10-04 从 `nodes.py` 的闭包搬来（原为硬写 `3.0 * _sr`，无出处）。
+AUDIO_DECLICK_PROBE_S: float = 3.0
+#: 🔵 `declick_transients` 的**算法常量**（不是用户旋钮 —— 用户只碰 `ratio` /
+#: `quiet_dbfs` / `cut_head_frames` 三个）。**2026-10-04 定**：原先这些是函数参数，
+#: 但**没有一个调用方传过** ⇒ 6 个死参数把签名撑到 12 位，读代码的人分不清
+#: 「哪些能调、哪些是算法的一部分」。⇒ 收成常量，签名只留会变的。
+#: 判据（每条都有实测支撑，改动前先看 `declick_transients` 的 docstring）：
+AUDIO_DECLICK_BG_WIN_MS: float = 50.0      # 背景滑窗宽。短窗（5ms）会被事件本身抬高
+AUDIO_DECLICK_BG_PCT: float = 20.0          # 背景取窗内 P20 低分位（长窗 + 低分位才拿得到"安静底"）
+AUDIO_DECLICK_FADE_MS: float = 2.0          # 事件两端淡变宽度
+#: 事件最长（毫秒）= **「多宽算一声」**。🔴 2026-10-04 由 **2.0 放宽到 50.0**：
+#:   实测「滴」宽 **8ms**（峰 −43 dBFS / 背景 −61 dBFS），旧的 2.0 把它判成「不是一声」**直接丢弃**。
+#:   宽度**不是**有效的区分判据（候选越宽越响，想靠它分开滴 / 音效会失败），但也不能设得比「一声」还短。
+#:   50ms = 人耳仍会把一个瞬态听成「一声」的上限；再长就属于内容。
+#:   ⚠️ 真正的把关是 `ratio` 与 `quiet_dbfs` 两个**相对 / 物理量**；本值只是安全阀。
+AUDIO_DECLICK_MAX_LEN_MS: float = 50.0
+AUDIO_DECLICK_MAX_EVENTS: int = 64          # 处理上限（防病态输入把循环拉爆）
+#: 官方 `MiniMaxH3ReferenceToVideo` 的 `ref_audios` 槽数（Autogrow `min=0, max=3`，
+#: 见 `comfy_extras/nodes_minimax_h3.py`）。🔴 **本包在 `stage_index ≥ 1` 时恒定占 1 个**
+#: （`plan.audio_ref`：声锚尾窗 **或** 上一段音频尾，二选一）⇒ 用户把 3 个槽填满时，
+#: 模型侧会看到 **4 个**音频参考。模型层**不拦**（`comfy/ldm/minimax/model.py` 是变长累加、
+#: 不校验个数）⇒ 我们**主动在 report 与前端标题上点明**，不静默超口径。
+AUDIO_REF_OFFICIAL_MAX: int = 3
+AUDIO_DECLICK_RATIO: float = 4.0            # 默认倍数（判据：峰值/背景）
+AUDIO_DECLICK_QUIET_DBFS: float = -50.0     # 默认背景闸（背景必须低于它才动手）
 # 🔴 2026-09-19 真渲染阴性结果后的修法（见 CHANGES「音频缝床声选择」）：
 #   旧行为「取床源全局最静窗」在「环境声 + 音乐」素材上会取到**近乎无内容**的窗
 #   （实测床声 −42 dBFS vs 缝前 −12.8 dBFS）⇒ 补丁本身就是一段更静的东西，
@@ -1548,6 +1620,432 @@ def audio_seam_patch(audio: Any, bed_audio: Any, patch: float = AUDIO_SEAM_PATCH
               total, int(out.shape[-1]), warn, voice_note))
     shaped = out.reshape(*lead, ch, total) if lead else out
     return {"waveform": shaped.to(dtype), "sample_rate": sr}, rep
+
+
+def _declick_envelope(x: Any, w1: int, n1: int) -> Tuple[Any, Any, int]:
+    """① 1ms **最大值**包络 `e` + ② `AUDIO_DECLICK_BG_WIN_MS` 长窗**低分位**底噪 `B`。
+
+    🔴 包络用 `max` 不用 `mean` —— 单样本尖峰会被 mean 抹平（本函数要治的正是 1~2ms 尖峰）。
+    🔴 底噪**必须是「长窗 + 低分位」**：初版用 **5ms 窗的中位** ⇒ 窗里只有 5 个 1ms 样本，
+       而「滴」自己占了 3 个 ⇒ **B 被事件本身抬高**（实测 B=0.00336 而真实底噪 ~0.0015）
+       ⇒ ratio 只有 2.84，**一个都没抓到**（2026-10-03 自测当场抓到）。
+       长窗（50ms）+ 低分位（P20）才能取到「安静底」而不是「被事件污染的中位」。
+
+    返回 `(e, B, half)`（`half` 给裁帧边界的邻域重算用）。
+    """
+    import numpy as np
+    from numpy.lib.stride_tricks import sliding_window_view
+
+    m = (x.mean(dim=0) if int(x.shape[0]) > 1 else x[0]).abs().detach().cpu().numpy()
+    e = m[:n1 * w1].reshape(n1, w1).max(axis=1)
+    half = max(1, int(round(AUDIO_DECLICK_BG_WIN_MS / 2.0)))
+    B = np.percentile(sliding_window_view(np.pad(e, (half, half), mode="edge"),
+                                          2 * half + 1), AUDIO_DECLICK_BG_PCT, axis=-1)
+    return e, B, half
+
+
+def _declick_bg_at_cut(B: Any, e: Any, n1: int, w1: int, half: int,
+                       cut_head_n: Any) -> int:
+    """④b 把**裁帧边界**当「新文件头」重算邻域背景（原地改 `B`）；返回边界样本数 `cut`。
+
+    🔴 为什么必须做：`#931` 工作在**未裁**视图，而**产物是裁后的** ⇒ 「裁出来的孤立峰」在
+       `#931` 眼里**不孤立**（前面还有 pin 的语音 ⇒ 背景不静 ⇒ 不命中），但在成片里它前面
+       什么都没有 ⇒ 听感就是「无缘无故一声滴」。
+       （2026-10-03 实测：节点内坐标 = 产物坐标 + 0.208s = `context_frames/fps`，精确吻合。）
+    做法：在边界处把背景窗**截断**（只往右看），等价于「认为边界左侧不存在」。
+    """
+    import numpy as np
+
+    cut = max(0, int(cut_head_n or 0))
+    cut_idx = cut // w1
+    if cut_idx > 0:
+        for i in range(max(0, cut_idx - half), min(n1, cut_idx + half + 1)):
+            a = max(cut_idx, i - half)
+            b = min(n1, i + half + 1)
+            if b > a:
+                B[i] = float(np.percentile(e[a:b], AUDIO_DECLICK_BG_PCT))
+    return cut
+
+
+def _declick_fade_in_at_cut(x: Any, total: int, cut: int, sr: int) -> Tuple[Any, bool]:
+    """④c 裁帧边界处的**短淡入**（治段首那个「滴」的正解）。返回 `(x, 是否做了)`。
+
+    🔴 链条：`#931` 工作在**未裁**音频上，`Trim AV` 在它下游裁掉 `context_frames` 帧
+       ⇒ **裁帧点落在波形中间** ⇒ 新开头是个「半波形」⇒ 在成片里它前面什么都没有
+       ⇒ 听感就是「无缘无故一声滴」（GG 耳检定性为伪影 ✓）。
+       ⚠️ **不是模型生成的** —— 产物本身已是裁后的（我最初判断成「模型生成」是错的）。
+    🔴 **必须 `clone` 后再写**：`x` 可能**与输入张量共享存储**
+       （`wf.detach().to(torch.float32)` 在 dtype 已匹配时**不复制**）⇒ 原地写会改掉调用方的输入。
+    """
+    if cut <= 0 or cut >= total:
+        return x, False
+    n = min(max(1, int(round(AUDIO_DECLICK_FADE_MS * sr / 1000.0))), total - cut)
+    ramp = torch.linspace(0.0, 1.0, n, device=x.device, dtype=torch.float32)
+    x = x.clone()
+    x[..., cut:cut + n] = x[..., cut:cut + n] * ramp
+    return x, True
+
+
+def _declick_find_events(cand: Any, n1: int, w1: int, sr: int,
+                         max_len_ms: float) -> Tuple[List[Tuple[int, int]], int]:
+    """④ 合并相邻候选成事件；长于 `max_len_ms` 的丢弃（太长就不是「一声」）。
+
+    返回 ``(events, dropped)``：`dropped` = **因超长被丢弃的段数**。
+    🔴 为什么要报它：`ratio` 调得**很小**时，候选会连成**一大片**⇒ 合并成超长段 ⇒ **全被丢** ⇒
+       一个都不治。此时旧行为只在报告里写「未命中」，用户**无从知道**是自己把 ratio 调坏了
+       （2026-10-04 审核实测：`ratio=0.001` ⇒ 命中 0 处，报告却不提任何原因）。⇒ 铁律 15。
+    """
+    events, dropped, i = [], 0, 0
+    while i < n1:
+        if cand[i]:
+            j = i
+            while j + 1 < n1 and cand[j + 1]:
+                j += 1
+            # 🔴 **格数 → 毫秒**：`max_len_ms` 是毫秒，而这里数的是 **1ms 格**
+            #    （`w1 = 0.001*sr`）。直接拿格数与毫秒比（旧写法）在 `sr < 1000` 或将来改包络
+            #    粒度时会**静默错位**（判据变松/变紧都不报错）。
+            if (j - i + 1) * (w1 / float(sr) * 1000.0) <= float(max_len_ms):
+                events.append((i, j))
+            else:
+                dropped += 1
+            i = j + 1
+        else:
+            i += 1
+    return events, dropped
+
+
+def _declick_fill(out: Any, s: int, t: int, total: int,
+                  lo_bound: int = 0, hi_bound: Any = None) -> Any:
+    """用**左右邻域波形线性过渡**填满 `[s, t)` —— 「消失」的正解：**换掉**，不是压低。
+
+    🔴 2026-10-04 由「压低」改「换掉」（GG：「目标是消失」）：
+       旧法 `seg * (_scale + (1-_scale)*w)` 只把事件**缩到邻域背景量级** ⇒ 对 1~2ms 脉冲
+       **压不到零**（实测残留 ≈10× 背景，仍听得见），且整窗乘系数把窗内背景一起压低 ⇒ 留洞。
+       新法把整段替换成「左邻 → 右邻」的线性过渡 ⇒ **脉冲在波形里不存在**。
+    🔴 `[lo_bound, hi_bound)` = **本事件周围不含其他事件的干净范围**（调用方算好传进来）。
+       为什么必须：邻域若伸进**另一个事件**，就会把那个尖峰**原样搬进本段** ⇒ 本处留下的
+       是邻居峰的副本，而它不在邻居的坐标上、**再也不会被治**
+       （2026-10-04 审核实测：两个相隔 7ms 的尖峰 ⇒ 治后残留 **0.416 = 原峰 83%**，等于没治）。
+    🔴 两端**不是样本级严丝合缝**：`fill[0] = left[0]`、`fill[-1] = right[-1]`，与接边的
+       `out[s-1]` / `out[t]` **同分布但不同相位**（都是极静背景的噪声样本）。
+       ⚠️ 这个"跳"在 −60 dBFS 量级、且只有 1 个样本 ⇒ 听不见；真实素材实测治后落到
+       **0.00194（= 背景电平）**、没有冒出新的可闻瞬态，佐证这一点。
+    🔴 **为什么敢直接拿邻域**：能走到这里的事件已过 `quiet_dbfs` 闸（左右邻都是**极静背景**）
+       ⇒ 填进去的是背景质感，不会把语音搬进来。
+    """
+    L = t - s
+    hi = total if hi_bound is None else min(int(hi_bound), total)
+    la, lb = max(int(lo_bound), s - L), s
+    ra, rb = t, min(hi, t + L)
+
+    def _fit(v: Any) -> Any:
+        n = int(v.shape[-1])
+        if n == L:
+            return v
+        if n > L:
+            return v[..., :L]
+        if n == 0:                       # 邻域整个被其他事件占掉（病态输入）
+            return torch.zeros(*v.shape[:-1], L, device=v.device, dtype=torch.float32)
+        rep = (L + n - 1) // n           # 邻域不够长 ⇒ 重复自身补足
+        return v.repeat(*([1] * (v.dim() - 1)), rep)[..., :L]
+
+    left = _fit(out[..., la:lb])
+    right = _fit(out[..., ra:rb])
+    ramp = torch.linspace(0.0, 1.0, L, device=out.device, dtype=torch.float32)
+    return left * (1.0 - ramp) + right * ramp
+
+
+def _declick_suppress(x: Any, sr: int, w1: int, events: List[Tuple[int, int]],
+                      e: Any, B: Any) -> Tuple[Any, List[Tuple[float, float, float]]]:
+    """⑤ 逐事件**换掉**（用邻域背景线性过渡填充）。返回 `(out, done)`。
+
+    `done` = 每处事件的 `(秒, 事件峰值, 邻域背景中位)` —— 报告与自测都读它。
+
+    🔴 **不是「压到背景电平」，是「换掉」**（2026-10-04 第二轮，GG：「目标是消失」）：
+       · 初版 `out = seg * w`（中间 w=0）⇒ 在背景里**挖了静音洞** ⇒ 洞边缘是新瞬态（10-03 打回）。
+       · 上一版压到邻域背景 P50 ⇒ 对 1~2ms 脉冲**压不到零**（实测残留 ≈10× 背景），且整窗
+         乘系数把窗内背景一起压低 ⇒ 留洞 ⇒ GG「还是有滴」。
+       · **本版**：`_declick_fill` 用左右邻域波形线性过渡填满整段 ⇒ 波形里不再有那个脉冲。
+    🔴 **两遍：先算全部区间，再逐个填** —— 填充的邻域必须**避开其他事件**
+       （否则把邻居的尖峰搬进来；审核实测残留 83%）。见 `_declick_fill` 的 docstring。
+    """
+    import numpy as np
+
+    total = int(x.shape[-1])
+    out = x.clone()
+    fn = max(1, int(round(AUDIO_DECLICK_FADE_MS * sr / 1000.0)))
+    done: List[Tuple[float, float, float]] = []
+    spans: List[Tuple[int, int, int, int]] = []          # (a, b, s, t)
+    for a, b in events[:max(1, AUDIO_DECLICK_MAX_EVENTS)]:
+        s = max(0, a * w1 - fn)
+        t = min(total, (b + 1) * w1 + fn)
+        if t - s >= 3:
+            spans.append((a, b, s, t))
+    for i, (a, b, s, t) in enumerate(spans):
+        lo = spans[i - 1][3] if i > 0 else 0             # 左邻不许伸进前一个事件
+        hi = spans[i + 1][2] if i + 1 < len(spans) else total   # 右邻不许伸进后一个
+        out[..., s:t] = _declick_fill(out, s, t, total, lo, hi)
+        done.append((s / float(sr), float(e[a:b + 1].max()), float(np.median(B[a:b + 1]))))
+    return out, done
+
+
+@dataclass
+class _DeclickCtx:
+    """`declick_transients` 一次调用的**判定上下文**：报告要的「按什么判、在哪份音频上、范围多宽」。
+
+    🔴 **为什么要它**（2026-10-04）：报告拼装的入参一度是 **10 个位置参数** —— 恰好等于调用点
+       当时的全部局部变量；更糟的是其中 `sr` / `total` / `out_len` **三个连着都是 int**
+       ⇒ 写错顺序（`total` 与 `out_len` 对调）会**生成一份看着完全正常的报告**，
+       而「长度守恒 %d → %d」那行会打印成 `324000 → 324000`，**谁也不会发现异常**。
+       收成具名对象 ⇒ 这类错不可能再犯；且**新增报告项时不必再改签名**（只加字段）。
+    """
+
+    sr: int
+    total: int
+    ratio: float
+    quiet_dbfs: float
+    max_len_ms: float = AUDIO_DECLICK_MAX_LEN_MS
+    limit_n: Any = None
+    limit_is_fallback: bool = False
+    cut: int = 0
+    cut_faded: bool = False
+
+
+def _declick_report(done: List[Tuple[float, float, float]], ctx: "_DeclickCtx",
+                    out_len: int) -> str:
+    """报告拼装（口径见下）。**入参收成 `ctx` 的由来见 `_DeclickCtx` 的 docstring。**
+
+    🔴 **范围闸要写明是不是 fallback**：拿不到台词起点时退回产线纪律上界，与「真的测到台词起点」
+       不是一回事 —— 读者要能分辨。
+    🔴 **位置同时给「节点内坐标」与「产物坐标」**：本节点工作在未裁音频上、产物是裁后的，
+       二者相差 `cut`；只报一个 ⇒ 与产物对账时必然对不上（2026-10-03 为此查了三轮）。
+    """
+    off = ctx.cut / float(ctx.sr)
+    if ctx.limit_n is None:
+        range_txt = "，⚠ 未设范围闸（可能碰到句首爆破音）"
+    else:
+        range_txt = "，范围 = 前 %.3fs（%s）" % (
+            int(ctx.limit_n) / float(ctx.sr),
+            "⚠ 台词起点不可测 ⇒ 退回产线纪律上界" if ctx.limit_is_fallback else "台词起点前")
+
+    def _ev_txt(t: float, pk: float, bg: float) -> str:
+        if off > 0:
+            return "@%.3fs（产物 @%.3fs）%.4f→背景%.4f" % (t, max(0.0, t - off), pk, bg)
+        return "@%.3fs %.4f→背景%.4f" % (t, pk, bg)
+
+    return ("[H3 Relay] 音频缝：**孤立瞬态抑制** %d 处"
+            "（判据 峰值/背景 > %.1f 且 背景 < %.0f dBFS，事件 ≤ %.1fms，两端淡变 %.1fms%s%s）\n"
+            "           位置与量级：%s\n"
+            "           其余内容**逐位不动**（长度守恒 %d → %d）"
+            % (len(done), ctx.ratio, ctx.quiet_dbfs,
+               ctx.max_len_ms, AUDIO_DECLICK_FADE_MS, range_txt,
+               "，裁帧边界 @%.3fs 已淡入 %.1fms" % (off, AUDIO_DECLICK_FADE_MS)
+               if ctx.cut_faded else "",
+               "；".join(_ev_txt(tt, pk, bg) for tt, pk, bg in done[:8])
+               + ("…" if len(done) > 8 else ""),
+               ctx.total, out_len))
+
+
+def declick_transients(audio: Any, ratio: float = AUDIO_DECLICK_RATIO,
+                       quiet_dbfs: float = AUDIO_DECLICK_QUIET_DBFS,
+                       limit_n: Any = None, cut_head_n: Any = None,
+                       limit_is_fallback: bool = False,
+                       max_len_ms: Any = None) -> Tuple[Any, str]:
+    """抑制**背景极静区**里的**孤立瞬态**（<2ms 尖脉冲）。**长度守恒、其余内容逐位不动**。
+
+    【为什么要它（2026-10-03 实测 + GG 耳检定性）】
+      模型会在**无台词区**生成孤立尖脉冲。实测段2 @**0.930s**：峰值 **0.0095（−40 dBFS）**，
+      而该处背景仅 **−60 dBFS** ⇒ 信噪比 ~20 dB ⇒ 在安静背景里突出成
+      **「无缘无故的一声滴」**（GG 原话，并定性为**伪影**而非动作音效）。
+      ⚠️ 它**不是**接缝 / pin / 交界伪影 —— **各臂都有**（nopin 0.0070 / A 0.0018 / P5 0.0095），
+         只是 D/N1 段首有语音把它盖住了（0.26–0.38）。
+      ⚠️ 与 `audio_seam_patch` 的区别：patch 是**整段替换** ⇒ 实测把床源瞬态**搬进来**
+         （0.930s → 0s）**治不了根**；本函数**只掐那一下**，其余逐位不动。
+
+    【判据（保守优先：宁可漏，也不误伤语音）】
+      ③ 候选 = `E > ratio*B` **且** `B < quiet_dbfs 线性值`
+         ← 🔴 **第二个闸判的是「背景」，不是「事件本身」**（两轮试错换来的）：
+            · 初版给**事件**设绝对上限（floor）⇒ 卡不住：语音的**轻辅音**（p/t/k 的送气段）
+              可以比「滴」还轻，两者量级**重叠** ⇒ 无论 floor 取 −45/−36/−32/−20，
+              **要么漏掉「滴」、要么掐到台词**（实测台词区最大改动 0.152 → 0.023 → 0.014，始终非 0）。
+            · **正确判据是「它周围有多静」**：「滴」之所以听得见，正是因为**它周围极静**
+              （实测背景 B=0.0016 = **−56 dBFS**）；而语音的辅音**周围是元音**（B≈0.017 = −35 dBFS）。
+            · ⇒ 用 `B < quiet_dbfs`（默认 **−50 dBFS**）就能干净地分开两者，且**对事件量级不敏感**
+              （将来画幅/模型让「滴」变响或变轻，这个判据依然成立）。
+
+    【实现】① 包络 ② 底噪 ④b 裁帧边界重算底噪 ④c 裁帧边界淡入 ④ 事件合并 ⑤ 压制
+      —— 各自在 `_declick_envelope` / `_declick_bg_at_cut` / `_declick_fade_in_at_cut` /
+      `_declick_find_events` / `_declick_suppress` / `_declick_report` 里（本函数只做编排）。
+      ⚠️ 拆函数是**纯代码搬移**，一个算式都没改 —— 判据 = **离线重放的逐位比对**（波形 sha 全等）
+         的**逐位重放**（波形 sha 必须与重构前完全一致）+ `tests/test_relay_core.py` 第 30 组。
+
+    返回 ``(audio, report)``。`ratio <= 0` ⇒ 关（返回原 audio + 空 report，**逐位直通**）。
+    无事件 ⇒ `(原 audio, "")`（**不打日志**，保持「没动就不报」的语义）。
+      ⚠️ 已知取舍：无事件时**连裁帧边界淡入也不生效**（那条改动在克隆张量上，随原 audio 一起丢弃）。
+         实测该边界伪影与孤立峰通常同时出现（`#931` 报告里两者同时命中），故保持现状不改 ——
+         动它属于**行为变更**，要有独立证据与 A/B，不混在重构里做。
+    """
+    if ratio is None or float(ratio) <= 0:
+        return audio, ""
+    # 🔴 「多宽算一声」：节点层可覆盖（widget `declick_max_len_ms`）；缺省取常量
+    #    ⇒ **默认值只有一个出处**（`AUDIO_DECLICK_MAX_LEN_MS`），别在这里再写字面量。
+    _ml = float(AUDIO_DECLICK_MAX_LEN_MS if max_len_ms is None else max_len_ms)
+    wf, sr, lead, dtype = _audio_parts(audio)
+    # 🔴 **先展平前导维**：`_audio_parts` 返回的 `wf` 可能带 batch 维（如 `[1,1,T]`），
+    #    而下游 helper 假设 `[C, T]`。不展平 ⇒ `x[0]` 拿到二维数组 ⇒ reshape 抛异常
+    #    ⇒ **被宿主吞掉**（铁律 8：宿主会吞异常）⇒ 节点照常出产物、但**declick 静默没执行**
+    #    （2026-10-03 实测：图上 `declick_ratio=4.0` 传对了、日志里却没有抑制报告行）。
+    #    ⚠️ 同时记下**输入**的原始形状（从 `audio` 直接取，**不是** `_audio_parts` 归一后的），
+    #    返回时还原 —— 否则 1D 输入 `[T]` 会变成 `[1,T]`
+    #    （自测 `test_declick.py` ①组抓到；第一版误把「归一后形状」当原始形状，又错一轮）。
+    _orig = None
+    if isinstance(audio, dict):
+        _w0 = audio.get("waveform")
+        if _w0 is not None and hasattr(_w0, "shape"):
+            _orig = tuple(int(v) for v in _w0.shape)
+    wf = wf.reshape(-1, int(wf.shape[-1]))
+    ch, total = int(wf.shape[0]), int(wf.shape[-1])
+    w1 = max(1, int(0.001 * sr))                 # 1ms
+    if total < 20 * w1:                          # 太短，不值得动
+        return audio, ""
+    import numpy as np
+
+    x = wf.detach().to(torch.float32)
+    n1 = total // w1
+    e, B, half = _declick_envelope(x, w1, n1)
+    cut = _declick_bg_at_cut(B, e, n1, w1, half, cut_head_n)
+    x, cut_faded = _declick_fade_in_at_cut(x, total, cut, sr)
+    quiet_lin = 10.0 ** (float(quiet_dbfs) / 20.0)
+    cand = (e > float(ratio) * np.maximum(B, 1e-9)) & (B < quiet_lin)   # ③ 相对突出 + 背景极静
+    # ④ 🔴 **范围闸**：只在前 `limit_n` 个样本内动手（由调用方传「台词起点」）。
+    #    为什么必须：**「句首爆破音」与「滴」在特征上分不开**（都是"静音后的第一个峰"，
+    #    背景同样极静）—— 2026-10-03 实测：不加范围闸时台词区峰值被削 26%
+    #    （0.4089 → 0.3019）。而「滴」恒在**台词之前**（本例 0.930s vs 台词 1.25s）
+    #    ⇒ 用节点已有的 `_speech_onset_in_head` 划一条线就能干净分开。
+    #    `limit_n` 为 None ⇒ 不设范围（老行为，会误伤，仅作对照用）。
+    if limit_n is not None:
+        lim_idx = max(0, int(limit_n)) // w1
+        # 🔴 `lim_idx <= 0` 时**不设范围**，**不能直接 return 空**：段首就有声时
+        #    `_speech_onset_in_head` 会返回 0（或很小值）⇒ 若在这里 return，**整个 declick
+        #    静默失效**（2026-10-03 实测：图上参数传对了、宿主也加载了新定义，但日志里没有抑制行）。
+        #    「段首有声」的典型场景 = pin 区本身就是语音 ⇒ 那种情况靠 `quiet_dbfs` 兜底
+        #    （pin 区背景不静 ⇒ 不会命中）。
+        if lim_idx > 0:
+            cand[lim_idx:] = False
+    # 📌 这里曾有一个「段首跳过闸」（`skip_head_ms`，默认 20ms），**已删**：
+    #    它的理由（「段首是文件头、背景恒为 0 ⇒ 起音会误判」）被实测推翻 —— GG 听到的
+    #    「滴」**就在段首 0.0–2.0ms**，那个闸把唯一要治的东西挡在门外（白跑两轮）。
+    #    文件头的「背景恒为 0」改由 `s == 0` 的淡出特判解决。
+    #    **教训**：加保护闸前先确认「被保护的范围里有没有要治的东西」。
+
+    events, _dropped = _declick_find_events(cand, n1, w1, sr, _ml)
+    if not events:
+        # 🔴 2026-10-04 曾想把「裁帧边界淡入」从本 return 里救出来（让它无条件生效）——**已否决**。
+        #    实测：那样会让**每一段**都在 `cut` 处淡入 2ms
+        #    并各打一行报告 ⇒ 违背「没动就不报」的零副作用语义，还把「本无需处理」的段标成处理过。
+        #    治滴的路已经通了：`_declick_bg_at_cut` 把 `cut` 处的背景按「只看右边」重算
+        #    ⇒ 背景极静 ⇒ `cand[cut]` 必中 ⇒ 滴**一定进 `events`** ⇒ 淡入随 ⑤ 压制一起生效。
+        #    ⚠️ 修 ④ 之前它不进 events，真因是**范围闸把 cut 排除了**，不是「淡入被短路」——
+        #       若把病因记错，就会去改这个 return（白改，还带副作用）。
+        # 🔴 **「被超长闸丢掉」必须说出来**（铁律 15）：否则用户把 `declick_ratio` 调得很小、
+        #    候选连成一片 ⇒ 全被丢 ⇒ 一个都不治，而报告只写「未命中」⇒ **无从归因**。
+        if _dropped:
+            return audio, ("[H3 Relay] 音频缝：孤立瞬态抑制**未命中事件** —— "
+                           "但有 %d 个候选段因**超过 %.1f ms**（`declick_max_len_ms`）被丢弃；"
+                           "若这是有意的（如 ratio 调得过小 ⇒ 候选连成一片），可忽略。"
+                           % (_dropped, _ml))
+        return audio, ""
+    out, done = _declick_suppress(x, sr, w1, events, e, B)
+    # 🔴 ctx 只在**真有事件要报**时才构造（上面 `if not events: return` 已经短路）⇒
+    #    没命中就不建对象，保持「没动就不报」的零开销语义。
+    rep = _declick_report(done, _DeclickCtx(
+        sr=sr, total=total, ratio=float(ratio), quiet_dbfs=float(quiet_dbfs),
+        max_len_ms=_ml,
+        limit_n=limit_n, limit_is_fallback=bool(limit_is_fallback),
+        cut=cut, cut_faded=cut_faded), int(out.shape[-1]))
+    shaped = out.reshape(*lead, ch, total) if lead else out
+    # 还原原始形状（_audio_parts 会把 1D 输入 [T] 归一成 [1,T]）
+    if tuple(shaped.shape) != _orig:
+        shaped = shaped.reshape(_orig)
+    return {"waveform": shaped.to(dtype), "sample_rate": sr}, rep
+
+
+def declick_gate(wf: Any, sr: int, cut_head_frames: Any = 0) -> Tuple[int, bool, int]:
+    """节点层「**范围闸政策**」：把台词起点 / 裁帧边界换算成 `declick_transients` 要的三个数。
+
+    2026-10-04 从 `nodes.py` 的 `_run_declick` 闭包**原样搬来**（一个算式都没改）。
+    动机**不是省行数**（core 加 ~40 行、节点减 ~40 行，总量不变），而是**可测性** ——
+    这三条分支此前**零断言覆盖**（闭包不在任何门槛里，`smoke_nodes.py` 也不碰 declick），
+    而它们的失败模式**全是静默的**：范围算错 ⇒ 该治的没治，而日志看起来一切正常。
+
+    返回 ``(limit_n, is_fallback, cut_n)``：
+      · `limit_n`      — 允许动手的样本数（台词起点之前）
+      · `is_fallback`  — True ⇒ 起点**没测到**，`limit_n` 是产线纪律上界（报告必须能分辨）
+      · `cut_n`        — 裁帧边界（样本），让 `declick_transients` 把边界当「新文件头」判
+
+    🔴 三条分支各自的由来（搬来时一并保留 —— 每条都对应一次实测）：
+      ① **先展平前导维**：`_audio_parts` 的 `wf` 可能带 batch 维（节点里实测 `[1,1,T]`），
+         而 `_speech_onset_in_head` 内部走 `_frame_rms` ⇒ 形状不对会让判据行为与展平后不同
+         （返回 None）⇒ 下游范围闸失效。
+      ② **fallback 不能退化成「不限范围」**：onset=None 时若返回 None/0，declick 会一路
+         扫到台词区（2026-10-03 实测：出 8 处、台词区峰值被削 4.8%）
+         ⇒ 退回产线纪律 `AUDIO_DECLICK_FALLBACK_S`（1.2s）。
+      ③ **裁帧边界要补偿**：fallback 的 1.2s 是**从头**算的，而真凶（裁出来的孤立峰）在
+         **边界之后** ⇒ pin 长（22 帧 = 0.917s）时边界后只剩 0.28s ⇒ 治不到
+         ⇒ fallback 时范围至少覆盖到「边界 + 1.2s」（安全方向仍由 `quiet_dbfs` 闸兜住）。
+    """
+    _wf = wf.reshape(-1, int(wf.shape[-1]))                                  # ①
+    n_probe = min(int(_wf.shape[-1]), int(AUDIO_DECLICK_PROBE_S * sr))
+    _lim = _speech_onset_in_head(_wf, n_probe)
+    is_fallback = not _lim                                                   # ②
+    # 🔴 换算按 **`FPS` 常量（24）**：`cut_head_frames` 是「裁掉多少**帧**」，而 `#931`
+    #    手里的音频是**样本**。用户的 `Trim AV` 若用了别的 fps，这里就会偏
+    #    —— `cut_head_frames` 的 tooltip 已写明要自行折算，报告的 `裁帧边界 @x.xxxs` 可对账。
+    cut_n = int(round(max(0, int(cut_head_frames or 0)) / float(FPS) * sr))
+    if is_fallback:                                                          # ③
+        _fb_n = int(round(AUDIO_DECLICK_FALLBACK_S * sr))
+        _lim = max(_fb_n, cut_n + _fb_n)
+    # ④ 🔴 **范围闸必须盖过裁帧边界**（2026-10-04 新增；零 GPU 复现逼出来的）。
+    #    接缝那一声「滴」= 裁帧切断波形留下的半波形，**恒在 `cut` 处**。
+    #    而 ② 的线画在「头部首个有声 run」—— 那个 run 在 **pin 区（上一段尾巴）里**
+    #    ⇒ 线落在 `cut` **之前** ⇒ 滴被 `cand[lim_idx:] = False` 排除
+    #    （实测 C1：pin 语音 0.05s 起 ⇒ 范围=前 0.050s ⇒ cut(0.208s) 峰值 0.5000 → 0.5000，
+    #      报告却只说「未命中」⇒ **静默漏治**）。
+    #    `cut` 之后才是新段内容 ⇒ 「上一段语音在哪」不该用来关掉它。
+    #    ⚠️ 只抬**下界**：`cut + guard` 之后仍由 `quiet_dbfs` 闸兜底 ⇒ 不会为了治滴去削新段台词。
+    if cut_n > 0:                                                            # ④
+        _lim = max(int(_lim), cut_n + int(round(AUDIO_DECLICK_CUT_GUARD_S * sr)))
+    return int(_lim), bool(is_fallback), cut_n
+
+
+def declick_on_segment(audio: Any, ratio: Any, quiet_dbfs: Any = None,
+                       cut_head_frames: Any = 0,
+                       max_len_ms: Any = None) -> Tuple[Any, str]:
+    """**节点层入口**：范围闸政策 + 「未命中也要报一行」。返回 ``(audio, note)``。
+
+    ``note == ""`` 当且仅当 `ratio <= 0`（declick 关）—— 保持「没启用就不说话」的语义。
+
+    🔴 未命中时**必须**给一行（铁律 15：安全网 / 退化分支必须可观测）：否则
+       「declick 没执行」与「执行了但没命中」在日志里**完全一样**
+       （2026-10-03 为此查了三轮：图上参数对、宿主也加载了新定义，就是看不到输出）。
+    🔴 `quiet_dbfs=None` ⇒ 用 `AUDIO_DECLICK_QUIET_DBFS`（**常量**）。原 `nodes.py` 里
+       硬写了一个 `-50.0` 字面量 ⇒ 同一个默认值有两个出处，改一处漏一处察觉不到。
+    """
+    if float(ratio or 0.0) <= 0.0:
+        return audio, ""
+    q = float(AUDIO_DECLICK_QUIET_DBFS if quiet_dbfs is None else quiet_dbfs)
+    ml = float(AUDIO_DECLICK_MAX_LEN_MS if max_len_ms is None else max_len_ms)
+    wf, sr, _, _ = _audio_parts(audio)
+    lim, is_fb, cut_n = declick_gate(wf, int(sr), cut_head_frames)
+    out, rep = declick_transients(audio, ratio=float(ratio), quiet_dbfs=q,
+                                  limit_n=lim, cut_head_n=cut_n, limit_is_fallback=is_fb,
+                                  max_len_ms=ml)
+    if not rep:
+        rep = ("[H3 Relay] 音频缝：孤立瞬态抑制已启用"
+               "（ratio=%g，背景<%g dBFS，事件≤%g ms，范围=前 %.3fs%s）⇒ **本段未命中事件** ⇒ 逐位直通"
+               % (float(ratio), q, ml, lim / float(sr),
+                  "（⚠ 台词起点不可测 ⇒ 退回纪律上界）" if is_fb else ""))
+    return out, rep
 
 
 def save_audio(audio: Any, path: str, note: str = "") -> str:
