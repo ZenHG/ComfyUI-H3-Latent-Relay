@@ -7,7 +7,8 @@
    · 只 publish 不 push ⇒ registry 包的 `repository` 指向的代码里没有这一版（无法复核、issue 无从查起）
    · push 了但 CI 红 ⇒ 已经公开的提交没通过自检
    三件事都要同时成立才算"发布完成"，靠人记就会漏。本脚本把它们串成一条**带交叉验证**的流水线：
-   推 → **等 CI 真的绿** → 发 registry → **回头查两边是不是真的是这一版**。
+   推 → **等 CI 真的绿** → 建 GitHub Release → 发 registry → **回头查两边是不是真的是这一版**。
+   ⚠️ 顺序是**故意的**：唯一"改不回来"的动作（registry 的 changelog）排在最后（见 RELEASING.md §3）。
 
 规范正文 = 仓库根 `RELEASING.md`（**唯一真相源**）；本文件是它的执行体，两边必须一致。
 改了流程 ⇒ 改 `RELEASING.md`，再看这里的步骤要不要跟着动。
@@ -16,6 +17,7 @@
     python tools/release.py                  # 预演：只查前置与改动面，不推不发
     python tools/release.py --go             # 真发布（推 + 等 CI + 发 registry + 交叉验）
     python tools/release.py --verify-only    # 只回答「两边现在同步吗」（纯只读，不推不发）
+    python tools/release.py --release-only   # 只补建 GitHub Release（幂等；不 push、不发 registry）
     python tools/release.py --go --skip-ci-wait   # 有急事时跳过等 CI（**默认不跳**）
 
 环境变量（都可省，省了走默认）：
@@ -146,8 +148,8 @@ def _cjk(s: str) -> int:
     return sum(1 for ch in s if "\u4e00" <= ch <= "\u9fff")
 
 
-def changelog_text(version: str) -> str:
-    """**两个渠道的用户可见说明** —— 取自 `RELEASE-NOTES.md` 的本版一节（中英双语）。
+def _notes_parts(version: str) -> tuple:
+    """`RELEASE-NOTES.md` 本版一节 → `(中文段, 英文段)`，**顺带把格式校验做掉**（不合就 die）。
 
     🔴 为什么不再从 `CHANGES.md` 顶部整节搬（2026-10-05 改）：`CHANGES.md` 是**开发者记录**
        （实现取舍 · 实测证据链 · 机检编号 · 翻车过程），整节搬过去在 registry 的版本页上就是
@@ -192,12 +194,30 @@ def changelog_text(version: str) -> str:
                    % (len(zh), NOTES_MAX_ZH))
     if len(en) > NOTES_MAX_EN:
         bad.append("英文段 %d 字符 > 预算 %d（同上）" % (len(en), NOTES_MAX_EN))
-    out = zh + "\n\n---\n\n" + en
     if bad:
         die("RELEASE-NOTES.md 的 %s 一节不合格式（%d 处）：\n    - %s\n"
             "    模板见 RELEASING.md §6（registry 的 changelog 发出去就改不回来，所以这里必须拦住）。"
             % (version, len(bad), "\n    - ".join(bad)))
-    return out
+    return zh, en
+
+
+def changelog_text(version: str) -> str:
+    """registry 的 `--changelog`：中文段 + 英文段（同一份文案，两个读者都照顾到）。"""
+    zh, en = _notes_parts(version)
+    return zh + "\n\n---\n\n" + en
+
+
+def _vkey(v: str) -> tuple:
+    """`0.6.22` → `(0, 6, 22)`（比大小用；不是字符串序）。"""
+    return tuple(int(x) for x in re.findall(r"\d+", v) or [0])
+
+
+def notes_versions() -> list:
+    """`RELEASE-NOTES.md` 里所有版本号，**由新到旧**。"""
+    if not os.path.isfile(NOTES_FILE):
+        return []
+    with io.open(NOTES_FILE, encoding="utf-8") as fh:
+        return re.findall(r"^## ([\d][\d.]*)", fh.read(), re.M)
 
 
 def token() -> str:
@@ -350,7 +370,7 @@ def wait_ci(slug: str) -> None:
 
 
 def publish(f: dict) -> None:
-    say("\n④ 渠道二 · Comfy Registry：publish")
+    say("\n⑤ 渠道二 · Comfy Registry：publish")
     comfy = os.environ.get("COMFY_CLI") or shutil.which("comfy")
     if not comfy:
         die("找不到 comfy-cli：`pip install comfy-cli`，或用 COMFY_CLI 指定其路径。\n"
@@ -384,9 +404,100 @@ def publish(f: dict) -> None:
     say("  ✅ 已上传")
 
 
+def _prev_released(gh: str, slug: str, version: str) -> str:
+    """**上一个建过 GitHub Release 的版本**（用来决定要补哪些"从未露过面"的版本）。取不到返回空串。"""
+    r = run([gh, "release", "list", "--repo", slug, "--limit", "60", "--json", "tagName"],
+            quiet=True)
+    try:
+        tags = [str(it.get("tagName") or "") for it in json.loads(r.stdout or "[]")]
+    except Exception:                                          # noqa: BLE001
+        return ""
+    older = [t.lstrip("vV") for t in tags if t and _vkey(t) < _vkey(version)]
+    return max(older, key=_vkey) if older else ""
+
+
+def _headline(s: str) -> str:
+    """取一段的**首句**当标题用（= 段首那个 `**…**` 加粗块）。
+
+    ⚠️ 判据必须是「整块 `**…**`」，**不能**取"第一物理行"：`RELEASE-NOTES.md` 是**折行**写的
+       （每行 ~110 字符），取首行会把标题截在半句上 —— 实测 0.6.19 的英文标题变成
+       `…Copy Bridge gains an optional`（后半句"voice anchor input"在下一行）⇒ 标题读不通。
+    ⚠️ 标题里**不能留 `*` / 反引号**：GitHub 的 h1 **不做**行内 Markdown 渲染 ⇒ 留在那里就是字面的
+       星号（`**修三处会**静默**…` 这种嵌套强调会变成一串 `*`）。
+    """
+    m = re.match(r"\s*\*\*(.+?)\*\*", s, re.S)
+    head = m.group(1) if m else s.strip().splitlines()[0]
+    # ⚠️ 强调符号**删掉**而不是换成空格：中英文混排时换成空格会在「两件事： run_id」这种地方
+    #    留下一个多余空格（实测）。
+    head = re.sub(r"\s+", " ", re.sub(r"[*`]", "", head)).strip()
+    return head.rstrip("。.")
+
+
+def _release_title(version: str) -> str:
+    """`vX.Y.Z — <中文首句> · <English first line>`。
+
+    双语是**必须**的：Releases 页面与 registry 的版本页是同一批读者（大半只看英文），
+    这里只写中文等于把英文读者挡在门外 —— 而标题是页面上**唯一**一定被看见的那行。
+    """
+    zh, en = _notes_parts(version)
+    return "v%s — %s · %s" % (version, _headline(zh), _headline(en))
+
+
+def _release_body(version: str, gh: str, slug: str) -> str:
+    """Release 正文 = 本版一节 ＋（若上一次 Release 之后还压着几版）把它们一起补上。
+
+    🔴 为什么要"补"：`v0.6.15` 之后有 **7 个版本从未建过 Release**（0.6.16~0.6.22），
+       只给最新一版建 Release ⇒ 从 0.6.15 直升的用户**永远看不到中间发生了什么**。
+       判据不写死版本号（写死了下次必漂）：问 gh「上一个 Release 是哪版」，中间的全补。
+    """
+    out = [changelog_text(version)]
+    prev = _prev_released(gh, slug, version)
+    gap = [v for v in notes_versions() if v != version and (not prev or _vkey(v) > _vkey(prev))]
+    if gap:
+        out.append("<details>\n<summary>此前未单独发布过 GitHub Release 的版本：%s"
+                   "（点击展开）</summary>\n" % " / ".join(gap))
+        for v in gap:
+            out.append("### %s\n\n%s" % (v, changelog_text(v)))
+        out.append("</details>")
+    return "\n\n---\n\n".join(out)
+
+
+def github_release(f: dict, slug: str) -> None:
+    """渠道一的**第二个**发布物：GitHub Release（tag + 用户可见正文）。
+
+    🔴 为什么故意排在 registry **之前**：registry 的 changelog 发出去就改不回来（见 §6），
+       ⇒ 宁可在这里停住（此时 registry 还是旧版、完全安全），也不要留下"改不回来"的半成品。
+    🔴 幂等：已存在就不动（Release 正文**可以**改，但改不改是人的决定，脚本不擅自覆盖）。
+    """
+    say("\n④ 渠道一 · GitHub Release（tag + 用户可见正文；正文由 RELEASE-NOTES.md 生成）")
+    gh = shutil.which("gh")
+    if not gh:
+        die("环境里没有 gh —— 建 Release 需要它（`winget install GitHub.cli` / `brew install gh`）。\n"
+            "    ⚠️ 这一步**故意排在 registry 之前**：在这里停住 = 什么都没弄脏。")
+    tag = "v" + f["version"]
+    if run([gh, "release", "view", tag, "--repo", slug], quiet=True).returncode == 0:
+        say("  ℹ️ Release %s 已存在 ⇒ 不覆盖（要改正文请在网页上改）" % tag)
+        return
+    body = _release_body(f["version"], gh, slug)
+    import tempfile
+    _d = tempfile.mkdtemp(prefix="h3relay-rel")
+    p = os.path.join(_d, "body.md")
+    try:
+        with io.open(p, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(body)
+        r = run([gh, "release", "create", tag, "--repo", slug, "--target", f["head"],
+                 "--title", _release_title(f["version"]), "--notes-file", p])
+        if r.returncode != 0:
+            die("建 Release 失败：%s" % ((r.stderr or r.stdout or "").strip()[-300:]))
+    finally:
+        shutil.rmtree(_d, ignore_errors=True)
+    say("  ✅ %s 已建（tag → %s，正文含 %d 个版本）"
+        % (tag, f["head"][:10], body.count("\n### ") + 1))
+
+
 def verify(f: dict, slug: str) -> None:
     """🔴 这一步是「不遗漏」的关键：**回头查**两边是不是真的这一版，而不是信命令的退出码。"""
-    say("\n⑤ 交叉验证（两个渠道 + 本机）")
+    say("\n⑥ 交叉验证（两个渠道 + 本机）")
     ok = True
     # 5.1 GitHub：远端 main 是否**包含**本地 HEAD
     #     （判据不是"远端 sha == 本地 HEAD"：发布后继续提交开发件是正常的，那不该判红。）
@@ -411,7 +522,21 @@ def verify(f: dict, slug: str) -> None:
                                           "（含本版 %s）" % f["version"] if on else
                                           "（**缺本版 %s**）" % f["version"]))
     ok &= on
-    # 5.3 本机运行时副本（**不是**公开渠道之一 ⇒ 只提示、不判红；`--go` 会顺手同步）
+    # 5.3 GitHub Release（渠道一的**第二个**发布物）：本版得有一个 —— 否则用户从 Releases 页面上
+    #     看不到这一版（仓库页右侧的 "Latest" 也还停在上一次）。tag 指向本版提交这件事由
+    #     第 ④ 步的 `--target <HEAD>` 保证，这里只查"在不在"。
+    gh = shutil.which("gh")
+    if not gh:
+        FAILED.append("GitHub Release 未验证（环境里没有 gh）")
+        say("  ⚠️ 没有 gh，跳过 Release 检查 —— 请手动确认 Releases 页面上有本版")
+    else:
+        has = run([gh, "release", "view", "v" + f["version"], "--repo", slug],
+                  quiet=True).returncode == 0
+        say("  [%s] GitHub Release v%s %s"
+            % ("OK" if has else "FAIL", f["version"],
+               "在位" if has else "**缺失**（渠道一只完成了一半：push 了但没有 Release）"))
+        ok &= has
+    # 5.4 本机运行时副本（**不是**公开渠道之一 ⇒ 只提示、不判红；`--go` 会顺手同步）
     deploy = os.environ.get("H3RELAY_DEPLOY")
     if deploy and os.path.isdir(deploy):
         r = run([sys.executable, "tools/sync_deploy_check.py", deploy, "--rev", f["head"]])
@@ -430,8 +555,10 @@ def verify(f: dict, slug: str) -> None:
     if FAILED:
         say("🔴 未完成：%s" % " · ".join(FAILED))
     else:
-        say("✅ 两个渠道都已发布并交叉验证：GitHub %s ｜ registry %s/%s v%s"
-            % (f["head"][:10], f["publisher"], f["name"], f["version"]))
+        say("✅ 两个渠道都已发布并交叉验证：\n"
+            "     GitHub  %s（Release v%s）\n"
+            "     Registry %s/%s v%s"
+            % (f["head"][:10], f["version"], f["publisher"], f["name"], f["version"]))
     return ok
 
 
@@ -443,7 +570,7 @@ def sync_deploy(deploy: str, head: str = "HEAD") -> None:
     ⚠️ 判据用 `git show <rev>:<file>` 的**提交态**逐文件比（忽略 CRLF），**不要 `cp -r` 整包**：
     `custom_nodes` 里留第二份副本会静默覆盖节点定义。
     """
-    say("\n⑥ 同步本机部署副本")
+    say("\n⑦ 同步本机部署副本")
     n = 0
     for rel in (git("ls-files", quiet=True).stdout or "").split():
         blob = subprocess.run([GIT, "-C", REPO, "show", "%s:%s" % (head, rel)],
@@ -455,7 +582,7 @@ def sync_deploy(deploy: str, head: str = "HEAD") -> None:
             with open(dst, "wb") as fh:
                 fh.write(blob)
             n += 1
-    say("  铺入 %d 个文件（`sync_deploy_check` 会在第 ⑤ 步复核）" % n)
+    say("  铺入 %d 个文件（`sync_deploy_check` 会在第 ⑥ 步复核）" % n)
 
 
 # --------------------------------------------------------------------------- 主流程
@@ -505,6 +632,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="H 仓发布器：GitHub + Comfy Registry 同步发布并交叉验证")
     ap.add_argument("--go", action="store_true", help="真发布（默认只预演）")
     ap.add_argument("--verify-only", action="store_true", help="只做交叉验证（纯只读）")
+    ap.add_argument("--release-only", action="store_true",
+                    help="只补建/检查 GitHub Release（不 push、不发 registry；幂等）")
     ap.add_argument("--skip-ci-wait", action="store_true", help="不等 CI（默认等）")
     ap.add_argument("--set-token", action="store_true",
                     help="把新的 registry PAT 写进 <仓根>/.comfy_registry_token（从 stdin 读，不发布）")
@@ -528,9 +657,19 @@ def main() -> int:
         verify(f, slug)
         return 1 if FAILED else 0
 
+    if a.release_only:
+        # 为什么单独一个模式：Release 是**可补建**的（正文可改、可删可重建），而 registry 的
+        # changelog 不是 ⇒ 补 Release 时**绝不能**顺带再发一次 registry（同版本会被拒，还会把
+        # 整套流程弄成红的）。所以这里只跑 ① 前置 + ④ Release + ⑥ 交叉验证。
+        preflight(f)
+        github_release(f, slug)
+        verify(f, slug)
+        return 1 if FAILED else 0
+
     preflight(f)
     if not a.go:
-        say("\n[预演结束] 上面都过了；加 --go 才会：push → 等 CI → registry publish → 交叉验证。")
+        say("\n[预演结束] 上面都过了；加 --go 才会：push → 等 CI → GitHub Release → "
+            "registry publish → 交叉验证。")
         return 0
 
     push()
@@ -538,6 +677,7 @@ def main() -> int:
         say("\n③ 跳过等 CI（--skip-ci-wait）")
     else:
         wait_ci(slug)
+    github_release(f, slug)
     publish(f)
     deploy = os.environ.get("H3RELAY_DEPLOY")
     if deploy and os.path.isdir(deploy):

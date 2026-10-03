@@ -9,15 +9,22 @@
 
 ```bash
 python tools/release.py            # 预演（本地前置 + 改动面，不推不发）
-python tools/release.py --go       # 真发布：push → 等 CI 绿 → registry publish → 交叉验证
+python tools/release.py --go       # 真发布：push → 等 CI 绿 → GitHub Release → registry publish → 交叉验证
 python tools/release.py --verify-only   # 只回答「两边现在同步吗」（纯只读）
+python tools/release.py --release-only  # 只补建 GitHub Release（幂等；不 push、不发 registry）
 ```
+
+> `--release-only` 为什么存在：Release **可补建**（正文可改、可删可重建），registry 的 changelog **不可**。
+> ⇒ 补 Release 时**绝不能**顺带再发一次 registry（同版本会被拒，白把流程弄红）。
+
+🔴 **顺序是故意的**：唯一"发出去就改不回来"的动作（registry 的 changelog，见 §6）**排在最后**，
+所以中间任何一步失败，都停在"什么都没弄脏"的状态上。
 
 ## 1. 两个渠道各是什么
 
 | 渠道 | 发布物 | "完成"的判据 |
 |---|---|---|
-| **GitHub**（`ZenHG/ComfyUI-H3-Latent-Relay`） | 提交历史 + 源码 | 远端 `main` 的 sha **等于**本地 HEAD，且**那一轮的 CI 是绿的** |
+| **GitHub**（`ZenHG/ComfyUI-H3-Latent-Relay`） | ① 提交历史 + 源码 ② **Release**（`vX.Y.Z` tag + 正文） | 远端 `main` 含本地 HEAD，**那一轮的 CI 是绿的**，且 Releases 页面上**有本版**（正文 = `RELEASE-NOTES.md`，见 §6） |
 | **Comfy Registry**（`zenhg/h3-latent-relay`） | `.comfyignore` 筛出的 zip（运行期文件，**不含 docs/tests/tools**） | `api.comfy.org/nodes/h3-latent-relay/versions` 里**能查到本版版本号** |
 
 🔴 **为什么必须成对**：任何一个单独成功都是**半成品**，而且两边都不报错 ——
@@ -42,18 +49,20 @@ python tools/release.py --verify-only   # 只回答「两边现在同步吗」�
    `{ file = … }`/`{ text = … }`、`PublisherId` 非占位、`Icon` 是能取到的 https 直链、
    `.comfyignore` 排开发件而**不排运行期目录**。
 
-## 3. 执行体做的五步（`tools/release.py --go`）
+## 3. 执行体做的六步（`tools/release.py --go`）
 
 | 步 | 动作 | 失败时的状态 |
 |---|---|---|
 | ① 前置 | 干净工作树 · 版本四处 · `review_050` · `en_sync` · **`RELEASE-NOTES.md` 本版一节（§6）** | 什么都没发生 |
-| ② GitHub | `git push origin HEAD:refs/heads/main`（失败自动换 HTTP/1.1 / schannel / **去代理直连**重试） | 什么都没发生 |
+| ② GitHub push | `git push origin HEAD:refs/heads/main`（失败自动换 HTTP/1.1 / schannel / **去代理直连**重试） | 什么都没发生 |
 | ③ 等 CI | 找 `headSha == 本地 HEAD` 的那一轮，`gh run watch --exit-status` | **已 push、未 publish** ⇒ 修完重跑，安全 |
-| ④ Registry | `comfy node validate` → `node pack` 预览（开发件混入即拒）→ `publish --token --changelog`（changelog = `RELEASE-NOTES.md` 本版一节，见 §6） | 已 push、未 publish ⇒ 重跑 |
-| ⑤ 交叉验证 | 远端 `main` sha == HEAD ？registry 版本列表含本版 ？（给了 `H3RELAY_DEPLOY` 则再比部署副本） | 会**点名**哪一项没过 |
+| ④ GitHub Release | `gh release create vX.Y.Z --target <HEAD> --notes-file <RELEASE-NOTES 生成>`。**幂等**：已存在就不动（正文可改，但改不改是人的决定）。正文还会自动补上「上一次 Release 之后压着的版本」（§6.5） | 已 push、未 Release ⇒ 重跑；registry 完全没被碰 |
+| ⑤ Registry | `comfy node validate` → `node pack` 预览（开发件混入即拒）→ `publish --token --changelog`（changelog = `RELEASE-NOTES.md` 本版一节，见 §6） | 已 push、未 publish ⇒ 重跑 |
+| ⑥ 交叉验证 | 远端 `main` 含 HEAD ？registry 版本列表含本版 ？Releases 有本版 ？（给了 `H3RELAY_DEPLOY` 则再比部署副本） | 会**点名**哪一项没过 |
 
 > ⚠️ **③ 的失败是本流程唯一的"半成品"状态**（GitHub 有了、registry 没有）。这是**有意如此**：
 > 宁可在 registry 上少一版，也不要在 CI 红的提交上发版。修完再跑一遍即可，registry 那边不会被弄脏。
+> ⑦ 之后还有一步**可选的**「同步本机部署副本」（仅当给了 `H3RELAY_DEPLOY`）；它不是公开渠道，只提示不判红。
 
 ## 4. 失败处置速查
 
@@ -64,6 +73,8 @@ python tools/release.py --verify-only   # 只回答「两边现在同步吗」�
 | `comfy node publish` 报 publisher 不匹配 | registry 上 `PublisherId` 与 `pyproject.toml` 不一致 | 改成网站上 `@` 后面那串（**两边都不可改，别猜**） |
 | `comfy node validate` 报警 | 见 [`docs/08-testing.md`](docs/08-testing.md) 的 S 规则说明 | 行级 `# noqa` + 在代码里写清理由，**别为消警告换拼法** |
 | registry 说版本已存在 | 同版本不能重发 | bump 一版（**已发布的版本与 changelog 都不可改**） |
+| `gh` 找不到 / 建 Release 失败 | 环境里没有 gh 或没登录 | 装/登录 gh。⚠️ 这一步**在 registry 之前**，所以停在这里 = **什么都没弄脏** |
+| `Release vX.Y.Z 已存在` | tag 上已有 Release | 脚本**幂等跳过**（不擅自覆盖正文）；要改正文去网页上改 |
 
 ## 5. 密钥（Registry PAT）
 
@@ -140,11 +151,27 @@ python tools/release.py --verify-only   # 只回答「两边现在同步吗」�
    同一段内容英文天然长 2~3 倍 ⇒ 拿总长当判据等于**只卡英文**，还会诱使人靠"中英不均衡地删"凑数。
 
 ⚠️ **英文不是"顺便翻一下"**：registry 的读者大半只看英文，英文段是**主要**文案。
+⚠️ 两段的**首句会被拿去当 GitHub Release 的标题**（§6.5）⇒ 首句要**自成一句话**、控制在一句以内
+（不要在首句里塞第二个论点，它会被标题截在半路）。
 
 ### 6.4 事实类的数字
 
 断言数、文件数、体积这类**会被机检复述的数字，不要写进发布说明** —— 它是冻结的，写进去就等于
 把「当时对、以后错」的陈述永久挂在公开页面上。
+
+### 6.5 GitHub Release 正文（同一份文案的第二个落点）
+
+- **标题（双语，别手写 —— 脚本从 `RELEASE-NOTES.md` 取）**：
+  `vX.Y.Z — <中文段首句> · <English first line>`。
+  🔴 标题**必须**带英文：Releases 页与 registry 版本页是同一批读者（大半只看英文），而标题是页面上
+  **唯一**一定被看见的那行 —— 只写中文等于把英文读者挡在门外。取首句时会去掉 `*` / 反引号与句末标点
+  （GitHub 的 h1 **不做**行内 Markdown 渲染 ⇒ 留在那里就是字面的星号）。
+- **正文**：本版一节 ＋ **「上一次 GitHub Release 之后压着的版本」全部补上**（折叠块）。
+  🔴 为什么必须补：v0.6.15 之后有 **7 个版本从未建过 Release**（0.6.16~0.6.22）——
+  只给最新一版建 Release，从 0.6.15 直升的用户**永远看不到中间发生了什么**。
+  判据**不写死版本号**（写死了下次必漂），而是问 gh「上一个 Release 是哪版」，中间的全补。
+- Release 的正文**事后可改**（与 registry 的 changelog 相反）⇒ §6.2 说的「梳理历史」在这里做得到：
+  先把 `RELEASE-NOTES.md` 的对应节改好，再去网页上把正文贴过去。
 
 ## 7. 明确不做的事
 

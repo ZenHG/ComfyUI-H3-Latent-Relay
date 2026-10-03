@@ -121,7 +121,7 @@ set `declick_ratio` to `0`.
 
 ## 0.6.19 — 2026-10-02
 
-**两件事：`run_id` 改一处、同组其余格自动跟随；`Copy Bridge` 新增可选输入「声锚」。**
+**两件事：`run_id` 改一处全组跟随；`Copy Bridge` 新增可选「声锚」。**
 
 - `run_id` 是「这部片子叫什么」，决定段文件落在哪个目录 —— 它原先在**六个节点**上各存一份、必须一字不差，
   改一处要手动改五处，漏改的那处会让桥去**另一个目录**找段文件。
@@ -137,8 +137,7 @@ set `declick_ratio` to `0`.
 
 <!-- EN -->
 
-**Two things: `run_id` now syncs across its group from a single edit; `Copy Bridge` gains an optional
-"voice anchor" input.**
+**`run_id` syncs group-wide from one edit; `Copy Bridge` gains an optional voice anchor.**
 
 - `run_id` names the film and decides which directory segment files land in. It used to be stored on **six
   nodes** and had to match character-for-character, so one edit meant five manual edits — and the missed one
@@ -160,7 +159,7 @@ set `declick_ratio` to `0`.
 
 ## 0.6.18 — 2026-09-30
 
-**修三处会**静默**出错的段号 / 段序问题。它们都会让成片**音画错段**或**段序错乱**，而画布上一个字都不报。**
+**修三处静默的段号 / 段序错误（成片会音画错段或段序错乱，画布一个字都不报）。**
 
 - 「段号推进」漏了「音频缝」节点 ⇒ 跑第 2 段时音频缝仍以「第 1 段」自居，把第 1 段的音频文件
   **覆盖成了第 2 段的音频** ⇒ 拼接时第 1 段拿到第 2 段的音轨。现改为表驱动，并在状态栏点名同步了哪几类。
@@ -177,8 +176,7 @@ set `declick_ratio` to `0`.
 
 <!-- EN -->
 
-**Fixes three *silent* failures affecting stage numbering / ordering. Each one produced a final cut with
-**mismatched audio** or **wrong segment order**, while the canvas reported nothing.**
+**Fixes three silent failures that mis-numbered or mis-ordered segments.**
 
 - The stage counter missed the **Audio Seam** node, so while running stage 2 the seam still thought it was
   stage 1 and **overwrote stage 1's audio with stage 2's**. It is now table-driven, and the status line names
@@ -213,8 +211,7 @@ PCM sidecars, glance at the concat report to confirm the right one was picked.
 
 <!-- EN -->
 
-**Both release channels (GitHub / Comfy Registry) are now driven by one command that cross-verifies them.
-Zero node behaviour change.**
+**Both release channels are now driven by one command that cross-verifies them.**
 
 - New `RELEASING.md` (the single source of truth) and `tools/release.py`: `--go` = push → wait for CI to
   **actually pass** → publish to the registry → verify that both sides really carry this version.
@@ -241,8 +238,7 @@ Zero node behaviour change.**
 
 <!-- EN -->
 
-**Groundwork for shipping: Comfy Registry metadata ready + product naming unified. Zero node behaviour
-change.**
+**Groundwork for shipping: Comfy Registry metadata and product naming.**
 
 - The node-menu **category** changed from "H3 Relay Kit" to "H3 Latent Relay"
   (**graphs, node names and wiring are all unchanged** — only the grouping label in the menu).
