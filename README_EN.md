@@ -10,7 +10,7 @@ not coupled to any third-party H3 node pack.
 
 | Item | Value |
 |---|---|
-| Version | **0.6.22** (8 nodes; the composite bridge `H3RelayCopyBridge` is the **only** bridge) |
+| Version | **0.6.23** (8 nodes; the composite bridge `H3RelayCopyBridge` is the **only** bridge) |
 | License | **MIT** (third-party attribution in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) |
 | Host | **ComfyUI ≥ 0.35.0 with MiniMax-H3 support** (the host itself is GPL-3.0, see License) |
 
@@ -262,6 +262,7 @@ collect anchors automatically from already-rendered segments.
 | **The anchor replaces the whole audio tail window** | Any BGM / ambience inside that window is replaced too. If you have a music bed, **mix it into the anchor** first |
 | **Timbre / pace / emotion are partly pinned** | The anchor is not "timbre only" — emotion and pacing follow it as well. Pick a clean clip whose **emotion matches the target line** |
 | **Multi-speaker segment: only the first is anchored** | There is exactly one `audio_ref` window ⇒ it anchors "**whoever speaks next at the seam**"; later speaker changes inside the segment rely on the prompt's `<Subject N>` |
+| 🟣 **Other speakers go through the official slots** | This pack anchors only the one at the seam. To give the **other speakers** a voice reference, wire their audio into the **official** `ref_audios` slots — that is the **only** path that emits a text label `<Audio j>`, which is what the prompt references (the one this pack injects is appended to the DiT side only, has **no label and cannot be referenced from the prompt**; the `report` says so). Run it through the official `TrimAudioDuration` to ~0.9 s first (reference rows ride through every sampling step — long references cost time). ⚠️ **Ordinals count wired slots in order, not slot numbers**: wire only `ref_audio_2` and it is `<Audio 1>`; writing `<Audio 3>` **resolves to nothing and reports nothing** (when slots are non-contiguous the bridge node title states the real ordinals) |
 | **Anchor length** | The tail window is 0.925 s ⇒ anchor **>= 0.9 s** (shorter: the full clip is used and the `report` warns); 1–4 s recommended |
 | **Ignored when `pin_audio=False`** | Stated in the `report` (degradation is visible, never silent) |
 
@@ -275,6 +276,9 @@ audio-grid reconciliation). The anchor source must be **this segment's speaker**
 **same speaker continuing ⇒ you need not connect it**, **speaker change at the seam ⇒ you must**.
 Later speaker changes inside the segment are handled by the prompt's `<Subject N>` (the anchor cannot
 and should not cover them — do not expect it to hold every voice in the segment).
+**For the other speakers' own voice references, use the official `ref_audios` slots** — that is the only
+path that emits an `<Audio j>` text label the prompt can reference; ordinals count **wired slots in order**,
+not slot numbers (see [`docs/07`](docs/07-chain.md) §声锚 in Chinese).
 One command gives the verdict (no need to read prompts by hand):
 
 ```bash
@@ -300,7 +304,7 @@ ComfyUI-H3-Latent-Relay/
 ├── web/                   # front-end JS: the 🧩 concat button, Chain panel, `run_id` one-field-syncs-the-group (canvas only)
 ├── examples/              # two openable workflows: minimal continuation (21 nodes) and full flow (47 nodes)
 ├── docs/                  # deep docs 01–10 (mechanism / parameters / sampling / canvas / troubleshooting / scripting / chain / tests / metrics / audio)
-├── tests/                 # offline self-test (zero GPU): 483 assertions + V3 parity + prompt-dispatch pure functions
+├── tests/                 # offline self-test (zero GPU): 487 assertions + V3 parity + prompt-dispatch pure functions
 ├── tools/                 # self-checks / forensic tools / concat CLI / bundler (incl. the en_sync docs gate)
 ├── licenses/              # third-party license texts shipped with the pack
 ├── dist/                  # bundler output (minimal distribution set + zip; not tracked)
@@ -376,10 +380,11 @@ The Chinese documents are the source of truth; `README_EN.md` and the English `d
 | [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md) | **complete troubleshooting table** · **FAQ** · workflow-file self-check · API submission |
 | [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md) | prompt-side discipline: head padding · dialogue-safe timing · last-frame anchor chaining |
 | [`docs/07-chain.md`](docs/07-chain.md) | the Chain auto-run controller (prompts / concat / resume) |
-| [`docs/08-testing.md`](docs/08-testing.md) | offline self-test: 31 assertion groups (483 assertions) · tool inventory |
+| [`docs/08-testing.md`](docs/08-testing.md) | offline self-test: 31 assertion groups (487 assertions) · tool inventory |
 | [`docs/09-metrics.md`](docs/09-metrics.md) | reference ranges for observables (DTW residual / appearance drift) · self-calibration |
 | 🇨🇳 [`docs/10-audio-seam-and-concat.md`](docs/10-audio-seam-and-concat.md) | **audio seam & multi-segment concatenation** — Chinese only for now: seam conventions and tuning guide · **dialogue protection** · criterion limits · track levels · sidecars · **script usage without the canvas** |
-| [`CHANGES.md`](CHANGES.md) | version history with the measurement evidence for each change |
+| [`RELEASE-NOTES.md`](RELEASE-NOTES.md) | **user-facing release notes** (bilingual, one section per version) · **read this before upgrading** |
+| [`CHANGES.md`](CHANGES.md) | version history with the measurement evidence for each change (the **developer** record) |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | dev environment · testing discipline · **English-doc sync discipline** · licence terms |
 | [`RELEASING.md`](RELEASING.md) | **release policy (single source of truth)**: GitHub + Comfy Registry must be updated as a pair · one command `tools/release.py` · failure handling · key discipline |
 | [`SECURITY.md`](SECURITY.md) | secrets / dependencies / network behaviour disclosure |

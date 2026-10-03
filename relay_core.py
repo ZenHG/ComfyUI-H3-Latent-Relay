@@ -657,6 +657,22 @@ def apply_relay(conditioning, plan: RelayPlan):
         _off = count_official_audio_refs(conditioning)
         _own = 1 if plan.audio_ref is not None else 0
         _tot = _off + _own
+        if _own:
+            # 🔴 2026-10-04 调研结论（读码确证，正文见 docs/07 §声锚·一段内多人）：官方那条路
+            #    （`ref_audios`）的每个音频参考都会在**文本呈现**里拿到一个标签 `<Audio j>`
+            #    （`comfy/text_encoders/minimax.py:178`；标签与 DiT 块**同序同数**，
+            #    两个第三方包 T8 / csglide 也是这个范式，且提示词**不引用**就不送参考）。
+            #    而本包这块是 `append=True` **事后追加**到 DiT 侧 `minimax_refs` 的 ——
+            #    tokenize 早就发生过 ⇒ **文本侧没有它的标签、prompt 引不到它**。
+            #    ⇒ 不写这一行，用户会以为"我给了锚 ⇒ prompt 里能引用它"，而那是错的。
+            plan.notes.append(
+                "本包注入的音频参考是**事后追加**的（DiT 侧第 %d 个，排在官方 %d 个之后）："
+                "文本侧**没有**对应的 `<Audio j>` 标签 ⇒ **prompt 引不到它**，"
+                "它只作为条件行被模型看到。\n"
+                "           要让某个声音变成**可被 prompt 引用**的参考（一段内多人的正路），"
+                "把该音频接**官方** `ref_audios` 槽 —— 编号按**已接线顺序**数 1..N（**不是槽号**），"
+                "长度先用官方 `TrimAudioDuration` 裁到 ~0.9 s 再接（参考行随每一步采样，长参考=慢）。"
+                % (_off + 1, _off))
         if _tot > AUDIO_REF_OFFICIAL_MAX:
             plan.notes.append(
                 "🔴 音频参考 **%d 个**，超过官方 `ref_audios` 上限 %d（官方 %d + 本包 %d）。\n"

@@ -1503,6 +1503,12 @@ class H3RelayCopyBridge:
                                "    同人续接不必接；**缝上换人才必须接**；**一段内后续换人由 prompt 的 `<Subject N>` 决定**，\n"
                                "    锚管不到也不该管 —— 别指望它把整段每个人的音色都管住。\n"
                                "    判据工具：`python tools/voice_bank.py advise --bank <声库> --prompt-file 段N.md --prev-file 段N-1.md`。\n"
+                               "🟣 **一段里多人要各自有参考 ⇒ 走官方 `ref_audios` 槽**（本包只负责缝区那一个）：\n"
+                               "    只有官方那条路会给每个音频参考发文本标签 `<Audio j>`，prompt 才引用得到；\n"
+                               "    本包注入的这个是**事后追加**到 DiT 侧的，**没有标签、prompt 引不到它**（report 会写明）。\n"
+                               "    ⚠️ `<Audio j>` 按**已接线顺序**编号（宿主的 Autogrow 只收已接线的槽）——\n"
+                               "    只接了 `ref_audio_2` 时它是 `<Audio 1>`，照槽号写 `<Audio 3>` 会**指空且不报错**；\n"
+                               "    槽位跳号时桥节点标题会直接提示实际编号。长度先用官方 `TrimAudioDuration` 裁到 ~0.9 秒。\n"
                                "🔴 **没有内容的锚会当场报错**（不静默）：全零 / 常量 / 静音 / NaN 一律 raise。\n"
                                "    注意别把**出词节点的 LATENT**（那是空的 AV latent）接到这里 —— 它全为零。\n"
                                "    想**关掉**声锚请**拔线**，不要接一个空 latent。",

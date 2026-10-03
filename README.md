@@ -7,7 +7,7 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 
 | 项 | 值 |
 |---|---|
-| 版本 | **0.6.22**（8 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
+| 版本 | **0.6.23**（8 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
 | 许可 | **MIT**（第三方出处见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)） |
 | 宿主 | **ComfyUI ≥ 0.35.0，且带 MiniMax-H3 支持**（宿主自身为 GPL-3.0，见 §许可与出处） |
 
@@ -232,6 +232,7 @@ python tools/voice_bank.py advise --bank <声库> --prompt-file 段N.md --prev-f
 | **锚替换整个音频尾窗** | 尾窗里的 BGM / 环境垫乐也会被换掉。有垫乐就**把垫乐混进声锚**再接 |
 | **音色 / 语速 / 情绪会被部分钉住** | 锚不是「只偷音色」—— 情绪与节奏也会跟随。请选与目标台词**情绪相近**的干净片段 |
 | **一段内多人只锚第一个** | `audio_ref` 只有一个窗 ⇒ 只锚「缝上接着说的那个人」；段内后续换人靠 prompt 的 `<Subject N>` |
+| 🟣 **其余人的参考要走官方槽** | 本包只锚缝区那 1 个。要让**其余说话人**也有声音参考，把他们的音频接**官方** `ref_audios` 槽 —— **只有官方那条路会生成文本标签 `<Audio j>`**，prompt 才引用得到（本包注入的那 1 个是事后追加到 DiT 侧的，**没有标签、prompt 引不到它**，`report` 会写明）。先接官方 `TrimAudioDuration` 裁到 ~0.9 s（参考行随每一步采样，长参考=慢）。⚠️ **编号按「已接线顺序」数，不是槽号**：只接了 `ref_audio_2` 时它是 `<Audio 1>`，照槽号写 `<Audio 3>` 会**指空且不报错**（槽位跳号时桥节点标题会直接写出实际编号） |
 | **声锚时长** | 尾窗要 0.925 秒 ⇒ 锚 **≥0.9 秒**（短了按全长取用并在 `report` 提醒）；建议 1–4 秒 |
 | **`pin_audio=False` 时被忽略** | `report` 里写明（降级可见，不静默） |
 
@@ -242,6 +243,9 @@ python tools/voice_bank.py advise --bank <声库> --prompt-file 段N.md --prev-f
 🔵 **一段里有多个人说话怎么办**：锚回答的问题**只有一个** —— 「**缝上接着说的那个人是谁**」。
 ⇒ **锚 = 本段第一个开口说话的人**；**同人续接不必接**、**缝上换人才必须接**；
 段内后续换人由 prompt 的 `<Subject N>` 决定（锚管不到、也不该管 —— 别指望它管住整段每个人）。
+**其余人要有自己的声音参考 ⇒ 接官方 `ref_audios` 槽**（那是唯一会生成 `<Audio j>` 标签的路，
+prompt 才引用得到；编号按**已接线顺序**，不是槽号 —— 详见
+[`docs/07`](docs/07-chain.md) §一段内多人）。
 判据一条命令（不用人肉读 prompt）：
 
 ```bash
@@ -267,7 +271,7 @@ ComfyUI-H3-Latent-Relay/
 ├── web/                   # 前端 JS：🧩 拼接按钮、Chain 面板、`run_id` 一处改全组（画布用；脚本用户见 docs/10 §7.4）
 ├── examples/              # 两个可直接打开的工作流：最小续接（21 节点）与全流程（47 节点）
 ├── docs/                  # 深度文档 01–10（原理 / 参数 / 采样链 / 画布 / 排障 / 脚本 / Chain / 测试 / 观测 / 音频）
-├── tests/                 # 离线自测（零 GPU）：483 项断言 + V3 逐字段 + 词分发纯函数
+├── tests/                 # 离线自测（零 GPU）：487 项断言 + V3 逐字段 + 词分发纯函数
 ├── tools/                 # 自检 / 取证 / 拼接 CLI / 打包器（含英文文档同步闸 en_sync.py）
 ├── licenses/              # 随包分发的第三方许可全文
 ├── dist/                  # 打包器的产出（最小分发集 + zip，不入库）
@@ -335,10 +339,11 @@ ComfyUI-H3-Latent-Relay/
 | [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md) | **完整排障表** · **常见疑问 FAQ** · 工作流文件自检 · API 提交 |
 | [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md) | 出词纪律：段首缓冲 · 台词安全时刻 · 末帧锚链 · 音频缝配套 |
 | [`docs/07-chain.md`](docs/07-chain.md) | Chain 自动连跑（换词 / 拼片 / 断点续跑） |
-| [`docs/08-testing.md`](docs/08-testing.md) | 离线自测：31 组断言明细（483 项）· 工具清单 |
+| [`docs/08-testing.md`](docs/08-testing.md) | 离线自测：31 组断言明细（487 项）· 工具清单 |
 | [`docs/09-metrics.md`](docs/09-metrics.md) | 观测量参考区间（DTW 残留 / 外观漂移）· 怎么自校准 |
 | [`docs/10-audio-seam-and-concat.md`](docs/10-audio-seam-and-concat.md) | **音频缝与多段拼接**：缝的口径与调参指南 · **台词保护** · 判据能力边界 · 音轨档位 · 边车 · **不开画布的脚本用法** |
-| [`CHANGES.md`](CHANGES.md) | 版本史与每次实测证据 |
+| [`RELEASE-NOTES.md`](RELEASE-NOTES.md) | **面向用户的发布说明**（中英双语，一版一节）· **升级前先看这个** |
+| [`CHANGES.md`](CHANGES.md) | 版本史与每次实测证据（**开发者记录**，细节更全） |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 开发环境 · 自测纪律 · **英文文档同步纪律** · 许可条款 |
 | [`RELEASING.md`](RELEASING.md) | **发布规范（唯一真相源）**：GitHub + Comfy Registry 两个渠道必须成对、一条命令 `tools/release.py`、失败处置、密钥纪律 |
 | [`SECURITY.md`](SECURITY.md) | 密钥 / 依赖 / 网络行为声明 |

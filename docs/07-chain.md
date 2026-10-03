@@ -347,11 +347,70 @@ python tools/voice_bank.py selftest     # 说话人解析规则的自检（可�
 ⚠️ **最小格式**没有 `subject_definitions` 段（`<Subject N>` 后面跟的是动作句）⇒ 拿不到角色名，
 用 `--speakers` 显式给。
 
-> 📌 **多锚（一段给多个人的锚）**：宿主协议**结构上是支持的** —— `minimax_refs` 是**块列表**，
-> 每块可自带 `ref_audio_t` + `audio_latent`（`comfy/ldm/minimax/model.py` 在循环里逐块消费，
-> 块排在目标流**之前**当条件行）。所以"缝上那个人钉住 + 其余人只当音色参考"在原理上成立。
-> ⚠️ 但**本包尚未实现、也尚未实测**（模型是否会按 `<Subject N>` 正确分配音色，未知）
-> ⇒ **当前不做**，别按它写产线。要不要做、先做不做小实测，见 `LOCAL-维护规范` 与交接。
+### 一段内多人：两条通道怎么配合（0.6.23 调研定论）
+
+> 2026-10-04 把宿主的参考通道**读码读到底**（不是猜），结论与上一版笔记不同，按新结论执行。
+
+**① 参考是怎么进模型的：两条通道，同序同数**
+
+| 通道 | 内容 | 谁生成 |
+|---|---|---|
+| **文本呈现** | 每个参考一个标签：`<Picture i>: ` / `<Video k>: ` / **`<Audio j>: `** | `comfy/text_encoders/minimax.py:169-191`（tokenizer） |
+| **DiT 条件行** | `minimax_refs` 块列表 ⇒ 排布在目标流**之前**、**被钉住不更新**的条件行 | `comfy/ldm/minimax/model.py:396-438`（`PackedLayout`） |
+
+🔴 **音频参考的"内容"只走 DiT；文本侧只有那个空标签**（`# audio never enters Qwen`，
+`minimax.py:10`）。**标签的用途就是让 prompt 引用它** —— 官方节点自己写着
+*"Use the same tags when prompting"*。两个第三方包（`minimax-h3-audio-T8`、`csglide_cast.py`）
+都是同一范式：`clip.tokenize(prompt, minimax_ref_items=ref_items)` 与
+`conditioning_set_values(cond, {"minimax_refs": ref_blocks})` **同序同数**，
+而且**提示词不引用就不送参考**。
+
+**② 所以本包**不做**"多塞几块"的多锚**（这是 0.6.22 之前笔记里设想的做法）
+
+本包注入音频参考走的是 `conditioning_set_values(..., append=True)` —— **事后追加**到 DiT 侧，
+而 tokenize **早就发生过了**。⇒ 追加的块：
+
+1. **文本侧没有对应标签**（`<Audio j>` 的编号在 tokenize 那一刻就定死了）⇒ **prompt 引不到它**；
+2. 让文本标签数与 DiT 参考块数**不再相等** —— 而"同序同数"正是这条通道的契约；
+3. 与两个第三方实现的做法**相反**。
+
+⚠️ 更要紧的是：**本包现有那 1 个锚的实测效果，并不能证明"无标签的块被模型采纳"** ——
+声锚同时**替换了钉住的音频前缀**（`pin_audio`），两件事一起变 ⇒ 效果归因是混淆的。
+⇒ 拿"1 个有效"去外推"N 个也有效"是**没有依据**的。**因此本包不实现 `voice_anchor_2/3`。**
+
+**③ 一段里多人要各自有参考 ⇒ 走官方 `ref_audios` 槽（正路）**
+
+```
+其余人的音频 ──► TrimAudioDuration（裁到 ~0.9 s）──► MiniMaxH3ReferenceToVideo.ref_audio_N
+本段第一个开口的人 ──► VAEEncodeAudio ──► Copy Bridge.voice_anchor   （本包：段级、缝区、自动裁窗）
+```
+
+- 为什么必须裁：参考行**随每一步采样**（`PackedLayout` 里 `audio_update=False` 的常驻行）
+  ⇒ 参考越长越慢，而且长参考会把整段内容的音色一起带进来。
+- prompt 里用 `<Audio j>` 指代（例：`<Audio 1> 是小满的声音`），与 `<Subject N>` 配合。
+
+**④ 🔴 `<Audio j>` 的编号**不是**槽号 —— 这是最容易踩、且**完全不报错**的一脚**
+
+宿主 `comfy_api/latest/_io.py:1198-1211` 按 `ref_audio_0..max` **索引升序**枚举，
+但 `if expected_id in live_inputs` **只把已接线的槽放进 dict**；官方节点再用
+`for audio in (ref_audios or {}).values()` 交给 tokenizer，tokenizer 按**枚举顺序**发 `<Audio 1..N>`。
+
+⇒ **`<Audio j>` 的 j = 第 j 个「已接线」的槽（按槽号升序）**：
+
+| 你接的槽 | prompt 里该写 | 写错的后果 |
+|---|---|---|
+| `ref_audio_0` / `ref_audio_1` / `ref_audio_2`（连续接满） | `<Audio 1>` / `<Audio 2>` / `<Audio 3>` | 编号与槽号一致，没问题 |
+| **只接** `ref_audio_2` | **`<Audio 1>`** | 写 `<Audio 3>` ⇒ **指空，且任何一层都不报错** |
+| 接 `ref_audio_0` + `ref_audio_2` | `<Audio 1>` / `<Audio 2>` | 写 `<Audio 3>` ⇒ 同上 |
+
+🔵 **本包的兜底**：槽位**跳号**时（编号会骗人），桥节点标题上会直接写出实际编号
+（`web/relay_kit_refs.js::ordinalHint`，只在会骗人时开口，连续接满时不制造噪声）；
+report 里也给权威口径。
+
+**⑤ 本包注入的那 1 个怎么陈述才对**（已写进 report，别在别处说反）
+
+它是 **DiT 侧第 `官方数+1` 个**音频参考，**没有文本标签、prompt 引不到它**，
+只作为条件行被模型看到。要"可被 prompt 引用"的参考 ⇒ 见 ③。
 
 
 ### 兜底措施

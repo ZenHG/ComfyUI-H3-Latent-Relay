@@ -43,7 +43,7 @@ export const REF_HOST = "MiniMaxH3ReferenceToVideo";
  * 用「末尾锚定 + 允许 `.` 前缀」两种形式都吃下，同时**不会**误吞
  * `ref_video_audios.ref_video_audio_0`（那串里没有 `ref_audio_` 这个子串）。
  */
-export const REF_SLOT_RE = /(^|\.)ref_audio_\d+$/;
+export const REF_SLOT_RE = /(^|\.)ref_audio_(\d+)$/;
 
 /** 提示后缀：所有由本模块追加到标题末尾的片段都以此开头（用于幂等剥离）。 */
 export const SUFFIX_MARK = " · ";
@@ -62,6 +62,12 @@ export function isRefAudioSlot(name) {
     return REF_SLOT_RE.test(String(name || ""));
 }
 
+/** 槽名 → **槽位号**（`ref_audios.ref_audio_2` ⇒ `2`）；不是槽位则 `null`。 */
+export function refSlotIndex(name) {
+    const m = REF_SLOT_RE.exec(String(name == null ? "" : name));
+    return m ? Number(m[2]) : null;
+}
+
 /**
  * 数官方音频槽的占用（**纯函数**，吃节点数组，不碰 `app`）。
  *
@@ -74,6 +80,7 @@ export function isRefAudioSlot(name) {
  */
 export function countRefAudioSlots(nodes) {
     let used = 0, slots = 0, hosts = 0, hostsRead = 0;
+    const perHost = [];
     for (const n of nodes || []) {
         if (!n) continue;
         const isHost = n.type === REF_HOST;
@@ -81,14 +88,65 @@ export function countRefAudioSlots(nodes) {
         const ins = n.inputs;
         if (!Array.isArray(ins)) continue;        // 读不到输入表 ⇒ 这个节点不贡献任何判据
         if (isHost) hostsRead += 1;
+        const mine = [];                          // 本节点上**已接线**的音频槽位号
         for (const inp of ins) {
             if (!isRefAudioSlot(inp && inp.name)) continue;
             slots += 1;
-            if (inp.link != null) used += 1;
+            if (inp.link != null) {
+                used += 1;
+                mine.push(refSlotIndex(inp.name));
+            }
+        }
+        if (isHost) {
+            // 🔴 排序成**宿主会用的那个顺序**（`_io.py:1198` 按 `ref_audio_0..max` 索引升序枚举，
+            //    `if expected_id in live_inputs` 只收已接线的）⇒ 这里必须同序，否则编出来的
+            //    `<Audio j>` 会与真实呈现错位 —— 而错位是**看不出来**的。
+            mine.sort((a, b) => a - b);
+            perHost.push({ id: n.id, wired: mine.map((slot, k) => ({ slot, ordinal: k + 1 })) });
         }
     }
-    return { used, slots, hosts, hostsRead };
+    return { used, slots, hosts, hostsRead, perHost };
 }
+
+/**
+ * 「**已接线顺序**」编号提示 —— **只在编号会骗人时才非空**（槽位从 0 连续接满 = 编号与槽号一致 ⇒ 返回 ""）。
+ *
+ * 🔴 为什么要这条：官方 `ref_audios` 的 `<Audio j>` 标签**不是按槽号**编的。
+ *    宿主 `comfy_api/latest/_io.py:1198-1211` 按 `ref_audio_0..max` 索引升序枚举，
+ *    但 `if expected_id in live_inputs` **只把已接线的槽放进 dict**；官方节点再用
+ *    `for audio in (ref_audios or {}).values()` 交给 tokenizer（`comfy_extras/nodes_minimax_h3.py:352`），
+ *    tokenizer 按**枚举顺序**发 `<Audio 1..N>`（`comfy/text_encoders/minimax.py:178`）。
+ * ⇒ 只接了 `ref_audio_2` 时，它的标签是 **`<Audio 1>`**（不是 `<Audio 3>`）。
+ *    用户在 prompt 里写 `<Audio 3>` 会**指空**，而且**任何一层都不会报错** ——
+ *    这正是本模块存在的理由（把静默失效变成显性提示）。
+ */
+export function ordinalHint(perHost) {
+    const bad = [];
+    for (const h of perHost || []) {
+        const w = (h && h.wired) || [];
+        if (!w.length) continue;
+        if (w.every((x) => x.ordinal === x.slot + 1)) continue;   // 连续且从 0 起 ⇒ 不会骗人
+        bad.push(w.map((x) => `ref_audio_${x.slot}→<Audio ${x.ordinal}>`).join("、"));
+    }
+    if (!bad.length) return "";
+    return "⚠ 音频槽按**已接线顺序**编号：" + bad.join("；")
+         + " —— 这是在 prompt 里要写的号，按槽号写会指空（且不报错）。";
+}
+
+/**
+ * 「一段里多人怎么锚」的正路 —— **只在越界时**拼进文案（那时用户多半正想塞更多人）。
+ *
+ * 🔴 为什么不给本包加 `voice_anchor_2/3`：本包注入的音频块走 `conditioning_set_values(append=True)`
+ *    直接进 `minimax_refs`（DiT 侧），而 tokenize **早就发生过了** ⇒ 文本呈现里**没有**对应的
+ *    `<Audio j>` 标签。而宿主/官方/两个第三方包（T8、csglide）的口径一致：
+ *    **文本标签与 DiT 参考块同序同数**，且提示词**要引用**那个标签。
+ *    ⇒ 本包硬塞第二块 = 造一行"prompt 指不到的参考"，与这条契约相反，且我们**未实测**。
+ *    正路是把其余人的音频接**官方 `ref_audios` 槽**（那条路自动有标签）。
+ */
+export const MULTI_ANCHOR_GUIDE =
+    ` 一段里多人要各自有参考：把其余人的音频也接**官方 ref_audio 槽**` +
+    `（只有官方那条路会生成 <Audio j> 标签，prompt 才引得到），` +
+    `先用官方的 TrimAudioDuration 裁到 ~0.9 s 再接（参考行会随每一步采样，长参考=慢）。`;
 
 /**
  * 算额度与文案。
@@ -111,7 +169,8 @@ export function audioRefBudget(officialUsed, stageIndex) {
         text = `⚠ 音频参考 ${total} 个（官方上限 ${OFFICIAL_AUDIO_REF_MAX}）：` +
                `你的 ${used} + 本包 ${mine}。模型不拦，但超出官方口径、我们未实测。` +
                `本包这 ${mine} 个是**续接音频**（声锚 / 上一段尾窗，二选一，没有"完全不用"的开关）` +
-               `⇒ 要腾额度，请自行减少参考节点的 ref_audio 槽位。`;
+               `⇒ 要腾额度，请自行减少参考节点的 ref_audio 槽位。` +
+               MULTI_ANCHOR_GUIDE;
     } else if (total === OFFICIAL_AUDIO_REF_MAX && mine > 0) {
         text = `音频参考 ${total}/${OFFICIAL_AUDIO_REF_MAX}（你的 ${used} + 本包 ${mine}）—— 正好用满。`;
     }
@@ -142,7 +201,11 @@ export function audioRefBudget(officialUsed, stageIndex) {
  */
 export function refBudgetFromScan(scan, stageIndex) {
     if (isScanUnknown(scan)) return null;
-    return audioRefBudget(scan.used, stageIndex);
+    const b = audioRefBudget(scan.used, stageIndex);
+    // 「已接线顺序」编号提示：**独立于额度**（没越界也可能编号骗人）⇒ 单独挂一个字段，
+    // 由 `budgetTitle` 决定要不要显示（纯函数 `ordinalHint` 已经在"不会骗人"时返回 ""）。
+    b.hint = ordinalHint(scan.perHost);
+    return b;
 }
 
 /** 剥掉本模块追加过的后缀（幂等 —— 可对同一串反复调用）。 */
@@ -177,9 +240,13 @@ export const UNKNOWN_SUFFIX = SUFFIX_MARK + "⚠ 音频参考额度未知（读�
  * @param {number} officialUsed 官方占用；**`-1` 或 `null` = 未知**
  * @param {number} stageIndex  桥的 `stage_index`
  */
-export function budgetTitle(title, officialUsed, stageIndex) {
+export function budgetTitle(title, officialUsed, stageIndex, hint = "") {
     const base = stripBudgetSuffix(title) || "";
     if (officialUsed == null || Number(officialUsed) < 0) return base + UNKNOWN_SUFFIX;
     const b = audioRefBudget(officialUsed, stageIndex);
-    return b.text ? base + SUFFIX_MARK + b.text : base;
+    // ⚠️ 顺序不能反：`stripBudgetSuffix` 从**第一个** `· ⚠/ℹ/音频参考` 一路剥到串尾
+    //    ⇒ 只要**第一段**以那三个之一开头，后面跟几段都会被剥干净（幂等性靠这个）。
+    //    额度文案以 `⚠` / `音频参考` 开头，编号提示以 `⚠` 开头 ⇒ 两条都安全。
+    const parts = [b.text, String(hint || "")].filter(Boolean);
+    return parts.length ? base + SUFFIX_MARK + parts.join(SUFFIX_MARK) : base;
 }

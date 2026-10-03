@@ -58,7 +58,9 @@ function refreshTitles() {
         if (budget == null) unknown += 1;
         else if (budget.over) flagged += 1;
         // 未知 ⇒ 传 -1（纯函数据此写「⚠ 额度未知」）；已知 ⇒ 传**扫描到的原始占用数**。
-        const want = budgetTitle(node.title || BRIDGE, unknownScan ? -1 : scan.used, stage);
+        // `hint` = 「已接线顺序」编号提示（只有编号会骗人时才非空，纯函数据此返回 "" 或 ⚠ 行）。
+        const want = budgetTitle(node.title || BRIDGE, unknownScan ? -1 : scan.used, stage,
+                                 budget ? budget.hint : "");
         if (node.title !== want) {
             node.title = want;
             changed = true;

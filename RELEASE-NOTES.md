@@ -18,6 +18,47 @@
 
 ---
 
+## 0.6.23 — 2026-10-04
+
+**一段里多人说话时，参考该怎么给 —— 顺手修掉一个「写错了也不报错」的坑。**
+
+- 本包的声锚只覆盖**接缝**那**一个**说话人（这是它的设计边界）。**其余人的声音参考**请把音频接
+  **官方参考节点**的 `ref_audio` 槽 —— 只有那条路会给每个参考生成一个文本标签 `<Audio j>`，
+  提示词才引用得到它，也才能和 `<Subject N>` 对上。
+- 本包注入的那一个参考是**事后追加**到模型侧条件里的 ⇒ **没有这个标签、提示词引不到它**
+  （它只作为条件行被模型看到）。报告里现在会写明这一点，不再让人误以为
+  「接了声锚就能在提示词里引用它」。
+- 🔴 **编号按「已接线顺序」数，不是槽号**：只接了第 3 个槽 `ref_audio_2` 时，它在提示词里是
+  **`<Audio 1>`**；照槽号写 `<Audio 3>` 会**指到空气，而且任何地方都不报错**。
+  槽位跳号时，**桥节点标题会直接写出实际编号**（连续接满时不打扰你）。
+- 接线前先用官方的音频裁剪节点裁到 **~0.9 秒**：参考行会跟着每一步采样，参考越长越慢。
+
+**升级动作**：图 / 连线 / 参数都不用动；只有「其余人参考」这一种用法需要照上面走。
+
+<!-- EN -->
+
+**How to give voice references when several people speak in one segment — plus a fix for a trap that
+never reported anything.**
+
+- This pack's voice anchor covers exactly **one** speaker: the one at the seam. That is its design
+  boundary. For the **other speakers**, wire their audio into the **official reference node's**
+  `ref_audio` slots — that is the only path that emits a text label `<Audio j>` per reference, which is
+  what the prompt uses to refer to it (and to pair it with `<Subject N>`).
+- The one reference this pack injects is appended to the model side **after** tokenisation, so it has
+  **no such label and the prompt cannot reference it** (the model only sees it as a conditioning row).
+  The report now says so, instead of letting you assume "anchor wired ⇒ I can reference it in the prompt".
+- 🔴 **Ordinals count wired slots in order, not slot numbers**: wire only the third slot (`ref_audio_2`)
+  and it is **`<Audio 1>`** in the prompt; writing `<Audio 3>` **points at nothing and reports nothing
+  anywhere**. When slots are non-contiguous, the **bridge node's title states the real ordinals**
+  (and stays quiet when they match).
+- Trim to **~0.9 s** with the official audio-trim node before wiring: reference rows ride through every
+  sampling step, so longer references are slower.
+
+**Action required**: nothing — no graph, wiring or parameter changes. Only the "other speakers" recipe
+above is new.
+
+---
+
 ## 0.6.22 — 2026-10-04
 
 **新功能：治「安静背景里无缘无故的一声滴」（declick），默认开。**

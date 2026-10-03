@@ -18,8 +18,9 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
-    OFFICIAL_AUDIO_REF_MAX, REF_HOST, isRefAudioSlot, countRefAudioSlots,
+    OFFICIAL_AUDIO_REF_MAX, REF_HOST, isRefAudioSlot, refSlotIndex, countRefAudioSlots,
     audioRefBudget, refBudgetFromScan, isScanUnknown, stripBudgetSuffix, budgetTitle,
+    ordinalHint,
 } from "../web/relay_kit_refs.js";
 
 let pass = 0;
@@ -181,13 +182,98 @@ console.log("[6] 静态扫描：纯模块不许依赖 app；壳不许自己重�
         !/\n\s*(?:app\.|const\s+\w+\s*=\s*app\.)/.test(shell.split("app.registerExtension")[0].replace(/try\s*\{[\s\S]*?\}\s*catch[\s\S]*?\}/g, "")));
 }
 
+// ------------------------------------------------------- 6b. 「已接线顺序」编号（`<Audio j>`）
+// 🔴 本组的来源（2026-10-04 读宿主源码确证，不是猜的）：
+//    宿主 `comfy_api/latest/_io.py:1198-1211` 按 `ref_audio_0..max` **索引升序**枚举，
+//    但 `if expected_id in live_inputs` **只把已接线的槽放进 dict**；官方节点再用
+//    `for audio in (ref_audios or {}).values()` 交给 tokenizer，tokenizer 按**枚举顺序**
+//    发 `<Audio 1..N>`（`comfy/text_encoders/minimax.py:178`）。
+// ⇒ `<Audio j>` 的 j = **第 j 个已接线的槽**（按槽号升序），**不是槽号本身**。
+//    只接 `ref_audio_2` ⇒ 标签是 `<Audio 1>`；用户照槽号写 `<Audio 3>` 会**指空且不报错**。
+console.log("");
+console.log("[6b] 音频槽的「已接线顺序」编号（ordinalHint）—— 编号会骗人时必须开口");
+{
+    check("6b.1 refSlotIndex：解析槽号；非槽位 ⇒ null",
+        refSlotIndex("ref_audios.ref_audio_2") === 2
+        && refSlotIndex("ref_audio_0") === 0
+        && refSlotIndex("ref_video_audios.ref_video_audio_1") === null
+        && refSlotIndex("") === null && refSlotIndex(null) === null);
+
+    const cont = countRefAudioSlots([hostNode("1078", 3, [0, 1, 2])]);
+    check("6b.2 从 0 连续接满 3 个 ⇒ 编号与槽号一致，`ordinalHint` **必须**为空（不制造噪声）",
+        cont.perHost.length === 1
+        && JSON.stringify(cont.perHost[0].wired) === JSON.stringify(
+            [{ slot: 0, ordinal: 1 }, { slot: 1, ordinal: 2 }, { slot: 2, ordinal: 3 }])
+        && ordinalHint(cont.perHost) === "",
+        JSON.stringify(cont.perHost[0].wired));
+
+    const only2 = countRefAudioSlots([hostNode("1078", 3, [2])]);
+    check("6b.3 只接 `ref_audio_2` ⇒ 它的官方编号是 **<Audio 1>**（不是 3），且必须开口提示",
+        JSON.stringify(only2.perHost[0].wired) === JSON.stringify([{ slot: 2, ordinal: 1 }])
+        && ordinalHint(only2.perHost).includes("ref_audio_2→<Audio 1>"),
+        ordinalHint(only2.perHost).slice(0, 70));
+
+    const gap = countRefAudioSlots([hostNode("1078", 3, [0, 2])]);
+    check("6b.4 跳号（接 0 与 2）⇒ <Audio 1> / <Audio 2>，两个映射都要点出来",
+        ordinalHint(gap.perHost).includes("ref_audio_0→<Audio 1>")
+        && ordinalHint(gap.perHost).includes("ref_audio_2→<Audio 2>"),
+        ordinalHint(gap.perHost).slice(0, 90));
+
+    const from1 = countRefAudioSlots([hostNode("1078", 3, [1, 2])]);
+    check("6b.5 从 1 起连续（接 1、2）也**算会骗人**（<Audio 1>/<Audio 2> ≠ 槽号+1）",
+        ordinalHint(from1.perHost) !== "", ordinalHint(from1.perHost).slice(0, 80));
+
+    // 乱序的 inputs 也要按**槽号升序**（宿主的枚举顺序），否则编出来的号与真实呈现错位。
+    const shuffled = countRefAudioSlots([
+        { id: 1, type: REF_HOST, inputs: [
+            { name: "ref_audios.ref_audio_2", link: 9 },
+            { name: "ref_audios.ref_audio_0", link: 8 },
+        ] },
+    ]);
+    check("6b.6 `inputs` 顺序打乱 ⇒ `wired` 仍按**槽号升序**（与宿主枚举同序）",
+        JSON.stringify(shuffled.perHost[0].wired) === JSON.stringify(
+            [{ slot: 0, ordinal: 1 }, { slot: 2, ordinal: 2 }]),
+        JSON.stringify(shuffled.perHost[0].wired));
+
+    check("6b.7 未接线 / 无参考节点 ⇒ 没有编号可提示（空串，不是噪声）",
+        ordinalHint(countRefAudioSlots([hostNode("1078", 3, [])]).perHost) === ""
+        && ordinalHint(countRefAudioSlots([]).perHost) === ""
+        && ordinalHint(null) === "");
+
+    check("6b.8 `refBudgetFromScan` 把提示挂在 `hint` 上（额度 `text` 本身不含它 —— 两者独立）",
+        (() => {
+            const s = countRefAudioSlots([hostNode("1078", 3, [0, 2])]);
+            const b = refBudgetFromScan(s, 1);
+            return b.hint.includes("<Audio 2>") && !b.text.includes("已接线顺序");
+        })());
+
+    const tGap = budgetTitle("桥", 2, 1, ordinalHint(gap.perHost));
+    check("6b.9 标题里「编号提示」也**幂等**（反复调用不叠加）",
+        tGap.includes("已接线顺序")
+        && budgetTitle(tGap, 2, 1, ordinalHint(gap.perHost)) === tGap
+        && budgetTitle(budgetTitle(tGap, 2, 1, ordinalHint(gap.perHost)), 2, 1,
+                       ordinalHint(gap.perHost)) === tGap);
+    check("6b.10 未知态（额度读不到）⇒ 只写「额度未知」，**不**硬塞编号提示",
+        budgetTitle("桥", -1, 1, ordinalHint(gap.perHost)).includes("额度未知")
+        && !budgetTitle("桥", -1, 1, ordinalHint(gap.perHost)).includes("已接线顺序"));
+
+    // 🔴 最可能撞上的真实场景：**只接了 `ref_audio_2` 一个槽、且没越界** —— 此时额度文案是**空**的，
+    //    于是标题里**只有编号提示**这一条后缀。剥离正则必须照样吃掉它，否则每刷新一次就叠一行。
+    const only2T = budgetTitle("桥", 1, 1, ordinalHint(only2.perHost));
+    check("6b.11 「额度无文案 + 只有编号提示」时标题也要**幂等**（这条后缀是第一段，剥离必须吃它）",
+        only2T.includes("已接线顺序")
+        && budgetTitle(only2T, 1, 1, ordinalHint(only2.perHost)) === only2T
+        && stripBudgetSuffix(only2T) === "桥",
+        only2T.slice(0, 60));
+}
+
 // ------------------------------------------------------- 7. 自引用：断言数只准有一个真相源
 // 同款做法见 `tests/test_prompt_dispatch.mjs` 的第 9 组。
 // ⚠️ 只认**提到本测试文件**的行（`.mjs` 名字必须逐字出现），否则会把别的测试的期望值抓进来。
 // 🔴 这个数**必须等于本文件实跑的通过数（含本行这条自检）**。
 //    第一版写成 33（比实跑少 1）⇒ 自检"通过"了，而声明值与真值其实**不一致** ——
 //    自引用机制最怕的就是这种"差一个数还绿"的假绿。改断言后请同步 ci.yml 与 docs/08。
-const EXPECTED_CHECKS = 34;
+const EXPECTED_CHECKS = 45;
 console.log("");
 console.log("[7] 断言数自引用（ci.yml / docs/08 里写的「期望 N/0」必须等于本文件实跑数）");
 {
@@ -201,9 +287,14 @@ console.log("[7] 断言数自引用（ci.yml / docs/08 里写的「期望 N/0」
         }
     }
     const shown = decl.map((d) => `${d.rel.split("/").pop()}=${d.n}`).join(" ");
-    check("7.1 ci.yml / docs/08 里写的「N/0」== 本文件实跑数（改测试必须同步那两处）",
-        decl.length >= 2 && decl.every((d) => d.n === EXPECTED_CHECKS),
-        `${shown} ｜ 本文件=${EXPECTED_CHECKS}`);
+    // 🔴 三边相等才算过：**声明的两个文件** == 常量 == **本文件此刻实跑的通过数 + 1（本行自己）**。
+    //    只比「声明 == 常量」是不够的：那样改了断言却忘了同步常量时，检查照样绿
+    //    （「差一个数还绿」正是这段注释警告过的假绿），必须把**实跑数**也拉进来当判据。
+    //    ⚠️ 2026-10-04 实测有效：加了一条 6b.11 却忘了改常量，这条**当场报红**。
+    check("7.1 ci.yml / docs/08 里写的「N/0」== 常量 == **本文件实跑数**（三边相等，改测试必须同步）",
+        decl.length >= 2 && decl.every((d) => d.n === EXPECTED_CHECKS)
+        && pass + 1 === EXPECTED_CHECKS,
+        `${shown} ｜ 常量=${EXPECTED_CHECKS} ｜ 实跑=${pass + 1}`);
 }
 
 // ---------------------------------------------------------------- 结果

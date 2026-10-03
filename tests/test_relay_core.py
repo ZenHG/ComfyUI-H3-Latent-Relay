@@ -3716,17 +3716,18 @@ check("30.30 幂等：对**已治结果**再治一次 ⇒ 逐位不变",
 
 print()
 print("=" * 78)
-def _apply31(n_audio):
+def _apply31(n_audio, own=True):
     """跑一遍 apply_relay，返回带 report 的结果（额度提示写进 notes ⇒ report）。
 
     ⚠️ 用 duck-typed 的 plan（`types.SimpleNamespace`）而不是 `plan_relay` ——
     本组要验的是**额度计数与提示**，与 latent 形状/时序网格无关 ⇒ 不该被那些前置条件绑住。
+    `own=False` = 本段不注入音频参考（首段形态），用来验「没动就不报」。
     """
     import types
     plan = types.SimpleNamespace(
         applied=True, span=5, keyframes=[],
-        audio_ref={"kind": "audio", "ref_audio_t": 37,
-                   "audio_latent": torch.randn(1, 2, 2, 37)},
+        audio_ref=({"kind": "audio", "ref_audio_t": 37,
+                    "audio_latent": torch.randn(1, 2, 2, 37)} if own else None),
         anchor_ref=None, notes=[])
     CORE.apply_relay(_cond31(n_audio), plan)
     return {"report": "\n".join(plan.notes), "plan": plan}
@@ -3754,6 +3755,25 @@ check("31.3 外部锚是 kind=video ⇒ **不占音频额度**（数音频块，
 check("31.4 没有官方参考块 ⇒ 数到 0，且不报警",
       CORE.count_official_audio_refs(_cond31(0)) == 0
       and "超过官方" not in _apply31(0)["report"], "")
+
+# —— 0.6.23：多锚调研的结论落进**权威口径**（report 是脚本/API 用户唯一的权威来源）——
+# 三条判据都来自**读码确证**，正文见 docs/07 §声锚·一段内多人。
+_r31_0 = _apply31(0)["report"]
+_r31_2 = _apply31(2)["report"]
+check("31.5 本包追加的块必须写明「文本侧没有 `<Audio j>` 标签 ⇒ **prompt 引不到它**」"
+      "（不许让用户以为给了锚就能在 prompt 里引用）",
+      "prompt 引不到它" in _r31_0 and "`<Audio j>`" in _r31_0, "")
+check("31.6 报告里点名它在 DiT 侧的**序号 = 官方数 + 1**（官方 0 ⇒ 第 1 个；"
+      "官方 2 ⇒ 第 3 个）；差一就是指错位置",
+      "第 1 个" in _r31_0 and "第 3 个" in _r31_2
+      and "排在官方 2 个之后" in _r31_2, "")
+check("31.7 「一段内多人的正路」写进 report：官方 `ref_audios` 槽 + 编号按**已接线顺序**"
+      "（不是槽号）+ `TrimAudioDuration` 裁窗",
+      "ref_audios" in _r31_0 and "已接线顺序" in _r31_0
+      and "不是槽号" in _r31_0 and "TrimAudioDuration" in _r31_0, "")
+check("31.8 🔴 首段（本段不注入音频参考）⇒ **这三行一条都不许出现**"
+      "（「没动就不报」—— 首段的 report 不许被这段文案污染）",
+      _apply31(0, own=False)["report"] == "", _apply31(0, own=False)["report"][:60])
 
 print()
 print("=" * 78)
