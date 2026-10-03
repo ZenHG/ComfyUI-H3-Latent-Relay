@@ -376,10 +376,21 @@ def publish(f: dict) -> None:
         die("找不到 comfy-cli：`pip install comfy-cli`，或用 COMFY_CLI 指定其路径。\n"
             "    ⚠️ 它必须能跑（早前实测：隔离 venv 要用系统 Python 3.12 建，3.13 建的在清华源上装不上）")
     r = run([comfy, "node", "validate"])
-    tail = [ln for ln in (r.stdout or "").splitlines() if ln.strip()][-1:]
-    say("  " + (tail[0] if tail else "(无输出)"))
+    # 🔴 2026-10-04：失败回显**必须连 stderr 一起看**。此前只打 stdout 的最后一行 ——
+    #    而 **CLI 自身没起来**时（实测：PATH 上那个 `comfy` 是 hermes 托管的，隔离运行时坏掉，
+    #    报 `uv.lock needs to be updated, but --locked was provided`）**错误全在 stderr、
+    #    stdout 是空的** ⇒ 打出来的是「`comfy node validate` 没过 —— 别发」，
+    #    **把"CLI 坏了"误报成"仓库校验没过"**（会让人去翻仓库，翻不到任何问题）。
+    out = ((r.stdout or "") + "\n" + (r.stderr or "")).strip()
+    tail = [ln for ln in out.splitlines() if ln.strip()][-3:]
+    say("  " + ("\n  ".join(tail) if tail else "(无输出)"))
     if r.returncode != 0:
-        die("`comfy node validate` 没过 —— 别发")
+        hint = ""
+        if not (r.stdout or "").strip():
+            hint = ("\n    ⚠️ 它的 stdout 是**空的** ⇒ 这多半**不是仓库校验没过，而是 comfy-cli 自身没起来**"
+                    "（真因在 stderr，见上一行）。\n"
+                    "    用 COMFY_CLI=<能跑的 comfy 可执行> 显式指定，**别依赖 PATH 上那个**。")
+        die("`comfy node validate` 没过 —— 别发" + hint)
     say("  ✅ 官方校验通过")
     # 打包预览：把「发出去到底有什么」摊开看，开发件混入就拦
     run([comfy, "node", "pack"], quiet=True)
