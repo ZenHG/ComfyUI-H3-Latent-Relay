@@ -40,8 +40,8 @@
           "zh": "使用方法",
           "en": "Usage",
           "mode": "condensed",
-          "h_en": "12f3e82fb5e93e34",
-          "h_src": "d509441315cfabfb",
+          "h_en": "67a3225fd5701eee",
+          "h_src": "1860ee7799d74c54",
           "seeded": "by-position"
         },
         {
@@ -79,7 +79,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-03",
-      "src_sha": "8dbf3c88de31b34a"
+      "src_sha": "8fa0547b4d6669e3"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",

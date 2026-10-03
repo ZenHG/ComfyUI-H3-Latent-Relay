@@ -153,43 +153,40 @@ The log should show `钉住 22 帧` / `裁首 N 帧 = 钉住 22 + 沉降 0` / `�
 | The output replays the previous segment from frame 1 | TrimAV is not connected, or its `trim_frames` is not wired to bridge `[2]` |
 | A new film picks up an old film's tail | `run_id` was not changed (same name ⇒ same file names) |
 
-### How to write the prompt (one prompt per segment)
+### Two prompt-related things this pack cares about
 
-This pack **does not generate prompts**, but the bridge and Trim AV both work on the assumption
-"**one segment = one sampling run**" ⇒ how you write the prompt directly affects the seam.
+**This pack does not generate prompts and does not parse them** — the bridge and Trim AV only look at
+tensors. Only two things in the prompt affect this pack's behaviour:
 
-**① Use the "minimal format"** (current recommendation; the older six-block format is still accepted)
+**① Voice anchor — the *decision* comes from the prompt, the *execution* does not**
 
-That means **natural-language scene description + speaker marker + dialogue**, without the
-`subject_definitions` / `overall_soundscape` / `non_diegetic_music` scaffold (measured: the scaffold
-makes the body far longer for negative benefit):
+🔴 Get the relationship straight:
 
-```
-[Shot 1] 中近景，她走在轨道右侧的地面上，与轨道平行、朝镜头方向匀速迈步，
-镜头以与她步行完全相同的速度沿轨道缓缓后退跟移，全程不停顿。
-她走着，呼吸匀，<Subject 1> 对着镜头开口说话:<d>[zh]这一镜，我边走边说，走了八秒了。</d>
-说完不再说话，她继续走，画面停在运动中途。
-```
-
-**② Three rules you must not break**
-
-| Rule | Why |
+| Step | What drives it |
 |---|---|
-| 🔴 **Dialogue must live inside the `<d>` tag**: `<Subject N> <minimal action clause>:<d>[zh]line</d>` | Dialogue left outside the tag ⇒ the model reads it as scene description; measured to mis-speak / babble |
-| 🔴 **The speaker marker must be within 120 characters before `<d>`** (`<Subject N>`; the legacy `(Sx)` still works) | It says *who* is talking; without it the model can only guess |
-| 🔴 **From segment 2 on: open by picking up the previous segment's action and camera**, do not restart | The bridge pins the previous segment's tail frames; restarting fights the pinned region |
+| **Executing the anchor** | the **`voice_anchor` input** (`LoadAudio → VAEEncodeAudio` audio latent) — the node only sees tensors and **cannot read the prompt**, so it has no idea who speaks in this segment, or how many people do |
+| **Deciding *who* to anchor** | the **prompt**: `<Subject N> … <d>[line]</d>` is the **only** place where "who speaks first in this segment" can be read by machine |
+| **Speaker changes inside the segment** | the prompt's `<Subject N>` (the model switches on its own) — **the anchor cannot cover this**; its window is only the seam (~0.9 s) |
 
-**③ Three measured lessons** (not style preferences)
+One command gives the verdict (no need to read prompts by hand):
 
-- **One-take ⇒ write no timestamps** (including inline `At`) — timestamps make the model cut shots; use `[Shot N]` only when you *want* a cut, and **whether it cut is judged by eye, not by a checker**.
-- **No clear faces outside close-ups**: mid/long shots break faces — that is an **ability boundary** of H3, not a configuration problem. Either go close, or write "faces sunk in shadow, reading as a uniform dark silhouette".
-- **Always describe positively**: the model does not hear `don't` / `no`; write the **result**, not what to avoid.
-- When a segment **contains dialogue**, prefer an **English body** (measured to markedly reduce mis-spoken lines) while the Chinese inside `<d>[zh]` stays **untouched**.
+```bash
+python tools/voice_bank.py advise --bank <voice bank> --prompt-file segN.md --prev-file segN-1.md
+```
 
-**④ Segment length**: `length` only accepts `5+17k` (22/39/56/73/90/107/124); out-of-range values
-**raise instead of snapping**; on a 12 GB card keep it ≤8 s (≈192 frames). For dialogue timing at the
-seam (head padding / dialogue-safe moment / last-frame anchor chaining) see
-[`docs/06`](docs/06-continuity-scripting.md).
+Rule: **the anchor is the first person who speaks in this segment**; **same speaker continuing ⇒ you need
+not connect it**, **speaker change at the seam ⇒ you must**. If ≥2 people speak in one segment the anchor
+only covers the seam — the rest is up to the prompt. Details in [`docs/07`](docs/07-chain.md) §声锚.
+
+**② Dialogue timing at the seam — three things to write by the book**
+
+| Discipline | In one line |
+|---|---|
+| **Head padding** | A continuation segment must leave room for "trim + margin" — never put dialogue on frame 0 |
+| **Dialogue-safe moment** | Keep dialogue away from the seam (that region gets trimmed and pinned); place it later per the formula |
+| **Last-frame anchor chain** | Segment N's last-frame state must be **copied verbatim** into segment N+1's prompt — do not just write "continue" |
+
+Mechanism, formulas and measurements: [`docs/06`](docs/06-continuity-scripting.md) (not repeated here).
 
 ### Minimal wiring
 
