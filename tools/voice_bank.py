@@ -58,6 +58,16 @@ import wave
 SR = 16000                    # 分析用重采样率（与实测量化脚本同口径）
 MIN_VOICED_S = 0.6            # 声锚质量下限：有声时长
 TARGET_PEAK = 0.9             # 声锚峰值归一目标（实测 0.9 ⇒ 模型跟随，不削顶）
+# 🔴 声锚**响度**归一（2026-10-03 立）。只归一峰值是不够的：模型会跟随锚的**响度**
+#    ⇒ 锚比段内人声响多少，生成段就比上一段响多少（实测有锚臂整体抬 +7 dB、
+#    段间跳 +6.4 dB）。目标值 = 「模型自然生成语音」的响度，口径 = 单声道 16k /
+#    50ms 窗 / 阈值取全段 P75 的**有声窗 RMS 中位**（脚本 `loudness_audit2.py`，
+#    本地实验目录，不入库）：无锚各臂 −20.4 ~ −23.8、首段 −22.9 ⇒ 取 −23.0。
+TARGET_RMS_DBFS = -23.0       # 声锚响度归一目标（有声窗 RMS 中位，dBFS）
+RMS_TOL_DB = 1.5              # 容差：|实测 − 目标| ≤ 此值 ⇒ 不动（避免无谓处理）
+MAX_ANCHOR_GAIN_DB = 12.0     # **放大**上限（防把极轻的锚连噪声底一起拉起来）
+MAX_ANCHOR_CUT_DB = 24.0      # **压制**上限（压制只是变小，不引入失真 ⇒ 放宽）
+PEAK_CEIL = 0.99              # 响度归一后峰值上限；超了 ⇒ 退回纯峰值归一
 WIN_S, HOP_S = 0.032, 0.016   # 有声检测窗/步长（与 seam 判据同口径）
 VOICED_AMP = 0.02             # 有声判定阈值（帧均幅）
 ANCHOR_MAX_S = 4.0            # 声锚最长时长。🔴 消费端取的是锚的**尾部**窗口
@@ -133,6 +143,65 @@ def longest_voiced_span(mp4: str):
 def _read_raw(path: str):
     import numpy as np
     return np.fromfile(path, dtype=np.int16).astype(np.float32) / 32768.0
+
+
+# ---------------------------------------------------------------- 响度归一
+def speech_rms_db(x, sr: int = SR, win_s: float = 0.05, pct: float = 75.0):
+    """「人声」响度：有声窗 RMS 中位（dBFS）。
+
+    口径：单声道 / 50ms 窗 / 阈值 = 全段逐窗 RMS 的 P75 / 取 ≥阈值的窗的 RMS 中位。
+    **不把静音与环境声算进来** —— 整段 RMS 会被非语音内容带偏。
+    （与本地实验脚本 `loudness_audit2.py` 同口径，便于与实测对账；该脚本不入库。）
+
+    返回 ``(db, 有声窗占比)``；音频太短或几乎全静音 ⇒ ``(None, 占比)``。
+    """
+    import numpy as np
+    x = np.asarray(x, dtype=np.float32).reshape(-1)
+    w = int(win_s * sr)
+    n = len(x) // w
+    if n < 3:
+        return None, 0.0
+    rms = np.sqrt((x[:n * w].reshape(n, w) ** 2).mean(axis=1))
+    db = 20.0 * np.log10(np.maximum(rms, 1e-9))
+    voiced = db >= float(np.percentile(db, pct))
+    frac = float(voiced.mean())
+    if int(voiced.sum()) < 2:
+        return None, frac
+    return float(np.median(db[voiced])), frac
+
+
+def normalize_anchor(x, sr: int = SR):
+    """声锚双归一：**先响度**（对齐 `TARGET_RMS_DBFS`）**再峰值护栏**。
+
+    返回 ``(y, 说明)``。说明里带实测值与增益，供上层打日志（铁律 15：走哪条
+    分支必须可观测）。
+
+    为什么不是「只压峰」：模型**跟随锚的响度** ⇒ 锚比段内人声响多少，生成段就
+    比上一段响多少（2026-10-03 实测：有锚臂整体 +7 dB、段间跳 +6.4 dB）。
+    """
+    import numpy as np
+    x = np.asarray(x, dtype=np.float32).reshape(-1)
+    db, frac = speech_rms_db(x, sr)
+    if db is None:
+        # 算不出人声响度 ⇒ 退回纯峰值归一（可见降级，不静默）
+        pk0 = float(abs(x).max())
+        if pk0 < 1e-4:
+            return x, "⚠ 几乎静音（峰值 %.4f）⇒ 不归一" % pk0
+        return x / pk0 * TARGET_PEAK, "⚠ 人声响度不可测（有声占比 %.2f）⇒ 退回纯峰值归一" % frac
+    gain_db = TARGET_RMS_DBFS - db
+    if abs(gain_db) <= RMS_TOL_DB:
+        y = x
+        note = "响度 %.1f dBFS 已在目标 ±%.1f dB 内 ⇒ 不动" % (db, RMS_TOL_DB)
+    else:
+        g = max(-MAX_ANCHOR_CUT_DB, min(MAX_ANCHOR_GAIN_DB, gain_db))
+        y = x * (10.0 ** (g / 20.0))
+        note = "响度 %.1f → %.1f dBFS（增益 %+.1f dB%s）" % (
+            db, db + g, g, "" if abs(g - gain_db) < 1e-6 else "，已钳到上限")
+    pk = float(abs(y).max())
+    if pk > PEAK_CEIL:
+        y = y / pk * TARGET_PEAK
+        note += "；⚠ 归一后峰值 %.3f 超 %.2f ⇒ 退回纯峰值归一（响度可能仍偏高）" % (pk, PEAK_CEIL)
+    return y, note
 
 
 # ---------------------------------------------------------------- 声库
@@ -291,6 +360,45 @@ _BW_CASES = [
 ]
 
 
+def _selftest_loudness() -> int:
+    """③ 声锚双归一的自测（合成信号，零外部依赖）。
+
+    为什么必须有：只归一峰值会让锚比段内人声响 7 dB，而**模型跟随锚的响度**
+    ⇒ 生成段比上一段响 ⇒ 段间跳变。这条自测把「响度真被拉齐」钉住。
+    """
+    import numpy as np
+    rng = np.random.default_rng(20261003)
+    n = SR * 2
+
+    def nz(amp):
+        return (rng.standard_normal(n) * amp).astype(np.float32)
+
+    spike = np.zeros(n, np.float32)
+    spike[-1] = 0.99                       # 响度极低但峰值满 ⇒ 抬响度必削顶
+    cases = [
+        ("太响的锚（amp 0.5）", nz(0.5), "rms"),
+        ("偏轻的锚（amp 0.03）", nz(0.03), "rms"),
+        ("已在目标（amp 0.0708）", nz(0.0708), "keep"),
+        ("稀疏尖峰（抬响度必削顶）", spike, "fallback"),
+    ]
+    bad = 0
+    for why, x, want in cases:
+        y, note = normalize_anchor(x, SR)
+        if want == "rms":
+            db, _ = speech_rms_db(y, SR)
+            ok = db is not None and abs(db - TARGET_RMS_DBFS) <= 2.0
+            got = "%.1f dBFS（目标 %.1f）" % (db, TARGET_RMS_DBFS) if db is not None else "不可测"
+        elif want == "keep":
+            ok = "不动" in note
+            got = note[:46]
+        else:
+            ok = ("退回" in note) and float(abs(y).max()) <= 0.95
+            got = "峰值 %.3f" % float(abs(y).max())
+        bad += 0 if ok else 1
+        print("  [%s] %-26s %-26s ｜ %s" % ("OK" if ok else "FAIL", why, got, note[:56]))
+    return bad
+
+
 def _selftest() -> int:
     bad = 0
     print("① 说话人解析（取每个 <d> 最近的前驱说话人标记，按开口顺序去重）")
@@ -308,7 +416,9 @@ def _selftest() -> int:
         print("  [%s] %-30s vs %-38s CER=%.2f 命中「%s」 期望%s ⇒ %s"
               % ("OK" if ok else "FAIL", ref[:30], hyp[:38], c, hyp[i0:i1][:20],
                  "过" if want_ok else "拒", why))
-    n = len(_SELFTEST_CASES) + len(_BW_CASES)
+    print("③ 声锚双归一（响度对齐 %.1f dBFS + 峰值护栏 %.2f）" % (TARGET_RMS_DBFS, PEAK_CEIL))
+    bad += _selftest_loudness()
+    n = len(_SELFTEST_CASES) + len(_BW_CASES) + 4
     print("  自检：%d/%d 通过" % (n - bad, n))
     return 0 if bad == 0 else 1
 
@@ -439,6 +549,9 @@ def collect(mp4: str, name: str, bank_dir: str, force: bool = False,
     if _base is None:
         return None, "🔴 角色名含路径分隔符/非法字符（%r）⇒ 拒绝（防路径注入）" % name
     name = _base
+    # 🔴 防御：调用方可能把 `<d>[zh]` 的**语言标记**一起传进来（它是标签不是台词），
+    #    带进去会让 ASR 比对凭空多两个字符 ⇒ 入口统一剥掉（2026-10-03）。
+    line = re.sub(r"^\s*\[[^\]]{1,12}\]\s*", "", line or "").strip()
     if manual_wav(bank_dir, name) and not force:
         return manual_wav(bank_dir, name), "已有手动锚，跳过自动采集"
     if not force and name in load_bank(bank_dir):
@@ -509,7 +622,9 @@ def collect(mp4: str, name: str, bank_dir: str, force: bool = False,
     pk = float(abs(x).max())
     if pk < 1e-4:
         return None, "裁出的声锚近乎静音（峰值 %.4f）⇒ 不采集" % pk
-    x = x / pk * TARGET_PEAK
+    x, _norm = normalize_anchor(x, SR)
+    if float(abs(x).max()) < 1e-4:
+        return None, "归一后近乎静音 ⇒ 不采集"
     with wave.open(wav_out, "w") as wf:
         wf.setnchannels(1)
         wf.setsampwidth(2)
@@ -519,10 +634,10 @@ def collect(mp4: str, name: str, bank_dir: str, force: bool = False,
     bank = load_bank(bank_dir)
     bank[name] = {"wav": wav_out, "src": os.path.basename(mp4),
                   "voiced_s": round(total, 2), "span_s": round(dur, 2),
+                  "norm": _norm,
                   "collected": datetime.datetime.now().astimezone().isoformat(timespec="seconds")}
     save_bank(bank_dir, bank)
-    return wav_out, ("采集 %.2fs（%.2f–%.2fs，峰值→%.2f）"
-                     % (dur, t0, t1, TARGET_PEAK))
+    return wav_out, ("采集 %.2fs（%.2f–%.2fs）；%s" % (dur, t0, t1, _norm))
 
 
 # ---------------------------------------------------------------- CLI
