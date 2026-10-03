@@ -296,6 +296,44 @@ Chain 按一张**显式表**推进它们 —— 表就是单一真相源，漏�
 | **声锚时长** | 尾窗要 0.925 秒 ⇒ 声锚 ≥0.9 秒（短了按全长取用并在 report 提醒）；建议 1–4 秒 |
 | **`pin_audio=false` 时被忽略** | report 会写明（降级可见，不静默） |
 
+### 一段内多人说话：怎么锚（0.6.21）
+
+**先把作用域说死**：声锚回答的问题**只有一个** —— 「**缝上接着说的那个人是谁**」。
+锚窗只有 ~0.9 秒（= 缝区，由 `context_frames` 换算），它替换的是**本段开头**那一段音频上下文。
+⇒ **段内后续换人，锚管不到、也不该管** —— 那是 prompt 里 `<Subject N>` 的职责。
+
+由此得到三条规则（都可由 prompt 机检，不用猜）：
+
+| 情形 | 判定 | 该怎么做 |
+|---|---|---|
+| 本段首说话人 == 上一段末说话人 | **同人续接** | **不必接锚**（保留音频连续性；接同一人的锚也无害） |
+| 本段首说话人 ≠ 上一段末说话人 | 🔴 **缝上换人** | **必须接锚，锚 = 本段第一个开口说话的人**（否则上一个人的音色会污染本段） |
+| 本段内 ≥2 个说话人 | 锚**只覆盖缝区** | 后面换人靠 prompt 的 `<Subject N>`；**能拆段就拆段**（同段换人在音色/口型/时间轴三处都难） |
+
+🔴 **两个最容易踩的错**：
+1. **按"主角"或"这一段里戏份最多的人"选锚** ⇒ 错。要选的是**第一个开口**的那个人。
+2. **指望锚把整段每个人的音色都管住** ⇒ 做不到。锚只在缝区；后面靠 prompt 声明。
+
+**判据工具**（把上面这张表变成一条命令，不用人肉读 prompt）：
+
+```bash
+python tools/voice_bank.py advise --bank <声库目录> --prompt-file 段2.md --prev-file 段1.md
+python tools/voice_bank.py advise --bank <声库目录> --speakers 许然,小满 --prev-speaker 许然
+python tools/voice_bank.py selftest     # 说话人解析规则的自检（可证伪）
+```
+
+它按「每个 `<d>` **最近的前驱**说话人标记」算开口顺序（与 `check_h3_prompts.py` 的 L5 同源），
+输出「该不该接 / 该接谁 / 本段几人」；缺锚 ⇒ 退出码 3（与 `lookup` 一致）。
+⚠️ **最小格式**没有 `subject_definitions` 段（`<Subject N>` 后面跟的是动作句）⇒ 拿不到角色名，
+用 `--speakers` 显式给。
+
+> 📌 **多锚（一段给多个人的锚）**：宿主协议**结构上是支持的** —— `minimax_refs` 是**块列表**，
+> 每块可自带 `ref_audio_t` + `audio_latent`（`comfy/ldm/minimax/model.py` 在循环里逐块消费，
+> 块排在目标流**之前**当条件行）。所以"缝上那个人钉住 + 其余人只当音色参考"在原理上成立。
+> ⚠️ 但**本包尚未实现、也尚未实测**（模型是否会按 `<Subject N>` 正确分配音色，未知）
+> ⇒ **当前不做**，别按它写产线。要不要做、先做不做小实测，见 `LOCAL-维护规范` 与交接。
+
+
 ### 兜底措施
 
 | 兜底 | 行为 |
@@ -320,4 +358,6 @@ Chain 按一张**显式表**推进它们 —— 表就是单一真相源，漏�
 ```
 python tools/voice_bank.py collect 段产物.mp4 --name 周砚 --bank ./voices --line "台词原文"
 python tools/voice_bank.py lookup  周砚 --bank ./voices
+python tools/voice_bank.py advise  --bank ./voices --prompt-file 段2.md --prev-file 段1.md
+python tools/voice_bank.py selftest          # 说话人解析规则的自检（可证伪）
 ```

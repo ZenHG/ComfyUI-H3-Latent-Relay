@@ -38,7 +38,7 @@
 
 | 脚本 | 干什么 | 怎么跑 |
 |---|---|---|
-| `voice_bank.py` | **从已渲染段采集「某角色的声锚」**，喂给 Copy Bridge 的可选输入 `voice_anchor`（跨说话人续接锁定音色，见 [`docs/07`](../docs/07-chain.md) §声锚）。有声检测（≥0.6 s）+ 峰值归一 0.9 + 声库 `voices.json`（**首个稳定锚锁定复用**，手动 `<角色名>.wav` 永远优先）。可选 **ASR 台词守卫**：装了 `funasr` 才启用（验台词 CER ≤ 0.35 + 逐字时间戳精确裁锚）；没装 ⇒ 打印警告后回退纯能量法，**零额外依赖** | `python tools/voice_bank.py collect <段产物.mp4> --name 周砚 --bank <声库目录> [--line "台词原文"]`（另有 `lookup` / `list`） |
+| `voice_bank.py` | **从已渲染段采集「某角色的声锚」**，喂给 Copy Bridge 的可选输入 `voice_anchor`（跨说话人续接锁定音色，见 [`docs/07`](../docs/07-chain.md) §声锚）。有声检测（≥0.6 s）+ 峰值归一 0.9 + 声库 `voices.json`（**首个稳定锚锁定复用**，手动 `<角色名>.wav` 永远优先）。可选 **ASR 台词守卫**：装了 `funasr` 才启用（验台词 CER ≤ 0.35 + 逐字时间戳精确裁锚）；没装 ⇒ 打印警告后回退纯能量法，**零额外依赖**。另有 **`advise`**（一段内多人时算「该不该接锚 / 该接谁」——规则 = 锚给**缝上第一个开口说话的人**；同人续接不必接、换人才必须接）与 **`selftest`**（说话人解析规则的自检，可证伪） | `python tools/voice_bank.py collect <段产物.mp4> --name 周砚 --bank <声库目录> [--line "台词原文"]`（另有 `lookup` / `list` / `advise` / `selftest`） |
 
 前四个失败时会以非零退出码退出（CI 直接可用），见 `.github/workflows/ci.yml`。
 

@@ -10,7 +10,7 @@ not coupled to any third-party H3 node pack.
 
 | Item | Value |
 |---|---|
-| Version | **0.6.20** (8 nodes; the composite bridge `H3RelayCopyBridge` is the **only** bridge) |
+| Version | **0.6.21** (8 nodes; the composite bridge `H3RelayCopyBridge` is the **only** bridge) |
 | License | **MIT** (third-party attribution in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) |
 | Host | **ComfyUI ≥ 0.35.0 with MiniMax-H3 support** (the host itself is GPL-3.0, see License) |
 
@@ -153,6 +153,44 @@ The log should show `钉住 22 帧` / `裁首 N 帧 = 钉住 22 + 沉降 0` / `�
 | The output replays the previous segment from frame 1 | TrimAV is not connected, or its `trim_frames` is not wired to bridge `[2]` |
 | A new film picks up an old film's tail | `run_id` was not changed (same name ⇒ same file names) |
 
+### How to write the prompt (one prompt per segment)
+
+This pack **does not generate prompts**, but the bridge and Trim AV both work on the assumption
+"**one segment = one sampling run**" ⇒ how you write the prompt directly affects the seam.
+
+**① Use the "minimal format"** (current recommendation; the older six-block format is still accepted)
+
+That means **natural-language scene description + speaker marker + dialogue**, without the
+`subject_definitions` / `overall_soundscape` / `non_diegetic_music` scaffold (measured: the scaffold
+makes the body far longer for negative benefit):
+
+```
+[Shot 1] 中近景，她走在轨道右侧的地面上，与轨道平行、朝镜头方向匀速迈步，
+镜头以与她步行完全相同的速度沿轨道缓缓后退跟移，全程不停顿。
+她走着，呼吸匀，<Subject 1> 对着镜头开口说话:<d>[zh]这一镜，我边走边说，走了八秒了。</d>
+说完不再说话，她继续走，画面停在运动中途。
+```
+
+**② Three rules you must not break**
+
+| Rule | Why |
+|---|---|
+| 🔴 **Dialogue must live inside the `<d>` tag**: `<Subject N> <minimal action clause>:<d>[zh]line</d>` | Dialogue left outside the tag ⇒ the model reads it as scene description; measured to mis-speak / babble |
+| 🔴 **The speaker marker must be within 120 characters before `<d>`** (`<Subject N>`; the legacy `(Sx)` still works) | It says *who* is talking; without it the model can only guess |
+| 🔴 **From segment 2 on: open by picking up the previous segment's action and camera**, do not restart | The bridge pins the previous segment's tail frames; restarting fights the pinned region |
+
+**③ Three measured lessons** (not style preferences)
+
+- **One-take ⇒ write no timestamps** (including inline `At`) — timestamps make the model cut shots; use `[Shot N]` only when you *want* a cut, and **whether it cut is judged by eye, not by a checker**.
+- **No clear faces outside close-ups**: mid/long shots break faces — that is an **ability boundary** of H3, not a configuration problem. Either go close, or write "faces sunk in shadow, reading as a uniform dark silhouette".
+- **Always describe positively**: the model does not hear `don't` / `no`; write the **result**, not what to avoid.
+- When a segment **contains dialogue**, prefer an **English body** (measured to markedly reduce mis-spoken lines) while the Chinese inside `<d>[zh]` stays **untouched**.
+
+**④ Segment length**: `length` only accepts `5+17k` (22/39/56/73/90/107/124); out-of-range values
+**raise instead of snapping**; on a 12 GB card keep it ≤8 s (≈192 frames). For dialogue timing at the
+seam (head padding / dialogue-safe moment / last-frame anchor chaining) see
+[`docs/06`](docs/06-continuity-scripting.md).
+
 ### Minimal wiring
 
 ```
@@ -223,6 +261,17 @@ collect anchors automatically from already-rendered segments.
 *previous segment's AV latent*, so using it as the anchor just sets the anchor source back to the
 default "previous segment's audio tail" ⇒ **it looks enabled but is a no-op** (and it bypasses the
 audio-grid reconciliation). The anchor source must be **this segment's speaker**.
+
+🔵 **What if several people speak in one segment?** The anchor answers exactly **one** question:
+"**who speaks next at the seam**". ⇒ **the anchor is the first person who speaks in this segment**;
+**same speaker continuing ⇒ you need not connect it**, **speaker change at the seam ⇒ you must**.
+Later speaker changes inside the segment are handled by the prompt's `<Subject N>` (the anchor cannot
+and should not cover them — do not expect it to hold every voice in the segment).
+One command gives the verdict (no need to read prompts by hand):
+
+```bash
+python tools/voice_bank.py advise --bank <voice bank> --prompt-file segN.md --prev-file segN-1.md
+```
 
 Implementation / limitations (BGM, emotion, multi-speaker segments) in
 [`docs/07-chain.md`](docs/07-chain.md) §声锚; bundled auto-collector `tools/voice_bank.py`

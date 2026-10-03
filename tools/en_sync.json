@@ -8,8 +8,8 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "condensed",
-          "h_en": "ee1a2092fe71a204",
-          "h_src": "7c5d369ec94f6311",
+          "h_en": "b4c607e05097acbc",
+          "h_src": "a44c174e98af5aa4",
           "seeded": "by-position"
         },
         {
@@ -40,8 +40,8 @@
           "zh": "使用方法",
           "en": "Usage",
           "mode": "condensed",
-          "h_en": "a832a19a99de3ee7",
-          "h_src": "70afa547aa12a7b1",
+          "h_en": "12f3e82fb5e93e34",
+          "h_src": "d509441315cfabfb",
           "seeded": "by-position"
         },
         {
@@ -78,8 +78,8 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-02",
-      "src_sha": "cc19c9f609c840e1"
+      "stamped": "2026-10-03",
+      "src_sha": "8dbf3c88de31b34a"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -166,7 +166,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-02",
+      "stamped": "2026-10-03",
       "src_sha": "997bb34f6092cf08"
     },
     "docs/02-parameters.md": {
@@ -190,7 +190,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-02",
+      "stamped": "2026-10-03",
       "src_sha": "9e7c5877c65898d2"
     }
   }

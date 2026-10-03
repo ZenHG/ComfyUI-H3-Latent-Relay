@@ -1499,6 +1499,10 @@ class H3RelayCopyBridge:
                                "· 有 BGM/环境垫乐时请把垫乐混进声锚里 —— 锚替换的是整个音频尾窗；\n"
                                "· pin_audio=False 时本输入被忽略（report 会写明）；\n"
                                "· 不接 = 行为与旧版完全一致。\n"
+                               "🔵 **锚 = 「缝上第一个开口说话的人」**（锚窗只覆盖缝区 ~0.9 秒，由 context_frames 换算）。\n"
+                               "    同人续接不必接；**缝上换人才必须接**；**一段内后续换人由 prompt 的 `<Subject N>` 决定**，\n"
+                               "    锚管不到也不该管 —— 别指望它把整段每个人的音色都管住。\n"
+                               "    判据工具：`python tools/voice_bank.py advise --bank <声库> --prompt-file 段N.md --prev-file 段N-1.md`。\n"
                                "🔴 **没有内容的锚会当场报错**（不静默）：全零 / 常量 / 静音 / NaN 一律 raise。\n"
                                "    注意别把**出词节点的 LATENT**（那是空的 AV latent）接到这里 —— 它全为零。\n"
                                "    想**关掉**声锚请**拔线**，不要接一个空 latent。",

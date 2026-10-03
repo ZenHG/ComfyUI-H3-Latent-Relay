@@ -35,12 +35,22 @@ CLI（`<声库目录>` 用你自己的路径，例如 `./voices`）：
     python voice_bank.py collect <mp4> --name 周砚 --bank <声库目录>
     python voice_bank.py lookup  周砚 --bank <声库目录>
     python voice_bank.py list   --bank <声库目录>
+    # 「这一段该接谁的锚」—— 一段内多人时的规则（见下方 §该给谁做锚）
+    python voice_bank.py advise --bank <声库目录> --prompt-file 段2.md --prev-file 段1.md
+    python voice_bank.py advise --bank <声库目录> --speakers 许然,小满 --prev-speaker 许然
+    python voice_bank.py selftest      # 说话人解析规则的自检（可证伪）
+
+声锚的语义边界（一段内多人时尤其要记住）：
+    声锚回答的问题**只有一个** —— 「**缝上接着说的那个人是谁**」。锚窗只有 ~0.9 秒
+    （= 缝区，`context_frames` 换算），段内后续换人由 prompt 的 `<Subject N>` 决定。
+    ⇒ **锚 = 本段第一个开口说话的人**；同人续接不必接；换人才必须接。细则见 `advise`。
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import wave
@@ -171,8 +181,115 @@ def lookup(bank_dir: str, name: str):
     return None, "声库无「%s」" % name
 
 
-_ASR_SINGLETON = None      # 效能：funasr 模型 944MB，进程内只加载一次（懒加载单例）
+# ------------------------------------------------- 「该给谁做锚」的规则（0.6.21）
+# 🔴 声锚回答的问题**只有一个**：「**缝上接着说的那个人是谁**」。
+#   锚窗只有 ~0.9 秒（= 缝区），它钉住的是**本段开头**那段音频上下文；
+#   **段内后续换人，锚管不到、也不该管** —— 那是 prompt 里 `<Subject N>` 的职责。
+#
+# 由此得到三条规则（都可由 prompt 机检，不用猜）：
+#   ① **锚 = 本段第一个开口说话的人**（不是"主角"、也不是"这一段里所有人"）；
+#   ② 本段首说话人 == 上一段末说话人 ⇒ **同人续接** ⇒ **不接锚更稳**
+#      （保留音频连续性，且不会被锚的音色牵引）；
+#   ③ 两者不同 ⇒ **缝上换人** ⇒ **必须接锚**（锚 = 本段首说话人），
+#      否则上一个人的音色会污染本段。
+# ⚠️ 一段内 ≥2 个说话人 ⇒ 锚只覆盖缝区，后面靠 prompt 切；**能拆段就拆段**。
+#
+# 说话人判据与 `check_h3_prompts.py` 的 L5 **同源**：取每个 `<d>` **最近的前驱**
+# 说话人标记（`<Subject N>` 或兼容形态 `(Sx)`），不能取"第一个" ——
+# 120 字符窗会跨到上一个 Shot 的正文里（那里也有 `<Subject N>`）。
 
+_D_RE = re.compile(r"<d>")
+_SPK_RE = re.compile(r"<Subject (\d+)>|\(S(\d+)\)")
+
+
+def speakers_in_order(prompt: str) -> list:
+    """本段说话人，按**开口顺序**去重（`<Subject N>` 形态）。"""
+    out = []
+    for m in _D_RE.finditer(prompt or ""):
+        marks = list(_SPK_RE.finditer(prompt[:m.start()]))
+        if not marks:
+            continue
+        g = marks[-1]
+        tag = "Subject %s" % (g.group(1) or g.group(2))
+        if tag not in out:
+            out.append(tag)
+    return out
+
+
+def subject_name(prompt: str, tag: str) -> str:
+    """把 `<Subject N>` 映射成**角色名**（best-effort）。
+
+    六段式有 `subject_definitions:` 段（`<Subject 1> 许然，中国女性…`）⇒ 取名字。
+    **最小格式没有这个段**（`<Subject N>` 后面跟的是动作句）⇒ 拿不到名字，
+    原样返回 `Subject N`，由调用方自己映射（或用 `--speakers` 显式给）。
+    """
+    m = re.search(r"<%s>\s*([^\s，,：:；;。、\n]+)" % re.escape(tag), prompt or "")
+    return m.group(1) if m else tag
+
+
+def advise_anchor(bank_dir: str, prompt: str = "", prev_prompt: str = "",
+                  speakers=None, prev_speaker: str = "") -> tuple:
+    """给一段算「该不该接声锚 / 该接谁」。返回 ``(ok, lines, anchor_path)``。
+
+    ``speakers`` 显式给了就优先（最小格式拿不到名字时用）；否则从 prompt 解析。
+    ``ok`` 只表示**有没有可用的锚**（缺锚 ⇒ False，退出码 3，与 ``lookup`` 一致）。
+    """
+    spk = [s for s in (speakers or []) if s] or speakers_in_order(prompt)
+    if prompt and not speakers:
+        spk = [subject_name(prompt, t) for t in spk]
+    prev = prev_speaker or ""
+    if not prev and prev_prompt:
+        tail = speakers_in_order(prev_prompt)
+        prev = subject_name(prev_prompt, tail[-1]) if tail else ""
+
+    lines = []
+    lines.append("本段说话人（按开口顺序）：%s" % ("、".join(spk) if spk else "（解析不到 —— 用 --speakers 显式给）"))
+    lines.append("上一段最后一个说话人：%s" % (prev or "（未知）"))
+
+    first = spk[0] if spk else ""
+    if first and prev and first == prev:
+        lines.append("⇒ 缝上**同人续接**（%s）⇒ **不必接声锚**（保留音频连续性；接同一人的锚也无害）" % first)
+    elif first and prev:
+        lines.append("⇒ 缝上**换人**（%s → %s）⇒ 🔴 **必须接声锚**，锚 = %s（否则 %s 的音色会污染本段）"
+                     % (prev, first, first, prev))
+    elif first:
+        lines.append("⇒ 缝上说话人 = %s（上一段未知）⇒ 换人时接锚更稳" % first)
+
+    if len(spk) >= 2:
+        lines.append("⚠ 本段有 %d 个说话人：声锚**只覆盖缝区**（前 ~0.9 秒，= context_frames 换算）；"
+                     "后面换人由 prompt 的 `<Subject N>` 决定 —— 锚管不到、也不该管。" % len(spk))
+        lines.append("   建议：**能拆段就拆段**（一段一说话人）。同段换人在音色 / 口型 / 时间轴三处都难。")
+
+    path = None
+    if first:
+        path, why = lookup(bank_dir, first)
+        lines.append("声库：%s → %s（%s）" % (first, path or "⟨无⟩", why))
+    return (path is not None), lines, path
+
+
+_SELFTEST_CASES = [
+    # (prompt, 期望的说话人顺序)
+    ("<Subject 1> 许然开口说话:<d>[zh]甲</d>，随后 <Subject 2> 小满开口说话:<d>[zh]乙</d>", ["Subject 1", "Subject 2"]),
+    ("<Subject 1> (S1) 看着对方:<d>[zh]甲</d> 又 <Subject 1> (S1) 补一句:<d>[zh]丙</d>", ["Subject 1"]),
+    ("[Shot 2] At 00:02.4 <Subject 2> (S2) 开口:<d>[zh]乙</d>", ["Subject 2"]),
+    ("没有台词的纯动作段", []),
+    # 最近前驱：跨 Shot 时不能取"第一个"标记
+    ("[Shot 1] <Subject 1> 走:<d>[zh]甲</d> [Shot 2] <Subject 2> 说:<d>[zh]乙</d>", ["Subject 1", "Subject 2"]),
+]
+
+
+def _selftest() -> int:
+    bad = 0
+    for txt, want in _SELFTEST_CASES:
+        got = speakers_in_order(txt)
+        ok = got == want
+        bad += 0 if ok else 1
+        print("  [%s] %-52s → %s" % ("OK" if ok else "FAIL", txt[:52], got))
+    print("  自检：%d/%d 通过" % (len(_SELFTEST_CASES) - bad, len(_SELFTEST_CASES)))
+    return 0 if bad == 0 else 1
+
+
+_ASR_SINGLETON = None      # 效能：funasr 模型 944MB，进程内只加载一次（懒加载单例）
 
 def _asr_model():
     global _ASR_SINGLETON
@@ -348,7 +465,36 @@ def _main(argv):
     p2.add_argument("--bank", required=True)
     p3 = sub.add_parser("list", help="列出声库")
     p3.add_argument("--bank", required=True)
+    p4 = sub.add_parser("advise", help="这一段该不该接声锚 / 该接谁（一段内多人时按「缝上第一个说话人」）")
+    p4.add_argument("--bank", required=True, help="声库目录")
+    p4.add_argument("--prompt", default="", help="本段提示词原文")
+    p4.add_argument("--prompt-file", default="", help="本段提示词文件（与 --prompt 二选一）")
+    p4.add_argument("--prev", default="", help="上一段提示词原文（判「缝上是否换人」）")
+    p4.add_argument("--prev-file", default="", help="上一段提示词文件")
+    p4.add_argument("--speakers", default="", help="显式给说话人（逗号分隔，按开口顺序）——"
+                                                 "最小格式没有 subject_definitions 时用它")
+    p4.add_argument("--prev-speaker", default="", help="显式给「上一段最后一个说话人」")
+    sub.add_parser("selftest", help="说话人解析规则的自检（可证伪）")
     a = ap.parse_args(argv)
+    if a.cmd == "selftest":
+        print("说话人解析自检（规则：取每个 <d> 最近的前驱说话人标记，按开口顺序去重）")
+        return _selftest()
+    if a.cmd == "advise":
+        def _txt(inline, path):
+            if inline:
+                return inline
+            if path:
+                return open(path, encoding="utf-8").read()
+            return ""
+        ok, lines, path = advise_anchor(
+            a.bank, prompt=_txt(a.prompt, a.prompt_file),
+            prev_prompt=_txt(a.prev, a.prev_file),
+            speakers=[s.strip() for s in a.speakers.split(",") if s.strip()] or None,
+            prev_speaker=a.prev_speaker.strip())
+        for ln in lines:
+            print("  " + ln)
+        print("  ⇒ %s" % ("可以接锚" if ok else "🔴 没有可用锚（先 collect，或拔掉 voice_anchor 那根线）"))
+        return 0 if ok else 3
     if a.cmd == "collect":
         w, msg = collect(a.mp4, a.name, a.bank, force=a.force, line=a.line)
         print(("[%s] %s" % ("OK" if w else "跳过", msg)))
