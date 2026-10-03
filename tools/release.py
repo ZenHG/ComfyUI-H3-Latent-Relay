@@ -133,17 +133,71 @@ def local_facts() -> dict:
             "versions": vals, "head": head}
 
 
+NOTES_FILE = os.path.join(REPO, "RELEASE-NOTES.md")
+NOTES_MARKER = "<!-- EN -->"
+#: 发布说明的**各语种预算**（字符数，含标点）。为什么不设「整节总长」：中文一个字承载的信息
+#: 比英文一个词多，同一段内容英文天然要长 2~3 倍 ⇒ 拿总长当判据等于**只卡英文**，
+#: 而且会诱使人「中英不均衡地删」来凑总数。两个语种各自成段、各自有预算，才说得通。
+NOTES_MAX_ZH = 700
+NOTES_MAX_EN = 1700
+
+
+def _cjk(s: str) -> int:
+    return sum(1 for ch in s if "\u4e00" <= ch <= "\u9fff")
+
+
 def changelog_text(version: str) -> str:
-    """取 CHANGES.md **顶部那一节**当 registry changelog（版本不匹配就报出来，不静默发错内容）。"""
-    with io.open(os.path.join(REPO, "CHANGES.md"), encoding="utf-8") as fh:
+    """**两个渠道的用户可见说明** —— 取自 `RELEASE-NOTES.md` 的本版一节（中英双语）。
+
+    🔴 为什么不再从 `CHANGES.md` 顶部整节搬（2026-10-05 改）：`CHANGES.md` 是**开发者记录**
+       （实现取舍 · 实测证据链 · 机检编号 · 翻车过程），整节搬过去在 registry 的版本页上就是
+       一大坨内部细节，**而且没有英文** —— 那个页面的读者大半只看英文。
+    🔴 为什么这里**硬校验 + 硬拦**、而不是"提醒一下"：registry 的版本接口**只收 `GET`/`OPTIONS`**
+       （`PATCH` 实测 **405**）⇒ **发出去的 changelog 一个字符都改不回来**（已发布的 0.6.16~0.6.22
+       就是这么留下的）。⇒ 判据只能是「**发布前就写对**」，没有事后补救这条路。
+       ⚠️ 本函数在 `preflight()` 里就调一次 —— 必须在 **push 之前**拦住，否则会留下
+       「GitHub 有了、registry 没有」的半成品状态（见 RELEASING.md §3）。
+       格式正文见 RELEASING.md §6。
+    """
+    if not os.path.isfile(NOTES_FILE):
+        die("缺 RELEASE-NOTES.md —— 两个渠道的用户可见说明都取它（格式见 RELEASING.md §6）")
+    with io.open(NOTES_FILE, encoding="utf-8") as fh:
         text = fh.read()
-    m = re.search(r"^## ([0-9][^ \n]*)[^\n]*\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+    m = re.search(r"^## %s[^\n]*\n(.*?)(?=^## |\Z)" % re.escape(version), text, re.M | re.S)
     if not m:
-        die("CHANGES.md 里找不到 `## x.y.z` 版本节")
-    if m.group(1) != version:
-        die("CHANGES.md 顶部是 %s，pyproject 是 %s —— 先把 CHANGES 顶上那一节补上/对齐"
-            % (m.group(1), version))
-    return re.sub(r"\n*-{3,}\s*$", "", m.group(2).strip()).strip()
+        die("RELEASE-NOTES.md 里找不到 `## %s` 一节 —— 发布前必须为本版补一节双语说明\n"
+            "    （照着上一版的样子写；格式与理由见 RELEASING.md §6）" % version)
+    body = m.group(1).strip()
+
+    parts = body.split(NOTES_MARKER)
+    if len(parts) != 2:
+        die("RELEASE-NOTES.md 的 %s 一节里 `%s` 出现了 %d 次 —— 必须**恰好一次**"
+            "（中文在前、英文在后）" % (version, NOTES_MARKER, len(parts) - 1))
+    zh, en = parts[0].strip(), parts[1].strip()
+
+    bad = []
+    if _cjk(zh) < 40:
+        bad.append("中文段太短（仅 %d 个汉字）" % _cjk(zh))
+    if _cjk(en) > 0:
+        bad.append("英文段里混进了 %d 个汉字（英文段要独立成文，不是逐句直译）" % _cjk(en))
+    _nw = len(re.findall(r"[A-Za-z]{2,}", en))
+    if _nw < 40:
+        bad.append("英文段太短（仅 %d 个英文词）" % _nw)
+    if "**升级动作**" not in zh:
+        bad.append("中文段缺结尾行 `**升级动作**：…`")
+    if "**Action required**" not in en:
+        bad.append("英文段缺结尾行 `**Action required**: …`")
+    if len(zh) > NOTES_MAX_ZH:
+        bad.append("中文段 %d 字符 > 预算 %d（registry 版本页上要一屏看完）"
+                   % (len(zh), NOTES_MAX_ZH))
+    if len(en) > NOTES_MAX_EN:
+        bad.append("英文段 %d 字符 > 预算 %d（同上）" % (len(en), NOTES_MAX_EN))
+    out = zh + "\n\n---\n\n" + en
+    if bad:
+        die("RELEASE-NOTES.md 的 %s 一节不合格式（%d 处）：\n    - %s\n"
+            "    模板见 RELEASING.md §6（registry 的 changelog 发出去就改不回来，所以这里必须拦住）。"
+            % (version, len(bad), "\n    - ".join(bad)))
+    return out
 
 
 def token() -> str:
@@ -227,6 +281,11 @@ def preflight(f: dict):
                              ("  " + tail[0]) if tail else ""))
         if r.returncode != 0:
             die("前置门槛没过：%s ⇒ 先修它（全量 12 项见 RELEASING.md §2 第 4 条）" % name)
+    # 发布说明（两个渠道的用户可见文案）。**必须在 push 之前**校验：registry 的 changelog
+    # 发出去就改不回来（版本接口只收 GET/OPTIONS），而 push 过了再过不了这一步会留下
+    # 「GitHub 有了、registry 没有」的半成品状态。
+    cl = changelog_text(f["version"])
+    say("  ✅ 发布说明：RELEASE-NOTES.md ｜ %s ｜ 中英双语 ｜ %d 字符" % (f["version"], len(cl)))
 
 
 def push() -> None:

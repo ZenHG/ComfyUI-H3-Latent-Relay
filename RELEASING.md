@@ -31,7 +31,10 @@ python tools/release.py --verify-only   # 只回答「两边现在同步吗」�
 2. **版本号四处一致**（`review_050` 的 H1 盯着）：
    `__init__.py` 的 `__version__` · `pyproject.toml` 的 `version` · `CHANGES.md` 顶部 `## x.y.z` ·
    `README.md` 首部 `| 版本 | **x.y.z** |`。
-3. **`CHANGES.md` 顶部那一节就是本版** —— registry 的 changelog 直接取它（版本不符会被脚本报出来）。
+3. **两份记录都写了本版**：
+   - `CHANGES.md` 顶部那一节 = 本版（面向开发者；版本不符会被 H1 报出来）。
+   - `RELEASE-NOTES.md` 有本版一节、**中英双语、≤2000 字符**（面向用户；**registry 的 changelog 与
+     GitHub Release 正文都取它**）。格式与机器判据见 **§6**，`tools/release.py` 会在 **push 之前**拦住。
 4. **本地门槛全绿**：跑 `h3relay_check_all.py`（本机工具，在**仓库之外的** tools 目录里；
    12 项，与 CI 逐步对应）。`tools/release.py` 自己只跑最会翻车的两项（`review_050` / `en_sync`），
    全量请你手跑。
@@ -43,10 +46,10 @@ python tools/release.py --verify-only   # 只回答「两边现在同步吗」�
 
 | 步 | 动作 | 失败时的状态 |
 |---|---|---|
-| ① 前置 | 干净工作树 · 版本四处 · `review_050` · `en_sync` | 什么都没发生 |
+| ① 前置 | 干净工作树 · 版本四处 · `review_050` · `en_sync` · **`RELEASE-NOTES.md` 本版一节（§6）** | 什么都没发生 |
 | ② GitHub | `git push origin HEAD:refs/heads/main`（失败自动换 HTTP/1.1 / schannel / **去代理直连**重试） | 什么都没发生 |
 | ③ 等 CI | 找 `headSha == 本地 HEAD` 的那一轮，`gh run watch --exit-status` | **已 push、未 publish** ⇒ 修完重跑，安全 |
-| ④ Registry | `comfy node validate` → `node pack` 预览（开发件混入即拒）→ `publish --token --changelog` | 已 push、未 publish ⇒ 重跑 |
+| ④ Registry | `comfy node validate` → `node pack` 预览（开发件混入即拒）→ `publish --token --changelog`（changelog = `RELEASE-NOTES.md` 本版一节，见 §6） | 已 push、未 publish ⇒ 重跑 |
 | ⑤ 交叉验证 | 远端 `main` sha == HEAD ？registry 版本列表含本版 ？（给了 `H3RELAY_DEPLOY` 则再比部署副本） | 会**点名**哪一项没过 |
 
 > ⚠️ **③ 的失败是本流程唯一的"半成品"状态**（GitHub 有了、registry 没有）。这是**有意如此**：
@@ -87,12 +90,61 @@ python tools/release.py --verify-only   # 只回答「两边现在同步吗」�
 - 🔴 **别往 ignore 文件里写行内注释**（`模式  # 注释` 会被当成模式的一部分 ⇒ **静默不忽略**）。
   加完行**必须** `git check-ignore -v <路径>` 验一遍。
 
-## 6. 版本与 changelog 规则
+## 6. 版本与发布说明（`RELEASE-NOTES.md`）
 
-- `version` 用语义化三位：`X.Y.Z`。**`name` 与已发布的 version/changelog 都不可改**。
-- changelog 取 `CHANGES.md` 顶部那一节 ⇒ **发布前先把它写对**（发布后改不动公开页面上的那份）。
-- 事实类的数字（断言数、文件数、体积）**不要**在 changelog 里复述 —— 它们会被机检盯着，
-  而 changelog 是冻结的，容易变成永久错误的陈述。
+### 6.1 版本号
+
+- `version` 用语义化三位：`X.Y.Z`，且必须**四处一致**（§2 第 2 条）。
+- 🔴 **`name` 与「已发布的 version / changelog」都不可改** —— registry 的版本接口只收 `GET`/`OPTIONS`
+  （`PATCH` 实测 **405**）。**发出去就改不回来**，这是本文件所有「发布前把关」的根因。
+
+### 6.2 两份记录、两个读者（**别混**）
+
+| 文件 | 读者 | 写什么 |
+|---|---|---|
+| `CHANGES.md` | 开发者 / 未来维护者 | 实现取舍 · 实测证据链 · 机检编号 · 翻车过程。允许本机细节（H3e 对它豁免） |
+| `RELEASE-NOTES.md` | **用户** | **用户能感知的变化**。两个渠道的用户可见文案**都取它**：registry 的 changelog + GitHub Release 正文 |
+
+🔴 **不要把 `CHANGES.md` 的整节搬去 registry**。2026-10-05 之前就是这么做的，结果 registry 的版本页
+是一大坨内部细节、**而且没有英文** —— 而它已经改不回来了。（0.6.16~0.6.22 就停在那副样子。）
+
+### 6.3 每节的格式（`tools/release.py` **硬校验**，不符即拒绝发布）
+
+```markdown
+## X.Y.Z — YYYY-MM-DD
+
+**<中文：一句话说清本版最该知道的事>**
+
+- 要点，每条一行；🔴 **有行为变化就点明「要不要动配置」**。
+
+**升级动作**：图 / 连线 / 参数都不用动。（或写明要做什么）
+
+<!-- EN -->
+
+**<English: one line>**
+
+- Bullets, one per line; 🔴 flag any behaviour change.
+
+**Action required**: nothing — no graph, wiring or parameter changes.
+```
+
+机器判据（`release.py::changelog_text`，在 **push 之前**跑）：
+
+1. 存在 `## <pyproject.version>` 一节 —— **没有就直接拒绝发布**（**不回退**到 `CHANGES.md`：静默回退
+   正是这次要修的病）。
+2. `<!-- EN -->` **恰好一次**；中文在前、英文在后，两段都非空。
+3. 中文段 ≥ 40 汉字；英文段 ≥ 40 英文词**且不含汉字**（英文要**独立成文**，不是逐句直译）。
+4. 两段各自的结尾行（`**升级动作**` / `**Action required**`）必须在。
+5. 长度：中文段 ≤ **700 字符** · 英文段 ≤ **1700 字符**（registry 的版本页上要一屏看完）。
+   —— 判据是**各语种自己的预算**，不是「整节总长」：中文一个字承载的信息比英文一个词多，
+   同一段内容英文天然长 2~3 倍 ⇒ 拿总长当判据等于**只卡英文**，还会诱使人靠"中英不均衡地删"凑数。
+
+⚠️ **英文不是"顺便翻一下"**：registry 的读者大半只看英文，英文段是**主要**文案。
+
+### 6.4 事实类的数字
+
+断言数、文件数、体积这类**会被机检复述的数字，不要写进发布说明** —— 它是冻结的，写进去就等于
+把「当时对、以后错」的陈述永久挂在公开页面上。
 
 ## 7. 明确不做的事
 

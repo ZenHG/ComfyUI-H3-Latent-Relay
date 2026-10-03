@@ -1321,8 +1321,36 @@ else:
 _ci_txt2 = open(_ci_path, encoding="utf-8").read() if os.path.isfile(_ci_path) else ""
 if "RELEASING.md" not in _ci_txt2:
     _bad_rel.append(".comfyignore 没排 RELEASING.md（规范不该发给用户）")
+
+# —— 发布说明：**用户可见文案**（`RELEASE-NOTES.md`）也是规范的一部分 ——
+# 为什么要有这一条：registry 的 changelog **发布后不可改**（版本接口只收 GET/OPTIONS，PATCH 实测 405）
+#    ⇒ 唯一的防线是「发布前就写对」。发布器（`tools/release.py`）确实会拦，但它只在**发布那一刻**跑；
+#    而"本版忘了写发布说明"这件事，提交时就能发现（连 CI 都能），没理由等到发版那晚。
+# 🔴 为什么**不在这里重写一遍格式规则**：规则写两处必然漂（本仓的老病）。⇒ 直接 import
+#    `tools/release.py` 的校验器复用它 —— 它只依赖标准库，且**顶层无副作用**（可安全导入）。
+#    ⚠️ 校验器用 `sys.exit` 报错 ⇒ 必须兜住 `SystemExit`（否则它会把本套件一起带走）。
+_as_notes = os.path.join(KIT, "RELEASE-NOTES.md")
+if not os.path.isfile(_as_notes):
+    _bad_rel.append("缺 RELEASE-NOTES.md（两个渠道的用户可见说明都取它，见 RELEASING.md §6）")
+elif _v_py is None:
+    _bad_rel.append("读不出 pyproject 的 version ⇒ 无法核对 RELEASE-NOTES.md 的本版一节")
+else:
+    sys.path.insert(0, os.path.join(KIT, "tools"))
+    try:
+        import release as _rel                     # noqa: PLC0415 - 复用发布器的校验器
+    except Exception as _e:                        # noqa: BLE001
+        _bad_rel.append("导入 tools/release.py 失败（发布说明的校验器在它里面）：%s" % _e)
+    else:
+        try:
+            _rel.changelog_text(_v_py.group(1))
+        except SystemExit:
+            _bad_rel.append("RELEASE-NOTES.md 的 %s 一节没过发布器的格式校验（规则见 RELEASING.md §6）"
+                            % _v_py.group(1))
+if "RELEASE-NOTES.md" not in _ci_txt2:
+    _bad_rel.append(".comfyignore 没排 RELEASE-NOTES.md（发布说明不该发给用户）")
+
 ck("H3l 发布规范在位且成对（RELEASING.md 提到两个渠道 + 指向 tools/release.py；执行体可编译；"
-   "规范本身被 .comfyignore 排除）",
+   "规范本身被 .comfyignore 排除；RELEASE-NOTES.md 的本版一节过发布器格式校验）",
    not _bad_rel, "%d 处：%s" % (len(_bad_rel), _bad_rel[:6]))
 
 # ============================================================================

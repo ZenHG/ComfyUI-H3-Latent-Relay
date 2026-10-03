@@ -16,6 +16,7 @@ tools/
 
 # —— 面向开发/升级的根文档（不是安装必读）——
 CHANGES.md
+RELEASE-NOTES.md
 CONTRIBUTING.md
 CODE_OF_CONDUCT.md
 SECURITY.md

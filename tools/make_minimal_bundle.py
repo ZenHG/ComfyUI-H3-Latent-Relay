@@ -108,6 +108,8 @@ EXCLUDED_NOTE = {
     "tools/": "10 个自检/取证/CLI ——开发用（含本脚本自身）",
     ".github/": "CI 工作流与 issue 模板",
     "CHANGES.md": "版本流水（历史，含旧机路径，已豁免开源卫生扫描）",
+    "RELEASE-NOTES.md": "用户可见的发布说明（双语；registry changelog / GitHub Release 取它）"
+                        "——升级前看一眼，但非运行必需",
     "CONTRIBUTING.md": "贡献者指南",
     "CODE_OF_CONDUCT.md": "行为准则",
     "SECURITY.md": "安全策略",

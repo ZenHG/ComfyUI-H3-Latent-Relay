@@ -1,0 +1,253 @@
+# 发布说明（Release Notes）
+
+> **这份文件写给用户，不是写给开发者。**
+> **两个渠道的用户可见说明都取这里**（唯一真相源）：Comfy Registry 的 changelog 与 GitHub Release 的正文。
+> 开发者细节（实现方案、实测证据链、机检编号、翻车过程）留在 [`CHANGES.md`](CHANGES.md)，**不要往这里搬**。
+>
+> 格式规矩（正文见 [`RELEASING.md`](RELEASING.md) §6）：
+>
+> - 一版一节，**新的在最上面**，标题固定 `## x.y.z — YYYY-MM-DD`。
+> - 每节**必须中英双语**：中文在前，一行 `<!-- EN -->` 分隔，英文在后。
+>   英文**独立成文**（不是逐句直译 —— registry 页面上大部分读者只看英文）。
+> - 只写**用户能感知的变化**。有行为变化必须用 🔴 点明「要不要动配置」。
+> - 节内总长 ≤ 2000 字符（registry 的版本页上要一屏看完）。
+> - 每节结尾固定两行：中文 `**升级动作**：…` / 英文 `**Action required**: …`。
+>
+> 为什么要有它：registry 的 changelog **发布后不可改**（版本接口只收 `GET`/`OPTIONS`），
+> 所以唯一的防线是**发布前把它写对**；`tools/release.py` 会在 push 之前就按上面几条把你拦住。
+
+---
+
+## 0.6.22 — 2026-10-04
+
+**新功能：治「安静背景里无缘无故的一声滴」（declick），默认开。**
+
+- 「音频缝」新增 `declick_ratio`（默认 4.0，**填 0 = 关闭、逐位直通**）。它只在**台词开始之前**动手，
+  且要求那一小段比周围安静背景突出 4 倍以上 —— 判据判的是「**它周围有多静**」，不是「它本身多响」
+  （语音的轻辅音也很短，只看响度会掐到台词）。
+- 动手方式是把那一小段**用旁边的背景换掉**，而不是把音量拧小。拧小永远会剩一点，你听到的就是那一点。
+- 实测那声「滴」宽约 **8 毫秒**，而旧版把宽度上限写死 2 毫秒 ⇒ 它被判成「不是一声」直接丢弃，
+  **这才是「滴」一直还在的原因**。宽度上限现为 `declick_max_len_ms`（默认 50）。
+- 新增 `cut_head_frames`：填上「本段会被裁掉多少帧」，才能治到「裁帧切断波形」造成的接缝滴。
+- ⚠️ 绝大多数素材会报告「未命中事件 ⇒ 逐位直通」—— 那是正常的，不是没生效。
+- 🆕 官方音频参考只有 **3** 个槽位，本包在续接段会固定占用 **1** 个 ⇒ 3 槽填满时模型侧会看到 4 个。
+  **桥节点标题上会直接挂警告**（不再只写日志 —— 大量用户不看日志）。
+
+**升级动作**：图 / 连线 / 参数都不用动。想完全回到 0.6.21 的行为，把 `declick_ratio` 填 `0`。
+
+<!-- EN -->
+
+**New: kills the stray "tick" in a quiet background (declick), on by default.**
+
+- `Audio Seam` gains `declick_ratio` (default 4.0; **set 0 to disable, bit-exact pass-through**). It only acts
+  **before the dialogue onset**, and only where the sound stands ≥4× above the quiet background around it.
+  The criterion is **how quiet its surroundings are**, not how loud it is — soft speech plosives are short
+  bursts too, so judging by loudness alone eats dialogue.
+- The action **replaces** that sliver with neighbouring background; it does not just turn the volume down.
+  Turning it down always leaves a residue — and that residue is what you hear.
+- The tick measures about **8 ms**, while the old build hard-coded a 2 ms width cap, so it was classified as
+  "not a tick" and dropped — **that was why it kept coming back**. The cap is now `declick_max_len_ms` (50).
+- New `cut_head_frames`: set it to how many frames this segment gets trimmed by, otherwise the seam tick
+  caused by cutting through a waveform cannot be treated.
+- ⚠️ Most material will report "no event matched ⇒ bit-exact pass-through". That is normal, not a failure.
+- 🆕 The official audio-reference budget is only **3** slots, and this pack always occupies **1** on
+  continuation stages — so with all 3 filled the model sees 4. **The bridge node title now shows a warning**
+  instead of only logging it.
+
+**Action required**: nothing — no graph, wiring or parameter changes. To get exactly the 0.6.21 behaviour,
+set `declick_ratio` to `0`.
+
+---
+
+## 0.6.21 — 2026-10-03
+
+**声锚现在会做「响度归一」—— 修「有锚的段整体比别的段响」。**
+
+- 此前只把锚的**峰值**压到 0.9，但**模型会跟随锚的响度**：锚比段内人声响多少，生成段就比上一段响多少。
+  实测段间跳变 **+6.4 dB**。
+- 现按**有声部分的中位响度**归一到 −23 dBFS（放大与压制分别设上限；到不了就退回纯峰值归一，并在报告里说明）。
+- 🔴 **有行为变化**：依赖「锚只压峰」的旧链路，段间响度会变 —— 这正是本次要修的那件事。
+  想恢复旧行为用 `--no-voice-loudness`。**图 / 连线 / 参数都不用动。**
+- 新增一条命令回答「这段的声锚该给谁」：`voice_bank.py advise`。
+  规则 = **锚给「缝上第一个开口说话的人」**；同一个人续接不必接，缝上换人才必须接。
+
+**升级动作**：不用动配置；介意段间响度变化的人看一眼 `--no-voice-loudness`。
+
+<!-- EN -->
+
+**Voice anchors are now loudness-normalised — fixes "every anchored segment is louder than the rest".**
+
+- Only the anchor *peak* used to be capped at 0.9, but the **model follows the anchor's loudness**: the louder
+  the anchor, the louder the generated segment. Measured step between segments: **+6.4 dB**.
+- Anchors are now normalised to −23 dBFS by the **median loudness of their voiced parts** (gain and
+  attenuation have separate caps; if the target cannot be reached it falls back to peak-only normalisation
+  and says so in the report).
+- 🔴 **Behaviour change**: pipelines that relied on peak-only anchoring will hear different inter-segment
+  loudness — that is the fix. Use `--no-voice-loudness` to restore the old behaviour.
+  **No graph, wiring or parameter changes.**
+- New `voice_bank.py advise` answers "who should this segment's anchor be?".
+  Rule = **anchor the first person who speaks at the seam**; the same speaker continuing does not need one,
+  a speaker change at the seam requires it.
+
+**Action required**: nothing to change; see `--no-voice-loudness` if you care about the loudness shift.
+
+---
+
+## 0.6.20 — 2026-10-02
+
+**锚没有内容 ⇒ 当场报错（此前是静默的）。**
+
+- 尾窗含 NaN/Inf，或几乎是常量（= 静音 / 空锚）⇒ 直接报错，并说明是「全为零」还是「常量」。
+- 此前把**出词节点的 `LATENT` 输出**接到声锚输入上，会**静默生效**、报告里还写着「声锚生效」
+  ⇒ 既丢了音频连续性，又什么都没换来。
+- ⚠️ **想关掉声锚请拔线**（不接 = 逐位同旧版），**不要接一个空 latent**。图 / 连线 / 参数都不用动。
+
+**升级动作**：不用动；若曾用空 latent 关声锚，请改为拔线。
+
+<!-- EN -->
+
+**An anchor with no content now fails loudly (it used to fail silently).**
+
+- If the tail window contains NaN/Inf, or is nearly constant (= silence / an empty anchor), the node raises
+  and says whether it was all-zero or constant.
+- Feeding the text-node's `LATENT` output into the anchor input used to take effect **silently**, with the
+  report still claiming the anchor was active — losing audio continuity and gaining nothing.
+- ⚠️ **To turn the anchor off, unplug it** (unplugged = bit-exact same as before). **Never plug in an empty
+  latent.** No graph, wiring or parameter changes.
+
+**Action required**: nothing — but if you used to disable the anchor by feeding an empty latent, unplug it instead.
+
+---
+
+## 0.6.19 — 2026-10-02
+
+**两件事：`run_id` 改一处、同组其余格自动跟随；`Copy Bridge` 新增可选输入「声锚」。**
+
+- `run_id` 是「这部片子叫什么」，决定段文件落在哪个目录 —— 它原先在**六个节点**上各存一份、必须一字不差，
+  改一处要手动改五处，漏改的那处会让桥去**另一个目录**找段文件。
+- 现在改任一格，**同组其余格自动跟随**；同组出现**两个不同的名字时不猜**，而是拦住会提交的按钮
+  并列出哪个节点是哪个名字。范围只限**同一个分组框**（一张图里放两部片子是正常用法）。
+- 清空一格 **≠** 想清空全组（否则误删一个字符就会把整部片子的目录名清掉）。
+- 🔴 **纯前端能力 ⇒ 必须刷新浏览器页面**（`Ctrl+F5`）。用 `/prompt` 提交 JSON 的脚本**不受影响也无需改**
+  —— 脚本本来就把这一格写成同一个变量。
+- `Copy Bridge` 新增**可选**输入 `voice_anchor`（LATENT）：跨说话人续接时锁定本段说话人的音色。
+  **不接 = 逐位同旧版。** 多说话人长片建议接；单人 / 无对白片不用。
+
+**升级动作**：不用动图，但**必须刷新浏览器页面**。
+
+<!-- EN -->
+
+**Two things: `run_id` now syncs across its group from a single edit; `Copy Bridge` gains an optional
+"voice anchor" input.**
+
+- `run_id` names the film and decides which directory segment files land in. It used to be stored on **six
+  nodes** and had to match character-for-character, so one edit meant five manual edits — and the missed one
+  sent the bridge looking in the **wrong directory**.
+- Editing any one of them now updates the rest of its group. If the group holds **two different names it
+  refuses to guess** — it blocks the submitting buttons and lists which node carries which name. Scope is
+  limited to the **same group box** (two films in one graph is normal usage).
+- Clearing one field does **not** mean "clear the whole group" (otherwise deleting one character would rename
+  the whole film's directory).
+- 🔴 **This is front-end only ⇒ reload the browser page** (`Ctrl+F5`). Scripts submitting JSON via `/prompt`
+  are unaffected and need no changes — they already use a single variable.
+- `Copy Bridge` gains an optional `voice_anchor` (LATENT) input that pins the current speaker's timbre across
+  a speaker change. **Unplugged = bit-exact same as before.** Recommended for multi-speaker long-form;
+  unnecessary for single-speaker or silent films.
+
+**Action required**: no graph changes, but you **must reload the browser page**.
+
+---
+
+## 0.6.18 — 2026-09-30
+
+**修三处会**静默**出错的段号 / 段序问题。它们都会让成片**音画错段**或**段序错乱**，而画布上一个字都不报。**
+
+- 「段号推进」漏了「音频缝」节点 ⇒ 跑第 2 段时音频缝仍以「第 1 段」自居，把第 1 段的音频文件
+  **覆盖成了第 2 段的音频** ⇒ 拼接时第 1 段拿到第 2 段的音轨。现改为表驱动，并在状态栏点名同步了哪几类。
+- 拼接挑「哪份 PCM 边车真的进了 mp4」原先按节点类型**猜**顺序；现改为读**提交图的数据流**（谁在下游谁优先），
+  落选的写进报告。读不出提交图时**拒收全部边车、退回 mp4 解码** —— 宁可音轨多一代有损编码，也绝不配错段。
+- 段记录跨轮残留 + 空洞被压实 ⇒ **后面的段被当成前面的段拼进成片**。现记录带真段号，
+  重跑前段会丢掉其后记录，自动拼接遇到空洞**直接拒拼**并说明缺第几段。
+- 画布菜单里的**节点标签改成纯英文**（`🔗 H3 Relay · Trim AV` 这样）。**老图不受影响**
+  （工作流存的是类型名与你自设的标题）；中文文档正文保留中文词，另加「术语 ↔ 节点标签对照表」。
+- 另：连跑按钮现在有**状态色带 + 阶段文字 + 按钮文字**三条互相独立的通道表明「点上没有」，
+  并对重复点击做 0.4 秒防抖（双击 = 白烧一轮）。
+
+**升级动作**：不用动图，但**必须刷新浏览器页面**；若你的图里有多个音频节点各落一份 PCM 边车，看一眼拼接报告确认挑对了。
+
+<!-- EN -->
+
+**Fixes three *silent* failures affecting stage numbering / ordering. Each one produced a final cut with
+**mismatched audio** or **wrong segment order**, while the canvas reported nothing.**
+
+- The stage counter missed the **Audio Seam** node, so while running stage 2 the seam still thought it was
+  stage 1 and **overwrote stage 1's audio with stage 2's**. It is now table-driven, and the status line names
+  what was synced.
+- Picking which PCM sidecar actually made it into the mp4 used to **guess** from node types. It now reads the
+  **submitted graph's data flow** (downstream wins) and lists the losers in the report. Unreadable graph ⇒
+  all sidecars rejected, falling back to decoding the mp4 (one extra generation of lossy audio beats
+  mis-assigned audio).
+- Stale cross-run segment records meant **later segments were spliced in as earlier ones**. Records now carry
+  real stage numbers, re-running an early stage drops the stale later ones, and automatic concat **refuses**
+  to run with a hole, naming the missing stages.
+- Canvas node labels are now **pure English** (`🔗 H3 Relay · Trim AV`). **Existing graphs are unaffected**
+  (workflows store type names and your own titles).
+- The run button now reports through **three independent channels** (title colour band + status text + button
+  text), with a 0.4 s debounce (a double click used to burn a whole GPU round).
+
+**Action required**: no graph changes, but you **must reload the browser page**; if your graph drops several
+PCM sidecars, glance at the concat report to confirm the right one was picked.
+
+---
+
+## 0.6.17 — 2026-09-30
+
+**把两个发布渠道（GitHub / Comfy Registry）规范成一条命令，并回头交叉验证。节点行为零变化。**
+
+- 新增发布规范 `RELEASING.md` 与执行体 `tools/release.py`：`--go` = push → 等 CI **真绿** → 发 registry
+  → 回头核对「两边是不是这一版」。
+- 它**不认命令的退出码就算成功** —— 会回头查远端 main 是不是本版、registry 的版本列表里有没有本版。
+- 修了一条静默失效的忽略规则（`node.zip` 那行带行尾注释 ⇒ 整行被当成模式 ⇒ 实际没生效）。
+
+**升级动作**：不用动你的配置。
+
+<!-- EN -->
+
+**Both release channels (GitHub / Comfy Registry) are now driven by one command that cross-verifies them.
+Zero node behaviour change.**
+
+- New `RELEASING.md` (the single source of truth) and `tools/release.py`: `--go` = push → wait for CI to
+  **actually pass** → publish to the registry → verify that both sides really carry this version.
+- It does **not** treat an exit code as proof of success — it re-checks the remote commit and the registry
+  version list.
+- Fixed a silently ineffective ignore rule (a trailing comment on the `node.zip` line turned the whole line
+  into a pattern).
+
+**Action required**: nothing to change on your side.
+
+---
+
+## 0.6.16 — 2026-09-30
+
+**为「上架」做准备的一版：Comfy Registry 元数据就绪 + 产品名统一。节点行为零变化。**
+
+- 画布节点菜单里的**分组名**由「H3 Relay Kit」改为「H3 Latent Relay」
+  （**图、节点名、连线全未变**，只是菜单里的归类名）。
+- registry 元数据（PublisherId / DisplayName / Icon / license 形态）就绪，
+  安装 id 为 `h3-latent-relay`。
+- ⚠️ 版本号在 `0.6.9` ~ `0.6.15` 之间**从未单独发布过 registry 版本**，本版是首次上线。
+
+**升级动作**：不用动你的配置。
+
+<!-- EN -->
+
+**Groundwork for shipping: Comfy Registry metadata ready + product naming unified. Zero node behaviour
+change.**
+
+- The node-menu **category** changed from "H3 Relay Kit" to "H3 Latent Relay"
+  (**graphs, node names and wiring are all unchanged** — only the grouping label in the menu).
+- Registry metadata (PublisherId / DisplayName / Icon / license form) is in place; the install id is
+  `h3-latent-relay`.
+- ⚠️ No registry release was published for `0.6.9` ~ `0.6.15`; this is the first published version.
+
+**Action required**: nothing to change on your side.
