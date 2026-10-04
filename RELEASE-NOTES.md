@@ -18,6 +18,53 @@
 
 ---
 
+## 0.6.26 — 2026-10-04
+
+**修一个你可能已经听出来的问题：`voice_bank.py` 采出的声锚变调。**
+
+在 10-04 之后重采过声库的话，那批锚**音调偏高** —— 原因是**落盘数据的采样率与文件头
+对不上**（16 kHz 的样本写进了 32 kHz 的头，播放快一倍）。
+🔴 **文件头和登记信息看起来完全正常**，所以它一路混到了耳朵这里。
+已修，并加两道自动检查（落盘前样本数自洽 + 落盘往返音高不变）。
+顺带修了两个同类老问题：裁窗**可能越出素材末尾**、裁窗两端**可能落在停顿上**。
+
+🔴 **旧声库是 16 kHz 的**：本来就偏低频，且**不会自动重采**。想换新口径请手动
+`python tools/voice_bank.py collect <mp4> --name <角色> --bank <声库目录> --force`。
+
+🔴 **一条物理限制**：锚从 16 k 提到 32 k，`−40dB` 带宽 4.7~5.3 → 9.0~10.5 kHz，
+**再往上受音源限制**（H3 自己吐的音轨有效带宽约 4.9 kHz）。
+**提高采样率不会凭空补出高频** —— 要更好音色得**换音源**（真人 / 原始录音）。
+新采的锚会在 `report` 与 `voices.json` 的 `tail_clean` 里点名「尾部有停顿 → 音色打折」。
+
+**升级动作**：**无需动作** —— 图、连线、节点参数全不变，本次只改开发者工具与文档。
+旧声库要吃新口径就按上面那条命令 `--force` 重采。
+
+<!-- EN -->
+
+**Fixes a problem you may have already heard: anchors from `voice_bank.py` came out pitch-shifted.**
+
+If you re-collected your voice bank after 10-04, those anchors were **an octave up** — the written
+data's sample rate did not match the file header (16 kHz samples under a 32 kHz header, playing twice
+as fast). 🔴 **The header and the registry looked perfectly normal**, which is why it survived to your
+ears. Fixed, plus two automatic guards (sample-count self-consistency before writing, and a
+write→read pitch round-trip). Two older bugs of the same family are fixed too: the crop window could
+**run past the end of the source**, and its edges could land **in a pause** rather than on speech.
+
+🔴 **If your existing anchors are 16 kHz**: they were low in bandwidth to begin with, and they are
+**not re-collected automatically**. To move to the corrected behaviour, re-collect manually with
+`--force` (command above).
+
+🔴 **One physical limit**: moving an anchor from 16 k to 32 k raised its −40 dB bandwidth from
+4.7–5.3 kHz to 9.0–10.5 kHz, but **beyond that the source is the ceiling** (the audio tracks H3 itself
+reach only ~4.9 kHz). **A higher sample rate does not invent high frequencies that were never
+captured** — a better voice needs a **better source** (a real person or the original recording).
+Newly collected anchors now **say so** in the `report` and in `voices.json`'s `tail_clean`.
+
+**Action required**: **none** — graphs, wiring and node parameters are all unchanged; this release
+only touches developer tooling and documentation. Re-collect with `--force` to benefit.
+
+---
+
 ## 0.6.25 — 2026-10-04
 
 **多锚落地：一个音频参考槽装上一段多个人的音色。** 窗长改成**自动**（`0`），素材自己说话。

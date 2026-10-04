@@ -8,8 +8,8 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "condensed",
-          "h_en": "0a0556ba08ffc874",
-          "h_src": "0975ff0d1501affb",
+          "h_en": "4d3a65d050587335",
+          "h_src": "70b636f3f2cf6fcc",
           "seeded": "by-position"
         },
         {
@@ -40,8 +40,8 @@
           "zh": "使用方法",
           "en": "Usage",
           "mode": "condensed",
-          "h_en": "d4a6a7f1374c9e5e",
-          "h_src": "dcf985f423a2ff6f",
+          "h_en": "1ea51479df0ae2da",
+          "h_src": "0970111210beb721",
           "seeded": "by-position"
         },
         {
@@ -79,7 +79,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-04",
-      "src_sha": "4a31dfdffa3ba9b4"
+      "src_sha": "be8a8172613da19d"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",

@@ -10,7 +10,7 @@ not coupled to any third-party H3 node pack.
 
 | Item | Value |
 |---|---|
-| Version | **0.6.25** (8 nodes; the composite bridge `H3RelayCopyBridge` is the **only** bridge) |
+| Version | **0.6.26** (8 nodes; the composite bridge `H3RelayCopyBridge` is the **only** bridge) |
 | License | **MIT** (third-party attribution in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) |
 | Host | **ComfyUI ≥ 0.35.0 with MiniMax-H3 support** (the host itself is GPL-3.0, see License) |
 
@@ -265,6 +265,8 @@ collect anchors automatically from already-rendered segments.
 | **The automatic reference window could in principle trigger recitation** | Since 0.6.25, with no anchor wired the window is chosen automatically (2–6 s, vs 0.93 s before) ⇒ the window **is** the previous segment's dialogue. **No recitation observed in measurement** (0.93 → 4.18 s, no seg-1 content per ASR), but that is one segment, one generation — listen once on dialogue-dense material; for guaranteed-old behaviour set `audio_ref_seconds` (0.93 = old) |
 | 🟣 **Other speakers go through the official slots** | This pack anchors only the one at the seam. To give the **other speakers** a voice reference, wire their audio into the **official** `ref_audios` slots — that is the **only** path that emits a text label `<Audio j>`, which is what the prompt references (the one this pack injects is appended to the DiT side only, has **no label and cannot be referenced from the prompt**; the `report` says so). Run it through the official `TrimAudioDuration` to ~0.9 s first (reference rows ride through every sampling step — long references cost time). ⚠️ **Ordinals count wired slots in order, not slot numbers**: wire only `ref_audio_2` and it is `<Audio 1>`; writing `<Audio 3>` **resolves to nothing and reports nothing** (when slots are non-contiguous the bridge node title states the real ordinals) |
 | **Anchor length** | The tail window is 0.925 s ⇒ anchor **>= 0.9 s** (shorter: the full clip is used and the `report` warns); 1–4 s recommended |
+| 🔴 **A pause at the anchor's tail costs you timbre fidelity** | `_voice_anchor_tail` on the consumer side takes only the **last 0.925 s** of the anchor (`a_frames/FPS`) ⇒ **silence at the tail is silence the model sees** (that part of the anchor is effectively no anchor at all). `voice_bank.py` prefers spans whose tail window is fully voiced and, when it cannot, **says so in the `report` and in `voices.json`'s `tail_clean`** ("timbre condition will degrade"). Seeing that warning means **the source's continuous speech is too short** — use a longer, cleaner single-speaker clip |
+| 🔴 **Raising the anchor's sample rate does not raise the timbre ceiling** | The anchor is finally fed to the H3 audio VAE (native 32 kHz). A higher sample rate **preserves the spectrum that is already there; it does not invent high frequencies that were never captured** — measured, moving the anchor from 16 k to 32 k raised the −40 dB bandwidth from 4.7–5.3 kHz to 9.0–10.5 kHz, but **beyond that the source is the limit**: the audio tracks H3 itself produces only reach ~4.9 kHz of usable bandwidth (H3 *can* output 15 kHz, but those clips are sound effects / ambience, not speech). ⇒ **A better voice means a better source** (a real person / the original recording), not a higher sample rate |
 | **Ignored when `pin_audio=False`** | Stated in the `report` (degradation is visible, never silent) |
 
 ⚠️ **One common mis-wiring**: **never feed `context_latent` into `voice_anchor`** — that is the
