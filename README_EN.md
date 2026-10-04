@@ -262,7 +262,7 @@ collect anchors automatically from already-rendered segments.
 | **The anchor replaces the whole audio tail window** | Any BGM / ambience inside that window is replaced too. If you have a music bed, **mix it into the anchor** first |
 | **Timbre / pace / emotion are partly pinned** | The anchor is not "timbre only" — emotion and pacing follow it as well. Pick a clean clip whose **emotion matches the target line** |
 | **Multi-speaker segment: only the first is anchored** | There is exactly one `audio_ref` window ⇒ it anchors "**whoever speaks next at the seam**"; for "bring everyone" use `audio_ref_seconds` (above), to "name someone" use the official `ref_audios` slots |
-| **The automatic reference window may trigger recitation** | Since 0.6.25, with no anchor wired the window is chosen automatically (2–6 s, vs 0.93 s before) ⇒ the window **is** the previous segment's dialogue, so the model **may recite it**. **Not yet verified end-to-end**; for guaranteed-old behaviour set `audio_ref_seconds` explicitly (0.93 = old) or wire an anchor |
+| **The automatic reference window could in principle trigger recitation** | Since 0.6.25, with no anchor wired the window is chosen automatically (2–6 s, vs 0.93 s before) ⇒ the window **is** the previous segment's dialogue. **No recitation observed in measurement** (0.93 → 4.18 s, no seg-1 content per ASR), but that is one segment, one generation — listen once on dialogue-dense material; for guaranteed-old behaviour set `audio_ref_seconds` (0.93 = old) |
 | 🟣 **Other speakers go through the official slots** | This pack anchors only the one at the seam. To give the **other speakers** a voice reference, wire their audio into the **official** `ref_audios` slots — that is the **only** path that emits a text label `<Audio j>`, which is what the prompt references (the one this pack injects is appended to the DiT side only, has **no label and cannot be referenced from the prompt**; the `report` says so). Run it through the official `TrimAudioDuration` to ~0.9 s first (reference rows ride through every sampling step — long references cost time). ⚠️ **Ordinals count wired slots in order, not slot numbers**: wire only `ref_audio_2` and it is `<Audio 1>`; writing `<Audio 3>` **resolves to nothing and reports nothing** (when slots are non-contiguous the bridge node title states the real ordinals) |
 | **Anchor length** | The tail window is 0.925 s ⇒ anchor **>= 0.9 s** (shorter: the full clip is used and the `report` warns); 1–4 s recommended |
 | **Ignored when `pin_audio=False`** | Stated in the `report` (degradation is visible, never silent) |
@@ -332,8 +332,10 @@ audio-reference slot**) — use `audio_ref_seconds`:
 - **No number to type**: `0` = automatic, the material decides (`min_voiced_s` = 2 s of voiced, cap 6 s).
 - **Do not wire a voice anchor**: an anchor **takes over** the window length (its source is the anchor, not
   the previous segment) ⇒ the `report` says so by name.
-- ⚠️ **Cost, not yet verified end-to-end**: the window **is** the previous segment's dialogue ⇒ the model
-  **may recite it**. To have a prompt *address* a specific person you still need the official slots above.
+- ⚠️ **Cost**: the window **is** the previous segment's dialogue ⇒ the model **could in principle recite it**.
+  **Not observed in measurement** (0.93 → 4.18 s window, no seg-1 content per ASR; the same criterion hits
+  seg-1 keywords 3/3 on control samples) — but that covers one segment, one generation. To have a prompt
+  *address* a specific person you still need the official slots above.
 - The two routes are **complementary, not conflicting**: "bring everyone" ⇒ this parameter; "name someone"
   ⇒ official slots; "pin the timbre and own the seam" ⇒ the voice anchor.
 

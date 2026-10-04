@@ -40,8 +40,8 @@
           "zh": "使用方法",
           "en": "Usage",
           "mode": "condensed",
-          "h_en": "ce73a98c8bc0c185",
-          "h_src": "f0859dfef733e958",
+          "h_en": "d4a6a7f1374c9e5e",
+          "h_src": "dcf985f423a2ff6f",
           "seeded": "by-position"
         },
         {
@@ -79,7 +79,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-04",
-      "src_sha": "fc4170e40dd2413f"
+      "src_sha": "4a31dfdffa3ba9b4"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -184,14 +184,14 @@
           "zh": "参数",
           "en": "Parameters",
           "mode": "full",
-          "h_en": "00c906bcc5aa882c",
-          "h_src": "a79d67f16262f93e",
+          "h_en": "61382a6a17fd3043",
+          "h_src": "05c59dc969f1be14",
           "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-10-04",
-      "src_sha": "eb7723df6e312135"
+      "src_sha": "76a0ce46ac4e389a"
     }
   }
 }

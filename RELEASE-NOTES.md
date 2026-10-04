@@ -30,7 +30,7 @@
 - **接了声锚就不生效**（窗的原料变成声锚，长度不由上一段决定）—— report 会点名。
 - report 写明**按什么定的**（判据、有声格数、比旧口径长几倍）；静默素材 / NaN / 空音频都点名原因。
 
-⚠️ **代价，尚未端到端实测**：窗里**就是上一段的台词**，模型**可能复述**。
+⚠️ **代价**：窗里**就是上一段的台词**，模型**理论上可能复述**（实测未观察到，但只覆盖一段素材一次生成）。
 要旧行为就把 `audio_ref_seconds` 填 **0.93**。
 
 **升级动作**：**不接声锚的图行为会变**（参考窗 0.93 s → 自动 2~6 s）。想保持旧行为就把
@@ -53,8 +53,9 @@ practice). **The slot budget is unchanged — still one of the official three sl
 - The `report` states **how it was decided** (criterion, voiced-grid count, growth vs the old window); silent
   material / NaN / empty audio all name their reason.
 
-⚠️ **Cost, not verified end-to-end**: the window **is** the previous segment's dialogue, so the model **may
-recite it**. Set `audio_ref_seconds` to **0.93** for the old behaviour.
+⚠️ **Cost**: the window **is** the previous segment's dialogue, so the model **could in principle recite it**
+(not observed in measurement, but that covers one segment and one generation). Set `audio_ref_seconds` to
+**0.93** for the old behaviour.
 
 **Action required**: graphs **without** a voice anchor change behaviour (reference window 0.93 s → automatic
 2–6 s). Set `audio_ref_seconds` to **0.93** to keep the old window; graphs **with** a voice anchor are
