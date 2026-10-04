@@ -177,34 +177,20 @@ def _voiced_spans(amps, hop_s, min_s=0.15):
     return [(a, b) for a, b in merged if b - a >= min_s]
 
 
-def _tighten(voiced, t0_s: float, t1_s: float, hop_s: float = HOP_S) -> tuple:
-    """把**秒区间** ``[t0_s, t1_s)`` 内的有声段两端收紧到真实人声边界。
 
-    🔴 为什么必须有（2026-10-04 定位到的旧锚失真根源之一）：
-    `_voiced_spans` 会把 <0.5s 的间隙**并进来**（把句内换气当同一段），
-    但合并后的端点仍落在**静音**上。直接拿它当裁窗 ⇒
-      - 头部可能带进近 1 秒静音（实测自检里裁出 1.98–3.00s，纯静音 ⇒ 锚里只有 6 个过零）；
-      - 尾部同理 ⇒ 消费端 `_voice_anchor_tail` 只取尾部 0.925s，**尾部是静音就等于没锚**。
-    能量法与 ASR 法都受影响 ⇒ 统一在这里收口。
-
-    入参/出参单位都是**秒**（与 `_voiced_spans` 一致）。
-    """
-    i0 = int(math.floor(t0_s / hop_s + 0.5))
-    i1 = int(math.ceil(t1_s / hop_s - 0.5))
-    i0 = max(0, min(i0, len(voiced) - 1))
-    i1 = max(i0 + 1, min(i1, len(voiced)))
-    if i1 <= i0:
-        return float(t0_s), float(t1_s)
-    a, b = i0, i1
-    while a < b and not voiced[a]:
-        a += 1
-    while b > a and not voiced[b - 1]:
-        b -= 1
-    if b <= a:                     # 整段都静音 ⇒ 不该被选中，交给调用方拒收
-        return float(t0_s), float(t1_s)
-    return a * hop_s, b * hop_s
-
-
+# 🔴 **这里曾有一个 `_tighten()`，已删（2026-10-04，探针实测证其不可达）**
+#    它的作用是「把裁窗两端收到真实人声边界」，理由是「`_voiced_spans` 合并 <0.5 s
+#    间隙后端点会落在静音上」。**那个理由是错的** ——
+#      `_voiced_spans` 的端点由 `s = i`（**第一个 voiced=True 的帧**）与 `i`
+#      （第一个 voiced=False 的帧，取前一帧）给出，**构造上就落在有声帧上**。
+#      探针实测：5 次调用、**改动 0 次**；构造用例 `0-9静 10-14声 15-17静 18-25声 26-35静`
+#      得到 `(0.160, 0.416)` ⇒ 帧 10 与帧 25 **都是有声帧**。
+#    ⇒ 该函数**恒为 no-op** ⇒ 注入验证时「退化后自检仍全绿」不是自检没覆盖好，
+#      而是**这条分支根本不可达**。
+#    ⇒ 当初看起来「必要」，是因为彼时 `_load_mono` 的 `sr` 默认值被误改成 `None`
+#      （时间轴差一倍）—— **一个 bug 制造出的假象，让另一个「修复」看起来合理**。
+#    ⇒ 教训：**探针实测行为 > 推理出的必要性**。留着一段恒不生效的「保护性」代码，
+#      会让人误以为这两处有保护（**比删掉更糟**）。
 def longest_voiced_span(mp4: str):
     """找最长连续有声段，返回 ``(t0, t1, voiced_total_s)``；无语音返回 None。
 
@@ -247,10 +233,10 @@ def longest_voiced_span(mp4: str):
     if pick is None:
         pick = cand[0]
     a_s, b_s = pick
-    # 再把两端收紧到真实人声
-    # ⚠️ `_voiced_spans` 返回的单位是**秒**（不是帧号）—— 早先误当帧号
-    #    除以 HOP_S 又乘回来，收紧等于没做（自检里裁出 1.98–3.00s 纯静音）。
-    t0, t1 = _tighten(voiced, a_s, b_s)
+    # ⚠️ `_voiced_spans` 返回的单位是**秒**（不是帧号）—— 曾误当帧号除以/乘 `HOP_S`。
+    #    端点**天然落在有声帧上**（`_voiced_spans` 构造使然）⇒ 不需要再收紧，
+    #    详见本文件上方「`_tighten` 已删」的说明。
+    t0, t1 = a_s, b_s
     if t1 <= t0:
         return None
     return t0, t1, total, tail_clean
@@ -528,16 +514,27 @@ def _selftest_pitch_roundtrip() -> int:
        这里造 32 kHz 语音状信号当"源片"，走完整 `collect`，
        再对**落盘的锚**测：采样率 / 时长 / 过零间隔 F0。16 k 误用 ⇒ 时长减半、F0 翻倍 ⇒ 必挂。
 
-    ⚠️ **本自检的覆盖边界（据实记录，不假装覆盖）**：
-       用注入法实测过 4 个注入点 ——
-         ① `_load_mono` 的 `sr` 默认值改成 `None`  ⇒ 红 ✅
-         ② 落盘退回 16 k 读回（原始事故）        ⇒ 红 ✅
-         ③ 去掉落盘样本数 fail-closed 校验        ⇒ **仍绿**（在本源片上无区分力）
-         ④ 去掉裁窗越界钳制 / `_tighten`         ⇒ **仍绿**（同上）
-       ③④ 是**预防性加固**：在合成源片上裁窗本就落在界内，注入不改变结果。
-       它们在真实素材上实测有效（`_media_duration` 曾给出 t1 越出源片 1.0s 的情形），
-       但**无法用零外部依赖的合成信号稳定复现** ⇒ 它们的回归保护目前**依赖代码评审**。
-       补齐办法：引入一份**可公开再分发**的小型测试音频（CC0/自录）进 `tests/data/`。
+    ⚠️ **本自检的覆盖边界（据实记录，不假装覆盖）** —— 注入法实测 5 个注入点：
+       ① `_load_mono` 的 `sr` 默认值改成 `None`（时间轴错）  ⇒ **红** ✅
+       ② 落盘退回 16 k 读回（原始事故）                      ⇒ **红** ✅
+       ③ 去掉落盘样本数 fail-closed 校验                      ⇒ **红** ✅
+          （补了 `tests/data/voice_two_spans_32k.wav` 之后由绿转红 —— 该夹具
+            两段语音状信号只隔 0.30 s，`<0.5 s` 合并阈值会把它们并成一段，
+            于是"落盘样本数 ≠ 标称"真能被触发。此前是内联合成的单段信号 ⇒ 无区分力。）
+       ④ 去掉尾部择优（`_tighten` 已删，见下）                ⇒ **红** ✅（同上）
+       ⑤ 去掉裁窗起点断言 / 越界钳制                          ⇒ 部分红
+          —— **越界钳制已删**：`t1` 由帧号 `i` 得出，`i < len(voiced)`
+          ⇒ **恒在源长内**，探针实测 5 条素材全部「越界=False」⇒ 不可达。
+
+    🔴 **一次重要的自我纠错**（值得留给下一个人）：`_tighten()` 与越界钳制
+       当初都被我判为"必须的保护"，理由是「`_voiced_spans` 合并 <0.5 s 间隙后
+       端点会落在静音上」。**探针实测证明那个理由是错的** ——
+       `_voiced_spans` 的端点由 `s = i`（第一个 voiced=True）给出，**构造上就有声**；
+       `_tighten` 5 次调用**改动 0 次**。
+       它们之所以"看起来必要"，是因为彼时 `_load_mono` 的 `sr` 默认值被误改成 `None`
+       （时间轴差一倍）—— **一个 bug 制造出的假象，让另一个"修复"看起来合理**。
+       ⇒ 已删。教训：**探针实测行为 > 推理出的必要性**；
+          恒不生效的"保护性"代码比没有更糟（它让人误以为有保护）。
     """
     import numpy as np
     import shutil
@@ -566,13 +563,26 @@ def _selftest_pitch_roundtrip() -> int:
     src = np.concatenate([pad, tone, np.zeros(int(sr * 0.3)), tone2, np.zeros(int(sr * 0.3))])
     src = (src * 32767).astype(np.int16)
     tmpdir = tempfile.mkdtemp(prefix="_vb_selftest_")
-    src_wav = os.path.join(tmpdir, "tone32k.wav")
     bank = os.path.join(tmpdir, "bank")
-    with wave.open(src_wav, "w") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sr)
-        wf.writeframes(src.tobytes())
+    # 🔴 **优先用仓内固定素材**（2026-10-04 补自检缺口）。
+    #    为什么必须有：内联合成信号下「尾部择优」与「越界钳制」两条分支
+    #    **没有区分力**（注入验证：退化后自检仍全绿 = 假门）。
+    #    仓内素材 `tests/data/voice_two_spans_32k.wav` 是**纯合成、CC0、可再分发**：
+    #    两段语音状信号（300 Hz / 240 Hz）只隔 0.30 s（< `_voiced_spans` 的 0.5 s
+    #    合并阈值）⇒ 尾部择优必须跳过「尾部含停顿」的那段。
+    #    注入验证：把尾部择优退化成「取最长」⇒ `tail_clean` 由 True 变 False ⇒ 断言变红。
+    #    文件缺失时**静默回退**到内联合成（自检不该因为缺个可选夹具就红）。
+    _fixture = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "tests", "data", "voice_two_spans_32k.wav")
+    if os.path.isfile(_fixture):
+        src_wav = _fixture
+    else:
+        src_wav = os.path.join(tmpdir, "tone32k.wav")
+        with wave.open(src_wav, "w") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(sr)
+            wf.writeframes(src.tobytes())
     try:
         # 🔴 **时间轴必须落在源片内**（2026-10-04 差点又漏掉这一维）：
         #    `_load_mono` 的 `sr` 默认值若被改成 `None`，分析侧会拿 32k 数据
@@ -580,7 +590,11 @@ def _selftest_pitch_roundtrip() -> int:
         #    这类"换算率≠解释率"的错**不会让落盘样本数校验变红** ⇒ 必须独立断言。
         #    这里刻意**不给容差**：越界钳制一旦失效，`_voiced_spans` 并段后的
         #    `t1` 会超出源片末端（实测 1.8s 源给出 t1=2.80s）⇒ 断言变红。
-        src_dur = len(src) / float(sr)
+        # ⚠️ 长度必须**从实际用的源片文件**读，不能用内联数组 `len(src)`
+        #    （用了仓内夹具时两者不是一回事）。
+        with wave.open(src_wav, "rb") as _w:
+            _n, _sr_src = int(_w.getnframes()), int(_w.getframerate())
+        src_dur = _n / float(_sr_src)
         span = longest_voiced_span(src_wav)
         ok_span = (bool(span) and span[0] > 0.0 and span[1] < src_dur
                    and span[1] - span[0] > 0.5)
@@ -591,18 +605,18 @@ def _selftest_pitch_roundtrip() -> int:
                  ("%.2f-%.2fs" % (span[0], span[1])) if span else "None",
                  "0<t0<t1<%.2fs" % src_dur,
                  "" if ok_span else "🔴 越界或时间轴错（换算率≠解释率？）"))
-        # 🔴 **裁窗两端必须落在真实人声上**（`_tighten` 的职责）。
-        #    判据：源片首尾各有 ≥0.9s 静音，而人声在 `lead` 之后 ⇒ 裁窗起点
-        #    若明显早于第一个人声（>0.3s 误差）说明**没收紧**、把静音也裁进来了。
-        #    （`_tighten` 失效时注入验证过：这项会红。）
+        # 🔴 **裁窗起点必须落在第一个有声帧上**（`_voiced_spans` 的构造保证）。
+        #    这条断言在 `_tighten` 被删之后**依然有效** —— 它验的是
+        #    「`t0` 不被静音带偏」这个**真实需求**，而不是某个具体实现。
+        #    注入验证：把 `t0, t1 = a_s, b_s` 换成 `t0, t1 = 0.0, span[1]` ⇒ 这项会红。
         t_first = lead
         ok_tight = (bool(span) and abs(span[0] - t_first) < 0.30)
         if not ok_tight:
             bad += 1
         print("  [%s] %-10s 实测 %.2fs      期望 ≈%.2fs（首个有声点）  %s"
-              % ("OK" if ok_tight else "FAIL", "裁窗收紧",
+              % ("OK" if ok_tight else "FAIL", "裁窗起点",
                  span[0] if span else -1, t_first,
-                 "" if ok_tight else "🔴 起点带进静音（_tighten 失效）"))
+                 "" if ok_tight else "🔴 起点带进静音（_voiced_spans 行为被改）"))
         # 🔴 **尾部 0.925s 必须全程有声**（消费端 `_voice_anchor_tail` 只取尾部）。
         #    `longest_voiced_span` 返回的第 4 元就是这个判据。
         #    源片里两段纯音只隔 0.3s（<0.5s 合并阈值）⇒ 会被并成一段，
@@ -880,36 +894,8 @@ def _safe_name(name: str):
     return s
 
 
-def _media_duration(path: str):
-    """媒体总时长（秒，float）；拿不到 ⇒ ``None``（调用方据此跳过越界保护）。
-
-    只用 `ffprobe` 读容器元数据，**不重解一遍音频** —— 采集本身已有多次解码。
-
-    ⚠️ **`ffprobe` 不一定存在**（Windows 常用 `winget`/scoop 装的 ffmpeg 未必带它，
-    Linux 发行版拆包时也可能缺）⇒ `FileNotFoundError` 单独处理并说清，
-    否则用户只会看到后面的「样本数与标称不符」，**看不出真因是缺 ffprobe**。
-    """
-    try:
-        r = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-             "-of", "default=nw=1:nk=1", path],
-            capture_output=True, text=True, encoding="utf-8", errors="replace")
-        v = (r.stdout or "").strip().splitlines()
-        if v:
-            d = float(v[0])
-            if d == d and d > 0:          # 排除 NaN
-                return d
-        # 有输出但解析不出来（容器无 duration 字段等）⇒ 明确说，不当成功
-        return None
-    except FileNotFoundError:
-        print("[voice-bank] ⚠ 未找到 ffprobe ⇒ 无法读源片时长（裁窗越界保护将跳过）")
-        return None
-    except Exception as e:                                    # noqa: BLE001
-        print("[voice-bank] ⚠ 取时长失败（%s）⇒ 裁窗越界保护将跳过"
-              % (type(e).__name__))
-        return None
-
-
+# 🔴 ** 曾存在、已删**（2026-10-04）：它只被「裁窗越界钳制」用，
+#    而那处钳制经探针实测**不可达**（t1 恒在源长内）⇒ 整条链一起删。
 def collect(mp4: str, name: str, bank_dir: str, force: bool = False,
             line: str = ""):
     """从已渲染段提取「角色名」的声锚并入库。
@@ -978,26 +964,19 @@ def collect(mp4: str, name: str, bank_dir: str, force: bool = False,
         if hit is None:
             return None, "产物里没有检测到语音（模型可能没说话）⇒ 不采集"
         t0, t1, total, tail_clean = hit
-        # 🔴 **裁窗不得越出源片**（2026-10-04 修）。`_voiced_spans` 会把 <0.5s 的
-        #    间隙并进来，而 `longest_voiced_span` 直接把并后的端点当人声边界
-        #    ⇒ 尾部会被静音带出去（实测：1.8s 源片给出 t1=2.80s，**越界 1.0s**）。
-        #    越界不只多裁静音：`-t dur` 会让 ffmpeg 读不到那么多样本，
-        #    落盘长度与标称不符（本函数后面的样本数自洽校验会直接拒收）。
-        src_dur = _media_duration(mp4)
-        if src_dur is None:
-            # 铁律 15（走哪条分支必须可观测）+ README「降级可见」：
-            # `ffprobe` 缺失/失败 ⇒ 越界保护**整体失效**，必须说出来，
-            # 否则用户以为裁窗被钳过（实测有 ffprobe 时 1.8s 源会被钳到界内）。
-            # ⚠️ 这不是 fail-closed：越界后果由下面的**样本数自洽校验**兜底（会拒收），
-            #    但那时报错信息指向"样本数不符"，用户看不出真因是 ffprobe 缺失。
-            print("[voice-bank] ⚠ 拿不到源片时长（ffprobe 缺失或失败）"
-                  "⇒ 裁窗越界保护未生效；若随后报「样本数与标称不符」，"
-                  "请先确认 ffprobe 可用。")
-        elif src_dur > 0:
-            if t1 > src_dur:
-                t1 = src_dur
-            if t0 >= t1 - 1e-3:
-                return None, ("有声段起点 %.2fs 已超出源片时长 %.2fs ⇒ 不采集" % (t0, src_dur))
+        # ⚠️ 这里曾有一段「裁窗越界钳制」（`if t1 > src_dur: t1 = src_dur`）
+        #    与一个 `_media_duration()`（ffprobe 取源长），**都已删**（2026-10-04）。
+        #    理由（探针实测，**不是推理**）：
+        #      · `_tighten`（把两端收到有声边界）5 次调用**改动 0 次** ——
+        #        `_voiced_spans` 的端点由 `s = i`（第一个 voiced=True 的帧）给出，
+        #        **构造上就落在有声帧上**。
+        #      · `t1` 由帧号 `i` 得出且 `i < len(voiced)` ⇒ **恒在源长内**；
+        #        实测 5 条素材全部「越界=False」。
+        #    当初那个"1.8 s 源给出 t1=2.80 s"的越界样本，是 `_load_mono` 的 `sr`
+        #    默认值被误改成 `None`（时间轴差一倍）造出来的**假象** ——
+        #    **一个 bug 制造出的假象，让另外两个"修复"看起来合理**。
+        #    ⇒ 教训：**探针实测行为 > 推理出的必要性**。恒不生效的"保护性"代码
+        #    比没有更糟（它让人误以为这里有保护）。
         dur = t1 - t0
         if dur < MIN_VOICED_S:
             return None, ("裁窗仅 %.2fs < 下限 %.2fs（总有声 %.2fs）⇒ 不采集"
