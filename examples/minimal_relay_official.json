@@ -693,6 +693,14 @@
           "widget": {
             "name": "ref_anchor_frames"
           }
+        },
+        {
+          "name": "audio_ref_seconds",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "audio_ref_seconds"
+          }
         }
       ],
       "outputs": [
@@ -744,7 +752,8 @@
         "relay_demo",
         0,
         -1,
-        5
+        5,
+        0.0
       ]
     },
     {

@@ -1489,6 +1489,22 @@ class H3RelayCopyBridge:
                     "advanced": True, "default": 5, "min": 1, "max": 64, "step": 1,
                     "tooltip": "外观锚取该段**开头**多少帧（取头不取尾）。",
                 }),
+                # 🆕 0.6.25 音频参考窗（秒）—— 必须排在 `voice_anchor` **之前**
+                #（voice_anchor 恒为最后一个槽：widgets_values 按位对槽，见 0.6.1 的约定）
+                "audio_ref_seconds": ("FLOAT", {
+                    "advanced": True, "default": 0.0, "min": 0.0, "max": 30.0, "step": 0.5,
+                    "tooltip": "【可选】音频参考窗长度（**秒**）。`0` = **自动**（推荐）：\n"
+                               "从上一段尾部往前，累计够 2 秒**有声**内容就停（上限 6 秒）——\n"
+                               "让素材自己决定，比手填数字稳（手填是在「音色还原不足」与\n"
+                               "「模型复述上一段台词」之间猜）。实测自动给 2~6 秒，\n"
+                               "而旧口径（= 视频钉住窗 22 帧）只有 **0.93 秒**。\n"
+                               "🔵 **这就是「一段多人只占一个音频参考槽」的实现**：窗里可以含\n"
+                               "    上一段**多个说话人**的音色，而额度**只占官方 3 槽里的 1 个**。\n"
+                               "⚠️ 拉长的代价：参考音频里**就是上一段的台词**，模型**可能复述**\n"
+                               "    （此效果尚未端到端实测确认；report 会写明实际窗长）。\n"
+                               "· **接了「声锚」则本项不生效**（窗的原料变成声锚，长度不由上一段决定）——\n"
+                               "    report 会点名。两件事二选一：声锚=钉住本段说话人；本项=一带多人音色。",
+                }),
                 # ⚠ 0.6.1 声锚 —— 追加在**最后**（守 widgets_values 按位对槽）
                 "voice_anchor": ("LATENT", {
                     "tooltip": "【可选·声锚】**本段说话人**的音频锚（LoadAudio → VAEEncodeAudio 的 latent）。\n"
@@ -1537,7 +1553,7 @@ class H3RelayCopyBridge:
                anchor_latent=None, anchor_blend=1.0,
                conditioning=None, run_id="relay", stage_index=0,
                ref_anchor_latent=None, ref_anchor_stage=-1, ref_anchor_frames=5,
-               voice_anchor=None):
+               voice_anchor=None, audio_ref_seconds=0.0):
         CONTRACT.enforce()
         # 0.6.0：Latent 桥（H3RelayMotionContext）已删除，本节点成为**唯一桥**。
         # 原 Latent 桥「段号>=1 却无来源 -> 必须 raise（不得静默直通）」是反坏片关键守卫，
@@ -1601,6 +1617,8 @@ class H3RelayCopyBridge:
                 latent, context_latent,
                 trim_frames=int(context_frames),
                 audio_frames=None,
+                # 🆕 0.6.25：0 = 自动（`audio_ref_seconds` 传 0 时 plan 内走素材自决）
+                audio_ref_seconds=float(audio_ref_seconds or 0.0),
                 anchor_latent=ref_anchor_latent,
                 anchor_frames=int(ref_anchor_frames),
                 voice_anchor=voice_anchor,

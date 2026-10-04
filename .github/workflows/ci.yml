@@ -6,13 +6,13 @@
 # 所以不需要额外解析输出。
 #
 # 期望值：
-#   · 495/0  tests/test_relay_core.py      算法层
+#   · 510/0  tests/test_relay_core.py      算法层
 #   ·  91/0  tools/review_050.py           文档—代码一致性（✅ 本数字由**本文件的 H3g 自引用机检**盯着）
 #   ·  16/0  tools/smoke_nodes.py          节点层冒烟（✅ H3j 自 2026-09-30 起机检）
 #   ·   4/4  tools/assert_default_exit.py  默认出口 = V3（契约 1 + 行为 3；必须单进程、不设环境变量）
 #   ·  70/0  tests/test_v3_schema.py       V3 与 V1 逐字段一致（两种环境各一个数，原因见下：
-#                                          能拿到宿主注册表 ⇒ **8 节点 / 121 个 input**；
-#                                          `sys.modules["nodes"]=None` 硬挡 ⇒ **7 节点 / 108 input**）
+#                                          能拿到宿主注册表 ⇒ **8 节点 / 122 个 input**；
+#                                          `sys.modules["nodes"]=None` 硬挡 ⇒ **7 节点 / 109 input**）
 #   ·  期望 35/0  tests/test_prompt_dispatch.mjs  前端纯函数（词分发 + run_id 同步）（node）
 #   ·  期望 45/0  tests/test_audio_ref_budget.mjs  前端纯函数（音频参考额度：3 槽 + 本包 1）（node）
 # 改动后若这些数字变了，请同步 CONTRIBUTING.md「方面数/断言数」、tests 头注释 **以及本文件**。
@@ -37,19 +37,19 @@
 #    **分岔点不是"宿主 nodes 能不能 import"，而是那个异常是什么类型**：
 #    · 拿到宿主注册表（`import nodes` 成功）⇒ 上游不在注册表 ⇒ `_upscaler_cls()` 抛 **RuntimeError**
 #      ⇒ `_upscaler_module()` **捕获它**（只 except RuntimeError）⇒ 退回 `get_filename_list`
-#      （宿主自带注册 `latent_upscale_models`）⇒ INPUT_TYPES 不抛 ⇒ **8 节点 / 121 input / 70 项**。
+#      （宿主自带注册 `latent_upscale_models`）⇒ INPUT_TYPES 不抛 ⇒ **8 节点 / 122 input / 70 项**。
 #    · `import nodes` 抛 **ImportError**（`sys.modules["nodes"] = None` 这种硬挡）⇒ 类型不是
 #      RuntimeError ⇒ **不吞** ⇒ 穿透 ⇒ INPUT_TYPES 抛 ⇒ 逐节点容错跳过它
-#      ⇒ **7 节点 / 108 input / 63 项**。**这是设计内的降级，不是失败。**
+#      ⇒ **7 节点 / 109 input / 63 项**。**这是设计内的降级，不是失败。**
 #    · 🔴 `import nodes` 抛 **RuntimeError**（**CI 就是这种**：宿主 import 链里 `torch.cuda` 报
 #      `Found no NVIDIA driver on your system`）⇒ **被吞** ⇒ INPUT_TYPES 成功
-#      ⇒ **8 节点 / 121 input / 70 项**（所以 CI 的直跑与"本机"是同一档）。
+#      ⇒ **8 节点 / 122 input / 70 项**（所以 CI 的直跑与"本机"是同一档）。
 #    ⇒ 判据由**节点自己的 `INPUT_TYPES()`** 回答（`test_v3_schema.py` 的 2.1），
 #      **不是**由"宿主 nodes 能不能 import"去推 —— 后者在 CI 上会得出**相反**结论
 #      （2026-09-30 实测：探针说"期望 7"、实际 8 ⇒ 假红，而本地 70/0 复现不了）。
 #    ⚠️ 别用"只把上游节点从注册表摘掉"模拟第二档 —— 那是「装了宿主没装上游包」，仍是 8 节点。
 #       正确复现第二档：`sys.modules["nodes"] = None` 后跑 test_v3_schema
-#       ⇒ `63/0 · 7 节点 · 108 input`；工具版：`python tools/ci_env_repro.py tests/test_v3_schema.py`。
+#       ⇒ `63/0 · 7 节点 · 109 input`；工具版：`python tools/ci_env_repro.py tests/test_v3_schema.py`。
 #    🔴 2026-09-30 补记：这两行曾写成「8 节点」（跨行"跳过它 ⇒ 8 节点"）而**H3h 放过了**——
 #       因为它的判据只查"值在声明集合里"，不查 (节点数, input 数) **配对**。
 #       ⇒ 已把 H3h 收紧为**配对校验**，并修掉本文件这两处（机检的强弱也是被测对象）。
@@ -114,7 +114,7 @@ jobs:
           COMFYUI_PATH: ${{ runner.temp }}/ComfyUI
           PYTHONPATH: ${{ runner.temp }}/ComfyUI
         run: |
-          python tests/test_relay_core.py   # 期望 495/0
+          python tests/test_relay_core.py   # 期望 510/0
           python tools/review_050.py        # 期望 91/0（H3g 自引用机检；L13 + H3j/H3k/H3l/H3m 无凭据字面量）
           python tools/smoke_nodes.py       # 期望 16/0
           # 这两个此前**只在本地清单里、CI 没跑**（2026-09-30 补齐覆盖缺口）：
@@ -131,9 +131,9 @@ jobs:
 
       # V3 外壳与 V1 的逐字段一致性（零 GPU）。默认出口现在是 V3 ⇒ 它必须被 CI 覆盖。
       # ⚠️ 两个数分别对应"能不能拿到宿主注册表"（差的那一个 = `H3RelayLatentUpscale`）：
-      #    能拿到 ⇒ **70/0 · 8 节点 / 121 个 input**（**CI 的直跑就是这一档** —— 宿主 import 抛的是
+      #    能拿到 ⇒ **70/0 · 8 节点 / 122 个 input**（**CI 的直跑就是这一档** —— 宿主 import 抛的是
       #    RuntimeError「无 NVIDIA 驱动」，被 `_upscaler_module()` 按设计吞掉）；
-      #    `sys.modules["nodes"]=None` 硬挡 ⇒ **63/0 · 7 节点 / 108 input**（设计内的降级，不是失败）。
+      #    `sys.modules["nodes"]=None` 硬挡 ⇒ **63/0 · 7 节点 / 109 input**（设计内的降级，不是失败）。
       #    🔴 判据在测试里由**节点自己的 INPUT_TYPES()** 回答，不是由"宿主 nodes 能不能 import"推。
       # 🔴 `if: always()`（2026-09-30 加）：GitHub 默认**首败即停** ⇒ 上一步一红，
       #    这一步的输出根本不会出现在日志里（实测：review_050 红了一次，
@@ -144,7 +144,7 @@ jobs:
         env:
           COMFYUI_PATH: ${{ runner.temp }}/ComfyUI
           PYTHONPATH: ${{ runner.temp }}/ComfyUI
-        run: python tests/test_v3_schema.py       # 能拿到宿主注册表 70/0（8 节点 / 121 个 input）· 硬挡 63/0（7 节点 / 108 input）
+        run: python tests/test_v3_schema.py       # 能拿到宿主注册表 70/0（8 节点 / 122 个 input）· 硬挡 63/0（7 节点 / 109 input）
 
       # Chain 词分发的纯函数（与浏览器里跑的是同一份 web/relay_kit_prompt.js）
       - name: Chain prompt dispatch (node)

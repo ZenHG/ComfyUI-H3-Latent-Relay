@@ -299,6 +299,106 @@ def audio_tail_from_latent(
     return tail, take, float(grid_slack), raw_steps, grid_off
 
 
+#: 音频参考窗**自动**算法的阈值（0.6.25）。语义见 `auto_audio_ref_seconds`。
+AUDIO_REF_MIN_VOICED_S: float = 2.0
+AUDIO_REF_MAX_S: float = 6.0
+#: 「有声」判据 = `P99(每格 RMS 的一阶差分) × 本值` —— **相对量**（2026-10-04 的教训：
+#: 绝对 dBFS 阈值在底噪高的素材上会整段静默失效，见 `AUDIO_DECLICK_QUIET_REL`）。
+#: ⚠️ **必须是「差分」而不是 RMS**：真实路径拿到的是 **VAE 音频 latent**（已归一化），
+#:    静音段的 RMS 与语音段**同量级** ⇒ 用 RMS 判在真实素材上得到「有声格 = 0」。
+#: 🔴 **必须用高分位（P99）而不是 `P50`/`max`**（2026-10-04 四组判据横评实测，见下表）：
+#:    · `P50×2`：阈值被**静音格的差分尾巴**压低 ⇒ 静音格大量误判成有声。实测同一段
+#:      「尾部 2 秒有声 + 8 秒静默」素材，窗从真值 2.00 s 漂到 **6.69 s**（静默占比越大越糟）。
+#:    · `max×0.05`：**一个离群脉冲就把阈值顶到天花板**。实测在真实 latent 上注入一个
+#:      「1 ms × 30 倍」的脉冲（真实音频里本来就有瞬态）⇒ 有声格从 215 掉到 **2**、窗 6.53→3.30 s。
+#:    · **Otsu（log 域）**：抗离群好，但真实波形上抓得过紧（2.0~3.0 s），达不到
+#:      `min_voiced_s` 的目标（那正是本算法存在的理由）。
+#:    · **`P99×0.20`：唯一全场景不崩**。横评实测（真值 2.00 s 的一栏）：
+#:      合成「有声2s+静默 1/3/8/18s」四档 ⇒ 全 **2.00 s**（`P50×2` 分别漂到 2.83/4.98/6.69）；
+#:      真实 latent 注入 1ms×30、1ms×100、10ms×20、50ms×20 四种离群 ⇒ 全 **6.53 s**（`max×0.05` 全崩到 3.30）；
+#:      真实波形 6 份 ⇒ 2.04~6.51 s（`min_voiced_s=2` 都能满足）。
+#:    P99 本身就**裁掉最高 1%** ⇒ 离群脉冲进不了基准，这是它抗噪的原因。
+AUDIO_REF_VOICE_REL: float = 0.20
+
+
+def auto_audio_ref_seconds(wf: Any, sr: int,
+                           min_voiced_s: float = AUDIO_REF_MIN_VOICED_S,
+                           max_s: float = AUDIO_REF_MAX_S) -> Tuple[float, Dict[str, Any]]:
+    """**自动**决定音频参考窗长（秒）—— 让素材自己说话，而不是让人猜一个数。
+
+    🔵 **为什么自动**（0.6.25，GG 的原话：「参考音频的时长太短会对下一段音色还原度不足」）：
+       手填秒数是在**两个坏结果之间猜** —— 填短了音色还原不足；填长了模型可能**复述**
+       上一段的台词（参考音频里就是那些台词，见 `plan_relay` 的 `audio_ref_seconds`）。
+       本函数把「该多长」交给素材回答：**从上一段尾部往前，累计够 `min_voiced_s` 秒的
+       有声内容就停**，`max_s` 封顶。
+
+    🔵 **判据全是相对量**（`P99(每格 RMS 的一阶差分) × AUDIO_REF_VOICE_REL`）⇒ 与素材绝对
+       电平无关。为什么是 P99 而不是 P50 / max，见 `AUDIO_REF_VOICE_REL` 的横评实测。
+
+    返回 ``(秒数, 明细)``。**明细要进 `plan.notes``**（铁律 15）——
+    否则用户无法判断「自动」是按什么定的，也就无法信任它。
+    """
+    import numpy as np
+
+    # ⚠️ **显式求积**，不用 `reshape(-1, T)`：`T == 0`（空音频）时 `-1` 与 0 长维**歧义**
+    #    ⇒ 抛 `RuntimeError` 炸链。2026-10-04 已在同文件修过三处同款写法，这里是第四处。
+    _t = int(wf.shape[-1])
+    _c = 1
+    for _d in tuple(int(v) for v in wf.shape[:-1]):
+        _c *= _d
+    _wf = wf.reshape(_c, _t) if _c else wf.reshape(1, _t)
+    n = _t
+    empty: Dict[str, Any] = {"grids": 0, "voiced_grids": 0, "threshold": 0.0,
+                             "clipped": False, "reason": "素材太短"}
+    # 🔴 `sr <= 0` 会让 `int(0.001 * sr)` 之后的 `_gps = sr / w1` **除零** ⇒ 显式挡掉
+    #    （病态输入不该炸链，也不该静默给一个数）。
+    if n <= 0 or int(sr) <= 0:
+        return 0.0, dict(empty, reason="采样率或长度为 0 ⇒ 无从判断")
+    w1 = max(1, int(0.001 * int(sr)))
+    n1 = n // w1
+    empty["grids"] = int(n1)
+    if n1 <= 1:
+        return 0.0, empty
+    x = _wf.detach().to(torch.float32)
+    # 🔴 **非有限输入 fail-closed**（与 `declick_transients` 同款纪律，2026-10-04）：
+    #    含 NaN/Inf 时 `quantile` 返回 NaN ⇒ 阈值 NaN ⇒ 后面一律落空，而"落空"会被
+    #    读成"素材很安静" ⇒ **静默降级**。这里显式判掉，并说清是哪一种。
+    if not bool(torch.isfinite(x).all()):
+        return 0.0, dict(empty, reason="音频含 NaN/Inf ⇒ 拒绝据此决定窗长")
+    t = x[..., :n1 * w1].reshape(int(x.shape[0]), n1, w1)
+    rms = (t ** 2).mean(dim=2).sqrt().max(dim=0).values       # 每格 RMS，跨声道取最大
+    r = rms.detach().to("cpu").numpy()
+    # 🔴 判据必须用**一阶差分**而不是 RMS（2026-10-24 实测踩出来的）：真实路径拿到的是
+    #    **VAE 音频 latent，不是波形** —— latent 经过归一化，**静音段的 RMS 与语音段同量级**
+    #    ⇒ 用 `RMS > P50×N` 判，真实素材上得到「有声格 = 0、阈值 0.00000」**整段判不出声音**。
+    #    唯一在 latent 空间也成立的区分是**变化率**：语音段的 latent 逐格变化快。
+    #    （差分判据对真实波形同样有效 —— 语音处波形变化快、静处变化小 ⇒ 一套代码两条路都覆盖。）
+    d = np.abs(np.diff(r, prepend=r[:1]))
+    # 🔴 基准取 **P99** 而非 max/P50（横评实测，理由见 `AUDIO_REF_VOICE_REL` 的注释）：
+    #    max 会被单个离群脉冲顶死；P50 会被静音格的差分尾巴压低。
+    thr = float(np.quantile(d, 0.99)) * float(AUDIO_REF_VOICE_REL)
+    idx = np.flatnonzero(d > thr)                              # 有声格（升序）
+    if not len(idx):
+        return 0.0, dict(empty, reason="整段低于有声阈值（静默素材）⇒ 不给参考")
+    # 🔴 **绝对静音**是物理事实、不是相对判断（上面所有判据都是相对量）⇒ 单独一道：
+    #    峰值 < 1e-6（−120 dBFS）时，参考窗里**没有任何音色信息**，给了只是噪声。
+    if float(np.max(r)) < 1e-6:
+        return 0.0, dict(empty, reason="整段近乎无声（峰值 < 1e-6）⇒ 不给参考")
+    # ⚠️ **格长不是恒等于 1 ms**：`w1 = max(1, int(0.001*sr))`，而 latent 路的 `sr` 是
+    #    **AUDIO_HZ = 40** ⇒ `int(0.04) = 0` ⇒ 被 `max` 兜成 **1** ⇒ **1 格 = 25 ms**。
+    #    换算若写死「格数 / 1000 = 秒」就会**差 25 倍**（实测 latent 上把 6.5 s 算成 0.26 s）。
+    _gps = float(sr) / float(w1)                                  # 格 / 秒
+    need = max(1, int(round(float(min_voiced_s) * _gps)))
+    k = min(need, len(idx)) - 1                               # 从尾往前第 k 个有声格
+    start = int(idx[-1 - k])
+    sec = (n1 - start) / _gps
+    clipped = bool(sec > float(max_s))
+    if clipped:
+        sec = float(max_s)
+    return sec, {"grids": int(n1), "voiced_grids": int(len(idx)), "threshold": thr,
+                 "clipped": clipped, "reason": ""}
+
+
 # ---------------------------------------------------------------- 续接计划
 @dataclass
 class RelayPlan:
@@ -427,6 +527,7 @@ def plan_relay(
     context_latent: Any,
     trim_frames: int = 22,
     audio_frames: Optional[int] = None,
+    audio_ref_seconds: Optional[float] = None,
     settle_frames: int = 0,
     anchor_latent: Optional[Any] = None,
     anchor_frames: int = 5,
@@ -438,7 +539,10 @@ def plan_relay(
       latent          本段的目标 latent（提供分辨率 / 步数 / 帧数）
       context_latent  上一段的 AV latent（提供被钉住的尾段）
       trim_frames     钉住的像素帧数，必须在 GUIDE_RUNS 上
-      audio_frames    音频钉住窗口（像素帧口径）；默认与视频同窗
+      audio_frames    音频参考窗（**像素帧**口径）；默认与视频同窗
+      audio_ref_seconds
+                      音频参考窗（**秒**口径，用户旋钮）；`>0` 时**覆盖** `audio_frames`。
+                      这是「**一段多人只占一个音频参考槽**」的实现入口 —— 见下方 notes。
       settle_frames   沉降帧数（默认 0 = 只裁钉住区）。钉住区之后模型还会先
                       **复现**上一段若干帧才切到本段 prompt，那几帧一并裁掉
                       才能保证拼接处不跳变、上段文字不串入。不受 5+17k 网格
@@ -512,6 +616,39 @@ def plan_relay(
         for p, blk in zip(plan.indices, blocks)
     ]
 
+    # 🔵 **音频参考窗**（0.6.25）：优先级 `audio_ref_seconds`（秒 / 用户旋钮）> `audio_frames`（帧 / 兼容）
+    #    > 视频钉住窗（默认 ⇒ **逐位保持旧行为**）。
+    #
+    #    动机 —— 「**一段多人只占一个音频参考槽**」（2026-10-04 端到端实测 + 零 GPU 复现）：
+    #    旧口径下窗长 = 视频钉住窗（实测 22 帧 ⇒ **0.925 s**）⇒ 只够装**最后一个人**的一句，
+    #    段里其余人**没有任何音色参考**。而 ① 窗长是**独立参数**（不与视频窗绑死）、
+    #    ② 原料**就是上一段的整段音频**（`KEY_EXPORT_TAIL_AUDIO` 在宿主里**并不存在**
+    #    ⇒ `audio_tail_from_latent` 走 `audio_from_latent` 分支，实测能取到**整段 6.575 s**）
+    #    ⇒ **拉长就能让一个槽装下多人的音色**，且**不多占额度**。
+    #
+    #    ⚠️ **代价必须实测确认**（不要凭推理落地）：参考音频里**就是上一段的台词**
+    #    ⇒ 模型可能顺着**复述**。本包只负责把窗拉长，复述与否由模型决定。
+    _a_sec = float(audio_ref_seconds or 0.0)
+    _a_auto: Any = None
+    _a_auto_reason = ""
+    if _a_sec > 0.0:
+        audio_frames = int(math.ceil(_a_sec * FPS))
+    elif _a_sec == 0.0 and audio_frames is None:
+        # 🔵 **自动**（0.6.25 的默认，`0` = 让素材自己决定窗长）。用户原话：
+        #    「参考音频的时长太短会对下一段音色还原度不足」—— 手填秒数是在两个坏结果之间猜。
+        #    ⚠️ 接了声锚就**不自动**：窗的原料变成声锚，长度不由上一段决定 ⇒ 自动没意义。
+        if voice_anchor is not None:
+            _a_auto_reason = "已接声锚 ⇒ 窗的原料是声锚，长度不由上一段决定"
+        else:
+            try:
+                _auto, _ai = auto_audio_ref_seconds(audio_from_latent(context_latent), AUDIO_HZ)
+            except Exception as _e:                            # 读不出上一段音频 ⇒ 退回旧行为
+                _auto, _ai = 0.0, {"reason": "读不出上一段音频（%s）" % type(_e).__name__}
+            if _auto > 0.0:
+                audio_frames = int(math.ceil(_auto * FPS))
+                _a_auto = (_auto, _ai)
+            else:
+                _a_auto_reason = str(_ai.get("reason") or "自动定长失败")
     a_frames = int(audio_frames) if audio_frames else trim_frames
     src_total_frames = pixel_frames(int(src.shape[2]))
     overhang, grid_off = 0.0, False
@@ -557,6 +694,36 @@ def plan_relay(
         tail = tail[..., :dst_audio_t].clone()
         rt = dst_audio_t
     plan.audio_ref = {"kind": "audio", "ref_audio_t": int(rt), "audio_latent": tail}
+    # 🔵 音频参考窗的**诚实口径**（铁律 15：退化分支与自动决策都必须可观测）：
+    #    设了旋钮却**没生效**（被声锚接管 / 素材本身不够长）、以及**自动**到底按什么定的，
+    #    都要说出来 —— 否则用户以为"配了多人音色"，实际参考里只有最后一个说话人。
+    if _a_sec > 0.0:
+        if voice_anchor is not None:
+            plan.notes.append(
+                "音频参考窗：已接声锚 ⇒ 参考音频取自**声锚**（实际长 %.2f 秒），"
+                "`audio_ref_seconds=%.2f` **不生效**（声锚比它短 ⇒ 拉不长）。"
+                "要「一段多人只占一个槽」请**不接声锚**（改用上一段音频尾当参考）。"
+                % (int(rt) / float(AUDIO_HZ), _a_sec))
+        else:
+            plan.notes.append(
+                "音频参考窗 = **%.2f 秒**（%d 步；旋钮 `audio_ref_seconds`）—— 取自**上一段音频尾**"
+                "⇒ 一个参考槽里可含**多个说话人**的音色；"
+                "⚠️ 参考音频含上一段的台词，模型**可能复述**（此效果尚未端到端实测确认）。"
+                % (int(rt) / float(AUDIO_HZ), int(rt)))
+    elif _a_auto is not None:
+        _asec, _ai = _a_auto
+        _clip = ("，⚠ 已达上限 %.1fs" % float(AUDIO_REF_MAX_S)) if _ai.get("clipped") else ""
+        _grow = ((int(rt) / float(AUDIO_HZ)) / max(1e-9, trim_frames / float(FPS)))
+        plan.notes.append(
+            "音频参考窗 = **自动 %.2f 秒**（%d 步）—— 从上一段尾部往前累计够 %.1f 秒**有声**内容"
+            "（有声判据 = 每格 RMS 一阶差分 > P99×%.2f，%d/%d 格有声%s）。"
+            "⇒ 比旧口径（= 视频钉住窗）长 %.2fx，**一个参考槽里可含多个说话人**的音色。"
+            "⚠️ 参考音频含上一段的台词，模型**可能复述**（尚未端到端实测确认）。"
+            % (_asec, int(rt), float(AUDIO_REF_MIN_VOICED_S), float(AUDIO_REF_VOICE_REL),
+               int(_ai.get("voiced_grids", 0)), int(_ai.get("grids", 0)), _clip, _grow))
+    elif _a_auto_reason:
+        plan.notes.append("音频参考窗：自动定长**未生效**（%s）⇒ 退回旧口径 = 视频钉住窗"
+                          "（%.3f 秒）。" % (_a_auto_reason, trim_frames / float(FPS)))
     if overhang:
         plan.notes.append("音频栅格外溢 %.3f 步（已在放置时对齐）。" % overhang)
 

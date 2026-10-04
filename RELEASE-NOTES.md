@@ -18,6 +18,48 @@
 
 ---
 
+## 0.6.25 — 2026-10-04
+
+**多锚落地：一个音频参考槽装上一段多个人的音色。** 窗长改成**自动**（`0`），素材自己说话。
+
+**修一段多人音色还原不足。** 旧口径下音频参考窗 = 视频钉住窗（22 帧 ⇒ **仅 0.93 秒**），
+只装得下最后一个说话人；现在从上一段尾部往前**累计够 2 秒有声**就停（上限 6 秒，实测给 2~6 秒）。
+**额度占用不变 —— 仍然只占官方 3 槽里的 1 个。**
+
+- 新增 `audio_ref_seconds`（advanced）：`0` = **自动**（推荐，不用手填）；填值 = 强制指定秒数。
+- **接了声锚就不生效**（窗的原料变成声锚，长度不由上一段决定）—— report 会点名。
+- report 写明**按什么定的**（判据、有声格数、比旧口径长几倍）；静默素材 / NaN / 空音频都点名原因。
+
+⚠️ **代价，尚未端到端实测**：窗里**就是上一段的台词**，模型**可能复述**。
+要旧行为就把 `audio_ref_seconds` 填 **0.93**。
+
+**升级动作**：**不接声锚的图行为会变**（参考窗 0.93 s → 自动 2~6 s）。想保持旧行为就把
+`audio_ref_seconds` 显式填 **0.93**；接了声锚的图**不受影响**。旧图不用重连。
+
+<!-- EN -->
+
+**Multi-anchor: one audio-reference slot now carries several speakers from the previous segment.**
+The window length is now **automatic** (`0`) — the material decides.
+
+**Fixes thin timbre reproduction in multi-speaker segments.** The audio-reference window used to equal the
+video pin window (22 frames ⇒ **only 0.93 s**), which fits the last speaker only. It now walks back from the
+previous segment's tail until it has accumulated **2 s of voiced content** (cap 6 s; measured 2–6 s in
+practice). **The slot budget is unchanged — still one of the official three slots.**
+
+- New `audio_ref_seconds` (advanced): `0` = **automatic** (recommended, nothing to type); a value forces that
+  many seconds.
+- **Wiring a voice anchor disables it** (the window's source becomes the anchor, so the previous segment no
+  longer determines its length) — the `report` says so.
+- The `report` states **how it was decided** (criterion, voiced-grid count, growth vs the old window); silent
+  material / NaN / empty audio all name their reason.
+
+⚠️ **Cost, not verified end-to-end**: the window **is** the previous segment's dialogue, so the model **may
+recite it**. Set `audio_ref_seconds` to **0.93** for the old behaviour.
+
+**Action required**: graphs **without** a voice anchor change behaviour (reference window 0.93 s → automatic
+2–6 s). Set `audio_ref_seconds` to **0.93** to keep the old window; graphs **with** a voice anchor are
+unaffected. No rewiring needed.
+
 ## 0.6.24 — 2026-10-04
 
 **孤立瞬态抑制：修好漏治与误治，默认行为变好。**
