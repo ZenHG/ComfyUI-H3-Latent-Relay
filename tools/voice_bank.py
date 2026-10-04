@@ -49,14 +49,55 @@ CLI（`<声库目录>` 用你自己的路径，例如 `./voices`）：
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import subprocess
 import sys
 import wave
 
-SR = 16000                    # 分析用重采样率（与实测量化脚本同口径）
+SR = 16000                    # **分析**用重采样率（有声检测 / RMS / ASR 取窗；与实测量化脚本同口径）
+# 🔴 **落盘**采样率（2026-10-04 修）。原来落盘也用 `SR` = 16 kHz ⇒ **砍掉了一半频谱**，
+#    而宿主 `VAEEncodeAudio` 会把锚 resample 到 **H3 音频 VAE 的原生 32 kHz**
+#    （`comfy/sd.py:1070` + `comfy/ldm/minimax/audio_vae.py:374`，
+#    `sample_rate=32000` / `hop_length=800` ⇒ 40 latent 帧/秒）
+#    ⇒ 16 kHz 落盘时，8 kHz 以上**全是上采样插值编出来的**，
+#    齿音 / 气息 / 嘶声这些**辨音色最关键的高频**根本不存在。
+#    ✅ 修后实测：−40dB 带宽从 **4.7~5.3 kHz** 抬到 **9.0~10.5 kHz**。
+#    ⇒ 采集时**不再降采样**（`-ar` 去掉 ⇒ ffmpeg 保留源率），落盘也用源率。
+# ⚠️ **仍然 `-ac 1` 单声道**：H3 的 VAE 是**立体声**（`output_channels=2`），
+#    但单声道锚实测可用且**更稳**（立体声两声道相位不一致时 VAE 编码不稳）⇒ 保持单声道。
+# ⚠️ **别把"落盘 32 kHz"读成"素材宽带"**（2026-10-04 审码纠正，**错了两次才对**）：
+#    ① 编码不是瓶颈 —— 两个音源实测 −40dB 带宽几乎相同：
+#       · 边车 `audio_*.safetensors`（relay_kit 交接件）：**float16 无损**、
+#         `sample_rate=32000` 原生立体声（实测 −40dB = **4.87 kHz**）
+#       · mp4 `*-audio.mp4`（ComfyUI 产出）：**AAC-LC ≈128 kbps 有损**、32000 Hz
+#         （实测 −40dB = **4.85 kHz**）⇒ 只差 0.02 kHz ⇒ **AAC 没吃掉高频**。
+#    ② **H3 本身能产出宽带频** —— 扫全 72 条产出，最宽的 −40dB 到 **15.07 kHz**
+#       （`otui4_s1`，−30dB 15.98 kHz，几乎贴满 Nyquist）。
+#       ⇒ 「H3 输出端没有高频」是**错的**。
+#    ③ 真正的原因：**那几条宽带素材不是人声**（`otui*` 系列帧均幅 max=0.0001，
+#       近乎静音，是音效/环境声 ⇒ 带宽来自底噪，不代表语音高频）。
+#       ⇒ 结论落回本模块能负责的范围：**当前这批人声素材（4.7~5.3 kHz）** 就是窄的，
+#          换采样率救不了；**要宽带语音必须换人声音源**（真人 / 原始录音）。
+#    （过程记录：我先写成"边车是 32 kHz 无损"却仍用 mp4 数字下结论（推理链断裂，
+#      GG 抓出）；重测边车后改成"H3 没有高频"，再扫全量才发现是被审素材的问题。）
+# ⚠️ 旧的 16 kHz 声库**不会被自动重采**（手动锚优先、采集要显式 --force），
+#    ⇒ 想吃到高频得手动 `--force` 重采。
+SR_OUT_MIN = 32000             # 落盘采样率下限（**仅作文档与登记标注**，不再触发任何转换）
 MIN_VOICED_S = 0.6            # 声锚质量下限：有声时长
+# 🔴 消费端尾部窗（2026-10-04）。`_voice_anchor_tail`（relay_core.py）只取锚的**尾部**
+#    `a_frames/FPS*AUDIO_HZ` 个 latent 步，而 `a_frames = audio_frames or trim_frames`
+#    （`relay_core.py:652`）⇒ **尾窗秒数 = a_frames / FPS**（不是段长！）。
+#    默认 `trim_frames=22` ⇒ 22/24 = **0.917 秒**（README 记的 0.925 秒是按 37 步折算的）。
+#    ⇒ **锚的尾部静音 = 那部分等于没锚**（模型只拿到静音，音色条件失效）。
+#
+# ⚠️ **本值只对默认 `trim_frames=22` 成立**（审码发现，2026-10-04）：
+#    用户把 `context_frames` 调大时尾窗同步变大（29 帧 ⇒ 1.208s、48 帧 ⇒ 2.0s），
+#    而本模块**不知道**用户会传多少帧 ⇒ 用它当"尾部必须干净"的判据会**给出假保证**。
+#    ⇒ 采集侧只保证「尾部 ≥ TAIL_S 有声」，并在消息里**说明这是下界**；
+#       真正的完整性由消费端 `plan.notes` 按实际 `a_frames` 报（那边有真值）。
+TAIL_S = 0.925                # 尾部窗**下界**秒数（对应默认 trim_frames=22；见上方警告）
 TARGET_PEAK = 0.9             # 声锚峰值归一目标（实测 0.9 ⇒ 模型跟随，不削顶）
 # 🔴 声锚**响度**归一（2026-10-03 立）。只归一峰值是不够的：模型会跟随锚的**响度**
 #    ⇒ 锚比段内人声响多少，生成段就比上一段响多少（实测有锚臂整体抬 +7 dB、
@@ -81,16 +122,35 @@ BANK_JSON = "voices.json"
 
 
 # ---------------------------------------------------------------- 有声检测
-def _load_mono(v: str, ext: str = "raw"):
-    """mp4/任意音频 → 16k 单声道临时文件，返回路径。
+def _load_mono(v: str, ext: str = "raw", sr: int = SR):
+    """mp4/任意音频 → **单声道**临时文件，返回路径。
 
     ext="raw"（s16le，供本模块 numpy 读）或 ext="wav"（供 funasr —— 其内部
     ffmpeg 靠扩展名推断格式，无扩展名会报 ``Failed to load audio``）。
     临时文件放系统临时目录（源目录可能只读）。
+
+    🔴 **`sr` 决定读出的采样率，且必须与调用方的用途一致**（2026-10-04 修）：
+      - `sr=SR`（16 kHz，**默认**）= **分析域**。有声检测窗 32ms、阈值 `VOICED_AMP`、
+        `_voiced_spans` 的 `HOP_S` 时间轴**全都是按 16 kHz 定的** ⇒ 分析一律走这个。
+      - `sr=None`（**跟随源率**，不传 `-ar`）= **落盘域**。声锚要喂给 H3 音频 VAE
+        （原生 32 kHz），按 16 k 落盘会砍掉一半频谱。
+
+    ⚠️ **`sr` 的默认值必须是 `SR`(16k)，不能是 `None`**（2026-10-04 踩过）：
+       改成 `None` 之后，分析侧的 32k 数据被**按 16k 的时间轴**解释
+       ⇒ 时间轴整整差一倍（0.99s 的声音被判在 1.98s）、
+       `_voiced_spans` 算出 `t1=4.0s` 越出 3.0s 的源片。
+       **换算率与解释率必须成对**，不能只改一个。
+
+    ⚠️ **绝不能拿分析域（16 k）的数据去写 32 k 的头** —— 那等于把音频**加速一倍**、
+       **音调升高一个八度**，而文件头和 `voices.json` 里的 `sample_rate` 都看不出来。
+       曾经的真实事故：落盘段读 `sr_out`（32k）却用 16k 取数据
+       ⇒ 样本数只有期望的 49.9%，三个声锚集体变调。**改这段务必同时改 `selftest`。**
     """
     import tempfile
     out = os.path.join(tempfile.gettempdir(), "_vb_%d.%s" % (os.getpid(), ext))
-    cmd = ["ffmpeg", "-y", "-v", "error", "-i", v, "-vn", "-ac", "1", "-ar", str(SR)]
+    cmd = ["ffmpeg", "-y", "-v", "error", "-i", v, "-vn", "-ac", "1"]
+    if sr is not None and int(sr) > 0:
+        cmd += ["-ar", str(int(sr))]
     if ext == "raw":
         cmd += ["-f", "s16le"]
     subprocess.run(cmd + [out], check=True)
@@ -117,8 +177,40 @@ def _voiced_spans(amps, hop_s, min_s=0.15):
     return [(a, b) for a, b in merged if b - a >= min_s]
 
 
+def _tighten(voiced, t0_s: float, t1_s: float, hop_s: float = HOP_S) -> tuple:
+    """把**秒区间** ``[t0_s, t1_s)`` 内的有声段两端收紧到真实人声边界。
+
+    🔴 为什么必须有（2026-10-04 定位到的旧锚失真根源之一）：
+    `_voiced_spans` 会把 <0.5s 的间隙**并进来**（把句内换气当同一段），
+    但合并后的端点仍落在**静音**上。直接拿它当裁窗 ⇒
+      - 头部可能带进近 1 秒静音（实测自检里裁出 1.98–3.00s，纯静音 ⇒ 锚里只有 6 个过零）；
+      - 尾部同理 ⇒ 消费端 `_voice_anchor_tail` 只取尾部 0.925s，**尾部是静音就等于没锚**。
+    能量法与 ASR 法都受影响 ⇒ 统一在这里收口。
+
+    入参/出参单位都是**秒**（与 `_voiced_spans` 一致）。
+    """
+    i0 = int(math.floor(t0_s / hop_s + 0.5))
+    i1 = int(math.ceil(t1_s / hop_s - 0.5))
+    i0 = max(0, min(i0, len(voiced) - 1))
+    i1 = max(i0 + 1, min(i1, len(voiced)))
+    if i1 <= i0:
+        return float(t0_s), float(t1_s)
+    a, b = i0, i1
+    while a < b and not voiced[a]:
+        a += 1
+    while b > a and not voiced[b - 1]:
+        b -= 1
+    if b <= a:                     # 整段都静音 ⇒ 不该被选中，交给调用方拒收
+        return float(t0_s), float(t1_s)
+    return a * hop_s, b * hop_s
+
+
 def longest_voiced_span(mp4: str):
-    """找最长连续有声段，返回 ``(t0, t1, voiced_total_s)``；无语音返回 None。"""
+    """找最长连续有声段，返回 ``(t0, t1, voiced_total_s)``；无语音返回 None。
+
+    🔴 返回的 ``(t0, t1)`` 是**收紧后**的人声边界（不含首尾静音）——
+       旧实现直接返回 `_voiced_spans` 合并后的端点，会带进静音。
+    """
     raw = _load_mono(mp4)
     try:
         x = _read_raw(raw)
@@ -136,8 +228,32 @@ def longest_voiced_span(mp4: str):
     total = sum(b - a for a, b in spans)
     if not spans:
         return None
-    t0, t1 = max(spans, key=lambda ab: ab[1] - ab[0])
-    return t0, t1, total
+    # 🔴 **尾部优先**选段（2026-10-04）：消费端 `_voice_anchor_tail` 只取锚的**尾部**
+    #    `TAIL_S≈0.925s` ⇒ 尾部静音 = 那部分等于没锚。
+    #    「取最长段」会把**句中停顿**（<0.5s，被 `_voiced_spans` 并进来）也带上：
+    #    实测 `2c_m2s2_00002` 最长段 3.856–5.408s 内含 4.43–4.82s 的 0.39s 停顿
+    #    ⇒ 尾部 0.925s 只有 65% 有声（另一个锚 100%）。
+    #    口径：候选段按长度降序，取**第一个尾部 0.925s 全程有声**的；
+    #    全都不满足就退回最长（并在返回里带上 `tail_clean`，供上层提示）。
+    cand = sorted(spans, key=lambda ab: -(ab[1] - ab[0]))
+    pick, tail_clean = None, False
+    for a_s, b_s in cand:
+        i0 = int(round(a_s / HOP_S))
+        i1 = int(round(b_s / HOP_S))
+        need = int(math.ceil(TAIL_S / HOP_S))
+        if (i1 - i0) >= need and all(voiced[max(i0, i1 - need):i1]):
+            pick, tail_clean = (a_s, b_s), True
+            break
+    if pick is None:
+        pick = cand[0]
+    a_s, b_s = pick
+    # 再把两端收紧到真实人声
+    # ⚠️ `_voiced_spans` 返回的单位是**秒**（不是帧号）—— 早先误当帧号
+    #    除以 HOP_S 又乘回来，收紧等于没做（自检里裁出 1.98–3.00s 纯静音）。
+    t0, t1 = _tighten(voiced, a_s, b_s)
+    if t1 <= t0:
+        return None
+    return t0, t1, total, tail_clean
 
 
 def _read_raw(path: str):
@@ -399,6 +515,227 @@ def _selftest_loudness() -> int:
     return bad
 
 
+def _selftest_pitch_roundtrip() -> int:
+    """🔴 采集链路的**音高/时长不变**自检（2026-10-04 变调事故后加）。
+
+    事故回顾：落盘段读 `sr_out`（32 k）却用 `_load_mono()` 的**默认 16 k 分析域**取数据，
+    于是 16 k 的样本被按 32 k 写进 wav 头 ⇒ 播放**加速一倍**、**音调升高一个八度**。
+    而 wav 头、`voices.json` 的 `sample_rate` 全都"正常" ⇒ **任何元数据检查都抓不到**。
+
+    🔴 **必须端到端跑 `collect`**（而不是只测 `_load_mono` 本身）：
+       事故的错误在**调用点**（该传 `sr=None` 却没传）。第一版自检只测
+       `_load_mono(sr=None)` ⇒ 恒过 ⇒ 注入同样的 bug 也不红 ⇒ **假门**。
+       这里造 32 kHz 语音状信号当"源片"，走完整 `collect`，
+       再对**落盘的锚**测：采样率 / 时长 / 过零间隔 F0。16 k 误用 ⇒ 时长减半、F0 翻倍 ⇒ 必挂。
+
+    ⚠️ **本自检的覆盖边界（据实记录，不假装覆盖）**：
+       用注入法实测过 4 个注入点 ——
+         ① `_load_mono` 的 `sr` 默认值改成 `None`  ⇒ 红 ✅
+         ② 落盘退回 16 k 读回（原始事故）        ⇒ 红 ✅
+         ③ 去掉落盘样本数 fail-closed 校验        ⇒ **仍绿**（在本源片上无区分力）
+         ④ 去掉裁窗越界钳制 / `_tighten`         ⇒ **仍绿**（同上）
+       ③④ 是**预防性加固**：在合成源片上裁窗本就落在界内，注入不改变结果。
+       它们在真实素材上实测有效（`_media_duration` 曾给出 t1 越出源片 1.0s 的情形），
+       但**无法用零外部依赖的合成信号稳定复现** ⇒ 它们的回归保护目前**依赖代码评审**。
+       补齐办法：引入一份**可公开再分发**的小型测试音频（CC0/自录）进 `tests/data/`。
+    """
+    import numpy as np
+    import shutil
+    import tempfile
+    bad = 0
+    sr = 32000
+    f0 = 300.0
+    dur = 1.0
+    # ⚠️ 源片**前后各留 1.0s 静音**：`_voiced_spans` 会把 <0.5s 的间隙并进来，
+    #    留够静音才能让能量法把裁窗**收在真实人声上**（否则裁窗会越界到源片外）。
+    lead = 1.0
+    tone_n = int(sr * dur)
+    t = np.arange(tone_n) / float(sr)
+    # 加二次谐波，避免纯正弦的过零判据在削顶后失效
+    tone = 0.42 * np.sin(2 * np.pi * f0 * t) + 0.12 * np.sin(2 * np.pi * 2 * f0 * t)
+    tone = tone / np.abs(tone).max() * 0.85
+    pad = np.zeros(int(sr * lead))
+    # 🔴 **尾部加一段更长的纯音**（1.5s），中间只隔 0.3s。
+    #    为什么要它：单一纯音下"去掉 `_tighten`"或"去掉裁窗越界钳制"都**观察不到差异**
+    #    ⇒ 那两条自检是**假门**（已用注入法实测确认：注入后仍 18/18 绿）。
+    #    两段 + <0.5s 间隙 ⇒ `_voiced_spans` 会**并成一段**，`_tighten` 与越界钳制
+    #    才有可观测的作用。基频刻意不同（300 / 240 Hz）以便识别是哪一段。
+    t2 = np.arange(int(sr * 1.5)) / float(sr)
+    tone2 = 0.42 * np.sin(2 * np.pi * (f0 * 0.8) * t2) + 0.10 * np.sin(2 * np.pi * 1.6 * f0 * t2)
+    tone2 = tone2 / np.abs(tone2).max() * 0.85
+    src = np.concatenate([pad, tone, np.zeros(int(sr * 0.3)), tone2, np.zeros(int(sr * 0.3))])
+    src = (src * 32767).astype(np.int16)
+    tmpdir = tempfile.mkdtemp(prefix="_vb_selftest_")
+    src_wav = os.path.join(tmpdir, "tone32k.wav")
+    bank = os.path.join(tmpdir, "bank")
+    with wave.open(src_wav, "w") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sr)
+        wf.writeframes(src.tobytes())
+    try:
+        # 🔴 **时间轴必须落在源片内**（2026-10-04 差点又漏掉这一维）：
+        #    `_load_mono` 的 `sr` 默认值若被改成 `None`，分析侧会拿 32k 数据
+        #    按 16k 时间轴解释 ⇒ 声音被判在两倍时间处、`t1` 越出源片。
+        #    这类"换算率≠解释率"的错**不会让落盘样本数校验变红** ⇒ 必须独立断言。
+        #    这里刻意**不给容差**：越界钳制一旦失效，`_voiced_spans` 并段后的
+        #    `t1` 会超出源片末端（实测 1.8s 源给出 t1=2.80s）⇒ 断言变红。
+        src_dur = len(src) / float(sr)
+        span = longest_voiced_span(src_wav)
+        ok_span = (bool(span) and span[0] > 0.0 and span[1] < src_dur
+                   and span[1] - span[0] > 0.5)
+        if not ok_span:
+            bad += 1
+        print("  [%s] %-10s 实测 %-22s 约束 %-22s %s"
+              % ("OK" if ok_span else "FAIL", "分析时间轴",
+                 ("%.2f-%.2fs" % (span[0], span[1])) if span else "None",
+                 "0<t0<t1<%.2fs" % src_dur,
+                 "" if ok_span else "🔴 越界或时间轴错（换算率≠解释率？）"))
+        # 🔴 **裁窗两端必须落在真实人声上**（`_tighten` 的职责）。
+        #    判据：源片首尾各有 ≥0.9s 静音，而人声在 `lead` 之后 ⇒ 裁窗起点
+        #    若明显早于第一个人声（>0.3s 误差）说明**没收紧**、把静音也裁进来了。
+        #    （`_tighten` 失效时注入验证过：这项会红。）
+        t_first = lead
+        ok_tight = (bool(span) and abs(span[0] - t_first) < 0.30)
+        if not ok_tight:
+            bad += 1
+        print("  [%s] %-10s 实测 %.2fs      期望 ≈%.2fs（首个有声点）  %s"
+              % ("OK" if ok_tight else "FAIL", "裁窗收紧",
+                 span[0] if span else -1, t_first,
+                 "" if ok_tight else "🔴 起点带进静音（_tighten 失效）"))
+        # 🔴 **尾部 0.925s 必须全程有声**（消费端 `_voice_anchor_tail` 只取尾部）。
+        #    `longest_voiced_span` 返回的第 4 元就是这个判据。
+        #    源片里两段纯音只隔 0.3s（<0.5s 合并阈值）⇒ 会被并成一段，
+        #    尾部优先选段应当**跳过**它或选到尾部干净的那段。
+        ok_tail = bool(span) and bool(span[3])
+        if not ok_tail:
+            bad += 1
+        print("  [%s] %-10s 实测 %-22s 期望 %-22s %s"
+              % ("OK" if ok_tail else "FAIL", "尾部干净",
+                 ("是" if (span and span[3]) else "否"), "是",
+                 "" if ok_tail else "🔴 尾部 %.2fs 有停顿 ⇒ 消费端取不到人声" % TAIL_S))
+        all_t0 = lead
+        all_t1 = src_dur
+        # 落盘的锚 = 被选中的那一段；基频断言用「两段基频之一」——
+        # 目的是抓「变调/倍频」这类**量级错误**，不是精确识别是哪一段。
+        exp_f0s = (f0 * 0.8, f0)
+        got_path, msg = collect(src_wav, "Tone", bank, force=True)
+        if not got_path or not os.path.isfile(got_path):
+            bad += 1
+            print("  [FAIL] 采集失败：%s" % (msg or "无锚产出"))
+            return bad
+        with wave.open(got_path, "rb") as wf:
+            sr_a = int(wf.getframerate())
+            n_a = int(wf.getnframes())
+            a = np.frombuffer(wf.readframes(n_a), dtype=np.int16).astype(np.float64) / 32768.0
+        dur_a = n_a / float(sr_a)
+        # 🔴 **用「过零间隔中位数」测 F0，不要用过零率**（2026-10-04 两次踩坑）：
+        #    过零率 = 翻转数 / 窗长，窗里混进静音就整体拉低；`np.signbit` 在近零
+        #    浮点上还反复抖动（F0 曾测出 5 Hz、0 Hz）。间隔中位数对静音免疫
+        #    （静音段不产生过零点，压根不进中位数），且不用挑窗。
+        seg = a.astype(np.float64)
+        seg = seg - seg.mean()                        # 去直流
+        # ⚠️ 正弦的过零点**就在**零附近 ⇒ 任何 ±幅度门限找沿都会一个都找不到
+        #   （实测 10% 门限 ⇒ 沿数 0）。用经典零交叉（相邻样本异号）即可。
+        # ⚠️ 零交叉间隔是**半周期** ⇒ F0 = sr / (2×间隔)。曾两次搞错：
+        #   一次用 `signbit` 抖动测出 5 Hz，一次忘了 ×2 测出 603.8 Hz（真值 300）。
+        s = np.sign(seg)
+        idx = np.flatnonzero(s[:-1] * s[1:] < 0)
+        f_meas = 0.0
+        if len(idx) >= 3:
+            # ⚠️ `half` 是**半周期**样本数 ⇒ 它对应 F0/2，滤波边界要按半周期算：
+            #    覆盖 F0 ∈ [60, 400] Hz ⇒ half ∈ [sr/800, sr/120]。
+            #    早先误用 `[sr/400, sr/60]`（整整差一倍）⇒ 300 Hz 的 half=53
+            #    落在 sr/400=80 之下被全滤掉 ⇒ F0 恒报 0（自检红，误判为落盘失真）。
+            half = np.diff(idx).astype(np.float64)
+            per = half[(half > sr_a / 800.0) & (half < sr_a / 120.0)]
+            if len(per):
+                f_meas = float(sr_a) / (2.0 * float(np.median(per)))
+        # 时长：裁窗应**不短于**被并入的那段总长，且不超过整条源片
+        ok_dur = (dur_a >= 2.0) and (dur_a <= (all_t1 - all_t0) + 0.15)
+        checks = (
+            ("落盘采样率", sr_a, sr, sr_a == sr),
+            ("落盘时长(s)", round(dur_a, 3), ">=2.0", ok_dur),
+            ("F0(Hz)", round(f_meas, 1), "240 或 300",
+             min(abs(f_meas - v) / v for v in exp_f0s) < 0.03),
+        )
+        for what, g, w, ok in checks:
+            if not ok:
+                bad += 1
+            print("  [%s] %-10s 实测 %-10s 期望 %-10s %s"
+                  % ("OK" if ok else "FAIL", what, g, w,
+                     "" if ok else "🔴 变调/失真"))
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+    return bad
+
+
+def _selftest_low_rate_source() -> int:
+    """🔴 **低采样率素材必须原样通过**（2026-10-04 第二个同型事故后加）。
+
+    开源项目的用户素材**绝大多数不是 32 kHz**（16k / 22.05k / 44.1k / 48k 都常见）。
+    历史缺陷：音源低于 `SR_OUT_MIN` 时用
+        `x = x[:len(x) * SR_OUT_MIN / sr_out]` + 头写 `SR_OUT_MIN`
+    —— 切片**不会补长** ⇒ "头 32k / 数据 16k" ⇒ **播放速度 2× ⇒ 音调升高**。
+    与落盘读回那次事故**完全同型**（样本数与标称采样率不自洽）。
+
+    正确契约：**保留源率**，不假装提了频（宿主 `VAEEncodeAudio` 自己会 resample 到
+    H3 音频 VAE 的 32 kHz）。本自检对 16k / 22.05k / 48k 三种率断言：
+    落盘采样率 == 源率、时长不变、F0 不变。
+    """
+    import numpy as np
+    import shutil
+    import tempfile
+    bad = 0
+    f0 = 300.0
+    dur = 1.0
+    for sr_src in (16000, 22050, 48000):
+        lead = 0.5
+        n_tone = int(sr_src * dur)
+        t = np.arange(n_tone) / float(sr_src)
+        tone = (0.42 * np.sin(2 * np.pi * f0 * t) + 0.12 * np.sin(2 * np.pi * 2 * f0 * t))
+        tone = tone / np.abs(tone).max() * 0.85
+        src = np.concatenate([np.zeros(int(sr_src * lead)), tone])
+        src = (src * 32767).astype(np.int16)
+        tmpdir = tempfile.mkdtemp(prefix="_vb_selftest_lr_")
+        try:
+            sw = os.path.join(tmpdir, "src%d.wav" % sr_src)
+            with wave.open(sw, "w") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(sr_src)
+                wf.writeframes(src.tobytes())
+            got, msg = collect(sw, "T", os.path.join(tmpdir, "bank"), force=True)
+            if not got or not os.path.isfile(got):
+                bad += 1
+                print("  [FAIL] %5dHz 采集失败：%s" % (sr_src, msg or "无产出"))
+                continue
+            with wave.open(got, "rb") as wf:
+                sr_a = int(wf.getframerate())
+                n_a = int(wf.getnframes())
+                a = np.frombuffer(wf.readframes(n_a), dtype=np.int16).astype(np.float64) / 32768.0
+            dur_a = n_a / float(sr_a)
+            seg = a - a.mean()
+            s = np.sign(seg)
+            idx = np.flatnonzero(s[:-1] * s[1:] < 0)
+            f_meas = 0.0
+            if len(idx) >= 3:
+                half = np.diff(idx).astype(np.float64)
+                per = half[(half > sr_a / 800.0) & (half < sr_a / 120.0)]
+                if len(per):
+                    f_meas = float(sr_a) / (2.0 * float(np.median(per)))
+            # 时长允许 ±1 个分析窗（32ms）的裁切误差
+            ok = (sr_a == sr_src) and abs(dur_a - dur) < 0.12 and abs(f_meas - f0) / f0 < 0.03
+            if not ok:
+                bad += 1
+            print("  [%s] %5dHz 源 → 落盘 %5dHz / %.2fs / F0 %.1fHz  %s"
+                  % ("OK" if ok else "FAIL", sr_src, sr_a, dur_a, f_meas,
+                     "" if ok else "🔴 采样率被改写 ⇒ 会变调"))
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+    return bad
+
+
 def _selftest() -> int:
     bad = 0
     print("① 说话人解析（取每个 <d> 最近的前驱说话人标记，按开口顺序去重）")
@@ -418,7 +755,11 @@ def _selftest() -> int:
                  "过" if want_ok else "拒", why))
     print("③ 声锚双归一（响度对齐 %.1f dBFS + 峰值护栏 %.2f）" % (TARGET_RMS_DBFS, PEAK_CEIL))
     bad += _selftest_loudness()
-    n = len(_SELFTEST_CASES) + len(_BW_CASES) + 4
+    print("④ 落盘往返音高不变（防「分析域 16k 数据贴 32k 头」变调事故）")
+    bad += _selftest_pitch_roundtrip()
+    print("⑤ 低采样率素材原样通过（防「切片补长」式变调；用户素材常是 16k/22.05k）")
+    bad += _selftest_low_rate_source()
+    n = len(_SELFTEST_CASES) + len(_BW_CASES) + 4 + 5 + 4
     print("  自检：%d/%d 通过" % (n - bad, n))
     return 0 if bad == 0 else 1
 
@@ -539,6 +880,36 @@ def _safe_name(name: str):
     return s
 
 
+def _media_duration(path: str):
+    """媒体总时长（秒，float）；拿不到 ⇒ ``None``（调用方据此跳过越界保护）。
+
+    只用 `ffprobe` 读容器元数据，**不重解一遍音频** —— 采集本身已有多次解码。
+
+    ⚠️ **`ffprobe` 不一定存在**（Windows 常用 `winget`/scoop 装的 ffmpeg 未必带它，
+    Linux 发行版拆包时也可能缺）⇒ `FileNotFoundError` 单独处理并说清，
+    否则用户只会看到后面的「样本数与标称不符」，**看不出真因是缺 ffprobe**。
+    """
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=nw=1:nk=1", path],
+            capture_output=True, text=True, encoding="utf-8", errors="replace")
+        v = (r.stdout or "").strip().splitlines()
+        if v:
+            d = float(v[0])
+            if d == d and d > 0:          # 排除 NaN
+                return d
+        # 有输出但解析不出来（容器无 duration 字段等）⇒ 明确说，不当成功
+        return None
+    except FileNotFoundError:
+        print("[voice-bank] ⚠ 未找到 ffprobe ⇒ 无法读源片时长（裁窗越界保护将跳过）")
+        return None
+    except Exception as e:                                    # noqa: BLE001
+        print("[voice-bank] ⚠ 取时长失败（%s）⇒ 裁窗越界保护将跳过"
+              % (type(e).__name__))
+        return None
+
+
 def collect(mp4: str, name: str, bank_dir: str, force: bool = False,
             line: str = ""):
     """从已渲染段提取「角色名」的声锚并入库。
@@ -587,57 +958,143 @@ def collect(mp4: str, name: str, bank_dir: str, force: bool = False,
         _spans_in = _voiced_spans_in(mp4, asr_span[0], asr_span[1])
         if not _spans_in:
             return None, "ASR 认为有台词但本句窗口内能量检测全静音 ⇒ 数据矛盾，不采集"
-        _e1 = _spans_in[-1][1]
+        _e0, _e1 = _spans_in[0][0], _spans_in[-1][1]
         if t1 > _e1 + 0.10:
             t1 = _e1 + 0.05            # 收到能量证据的人声末尾（留 50ms 余量）
-            t0 = max(t0, t1 - ANCHOR_MAX_S)
+        # 🔴 起点同样要收到能量证据上（2026-10-04）：ASR 首字时间戳可能**早于**
+        #    人声（起音前的静音/呼吸）⇒ 头部带一截静音，锚的第一声被推后。
+        if t0 < _e0 - 0.10:
+            t0 = _e0 - 0.05
+        t0 = max(t0, t1 - ANCHOR_MAX_S)
         dur = t1 - t0
         if dur < MIN_VOICED_S:
             return None, ("ASR 台词窗仅 %.2fs < 下限 %.2fs ⇒ 不采集" % (dur, MIN_VOICED_S))
         total = dur
+        # ASR 路径的 `t1` 就是本句**能量终点** ⇒ 尾部落在人声上（除非句子本身
+        # 末尾有 <TAIL_S 的收尾气声，那属于素材固有）。与能量法不同，不做尾部择优。
+        tail_clean = True
     else:
         hit = longest_voiced_span(mp4)
         if hit is None:
             return None, "产物里没有检测到语音（模型可能没说话）⇒ 不采集"
-        t0, t1, total = hit
+        t0, t1, total, tail_clean = hit
+        # 🔴 **裁窗不得越出源片**（2026-10-04 修）。`_voiced_spans` 会把 <0.5s 的
+        #    间隙并进来，而 `longest_voiced_span` 直接把并后的端点当人声边界
+        #    ⇒ 尾部会被静音带出去（实测：1.8s 源片给出 t1=2.80s，**越界 1.0s**）。
+        #    越界不只多裁静音：`-t dur` 会让 ffmpeg 读不到那么多样本，
+        #    落盘长度与标称不符（本函数后面的样本数自洽校验会直接拒收）。
+        src_dur = _media_duration(mp4)
+        if src_dur is None:
+            # 铁律 15（走哪条分支必须可观测）+ README「降级可见」：
+            # `ffprobe` 缺失/失败 ⇒ 越界保护**整体失效**，必须说出来，
+            # 否则用户以为裁窗被钳过（实测有 ffprobe 时 1.8s 源会被钳到界内）。
+            # ⚠️ 这不是 fail-closed：越界后果由下面的**样本数自洽校验**兜底（会拒收），
+            #    但那时报错信息指向"样本数不符"，用户看不出真因是 ffprobe 缺失。
+            print("[voice-bank] ⚠ 拿不到源片时长（ffprobe 缺失或失败）"
+                  "⇒ 裁窗越界保护未生效；若随后报「样本数与标称不符」，"
+                  "请先确认 ffprobe 可用。")
+        elif src_dur > 0:
+            if t1 > src_dur:
+                t1 = src_dur
+            if t0 >= t1 - 1e-3:
+                return None, ("有声段起点 %.2fs 已超出源片时长 %.2fs ⇒ 不采集" % (t0, src_dur))
+        dur = t1 - t0
+        if dur < MIN_VOICED_S:
+            return None, ("裁窗仅 %.2fs < 下限 %.2fs（总有声 %.2fs）⇒ 不采集"
+                          % (dur, MIN_VOICED_S, total))
         if total < MIN_VOICED_S:
             return None, ("有声仅 %.2fs < 下限 %.2fs ⇒ 不采集"
                           % (total, MIN_VOICED_S))
-        dur = t1 - t0
-        if dur < MIN_VOICED_S:
-            # 最长句不够长 ⇒ 用整个有声带（跨停顿拼接会不自然，宁缺毋滥）
-            return None, ("最长连续语音 %.2fs < 下限 %.2fs（总有声 %.2fs）⇒ 不采集"
-                          % (dur, MIN_VOICED_S, total))
 
     os.makedirs(bank_dir, exist_ok=True)
     wav_out = os.path.abspath(os.path.join(bank_dir, "%s.wav" % name))
     # 先裁段，再在 Python 里做精确峰值归一（比 ffmpeg filter 直观且可校验）
+    # 🔴 **不指定 `-ar`**（2026-10-04）：原来固定 `-ar 16000` ⇒ **砍掉一半频谱**。
+    #    而宿主 `VAEEncodeAudio` 会把锚 resample 到 **H3 音频 VAE 原生 32 kHz**
+    #    （`comfy/sd.py:1070` + `comfy/ldm/minimax/audio_vae.py:374`
+    #    `MiniMaxH3AudioVAE`：DAC 编码器 + BigVGAN 解码器，`hop_length=800`）
+    #    ⇒ 16 kHz 以上**全是上采样插值编的**，齿音/气息/嘶声这些辨音色最关键的高频不存在。
+    #    ✅ 修后实测：落盘 32 kHz 的 −40dB 带宽从 4.7~5.3 kHz 抬到 9.0~10.5 kHz。
+    #
+    # ⚠️ **别把"提高采样率"当带宽变好的证据**（2026-10-04 审码纠正）：
+    #    边车（float16 无损 32 kHz）实测 −40dB = 4.87 kHz vs
+    #    mp4（AAC-LC 128k 有损 32 kHz）= 4.85 kHz ⇒ **编码不是瓶颈**；
+    #    且 H3 **能**产出宽带频（全 72 条里最宽 −40dB 达 15.07 kHz），
+    #    只是那几条宽带的都是**音效/环境声**（帧均幅 ≈0.0001）不是人声。
+    #    ⇒ 32 kHz 落盘只是**如实保存**，**不会凭空补出高频**；
+    #       **要宽带语音必须换人声音源**（真人 / 原始录音）。
+    # ⚠️ 音源本身低于 `SR_OUT_MIN`（用户给 16k / 22.05k mp4 很常见）⇒ 保留它的原率，
+    #    **并把实际采样率写进登记信息**（不假装提了频；切片补长会造成变调）。
     subprocess.run(
         ["ffmpeg", "-y", "-v", "error", "-ss", "%.3f" % t0, "-t", "%.3f" % dur,
-         "-i", mp4, "-vn", "-ac", "1", "-ar", str(SR), wav_out], check=False)
+         "-i", mp4, "-vn", "-ac", "1", wav_out], check=False)
     import numpy as np
-    raw = _load_mono(wav_out)
+    # 读回落盘的真实采样率（以文件为准，不假设源率）
+    try:
+        with wave.open(wav_out, "rb") as _wf:
+            sr_out = int(_wf.getframerate())
+            n_fm = int(_wf.getnframes())
+    except Exception:
+        return None, "裁剪落盘失败（wav 读不回）⇒ 不采集"
+    # 🔴🔴 **按 `sr_out` 读回，不是按分析域 16 k**（2026-10-04 修，变调事故）。
+    #     `_load_mono()` 默认给 16 k（分析域口径），用它读 32 k 的文件再按 32 k 落盘
+    #     ⇒ 样本数少一半 ⇒ 播放加速一倍 ⇒ **音调升高一个八度**，而文件头完全正常。
+    #     落盘域必须 `sr=None`（不传 `-ar` ⇒ 跟随文件本身的率）。
+    raw = _load_mono(wav_out, sr=None)
     x = _read_raw(raw)
     os.remove(raw)
+    # 样本数必须与**标称裁窗**一致（不是与"读回来多少"自洽！）。
+    # 🔴 判据选错会漏：拿 `len(x)` 和 ffmpeg 裁出的 `n_fm` 比是**自证**的 ——
+    #    两者都来自同一个 16k 误读，比值恒等于 1 ⇒ 永远红不了。
+    #    必须锚定**独立来源**的应得样本数 `dur × sr_out`。
+    #    （第一版自检就栽在这：纯音被当连续有声，裁出 1.97s 而非 1.0s，
+    #      `dur` 也跟着变 ⇒ 校验用真实 dur ⇒ 依然自洽 ⇒ 假门。）
+    exp_n = int(round(dur * sr_out))
+    tol = max(2, int(0.02 * sr_out))
+    if n_fm > 0 and abs(n_fm - exp_n) > tol:
+        # ffmpeg 裁出的长度与标称不符（`-ss` 越界 / 源片比标称短）⇒ 拒绝，
+        # 否则后面的读写都在一个错的基准上算。
+        return None, ("ffmpeg 裁段得 %.3fs（%d 样本）≠ 标称 %.2fs×%dHz=%.0f（差 %.1f%%）"
+                      "⇒ 裁窗与标称不符，**拒绝落盘**"
+                      % (n_fm / float(sr_out), n_fm, dur, sr_out, exp_n,
+                         100.0 * abs(n_fm - exp_n) / max(1.0, exp_n)))
+    if exp_n > 0 and abs(len(x) - exp_n) > tol:
+        return None, ("裁段样本数 %.0f ≠ 标称 %.2fs×%dHz=%.0f（差 %.1f%%）"
+                      "⇒ 读回率与文件头不一致，**拒绝落盘**（否则会变调）"
+                      % (len(x), dur, sr_out, exp_n,
+                         100.0 * abs(len(x) - exp_n) / max(1.0, exp_n)))
+
+    # ⚠️ 音源本身低于 `SR_OUT_MIN`（用户给 16k / 22.05k mp4 很常见）⇒
+    #    **保留它的原率**，不假装提了频；真实率写进登记信息，宿主 VAE 会自己 resample。
+    # 🔴 曾经的实现是 `x = x[:len(x) * SR_OUT_MIN / sr_out]` 再把头写成 32k ——
+    #    切片**不会补长**（16k 素材只有 16000 样本，切片仍只有 16000），
+    #    于是"头 32k / 数据 16k"⇒ **播放速度 2× ⇒ 又一次音调升高**。
+    #    与落盘读回那次事故**同型**（样本数与标称率不自洽）。真要提频就用 ffmpeg `-ar`。
     pk = float(abs(x).max())
     if pk < 1e-4:
         return None, "裁出的声锚近乎静音（峰值 %.4f）⇒ 不采集" % pk
-    x, _norm = normalize_anchor(x, SR)
+    x, _norm = normalize_anchor(x, sr_out)
     if float(abs(x).max()) < 1e-4:
         return None, "归一后近乎静音 ⇒ 不采集"
     with wave.open(wav_out, "w") as wf:
         wf.setnchannels(1)
         wf.setsampwidth(2)
-        wf.setframerate(SR)
+        wf.setframerate(sr_out)
         wf.writeframes((x * 32767).astype(np.int16).tobytes())
     import datetime
     bank = load_bank(bank_dir)
     bank[name] = {"wav": wav_out, "src": os.path.basename(mp4),
                   "voiced_s": round(total, 2), "span_s": round(dur, 2),
-                  "norm": _norm,
+                  "sample_rate": int(sr_out), "norm": _norm,
+                  "tail_clean": bool(tail_clean),
                   "collected": datetime.datetime.now().astimezone().isoformat(timespec="seconds")}
     save_bank(bank_dir, bank)
-    return wav_out, ("采集 %.2fs（%.2f–%.2fs）；%s" % (dur, t0, t1, _norm))
+    # 铁律 15：走哪条分支必须可观测。`tail_clean=False` 意味着消费端尾部 0.925s
+    # 有停顿 ⇒ 明确告诉用户这个锚的音色条件会打折，而不是让他们以为"采到了"。
+    _tail = "尾部 %.2fs 全有声 ✅" % TAIL_S if tail_clean else (
+        "⚠ 尾部 %.2fs 含停顿（本段有声太短，**音色条件会打折**）" % TAIL_S)
+    return wav_out, ("采集 %.2fs（%.2f–%.2fs）@%d Hz；%s；%s"
+                     % (dur, t0, t1, sr_out, _norm, _tail))
 
 
 # ---------------------------------------------------------------- CLI
