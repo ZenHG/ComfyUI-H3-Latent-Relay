@@ -18,6 +18,42 @@
 
 ---
 
+## 0.6.24 — 2026-10-04
+
+**孤立瞬态抑制：修好漏治与误治，默认行为变好。**
+
+- **范围**：以前只在**段首 1.4 秒**内动手。实测一段 10 秒素材里 **15 / 17 处孤立峰落在范围外、全没治**，
+  而报告只写「范围 = 前 1.408 s」—— 看不出漏了。现在**全段**动手。
+- **素材底噪**：背景闸以前写死 −50 dBFS ⇒ 底噪更高的素材**整段静默失效**（只说「未命中」）。
+  现在按**素材自身的背景**相对判断，报告里显示**实际生效**的闸值。
+- **音量断崖**（音乐收尾、门声、场景切换）：以前会被当成孤立瞬态**误治**（约一半概率）。
+  现在要求「邻域比事件**低一个量级**」才算伪影。
+- 术语统一：面向用户与开发的文案里，「滴」一律写作**孤立瞬态**。
+- 边界修复：空音频不再抛异常；含 NaN/Inf 的输入改为**明确报错**（以前会把 NaN 传遍整轨）。
+
+**升级动作**：无。`declick_quiet_dbfs` 现在是**下限**（实际闸会按素材背景放宽），老图参数照旧可用。
+
+<!-- EN -->
+
+**Isolated-transient suppression: fixes both misses and false positives. Defaults get better.**
+
+- **Scope**: it used to act only within the **first ~1.4 s**; measured on a 10 s segment,
+  **15 of 17 isolated peaks fell outside that window and were never treated**
+  (the report only said "range = first 1.408 s" — the miss was invisible). It now acts on the
+  **whole segment**.
+- **Material noise floor**: the background gate was a hard **−50 dBFS** ⇒ material with a higher
+  floor failed **silently across the whole segment** (only ever reported as "no hit"). It is now
+  judged **relative to the material's own background**, and the report shows the threshold actually used.
+- **Volume cliffs** (music tails, door slams, scene-change level jumps): these used to be
+  **misfired on** as isolated transients (roughly half the time). A candidate now has to sit an
+  **order of magnitude above** its neighbourhood.
+- Terminology: the colloquial word for it is unified as **isolated transient** throughout the copy.
+- Boundary fixes: empty audio no longer raises; NaN/Inf input now **fails loudly** instead of
+  smearing NaN across the whole track.
+
+**Action required**: none. `declick_quiet_dbfs` is now a **lower bound** (the effective gate is
+widened by the material's background), so existing graph values keep working.
+
 ## 0.6.23 — 2026-10-04
 
 **一段里多人说话时，参考该怎么给 —— 顺手修掉一个「写错了也不报错」的坑。**
@@ -61,15 +97,15 @@ above is new.
 
 ## 0.6.22 — 2026-10-04
 
-**新功能：治「安静背景里无缘无故的一声滴」（declick），默认开。**
+**新功能：治「安静背景里无缘无故的孤立瞬态」（declick），默认开。**
 
 - 「音频缝」新增 `declick_ratio`（默认 4.0，**填 0 = 关闭、逐位直通**）。它只在**台词开始之前**动手，
   且要求那一小段比周围安静背景突出 4 倍以上 —— 判据判的是「**它周围有多静**」，不是「它本身多响」
   （语音的轻辅音也很短，只看响度会掐到台词）。
 - 动手方式是把那一小段**用旁边的背景换掉**，而不是把音量拧小。拧小永远会剩一点，你听到的就是那一点。
-- 实测那声「滴」宽约 **8 毫秒**，而旧版把宽度上限写死 2 毫秒 ⇒ 它被判成「不是一声」直接丢弃，
-  **这才是「滴」一直还在的原因**。宽度上限现为 `declick_max_len_ms`（默认 50）。
-- 新增 `cut_head_frames`：填上「本段会被裁掉多少帧」，才能治到「裁帧切断波形」造成的接缝滴。
+- 实测那处孤立瞬态宽约 **8 毫秒**，而旧版把宽度上限写死 2 毫秒 ⇒ 它被判成「不是一声」直接丢弃，
+  **这才是「孤立瞬态」一直还在的原因**。宽度上限现为 `declick_max_len_ms`（默认 50）。
+- 新增 `cut_head_frames`：填上「本段会被裁掉多少帧」，才能治到「裁帧切断波形」造成的接缝孤立瞬态。
 - ⚠️ 绝大多数素材会报告「未命中事件 ⇒ 逐位直通」—— 那是正常的，不是没生效。
 - 🆕 官方音频参考只有 **3** 个槽位，本包在续接段会固定占用 **1** 个 ⇒ 3 槽填满时模型侧会看到 4 个。
   **桥节点标题上会直接挂警告**（不再只写日志 —— 大量用户不看日志）。

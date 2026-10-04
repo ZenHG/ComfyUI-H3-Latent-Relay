@@ -8,8 +8,8 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "condensed",
-          "h_en": "8a32c5d82a329134",
-          "h_src": "6c86f532ccc087fd",
+          "h_en": "d13217ffef678930",
+          "h_src": "a250ca09d885dd41",
           "seeded": "by-position"
         },
         {
@@ -40,16 +40,16 @@
           "zh": "使用方法",
           "en": "Usage",
           "mode": "condensed",
-          "h_en": "fdf854ab8d25810a",
-          "h_src": "a91baf58e9f1cd19",
+          "h_en": "7a93f960088afd4f",
+          "h_src": "07f4dd9e130951d8",
           "seeded": "by-position"
         },
         {
           "zh": "目录结构",
           "en": "Repository layout",
           "mode": "condensed",
-          "h_en": "de8dfa1dccb6e3f8",
-          "h_src": "47e4d1847dd0b02c",
+          "h_en": "636327f7c0f687c2",
+          "h_src": "9fd26c8ed857af36",
           "seeded": "by-position"
         },
         {
@@ -72,14 +72,14 @@
           "zh": "文档索引",
           "en": "Documentation index",
           "mode": "condensed",
-          "h_en": "7b8dc14e5a1fda7d",
-          "h_src": "c560cd7480f46d25",
+          "h_en": "f8a08146ddd5efe3",
+          "h_src": "e57e078e97e8a43b",
           "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-10-04",
-      "src_sha": "bd1574f0b71fda12"
+      "src_sha": "979b91040bc1ebea"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -184,14 +184,14 @@
           "zh": "参数",
           "en": "Parameters",
           "mode": "full",
-          "h_en": "8fffb42806802fa8",
-          "h_src": "e7ec87f5c91a026f",
+          "h_en": "64941fd4c3c96c98",
+          "h_src": "a3eb0a40351bd7eb",
           "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-10-04",
-      "src_sha": "26c7e3dba26d02cb"
+      "src_sha": "ce5a8ba0853c4561"
     }
   }
 }

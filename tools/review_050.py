@@ -905,11 +905,18 @@ try:
     _w2 = _want.reshape(-1, _want.shape[-1])
     _tail3 = _w2[..., int(_w2.shape[-1]) - _N2:]
     _g3 = CORE.target_level(_w2) / max(float(_tail3.pow(2).mean().sqrt()), 1e-12)
-    ck("L7 音频落盘/读回逐位一致 + 节点 stage 0 直通但落盘 + stage 1 用上一段**尾部窗**当床（电平对齐）",
-       _T.equal(_bk["waveform"], _o["waveform"]) and _a0 is _ba and "第 1 段无缝可补" in _l0
+    # 🔴 `_a0 is _ba` **保留**；它现在依赖「音量断崖被跳过」这条判据（与单测 22.13 同因）：
+    #    本夹具「前响后静」的分界处是一个断崖，旧判据（邻域 max > 事件峰）约 50% 概率
+    #    把它填成背景；改成「邻域 max × AUDIO_DECLICK_EDGE_REL > 事件峰」后断崖被跳过
+    #    ⇒ 未命中 ⇒ 返回原对象。⚠️ 夹具随机源有种子（上方 `_T.manual_seed(11)`）⇒ 结果确定。
+    ck("L7 音频落盘/读回逐位一致 + 节点 stage 0 直通（原对象返回）但落盘 + "
+       "stage 1 用上一段**尾部窗**当床（电平对齐）",
+       _T.equal(_bk["waveform"], _o["waveform"])
+       and _a0 is _ba
+       and "第 1 段无缝可补" in _l0
        and _T.allclose(_a1["waveform"][..., :_keep2], _tail3[..., :_keep2] * _g3, atol=1e-6)
        and "长度守恒" in _l1 and "尾部窗" in _l1,
-       "落盘目录挂到 output/relay_kit/ 下")
+       "同一对象=%s ｜ 落盘目录挂到 output/relay_kit/ 下" % (_a0 is _ba))
     _errs = []
     try:
         _obj.seam(_ca, _rid, 1, patch_seconds=1.0, bed_stage=1)
@@ -1069,7 +1076,7 @@ _V3_LEGIT_PAIRS = [(7, 103), (8, 116), (7, 104), (8, 117),
 # ↑ 2026-10-04 追加 (7,106)/(8,119)/(7,107)/(8,120)：音频缝加 declick_ratio / declick_quiet_dbfs /
 #   cut_head_frames 三个可选输入后 +3 input（由上一对各自 +3 得到）。
 # ↑ 2026-10-04 追加 (7,108)/(8,121)：再给音频缝加 `declick_max_len_ms`（「多宽算一声」，
-#   用户可调：滴实测 8ms，旧值写死 2ms 会漏治）后 **+1 input**（由上一对各自 +1 得到）。
+#   用户可调：孤立瞬态实测 8ms，旧值写死 2ms 会漏治）后 **+1 input**（由上一对各自 +1 得到）。
 #   旧对仍合法 —— ci.yml/README/__init__ 的声明数字由另一批在飞改动维护（当时未刷新）。
 for _fn, _txt in _v3_docs.items():
     for _ln in _txt.splitlines():

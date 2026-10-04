@@ -10,7 +10,7 @@ not coupled to any third-party H3 node pack.
 
 | Item | Value |
 |---|---|
-| Version | **0.6.23** (8 nodes; the composite bridge `H3RelayCopyBridge` is the **only** bridge) |
+| Version | **0.6.24** (8 nodes; the composite bridge `H3RelayCopyBridge` is the **only** bridge) |
 | License | **MIT** (third-party attribution in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) |
 | Host | **ComfyUI ≥ 0.35.0 with MiniMax-H3 support** (the host itself is GPL-3.0, see License) |
 
@@ -276,14 +276,46 @@ audio-grid reconciliation). The anchor source must be **this segment's speaker**
 **same speaker continuing ⇒ you need not connect it**, **speaker change at the seam ⇒ you must**.
 Later speaker changes inside the segment are handled by the prompt's `<Subject N>` (the anchor cannot
 and should not cover them — do not expect it to hold every voice in the segment).
-**For the other speakers' own voice references, use the official `ref_audios` slots** — that is the only
-path that emits an `<Audio j>` text label the prompt can reference; ordinals count **wired slots in order**,
-not slot numbers (see [`docs/07`](docs/07-chain.md) §声锚 in Chinese).
 One command gives the verdict (no need to read prompts by hand):
 
 ```bash
 python tools/voice_bank.py advise --bank <voice bank> --prompt-file segN.md --prev-file segN-1.md
 ```
+
+### Other speakers' voice references: official slots + `<Audio j>` in the prompt (format rules)
+
+This pack's voice anchor covers **only the one at the seam**, and it has **no text label** (it is appended
+to the DiT side after tokenisation) ⇒ **the prompt cannot reference it**. To give the **other speakers**
+their own voice references you must go through the **official** reference node — three steps:
+
+1. Run that speaker's audio through `TrimAudioDuration` to **~0.9 s** (reference rows ride through **every
+   sampling step**, so long references cost time).
+2. Wire it into the **official** `MiniMaxH3ReferenceToVideo` `ref_audios.ref_audio_N` slot (**not** this
+   pack's bridge node).
+3. Reference it in the prompt with **`<Audio j>`** — the label is emitted by the official node at
+   tokenisation time, in **wired order**, **1-based**.
+
+🔴 **Three format rules** (getting them wrong **does not raise an error** — it just silently does nothing
+or resolves to nothing):
+
+| # | Rule | Note |
+|---|---|---|
+| 1 | **The ordinal is the j-th _wired_ slot** (ascending slot number), **not the slot number** | See the table below. When slots are non-contiguous the bridge node **title** states the real ordinals (it stays silent otherwise) |
+| 2 | **The one this pack appends (anchor / previous segment's audio tail) has no label** | ⇒ **the prompt cannot reference it**; the `report` states its DiT-side ordinal = official count + 1 |
+| 3 | Placement: the **same tag family** as `<Picture i>` / `<Video k>` (official: *Use the same tags when prompting*) | Putting it next to the matching `<Subject N>` definition / line is the most direct |
+
+Ordinal mapping (the **easiest and completely silent** trap):
+
+| Slots you actually wire | What the prompt should say | Cost of getting it wrong |
+|---|---|---|
+| `ref_audio_0` + `ref_audio_1` + `ref_audio_2` | `<Audio 1>` / `<Audio 2>` / `<Audio 3>` | Ordinals match slot numbers — fine |
+| **only** `ref_audio_2` | **`<Audio 1>`** | writing `<Audio 3>` ⇒ **resolves to nothing, nothing reports anything** |
+| `ref_audio_0` + `ref_audio_2` | `<Audio 1>` / `<Audio 2>` | same as above |
+
+> ⚠️ Rules 1 and 2 are **confirmed by reading the source** (the tokenizer emits labels in enumeration order;
+> this pack appends via `conditioning_set_values`). For rule 3, **which wording works best has not been A/B
+> tested yet** — rely on rules 1 and 2. Mechanism and source references:
+> [`docs/07-chain.md`](docs/07-chain.md) §一段内多人 (Chinese).
 
 Implementation details and more (**audio-reference budget**, BGM, emotion, multi-speaker segments) in
 [`docs/07-chain.md`](docs/07-chain.md) §声锚; bundled auto-collector `tools/voice_bank.py`
@@ -304,7 +336,7 @@ ComfyUI-H3-Latent-Relay/
 ├── web/                   # front-end JS: the 🧩 concat button, Chain panel, `run_id` one-field-syncs-the-group (canvas only)
 ├── examples/              # two openable workflows: minimal continuation (21 nodes) and full flow (47 nodes)
 ├── docs/                  # deep docs 01–10 (mechanism / parameters / sampling / canvas / troubleshooting / scripting / chain / tests / metrics / audio)
-├── tests/                 # offline self-test (zero GPU): 487 assertions + V3 parity + prompt-dispatch pure functions
+├── tests/                 # offline self-test (zero GPU): 495 assertions + V3 parity + prompt-dispatch pure functions
 ├── tools/                 # self-checks / forensic tools / concat CLI / bundler (incl. the en_sync docs gate)
 ├── licenses/              # third-party license texts shipped with the pack
 ├── dist/                  # bundler output (minimal distribution set + zip; not tracked)
@@ -380,7 +412,7 @@ The Chinese documents are the source of truth; `README_EN.md` and the English `d
 | [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md) | **complete troubleshooting table** · **FAQ** · workflow-file self-check · API submission |
 | [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md) | prompt-side discipline: head padding · dialogue-safe timing · last-frame anchor chaining |
 | [`docs/07-chain.md`](docs/07-chain.md) | the Chain auto-run controller (prompts / concat / resume) |
-| [`docs/08-testing.md`](docs/08-testing.md) | offline self-test: 31 assertion groups (487 assertions) · tool inventory |
+| [`docs/08-testing.md`](docs/08-testing.md) | offline self-test: 31 assertion groups (495 assertions) · tool inventory |
 | [`docs/09-metrics.md`](docs/09-metrics.md) | reference ranges for observables (DTW residual / appearance drift) · self-calibration |
 | 🇨🇳 [`docs/10-audio-seam-and-concat.md`](docs/10-audio-seam-and-concat.md) | **audio seam & multi-segment concatenation** — Chinese only for now: seam conventions and tuning guide · **dialogue protection** · criterion limits · track levels · sidecars · **script usage without the canvas** |
 | [`RELEASE-NOTES.md`](RELEASE-NOTES.md) | **user-facing release notes** (bilingual, one section per version) · **read this before upgrading** |

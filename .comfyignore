@@ -22,9 +22,12 @@ CODE_OF_CONDUCT.md
 SECURITY.md
 RELEASING.md
 
-# —— git 自身的配置（归档里无意义）——
+# —— git / 打包自身的配置（归档里无意义）——
 .gitignore
 .gitattributes
+# ⚠️ `.comfyignore` **自己也要排**（2026-10-04 实包验证抓到）：它是 git 跟踪文件 ⇒
+#    `comfy node pack` 会把它打进包，而它对使用者毫无用处（只影响发版口径）。
+.comfyignore
 
 # —— 密钥（双保险）——
 # ⚠️ 它本来就**不被 git 跟踪**（.gitignore 里也有），而 `comfy node pack` 只打包

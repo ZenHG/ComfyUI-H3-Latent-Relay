@@ -65,7 +65,7 @@
      🔴 **内容守卫**（0.6.20）：全零 / 常量 / 静音 / NaN / 单步 一律 **raise**（不静默），
      且真实尺度（实测下限附近）**不被误伤**（反向自证）
  30. 孤立瞬态抑制 declick（0.6.21 新增）：`ratio=0` ⇒ 逐位直通（老图不受影响）、段首孤立峰与
-     「静背景里的一声滴」⇒ **压到邻域背景电平**（不挖静音洞）、台词区**逐位不动**、
+     「静背景里的一处孤立瞬态」⇒ **压到邻域背景电平**（不挖静音洞）、台词区**逐位不动**、
      形状 `[T]`/`[1,T]`/`[1,1,T]` 与 dtype 保真 + 长度守恒、范围闸外的峰不许碰、
      🔴 **裁帧边界**淡入 + 范围 fallback **从边界起算**（含一条反向断言）、
      `limit_n=0` 不许静默失效、全零 ⇒ 无事件、与 `patch` 的**顺序**（先 patch 后 declick）、
@@ -1937,9 +1937,21 @@ _dir22 = os.path.dirname(_p0)
 try:
     _n22obj = NODES.H3RelayAudioSeam()
     _a0, _l0, _j0 = unwrap(_n22obj.seam(_bed_a, _RID22, 0))   # 第 3 路 joined（复合，2026-09-19）
-    check("22.13 节点 stage 0 ⇒ 直通，但仍落盘（后段的床源靠它）",
-          _a0 is _bed_a and os.path.isfile(_p0) and "第 1 段无缝可补" in _l0,
-          _l0[:56])
+    # 🔴 `_a0 is _bed_a`（对象同一性）**保留**，但它现在依赖一条**判据修复**（2026-10-04）：
+    #    本夹具是「前 2s 响（0.5）+ 后 2s 静（0.05）」⇒ 分界处 @1.983s 是一个**音量断崖**。
+    #    全段政策下它进了候选；而当时「邻域静」的判据是「邻域 max **>** 事件峰」——
+    #    断崖两侧同一量级（0.4997 vs 左邻同量级噪声的 max）⇒ 谁大**只看那两窗的随机样本**
+    #    ⇒ 约 50% 概率把断崖**填成背景**（实测 0.4997 → 0.0489，而那不是孤立瞬态）。
+    #    判据改成「邻域 max **×`AUDIO_DECLICK_EDGE_REL` >** 事件峰」后断崖**被跳过**
+    #    ⇒ 本夹具回到「未命中 ⇒ 返回原对象」。
+    #    ⚠️ 因此这条断言现在**同时验两件事**：stage 0 的直通语义 + 断崖判据不被削。
+    #    ⚠️ 夹具的随机源是**有种子**的（上方 `torch.manual_seed(7)`）⇒ 结果确定，不是 flaky。
+    check("22.13 节点 stage 0 ⇒ 直通（原对象返回、长度守恒）+ 仍落盘（后段的床源靠它）",
+          (_a0 is _bed_a and os.path.isfile(_p0) and "第 1 段无缝可补" in _l0
+           and int(_a0["waveform"].shape[-1]) == int(_bed_a["waveform"].shape[-1])),
+          "同一对象=%s isfile=%s 长度 %d→%d"
+          % (_a0 is _bed_a, os.path.isfile(_p0), int(_bed_a["waveform"].shape[-1]),
+             int(_a0["waveform"].shape[-1])))
     _a1, _l1, _j1 = unwrap(_n22obj.seam(_cur_a, _RID22, 1, patch_seconds=2.0))
     _got = _a1["waveform"][..., :_keep22]
     _want = CORE.load_audio(_p0)["waveform"]
@@ -3457,7 +3469,7 @@ print("=" * 78)
 
 _SR30 = 32000                       # 与产线实测同采样率
 _N30 = _SR30 * 3                    # 3 秒
-_BG30 = 0.0016                      # 背景（≈ −56 dBFS，与实测「滴」处背景同量级）
+_BG30 = 0.0016                      # 背景（≈ −56 dBFS，与实测「孤立瞬态」处背景同量级）
 
 
 def _mk30(spikes, speech_from=None, dtype=torch.float32, shape=(1, 1, -1)):
@@ -3491,7 +3503,7 @@ _b30, _r30 = CORE.declick_transients(_a30, ratio=0.0)
 check("30.1 ratio=0 ⇒ 逐位直通（空报告）",
       _r30 == "" and bool(torch.equal(_b30["waveform"], _a30["waveform"])))
 
-# 30.2~30.4 真凶（段首孤立峰）与「滴」被压到背景；台词区**逐位不动**
+# 30.2~30.4 真凶（段首孤立峰）与「孤立瞬态」被压到背景；台词区**逐位不动**
 _c30, _rep30 = CORE.declick_transients(_a30, ratio=4.0, quiet_dbfs=-50.0, limit_n=_LIM30)
 check("30.2 报告可观测（抑制了几处 + 位置）", "孤立瞬态抑制" in _rep30, _rep30.splitlines()[0][:70])
 _p0 = float(_flat(_a30)[:64].abs().max())
@@ -3526,7 +3538,7 @@ check("30.8 范围闸外的峰逐位不动",
       float(_flat(_x)[_i25:_i25 + 64].abs().max()) == float(_flat(_y)[_i25:_i25 + 64].abs().max()))
 
 # 30.9~30.10 🔴 裁帧边界（本节点工作在**未裁**音频上，产物是裁后的）：
-#   ① 边界必须淡入（否则「裁出来的半波形」在成片里就是一声「滴」）
+#   ① 边界必须淡入（否则「裁出来的半波形」在成片里就是一处孤立瞬态）
 #   ② 边界之后的峰必须**还在范围内**被命中 —— 范围 fallback 要从**边界**起算，
 #      否则 pin 长（22 帧 ⇒ 0.917s）时边界后只剩 0.28s ⇒ 治不到真凶（2026-10-04 修）。
 _cut30 = int(round(22 / 24.0 * _SR30))
@@ -3616,27 +3628,53 @@ _dc_off, _note_off = CORE.declick_on_segment(_a30, 0.0)
 check("30.17 节点层关（ratio=0）⇒ 逐位直通 + **一个字都不说**（note 为空）",
       _note_off == "" and bool(torch.equal(_dc_off["waveform"], _a30["waveform"])))
 
-_lim30g, _fb30g, _cut30g = CORE.declick_gate(_gate30(), _SR30)
-check("30.18 测不到台词起点 ⇒ 退产线纪律上界（**不许**退化成「不限范围」）；前导维已展平",
+# 🔵 30.18~30.21 测的是 **head 政策**（`AUDIO_DECLICK_SCOPE_ALL=False` 的**回退路径**）。
+#    默认政策 2026-10-04 已改成「全段」（见 30.21b/c）。回退路径**必须仍有断言守着** ——
+#    它存在的意义就是"出事能一键退回"，没人守的退路等于没有。
+_lim30g, _fb30g, _cut30g = CORE.declick_gate(_gate30(), _SR30, scope_all=False)
+check("30.18 【head 政策】测不到台词起点 ⇒ 退产线纪律上界（**不许**退化成「不限范围」）；前导维已展平",
       _fb30g is True and _lim30g == int(1.2 * _SR30) and _cut30g == 0,
       "limit=%.3fs fb=%s cut=%d" % (_lim30g / _SR30, _fb30g, _cut30g))
 
-_lim30c, _fb30c, _cut30c = CORE.declick_gate(_gate30(), _SR30, cut_head_frames=5)
-check("30.19 裁帧边界 5 帧 ⇒ limit = 边界 + 1.2s = **1.408s**（与宿主实测报告逐字对齐）",
+_lim30c, _fb30c, _cut30c = CORE.declick_gate(_gate30(), _SR30, cut_head_frames=5, scope_all=False)
+check("30.19 【head 政策】裁帧边界 5 帧 ⇒ limit = 边界 + 1.2s = **1.408s**（与宿主实测报告逐字对齐）",
       _fb30c is True and abs(_lim30c / _SR30 - 1.40833) < 0.001
       and _cut30c == int(round(5 / 24.0 * _SR30)),
       "limit=%.5fs cut_n=%d" % (_lim30c / _SR30, _cut30c))
 
-_lim30p, _fb30p, _cut30p = CORE.declick_gate(_gate30(), _SR30, cut_head_frames=22)
-check("30.20 帧→样本按 **24 fps** 换算（22 帧 = 0.917s ⇒ 1.2+0.917 = 2.117s）",
+_lim30p, _fb30p, _cut30p = CORE.declick_gate(_gate30(), _SR30, cut_head_frames=22, scope_all=False)
+check("30.20 【head 政策】帧→样本按 **24 fps** 换算（22 帧 = 0.917s ⇒ 1.2+0.917 = 2.117s）",
       _cut30p == int(round(22 / 24.0 * _SR30)) and abs(_lim30p / _SR30 - 2.11667) < 0.001,
       "limit=%.5fs cut_n=%d" % (_lim30p / _SR30, _cut30p))
 
-_lim30s, _fb30s, _cut30s = CORE.declick_gate(_gate30(speech_s=1.0), _SR30, cut_head_frames=22)
-check("30.21 **测到**起点 ⇒ 用它、且**不**做边界补偿（1.0s ± 一帧窗 50ms）",
+_lim30s, _fb30s, _cut30s = CORE.declick_gate(_gate30(speech_s=1.0), _SR30, cut_head_frames=22,
+                                             scope_all=False)
+check("30.21 【head 政策】**测到**起点 ⇒ 用它、且**不**做边界补偿（1.0s ± 一帧窗 50ms）",
       _fb30s is False and abs(_lim30s / _SR30 - 1.0) <= 0.06
       and _lim30s < _cut30p + int(1.2 * _SR30),
       "limit=%.3fs fb=%s" % (_lim30s / _SR30, _fb30s))
+
+# 30.21b~c 🔴 **默认政策 = 全段**（2026-10-04 修订）。依据见 `AUDIO_DECLICK_SCOPE_ALL`：
+#   旧政策的前提「孤立瞬态恒在台词之前」被端到端实测**证伪**（10s 三人段 17 处孤立峰，
+#   15 处在旧的 1.408s 闸之外 ⇒ 一律没治，而报告看着一切正常）。
+_l30all, _f30all, _c30all = CORE.declick_gate(_gate30(), _SR30, cut_head_frames=5)
+check("30.21b **默认政策 = 全段**：limit = 输入全长（旧政策此处只给 1.408s ⇒ 闸外的孤立瞬态全漏治）",
+      _f30all is False and _l30all == _N30 and _c30all == int(round(5 / 24.0 * _SR30)),
+      "limit=%.3fs（全长 %.3fs） fb=%s cut_n=%d"
+      % (_l30all / _SR30, _N30 / _SR30, _f30all, _c30all))
+
+#   🔴 **本轮的靶子**：静背景里、**远离段首（4.4s）**的一声孤立瞬态 —— 旧政策下它在 1.408s
+#      闸外、**一个样本都不碰**（这就是「治好的孤立瞬态又出现了」的真因）；默认政策下必须被治。
+_g30c = torch.Generator().manual_seed(20261004)
+_x30c = (torch.rand(_N30 * 2, generator=_g30c) - 0.5) * 2.0 * _BG30
+_i30c = int(4.4 * _SR30)
+_x30c[_i30c:_i30c + int(0.004 * _SR30)] = 0.03            # 4ms 孤立瞬态，落在成片可见区
+_a30c = {"waveform": _x30c.reshape(1, 1, -1), "sample_rate": _SR30}
+_y30c, _r30c = CORE.declick_on_segment(_a30c, 4.0, -50.0)
+_p30c = float(_x30c[_i30c:_i30c + 128].abs().max())
+_q30c = float(_y30c["waveform"].reshape(-1)[_i30c:_i30c + 128].abs().max())
+check("30.21c 🔴 4.4s 处的孤立瞬态（head 政策闸外 ⇒ 逐位直通）在默认政策下**被治**",
+      _q30c < _p30c * 0.5, "%.5f → %.5f" % (_p30c, _q30c))
 
 _clean30 = {"waveform": _gate30(), "sample_rate": _SR30}
 _n50 = CORE.declick_on_segment(_clean30, 4.0, None)[1]
@@ -3646,15 +3684,15 @@ check("30.22 未命中也要报一行（铁律 15）+ `quiet_dbfs=None` 走**常
       _n50.splitlines()[0][:58])
 
 # 30.23~30.24 🔴 **范围闸必须盖过裁帧边界**（2026-10-04；零 GPU 复现逼出来的真凶）
-#   背景：钉在 `cut` 处那一声「滴」= 裁帧切出来的半波形（交接 2026-10-04 §2.3 定性）。
+#   背景：钉在 `cut` 处那一记孤立瞬态 = 裁帧切出来的半波形（交接 2026-10-04 §2.3 定性）。
 #   而范围闸原来用「头部首个有声 run」划线 —— 那个 run 在 **pin 区（上一段尾巴）里**
-#   ⇒ 线落在 `cut` **之前** ⇒ 滴被 `cand[lim_idx:] = False` 静默排除
+#   ⇒ 线落在 `cut` **之前** ⇒ 孤立瞬态被 `cand[lim_idx:] = False` 静默排除
 #   （探针 C1 实测：pin 语音 0.05s 起 ⇒ 范围=前 0.050s ⇒ cut(0.208s) 峰值 0.5000 → 0.5000，
 #     而报告只写「未命中」⇒ **看着一切正常**）。
 #   ⇒ 修法：`limit` 抬到 ≥ `cut + AUDIO_DECLICK_CUT_GUARD_S`（`cut` 之后才是新段内容，
 #     「上一段语音在哪」不该用来关掉它）。这两条把「诊断」与「疗效」各钉一个。
 _lim23, _fb23, _cut23 = CORE.declick_gate(_gate30(speech_s=0.30), _SR30, cut_head_frames=22)
-check("30.23 起点落在裁帧边界**之前** ⇒ 范围抬到 ≥ 边界 + 50ms（否则滴被静默漏治）",
+check("30.23 起点落在裁帧边界**之前** ⇒ 范围抬到 ≥ 边界 + 50ms（否则孤立瞬态被静默漏治）",
       _fb23 is False
       and _lim23 >= _cut23 + int(round(CORE.AUDIO_DECLICK_CUT_GUARD_S * _SR30)),
       "limit=%.3fs cut=%.3fs" % (_lim23 / _SR30, _cut23 / _SR30))
@@ -3670,12 +3708,12 @@ _a24 = {"waveform": _x24.reshape(1, 1, _N30), "sample_rate": _SR30}
 _y24, _r24 = CORE.declick_on_segment(_a24, 4.0, -50.0, 22)
 _p24 = float(_flat(_a24)[_cut24:_cut24 + 64].abs().max())
 _q24 = float(_flat(_y24)[_cut24:_cut24 + 64].abs().max())
-check("30.24 pin 区语音晚起 ⇒ `cut` 处那个滴**仍被治**（修前此处逐位直通）",
+check("30.24 pin 区语音晚起 ⇒ `cut` 处的孤立瞬态**仍被治**（修前此处逐位直通）",
       _q24 < _p24 * 0.5, "%.5f → %.5f" % (_p24, _q24))
 
 # 30.25~30.27 🔴 `max_len_ms` 是**用户可调旋钮**（widget `declick_max_len_ms`，默认 50）
-#   实测「滴」宽 **8ms**；旧版把这个值**写死 2ms** ⇒ 把滴判成「不是一声」**直接漏掉**
-#   ⇒ 这才是「还是有滴」的主因。这三条把「旋钮真的接线了 + 默认值只有一个出处」钉住。
+#   实测「孤立瞬态」宽 **8ms**；旧版把这个值**写死 2ms** ⇒ 把孤立瞬态判成「不是一声」**直接漏掉**
+#   ⇒ 这才是「抑制始终不生效」的主因。这三条把「旋钮真的接线了 + 默认值只有一个出处」钉住。
 _x25 = _mk30([(500.0, 0.02)])
 _i25 = int(0.5 * _SR30)
 _x25["waveform"][..., _i25:_i25 + int(0.008 * _SR30)] = 0.02        # 拉宽成 8ms
@@ -3713,6 +3751,70 @@ _b30, _r30 = CORE.declick_transients(_b28, ratio=4.0, quiet_dbfs=-50.0,
 check("30.30 幂等：对**已治结果**再治一次 ⇒ 逐位不变",
       bool(torch.equal(_b30["waveform"], _b28["waveform"])),
       "max|Δ|=%.9f" % float((_b30["waveform"] - _b28["waveform"]).abs().max()))
+
+# 30.31–30.32b · 邻域不够静 ⇒ **跳过**（2026-10-04 两轮实测逼出来的）
+#   第一轮病象（真实产物 `t3p_dc2_r4` @0.0710s，节点坐标）：左邻 **0.02905（−30.7 dBFS）** /
+#   事件 0.01434（−36.9）⇒ 旧写法治后 **0.02663（−31.5）** = **比事件本身还响 +5.4 dB**
+#   —— 等于把上一段语音**搬**到了这一处。
+#   第二轮病象（夹具 `_bed_a` @1.983s，音量断崖）：事件 0.4997、左邻同量级 ⇒ 旧判据
+#   「邻域 max **>** 事件峰」**约 50% 概率放行**（两侧同量级，谁大只看那两窗的随机样本）
+#   ⇒ 把断崖治成 **0.0489**（背景）。
+#   ⇒ 判据定稿：**邻域 max × `AUDIO_DECLICK_EDGE_REL` > 事件峰 ⇒ 跳过**
+#      （孤立伪影的前提是「周围比它低一个量级」，不是「周围不更大」）。
+_x31 = _flat(_mk30([(500.0, 0.30)])).reshape(1, -1)
+_x31[0, int(0.504 * _SR30):int(0.510 * _SR30)] = 0.90      # 紧邻事件的更响内容（模拟语音）
+_w131 = int(0.001 * _SR30)
+_e31, _B31, _h31 = CORE._declick_envelope(_x31, _w131, int(_x31.shape[-1]) // _w131)
+_o31, _d31, _k31 = CORE._declick_suppress(_x31, _SR30, _w131, [(500, 501)], _e31, _B31)
+check("30.31 邻域**比事件更响**（紧邻语音/音效）⇒ **跳过**（不碰）",
+      len(_k31) == 1 and len(_d31) == 0 and bool(torch.equal(_o31, _x31)),
+      "跳过 %d 处 / 已治 %d 处" % (len(_k31), len(_d31)))
+
+# 🔴 30.31b **本轮改进的核心**：邻域**只比事件低一点**（0.8×）也必须跳过 ——
+#   旧判据「邻域 max > 事件峰」在这里**会治**（0.8 < 1.0），但 0.8× 根本不是"静背景"
+#   （真伪影的邻域要低一个量级，实测真实孤立瞬态 5.7×）⇒ 治它 = 削内容边缘/断崖。
+#   新判据：0.8 × 2.0 = 1.6 > 1.0 ⇒ 跳过 ✅
+_g31b = torch.Generator().manual_seed(31)
+_x31b = (torch.rand(_N30, generator=_g31b) - 0.5) * 2.0 * 0.0005
+_x31b[int(0.500 * _SR30):int(0.501 * _SR30)] = 0.10        # 事件峰 0.10
+_x31b[int(0.480 * _SR30):int(0.500 * _SR30)] = 0.08        # 左邻 = 0.8×（不是静背景）
+_e31b, _B31b, _h31b = CORE._declick_envelope(_x31b.reshape(1, -1), _w131,
+                                             _N30 // _w131)
+_o31b, _d31b, _k31b = CORE._declick_suppress(_x31b.reshape(1, -1), _SR30, _w131,
+                                             [(500, 501)], _e31b, _B31b)
+check("30.31b 邻域**仅低 20%**（0.8×）⇒ 也跳过（旧判据「邻域>事件」在此**会误治**音量断崖）",
+      len(_k31b) == 1 and len(_d31b) == 0 and bool(torch.equal(_o31b, _x31b.reshape(1, -1))),
+      "跳过 %d 处 / 已治 %d 处" % (len(_k31b), len(_d31b)))
+
+_rep31 = CORE._declick_report(
+    [(0.100, 0.010, 0.001)],
+    CORE._DeclickCtx(sr=_SR30, total=1000, ratio=4.0, quiet_dbfs=-50.0, max_len_ms=50.0),
+    1000, [(0.071, 0.0143, 0.0291)])
+check("30.32 报告必须**点名跳过**且写明**倍数判据**（铁律 15：跳过不许静默）",
+      "跳过 1 处" in _rep31 and "邻域不够静" in _rep31 and "2.0 倍" in _rep31,
+      _rep31.splitlines()[-1][:70])
+
+# 30.33~30.34 · 多维度审核补（2026-10-04）：空音频不许炸 / 非有限输入 fail-closed
+for _nm33, _w33 in (("空 [1,1,0]", torch.zeros(1, 1, 0)),
+                    ("前导维 0 [0,1,100]", torch.zeros(0, 1, 100))):
+    _a33 = {"waveform": _w33, "sample_rate": _SR30}
+    _o33, _r33 = CORE.declick_on_segment(_a33, 4.0, -50.0)
+    check("30.33 %s ⇒ 不抛、原样返回（空音频合法；旧写法 `reshape(-1,…)` 会抛 RuntimeError）" % _nm33,
+          _o33 is _a33 and "未命中" in _r33,
+          "shape=%s rep=%s" % (tuple(_o33["waveform"].shape), _r33.splitlines()[0][:40]))
+
+_bad33 = []
+for _nm33, _v33 in (("NaN", float("nan")), ("Inf", float("inf"))):
+    _x33 = torch.rand(_N30, generator=torch.Generator().manual_seed(33)) * 0.01
+    _x33[100] = _v33
+    try:
+        CORE.declick_on_segment({"waveform": _x33.reshape(1, 1, -1), "sample_rate": _SR30},
+                                4.0, -50.0)
+        _bad33.append("%s 没 raise" % _nm33)
+    except ValueError as _e33:
+        _bad33.append("" if "NaN" in str(_e33) else "%s 文案没点名" % _nm33)
+check("30.34 含 NaN / Inf 的输入 ⇒ **fail-closed**（不许把 NaN 顺着「邻域填充」传遍全段）",
+      _bad33 == ["", ""], "%s" % (_bad33,))
 
 print()
 print("=" * 78)
