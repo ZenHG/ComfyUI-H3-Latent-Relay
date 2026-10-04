@@ -4,7 +4,7 @@
 
 背景（2026-10-02 实测）：
     H3 拷贝桥把上一段的音频尾作为 audio_ref ⇒ **上段说话人的嗓音会成为
-    本段嗓音的生成条件**。台词逐段换人时音色交叉污染（周砚 F0 114→131、
+    本段嗓音的生成条件**。台词逐段换人时音色交叉污染（实测某角色 F0 114→131、
     谱质心 1028→1308）。给「本段说话人」的声锚后离基准距离缩到 1/5。
 
 设计原则（对开源用户负责）：
@@ -27,17 +27,17 @@
 
 
 声库布局（run 无关、跨 run 复用）：
-    <bank_dir>/voices.json     {"周砚": {"wav": "...", "src": "2c_m2s1_00005",
+    <bank_dir>/voices.json     {"<角色名>": {"wav": "...", "src": "<段产物名>",
                                   "voiced_s": 0.86, "collected": "2026-10-02T14:20"}, ...}
     <bank_dir>/<角色名>.wav    自动采集的锚（手动文件同名时它就是手动锚本身）
 
 CLI（`<声库目录>` 用你自己的路径，例如 `./voices`）：
-    python voice_bank.py collect <mp4> --name 周砚 --bank <声库目录>
-    python voice_bank.py lookup  周砚 --bank <声库目录>
+    python voice_bank.py collect <mp4> --name <角色名> --bank <声库目录>
+    python voice_bank.py lookup  <角色名> --bank <声库目录>
     python voice_bank.py list   --bank <声库目录>
     # 「这一段该接谁的锚」—— 一段内多人时的规则（见下方 §该给谁做锚）
     python voice_bank.py advise --bank <声库目录> --prompt-file 段2.md --prev-file 段1.md
-    python voice_bank.py advise --bank <声库目录> --speakers 许然,小满 --prev-speaker 许然
+    python voice_bank.py advise --bank <声库目录> --speakers <角色A>,<角色B> --prev-speaker <角色A>
     python voice_bank.py selftest      # 说话人解析规则的自检（可证伪）
 
 声锚的语义边界（一段内多人时尤其要记住）：
@@ -107,7 +107,7 @@ def _voiced_spans(amps, hop_s, min_s=0.15):
             spans.append((s * hop_s, i * hop_s))
             s = None
     # 合并近邻（同一句话内部的短停顿；0.25s 内的间隙按"换气"处理 —— 实测
-    # 小满长句被 0.12s 阈值拆成两截而拒采；0.40s 的句内停顿也要合回 ⇒ 0.5s）
+    # 长句被 0.12s 阈值拆成两截而拒采；0.40s 的句内停顿也要合回 ⇒ 0.5s）
     merged = []
     for t0, t1 in spans:
         if merged and t0 - merged[-1][1] < 0.5:
@@ -288,7 +288,7 @@ def speakers_in_order(prompt: str) -> list:
 def subject_name(prompt: str, tag: str) -> str:
     """把 `<Subject N>` 映射成**角色名**（best-effort）。
 
-    六段式有 `subject_definitions:` 段（`<Subject 1> 许然，中国女性…`）⇒ 取名字。
+    六段式有 `subject_definitions:` 段（`<Subject 1> <角色名>，…`）⇒ 取名字。
     **最小格式没有这个段**（`<Subject N>` 后面跟的是动作句）⇒ 拿不到名字，
     原样返回 `Subject N`，由调用方自己映射（或用 `--speakers` 显式给）。
     """
@@ -338,7 +338,7 @@ def advise_anchor(bank_dir: str, prompt: str = "", prev_prompt: str = "",
 
 _SELFTEST_CASES = [
     # (prompt, 期望的说话人顺序)
-    ("<Subject 1> 许然开口说话:<d>[zh]甲</d>，随后 <Subject 2> 小满开口说话:<d>[zh]乙</d>", ["Subject 1", "Subject 2"]),
+    ("<Subject 1> A开口说话:<d>[zh]甲</d>，随后 <Subject 2> B开口说话:<d>[zh]乙</d>", ["Subject 1", "Subject 2"]),
     ("<Subject 1> (S1) 看着对方:<d>[zh]甲</d> 又 <Subject 1> (S1) 补一句:<d>[zh]丙</d>", ["Subject 1"]),
     ("[Shot 2] At 00:02.4 <Subject 2> (S2) 开口:<d>[zh]乙</d>", ["Subject 2"]),
     ("没有台词的纯动作段", []),

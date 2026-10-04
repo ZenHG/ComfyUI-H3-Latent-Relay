@@ -656,7 +656,7 @@ def plan_relay(
         # 0.6.1 声锚（voice anchor）：audio_ref 改用**指定说话人**的音频尾窗。
         # 动机（2026-10-02 实测）：audio_ref = 上段音频尾 ⇒ 上段说话人的嗓音
         # 成为**本段嗓音的生成条件** —— 台词逐段换人时音色交叉污染
-        # （周砚 F0 114→131、谱质心 1028→1308）。给声锚后离基准距离缩到 1/5。
+        # （实测：某角色 F0 114→131、谱质心 1028→1308）。给声锚后离基准距离缩到 1/5。
         # 静默降级纪律：声锚短于窗就取全长，并把「用了声锚」写进 notes 让 report 可见。
         tail, rt, raw_steps = _voice_anchor_tail(voice_anchor, a_frames)
         if rt < int(math.ceil(a_frames / float(FPS) * AUDIO_HZ - 1e-9)):

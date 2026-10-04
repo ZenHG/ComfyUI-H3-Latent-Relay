@@ -338,7 +338,7 @@ Chain 按一张**显式表**推进它们 —— 表就是单一真相源，漏�
 
 ```bash
 python tools/voice_bank.py advise --bank <声库目录> --prompt-file 段2.md --prev-file 段1.md
-python tools/voice_bank.py advise --bank <声库目录> --speakers 许然,小满 --prev-speaker 许然
+python tools/voice_bank.py advise --bank <声库目录> --speakers <角色A>,<角色B> --prev-speaker <角色A>
 python tools/voice_bank.py selftest     # 说话人解析规则的自检（可证伪）
 ```
 
@@ -387,7 +387,7 @@ python tools/voice_bank.py selftest     # 说话人解析规则的自检（可�
 
 - 为什么必须裁：参考行**随每一步采样**（`PackedLayout` 里 `audio_update=False` 的常驻行）
   ⇒ 参考越长越慢，而且长参考会把整段内容的音色一起带进来。
-- prompt 里用 `<Audio j>` 指代（例：`<Audio 1> 是小满的声音`），与 `<Subject N>` 配合。
+- prompt 里用 `<Audio j>` 指代（例：`<Audio 1> 是 <角色B> 的声音`），与 `<Subject N>` 配合。
 
 **④ 🔴 `<Audio j>` 的编号**不是**槽号 —— 这是最容易踩、且**完全不报错**的一脚**
 
@@ -478,8 +478,8 @@ report 里也给权威口径。
 精确裁锚 —— 念错/胡言乱语的语音绝不入锚；没装 ⇒ 回退纯能量法，零额外依赖。
 
 ```
-python tools/voice_bank.py collect 段产物.mp4 --name 周砚 --bank ./voices --line "台词原文"
-python tools/voice_bank.py lookup  周砚 --bank ./voices
+python tools/voice_bank.py collect 段产物.mp4 --name <角色名> --bank ./voices --line "台词原文"
+python tools/voice_bank.py lookup  <角色名> --bank ./voices
 python tools/voice_bank.py advise  --bank ./voices --prompt-file 段2.md --prev-file 段1.md
 python tools/voice_bank.py selftest          # 说话人解析规则的自检（可证伪）
 ```
