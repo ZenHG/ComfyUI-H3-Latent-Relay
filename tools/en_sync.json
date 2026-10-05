@@ -8,8 +8,8 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "condensed",
-          "h_en": "114cc78f208f3731",
-          "h_src": "231d81fa057b4623",
+          "h_en": "9d5bad297144803a",
+          "h_src": "321cc9248cce906f",
           "seeded": "by-position"
         },
         {
@@ -79,7 +79,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-06",
-      "src_sha": "29bb20863e040484"
+      "src_sha": "afae169fb686f213"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -400,14 +400,14 @@
           "zh": "声锚（voice_anchor，0.6.19）：跨说话人续接时锁定音色",
           "en": "Voice anchor (voice_anchor, 0.6.19): lock timbre when continuing across speakers",
           "mode": "full",
-          "h_en": "7fdd297d8b825561",
-          "h_src": "8a21a3c3e7262d51",
+          "h_en": "0c0d64440a554167",
+          "h_src": "3603ddb459c93a83",
           "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-10-06",
-      "src_sha": "af2dd08ab08cd366"
+      "src_sha": "569c78a3a9d95b8a"
     },
     "docs/08-testing.md": {
       "en": "docs/08-testing_EN.md",

@@ -603,4 +603,50 @@ python tools/voice_bank.py collect stage_output.mp4 --name <character name> --ba
 python tools/voice_bank.py lookup  <character name> --bank ./voices
 python tools/voice_bank.py advise  --bank ./voices --prompt-file seg2.md --prev-file seg1.md
 python tools/voice_bank.py selftest          # self-test of the speaker-parsing rules (falsifiable)
+python tools/voice_bank.py va-ledger --prompt-file segN.md --out <run dir>/_va.json
 ```
+
+### VA (cross-segment timbre accumulation, 0.6.27 · **experimental** · off by default): the advanced form of the voice anchor
+
+VA and the anchor **use the same channel** (the one `audio_ref` slot this pack owns). They differ only in
+**where the material comes from**:
+
+| | Voice anchor | VA |
+|---|---|---|
+| Material | an **external clip** you wire into `voice_anchor` | audio latents from **segments this run already produced**, accumulated per speaker |
+| Does it touch `pin`? | **Yes** (the pinned prefix is replaced by the anchor tail ⇒ hard alignment) | No (only `audio_ref` ⇒ soft guidance) |
+| What you do | find material, wire it up | drop a `_va.json` ledger into the run directory |
+
+**Switch = `_va.json` in the run directory** (`relay_kit/<run>/_va.json`). **No file ⇒ off ⇒ bit-identical to
+the previous version**; the same holds when the ledger has no entry for this stage, or no material can be
+collected from history ⇒ **three independent guards, zero migration for existing graphs**.
+You do not have to hand-write the ledger: `tools/voice_bank.py va-ledger` extracts it **straight from the
+prompt** (who speaks first + how long each line is), with no new dependency; you can override the regexes, or
+go fully manual (`--who/--lines`).
+
+🔴 **Not either-or — one material chain**: the reference is `[history…][tail window]`.
+**With an anchor wired, the tail window is the anchor's own tail** ⇒ same source as `pin` (the pinned prefix)
+⇒ the invariant holds automatically. ⇒ **`pin` belongs to the anchor** (it replaces both ref and pin, a hard
+alignment); VA only adds the soft condition.
+
+🔴 **Anchor wired + `with_anchor` left at its default `false` ⇒ VA is skipped.**
+Not a bug: the combination has **no measurement behind it** ⇒ it does not enter the default path. The node
+`report`'s "VA note" **states this by name** (and says how to turn it on) — it is never silent. To combine them
+set `with_anchor = true` in the ledger's `config` ⇒ the reference becomes `[history…][anchor tail window]`, and
+`pin_steps` is raised so the anchor tail is **not squeezed shorter by the history** (before that fix it dropped
+from 200 steps to 85 — ≈5 s to 2.1 s, i.e. trading a longer, purer anchor for shorter, noisier history).
+
+**`max_speakers` defaults to 1** — one block for "whoever speaks first at the seam". Reason: this pack's block
+has **no `<Audio j>` label** ⇒ several identities in one slot is conditional ambiguity (measured worse twice).
+Route the other speakers through the **official `ref_audios` slots** instead.
+
+**Measurement (0.6.27, three arms with a real anchor wired — same host process, same graph parameters,
+compared on the lossless sidecar):**
+
+| Arm | vs the "no anchor" arm, bit-exact | Note |
+|---|---|---|
+| Ledger + anchor wired (`with_anchor` default) | **identical** | the switch does not leak into the default path |
+| Ledger + `with_anchor=true` + anchor | audio `max\|Δ\|=0.747` / video `5.448` | the reference really changed; **listening confirmed "the anchor works"** |
+
+⚠️ **Criterion discipline**: this repo's SECS scores are **uncalibrated** (same-speaker and different-speaker
+ranges overlap) ⇒ **they cannot judge timbre**; the conclusion above rests on **listening**, nothing else.

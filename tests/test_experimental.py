@@ -330,6 +330,63 @@ check("0.6.28 判据单一真相源：`_voiced_grids` 对同一素材给出同�
          CORE._voiced_grids(torch.zeros(1, 1, 2, 400), 40)[5]))
 
 # ============================================================================
+# VA 适配层（0.6.28）：声锚门的**原因必须外泄到 notes** ——
+# `nodes.py` 把每条 VA note 原样拼进节点 `report` ⇒ 少了这层，用户只会在
+# 「接了声锚、还写了台账」时看到 VA **静默不生效**，而无从察觉。
+# 🔴 为什么必须在这一层测：`voice_accum._selftest` 只测 `anchor_gate`（纯函数），
+#    测不到「适配层有没有把这条 note 传出去」——那是真正的断裂点。
+import json as _json
+import shutil as _shutil
+import tempfile as _tempfile
+
+from exp.voice_accum import h3_adapter as VAAD
+
+_vdir = _tempfile.mkdtemp(prefix="h3relay_va_")
+try:
+    def _va_path(_run, _k):
+        return os.path.join(_vdir, "stage_%05d.safetensors" % _k)
+
+    def _va_load(_p):
+        return {"audio": torch.zeros(1, 1, 2, 400)}
+
+    def _va_audio(_lat):
+        return _lat["audio"]
+
+    with open(os.path.join(_vdir, "_va.json"), "w", encoding="utf-8") as _fh:
+        _json.dump({"stages": {"1": ["A"], "2": ["A"]}}, _fh)
+
+    _a0, _n0 = VAAD.build_audio("r", 2, stage_path_fn=_va_path, load_fn=_va_load,
+                                audio_fn=_va_audio, has_anchor=False)
+    _a1, _n1 = VAAD.build_audio("r", 2, stage_path_fn=_va_path, load_fn=_va_load,
+                                audio_fn=_va_audio, has_anchor=True)
+    # ⚠️ 别用 "跳过" 当判据：段文件缺失那条 note 里也有「跳过」二字（本轮自己踩到一次假红）
+    #    ⇒ 只认声锚门那条 note 独有的字样。
+    check("0.6.28 VA 适配层：**无声锚** ⇒ 声锚门不涉及，notes 里**不许**出现声锚门提示（不制造噪音）",
+          not any(("声锚已接" in _n) or ("with_anchor" in _n) for _n in _n0),
+          " ｜ ".join(_n0))
+    check("0.6.28 VA 适配层：接了声锚 + 默认 ⇒ 跳过，且**原因外泄到 notes**（= report 看得到）",
+          _a1 is None and any("跳过" in _n and "with_anchor" in _n for _n in _n1),
+          " ｜ ".join(_n1))
+
+    with open(os.path.join(_vdir, "_va.json"), "w", encoding="utf-8") as _fh:
+        _json.dump({"config": {"with_anchor": True}, "stages": {"1": ["A"], "2": ["A"]}}, _fh)
+    _a2, _n2 = VAAD.build_audio("r", 2, stage_path_fn=_va_path, load_fn=_va_load,
+                                audio_fn=_va_audio, has_anchor=True)
+    check("0.6.28 VA 适配层：`with_anchor=true` ⇒ **放行**（notes 写明叠加未实测）",
+          any("叠加" in _n for _n in _n2), " ｜ ".join(_n2))
+finally:
+    try:
+        _shutil.rmtree(_vdir)
+    except OSError:                                     # noqa: S110,BLE001
+        pass
+
+# 🔴 契约：节点侧必须把 VA 的 notes 拼进 `report`（否则上面三条白测 —— 用户还是看不到）
+with open(os.path.join(_KIT_DIR, "nodes.py"), encoding="utf-8") as _nf:
+    _nsrc = _nf.read()
+check("0.6.28 VA 契约：`nodes.py` 把 VA 的 notes 拼进节点 `report`（否则跳过原因只在宿主日志里）",
+      "_va_notes" in _nsrc and "注记·VA" in _nsrc and "extra.append" in _nsrc, "")
+
+# ============================================================================
 print()
 print("=" * 78)
 print("结果：通过 %d / 失败 %d" % (len(PASS), len(FAIL)))

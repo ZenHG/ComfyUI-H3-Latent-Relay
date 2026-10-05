@@ -600,4 +600,43 @@ python tools/voice_bank.py collect 段产物.mp4 --name <角色名> --bank ./voi
 python tools/voice_bank.py lookup  <角色名> --bank ./voices
 python tools/voice_bank.py advise  --bank ./voices --prompt-file 段2.md --prev-file 段1.md
 python tools/voice_bank.py selftest          # 说话人解析规则的自检（可证伪）
+python tools/voice_bank.py va-ledger --prompt-file 段N.md --out <run 目录>/_va.json
 ```
+
+### VA（跨段音色累积，0.6.27 · **实验层** · 默认关）：声锚的进阶版
+
+VA 与声锚**走同一条通道**（本包那 1 个 `audio_ref` 槽），差别只在**素材从哪来**：
+
+| | 声锚 | VA |
+|---|---|---|
+| 素材 | 你接进 `voice_anchor` 的一段**外部音频** | **本 run 已生成的段**里的音频 latent（按人累积） |
+| 是否动 `pin` | **动**（钉住的前缀也换成锚尾 ⇒ 硬对齐） | 不动（只换 `audio_ref` ⇒ 软引导） |
+| 要你做什么 | 找素材、接线 | 在 run 目录放一份 `_va.json` 台账 |
+
+**开关 = run 目录下的 `_va.json`**（`relay_kit/<run>/_va.json`）。**没有这个文件 = 关 = 逐位同旧版**；
+台账里没有本段、或历史段里收不到素材，也都返空 ⇒ **三重保险，老图零迁移**。
+台账不用手写：`tools/voice_bank.py va-ledger` 从**提示词**直接抽（谁先开口 + 每句多长），零新依赖；
+抽不准可以覆盖正则，也可以全手工（`--who/--lines`）。
+
+🔴 **与声锚不是二选一，是一条素材链**：参考 = `[历史素材…][尾窗]`。
+**接了声锚时，尾窗就是声锚尾窗** ⇒ 与 `pin`（钉住前缀）同源 ⇒ 不变式自动成立。
+⇒ **pin 归声锚**（它同时换 ref 与 pin，是硬对齐），VA 只补软条件。
+
+🔴 **声锚已接 + `with_anchor` 默认 `false` ⇒ VA 跳过**。
+这不是 bug：两者叠加**没有实测背书** ⇒ 不进默认路径。节点 `report` 的「注记·VA」会**点名这条**
+（并写明怎么开），不会静默。要叠加就在台账的 `config` 里写 `with_anchor = true`
+⇒ 参考变成 `[历史素材…][声锚尾窗]`，并**抬 `pin_steps` 保住声锚尾窗不被历史素材挤短**
+（未修之前实测从 200 步被压到 85 步 ≈5 s→2.1 s，等于拿更短更杂的换掉更长更纯的）。
+
+**默认 `max_speakers = 1`** —— 只给「缝上第一个开口的人」一块。理由：本包的块**没有 `<Audio j>` 标签**
+⇒ 一槽多身份 = 条件歧义（两轮实测都更糟）。其余说话人请走**官方 `ref_audios` 的 3 个槽**。
+
+**实测（0.6.27 真接声锚三臂，同一宿主进程、同图参数、比无损边车）**：
+
+| 臂 | 与「无声锚」臂逐位比 | 说明 |
+|---|---|---|
+| 台账 + 接声锚（`with_anchor` 默认） | **逐位相同** | 开关没泄漏到默认路径 |
+| 台账 + `with_anchor=true` + 接声锚 | audio `max\|Δ\|=0.747` / video `5.448` | 参考确实变了；**耳听判「声锚生效」** |
+
+⚠️ **判据纪律**：本仓的 SECS 分数**未校准**（同人/异人分数重叠）⇒ **不能拿来判音色**，
+上面的结论一律以**耳朵**为准。
