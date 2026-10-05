@@ -53,6 +53,10 @@ from . import layout_contract as CONTRACT
 #    适配层刻意做窄：只负责读配置/找历史段/调核心，算法全在
 #    `exp/history_anchor_v2/history_anchor.py`（那份零本包依赖、可独立单测）。
 from .exp.history_anchor_v2 import h3_adapter as TIHA_ADAPTER
+# 🧪 VA（Voice Accumulate）跨段「按人累积」音色参考 —— **默认关**（run 目录下无 `_va.json` 即不生效）。
+#    同一个 conditioning 域（`minimax_refs`），与 TIHA 正交（一个塞视频帧、一个塞音频块）。
+#    台账 = `_va.json`（段号 → 说话人开口顺序）；**零新依赖**（不 import ASR）。
+from .exp.voice_accum import h3_adapter as VA_ADAPTER
 
 
 # ============================================================================
@@ -855,7 +859,7 @@ class H3RelayTrimAV:
                                "  · 关 = 不写（老行为），拼接时该段退回 mp4 解码并如实报出\n"
                                "⚠ 写失败只会在日志里提示，**不影响本段渲染**（拼接自动退路）。",
                 }),
-                # 🔴 2026-09-25 新增（GG 拍板）：只读观测的总闸。**默认关**。
+                # 🔴 2026-09-25 新增（本仓作者 拍板）：只读观测的总闸。**默认关**。
                 #    本地跑批要常看这几行 ⇒ 入口显式传 True（l1_api / chain_auto.sh）。
                 "diagnostics": ("BOOLEAN", {
                     "default": False,
@@ -937,7 +941,7 @@ class H3RelayTrimAV:
                            % (bj, d_edge, d_base))
             # 多通道观测剖面：**节点实测的 raw decode 数据**，成片里看不到
             # （H.264 编码会改变锐度/色阶基准 → 离线用成片反推必错）。
-            # GG 2026-09-15：「不只是锐度，色阶、明暗等都需要」——沉降检测本就三路，只报一路=只开三分之一窗。
+            # 本仓作者 2026-09-15：「不只是锐度，色阶、明暗等都需要」——沉降检测本就三路，只报一路=只开三分之一窗。
             prof = CORE.observation_profile(images, pin)
             if prof["sharp"]:
                 n_sh = 18
@@ -970,7 +974,7 @@ class H3RelayTrimAV:
         #   平均每步多贵」⇒ 能看出残留强度与不连续形态。
         #   ⚠ 故意不喂给 detect_settle：DTW 路把「运动中的相似姿态」
         #     也给低代价，单独当裁量会多吃内容（2026-09-20 定）。
-        # 🔴 2026-09-25 GG 拍板：三路只读观测**默认关**（`diagnostics=False`）。
+        # 🔴 2026-09-25 本仓作者 拍板：三路只读观测**默认关**（`diagnostics=False`）。
         #   实测三路合计 **0.361 s/段**（0.796MP/90 帧）—— 对外是纯开销；本地要常看 ⇒ 入口传 True。
         #   注意它们**不参与任何裁量**（纯打印）⇒ 关掉不改变任何帧/latent/音频。
         #   （`want<0` 分支里的 detect_settle / boundary_jump_ratio / observation_profile
@@ -984,7 +988,7 @@ class H3RelayTrimAV:
                 % (_dtw["align_cost"],
                    _dtw["frames"][0], _dtw["frames"][1]))
         # 裁量→跳跃曲线：成片缝 = raw[pin-1] → raw[pin+settle]（相隔 settle+1 帧），
-        # **裁得越多、跳得越大**（GG：裁切=时间跳跃=跳切）。裁之前就把它算出来供权衡。
+        # **裁得越多、跳得越大**（本仓作者：裁切=时间跳跃=跳切）。裁之前就把它算出来供权衡。
         curve = CORE.trim_jump_curve(images, pin) if _diag else None
         if curve:
             bj_note += ("\n           裁量→跳跃曲线（settle : 归一跳跃）：%s"
@@ -1025,7 +1029,7 @@ class H3RelayTrimAV:
 
         n = pin + settle
         out = CORE.trim_head_frames(images, n)
-        # 🔴 2026-09-15 新增：**缝帧重影**（极短交叉溶，GG 认可的解法）。
+        # 🔴 2026-09-15 新增：**缝帧重影**（极短交叉溶，本仓作者 认可的解法）。
         #   裁后首帧换成「上段末帧 ⊕ 本段首帧」的混合 → 把缝处一跳**拆成两个半跳跨两格**，
         #   一闪而过 → 体感约等于一镜到底。**帧数守恒、不动音频、零采样开销。**
         #   上段末帧 = `images[pin-1]`（钉住区最后一帧 = 上段尾的复现）——节点手里就有，无需额外输入。
@@ -1077,7 +1081,7 @@ class H3RelayTrimAV:
                 "（强度 %.2f / 尺度 %d）——只动低频，不复制姿态 ⇒ 无重影。"
                 % (int(lowfreq_frames), float(lowfreq_pull), int(lowfreq_blur)))
 
-        # 🔴 2026-09-16 新增：**画质域修复**——糊区锐化（GG 定方向：先试零 GPU 传统锐化）。
+        # 🔴 2026-09-16 新增：**画质域修复**——糊区锐化（本仓作者 定方向：先试零 GPU 传统锐化）。
         #   默认 settle_frames=0（不裁沉降）后，成片段头保留几帧「重绘糊」；
         #   裁它 → 跳帧（裁 16 帧跳 0.055）；不裁 → 留糊。
         #   **第三条路 = 画质域修**：不裁、不动时间轴，只提升糊区高频（故不可能引入跳帧）。
@@ -1646,6 +1650,81 @@ class H3RelayCopyBridge:
                 anchor_latent=ref_anchor_latent,  # 复用已加载的锚，避免二次读盘
                 log=lambda m: print("[H3 Relay] " + m, flush=True),
             )
+            # 🧪 VA（按人累积音色）—— **默认关**，开关 = run 目录下的 `_va.json`。
+            #
+            # 【域归属】与 TIHA 同类：改的是 **conditioning 的 `minimax_refs`**（经 `plan.audio_ref`），
+            #   **不属于**三代域（时间轴 `TrimAV` / 画质域 `Post` / 音频域 `AudioSeam`），与之**正交**。
+            #
+            # 【它做什么】跨段累积**同一个说话人**在各历史段里的语音片段，拼成**一段**，
+            #   **替换**桥自己那个音频参考块的内容 ⇒ 回答「段 3 说话的人，段 1 段 2 都说过，
+            #   能不能综合参考」。⚠️ **不追加新块**（2026-10-04 三臂实测：追加 N 块 ⇒ 无 `<Audio j>`
+            #   标签 ⇒ 模型无法对应谁是谁 ⇒ 开/关两臂音频余弦只有 0.0497 = 打乱生成）。
+            # 🔴【2026-10-05 三处改造（前沿理论赋能）】每条的理由写在它落地的那一行附近：
+            #   ① **同源不变式**：新参考 = `[历史素材…][上一段音频尾]` —— **必须以 pin 的来源结尾**。
+            #      旧口径只改 `audio_ref` 而不动 pin ⇒ 与 `relay_core.py:4008-4012` 自己写明的
+            #      「两处读的都是"上段尾"、**只改一处会打架**」冲突 ⇒ 软条件进不去、只剩扰动。
+            #   ② **默认只给缝上那个人一块**（`config.max_speakers`，默认 1）：本包的块没有
+            #      `<Audio j>` 标签 ⇒ 一槽多身份 = 条件歧义（两轮实测都更糟）。其余人走官方 3 槽。
+            #   ③ **预算先行、整片丢弃**：拆掉旧口径的"先拼满再截断"（那会砍掉尾部一片、
+            #      切点落在音节中间）。⇒ 下游的截断闸变成**防御性**的，正常不再触发。
+            # ⚠️ 接了「声锚」时**跳过** VA：两者解同一个问题，且声锚的同源不变式是完好的。
+            # 【原料】`stage_%05d.safetensors` 里的**音频 latent**（40 Hz）——
+            #   ⚠ 不是 `audio_%05d.safetensors`（那是 32 kHz 波形，用它就得过音频 VAE ⇒
+            #   要加 `audio_vae` 入参 = schema 变更）。⇒ 本机制**零 schema 变更、零新依赖**。
+            # 【零依赖纪律】**绝不 import ASR/funasr**（944 MB，用户不该装）。
+            #   台账 `_va.json` 是纯数据，可由提示词正则抽（ASR 只是我们本地的精度增强）。
+            # 🔴 必须在 `apply_relay` **之前**替换 `plan.audio_ref` —— 否则块已经注入完了。
+            # 本段音频栅格步数（硬上限）—— **先算**：合成参考块要按它分配预算。
+            # （旧写法是等 VA 给完再截断 ⇒ 必然砍掉尾部那一片、切点落在音节中）
+            try:
+                _dst = int(CORE.audio_from_latent(latent).shape[-1])
+            except Exception:                                 # noqa: BLE001
+                _dst = None
+            # 钉住前缀的音频步数（= pin 的来源长度）。参考块**必须保住**它的下限 ——
+            # 否则硬约束（pin，钉进输出流头部）与软条件（ref）打架：
+            # `relay_core.py:4008-4012` 自己写着「两处读的都是"上段尾"，**只改一处会打架**」。
+            _pin_steps = int(math.ceil(int(context_frames) / float(CORE.FPS) * CORE.AUDIO_HZ - 1e-9))
+            _va_audio = None
+            _va_notes = []
+            if not plan.applied:
+                # 没有前序可接（首段 / 未接 `context_latent`）⇒ 参考块**根本不会被注入**
+                # （`apply_relay` 对未应用的 plan 原样返回）⇒ **不必读盘**（省掉整轮 stage 文件 IO）。
+                print("[H3 Relay] VA（按人累积音色）：本段没有前序可接（plan 未应用）⇒ 跳过",
+                      flush=True)
+            else:
+                # 🔵 `has_anchor=voice_anchor is not None`：声锚已接时**默认仍然跳过** VA
+                #    —— 判据在 `voice_accum.anchor_gate`（`config.with_anchor=false` ⇒ 跳过），
+                #    配置键与开关只在一处读 ⇒ **两个分支合并成一次调用**（原先重复了 13 行）。
+                #    要试**叠加**（参考 = `[历史素材…][声锚尾窗]`，末尾 = 声锚尾 = pin 的内容
+                #    ⇒ 同源不变式仍成立）请填 `config.with_anchor = true`。🔴 未实测 ⇒ 默认关。
+                #    ⚠️ 代价：声锚已接但无 `_va.json` 时，多读一次 `_va.json`（= 1 次 isfile）。
+                _va_audio, _va_notes = VA_ADAPTER.build_audio(
+                    run_id, int(stage_index),
+                    stage_path_fn=_stage_path,    # 路径推导只此一份，适配层不重复实现
+                    load_fn=CORE.load_av_latent,
+                    audio_fn=CORE.audio_from_latent,
+                    # 🔴 桥自己那一段：**新参考必须以它结尾** ⇒ 与钉住前缀同源（= R2 的正解）。
+                    #    声锚路径下它**已经是声锚尾窗** ⇒ 叠加时同源自动保持。
+                    tail_latent=(plan.audio_ref or {}).get("audio_latent"),
+                    pin_steps=_pin_steps,
+                    max_steps=_dst,
+                    has_anchor=voice_anchor is not None,
+                    log=lambda m: print("[H3 Relay] " + m, flush=True),
+                )
+            if _va_audio is not None:
+                # 防御闸：合成时已按 `max_steps` 分配预算 ⇒ 正常**不该**再触发。
+                # 真触发了说明预算口径漂了 ⇒ 出声（旧口径在这里静默砍掉一整片）。
+                if _dst is not None and int(_va_audio.shape[-1]) > _dst:
+                    _va_notes.append("⚠ VA 参考 %d 步 > 本段音频栅格 %d 步 ⇒ 已截断"
+                                     "（**正常情况下不该发生** —— 请报告：预算口径漂了）"
+                                     % (int(_va_audio.shape[-1]), _dst))
+                    _va_audio = _va_audio[..., :_dst].clone()
+                plan.audio_ref = {"kind": "audio",
+                                  "ref_audio_t": int(_va_audio.shape[-1]),
+                                  "audio_latent": _va_audio}
+                print("[H3 Relay] VA（按人累积音色）：已**替换**音频参考块内容（%d 步 ≈ %.2f s）"
+                      % (int(_va_audio.shape[-1]), int(_va_audio.shape[-1]) / 40.0),
+                      flush=True)
             cond_out = CORE.apply_relay(conditioning, plan)
             if _tiha_refs:
                 import node_helpers
@@ -1656,6 +1735,8 @@ class H3RelayCopyBridge:
             extra = ["[H3 Relay] 复合桥·钉帧路径：" + plan.summary()]
             for n in plan.notes:
                 extra.append("    注记：" + n)
+            for n in _va_notes:
+                extra.append("    注记·VA：" + n)
             extra.append("    ⚠ 第 4 路 conditioning 必须接到采样器的 positive；"
                          "不接 = 只做拷贝桥。")
             report = report + "\n" + "\n".join(extra)
@@ -2287,7 +2368,7 @@ class H3RelayAudioSeam:
                 audio = {"waveform": _shaped.to(_raw_dt), "sample_rate": _raw_sr}
         # 🆕 组 4 · 孤立瞬态抑制（declick，2026-10-03）
         # 动机：模型会在**无台词区**生成孤立短脉冲（实测段2 @0.930s，峰值 0.0095 = −40 dBFS，
-        #   而背景仅 −60 dBFS ⇒ 在安静背景里突出成「无缘无故的孤立瞬态」，GG 耳检定性为伪影）。
+        #   而背景仅 −60 dBFS ⇒ 在安静背景里突出成「无缘无故的孤立瞬态」，本仓作者 耳检定性为伪影）。
         # 🔴 与 `patch_seconds` 的关系：**独立但必须排在 patch 之后**（2026-10-04 修正）：
         #   patch 是「整段替换头部 N 秒」⇒ 若 declick 先做，**它对头部的处理会被 patch 整段盖掉**
         #   （实测「孤立瞬态」在 0.930s，正好落在 patch 窗内 ⇒ 白做，且.report 看着像治了）。

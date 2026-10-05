@@ -10,10 +10,9 @@ python tests/test_relay_core.py
 ```
 
 脚本会自动上溯定位 ComfyUI 根目录；装在别处时用
-`COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。也支持 `pytest tests/`
-（找不到 ComfyUI 根目录时自动 skip，不会崩）。
+`COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。也支持 `pytest tests/`。
 
-**510 项断言，零 GPU、不加载模型**，覆盖三十一个方面：
+**512 项断言，零 GPU、不加载模型**，覆盖三十一个方面：
 
 ### 计数与声明的纪律（原 README §8 的两条注，随瘦身搬入）
 
@@ -21,8 +20,8 @@ python tests/test_relay_core.py
   `test_v3_schema` 的节点数·input 数·项数（H3h）· `assert_default_exit`（H3i）。
   **其余一律写「失败 0」** —— 写死数字**必然漂移**（2026-09-25 实测：同一个数字在四处声明，
   只有一处有机检，另外两处漂了很久没人发现）。
-- ⚠️ **写更正说明时别复述旧的错误数字** —— 那会污染上面这些机检的正则（踩过）。
-- 本文这行的「510 项断言 / 三十一个方面」+ 下面表格的 `| 21 |` 行由 **H3c** 机检（2026-09-30 起，
+- ⚠️ **写更正说明时别复述旧的错误数字** —— 那会污染上面这些机检的正则。
+- 本文这行的「512 项断言 / 三十一个方面」+ 下面表格的 `| 21 |` 行由 **H3c** 机检（2026-09-30 起，
   README 瘦身后判据从 README 移到本文件）。
 
 | 组 | 覆盖 |
@@ -77,7 +76,7 @@ node tests/test_audio_ref_budget.mjs     # 期望 45/0
 - `relay_kit_refs.js`（0.6.22 新增）—— **官方 3 个音频参考槽 vs 本包恒占 1 个**：
   槽位名识别（🔴 必须认 Autogrow 的前缀形态 `ref_audios.ref_audio_N` —— 不认就是
   **计数恒 0、警告永不出现的静默失效**）、三态裁决（越界 / 安全 / **未知**，未知不许退化成 0）、
-  标题后缀**幂等**（状态来回切也不残留），并静态扫描「纯模块不许 import `app`／壳不许自己重写判据」；
+  标题后缀**幂等**，并静态扫描「纯模块不许 import `app`／壳不许自己重写判据」；
   **（0.6.23 追加）** 音频槽的**「已接线顺序」编号**（`<Audio j>`）：`<Audio j>` 的 j **不是槽号**，
   而是**第 j 个已接线的槽**（宿主 `_io.py:1198` 索引升序 + 只收有值的槽；`execution.py:169` 传的是
   用户提交的 `inputs`）⇒ 只接 `ref_audio_2` 时它是 `<Audio 1>`、写 `<Audio 3>` **指空且不报错**。
@@ -105,7 +104,7 @@ COMFYUI_PATH=<根> python tools/assert_default_exit.py   # 期望 4/4
 
 `test_v3_schema.py` 验的是 **V3 与 V1 的逐字段一致**：节点 id 序列与顺序 / 取值 / `optional` /
 Combo `options` **全序** / outputs 路数与显示名 / `is_output_node` / 显示名 / category。
-为什么必须机检：老工作流的 `widgets_values` 是**按位置**存的，参数表错一位就是**用户参数静默错位**（不报错）。
+为什么必须机检：老工作流的 `widgets_values` 是**按位置**存的，参数表错一位就是**用户参数静默错位**。
 
 > 🔴 **为什么会有两个数**（2026-09-25 首测 / **2026-09-30 修正机制**）：差的那一个节点是
 > `H3RelayLatentUpscale`，它的 `INPUT_TYPES()` 会走到 `_comfy_registry()`，而后者**第一步就
@@ -159,8 +158,8 @@ Combo `options` **全序** / outputs 路数与显示名 / `is_output_node` / 显
 CI（`.github/workflows/ci.yml`）按顺序跑：**ruff 静态检查 → 回归五件套（`test_relay_core` · `review_050` ·
 `smoke_nodes` · `test_experimental` · `check_ui_workflow`）→ 默认出口断言 → V3 逐字段一致 → JS 词分发 →
 构建分发集（`make_minimal_bundle.py --zip`，含 en_sync 前置闸）**，任一步失败即红。
-`en-sync` 不单列 CI 步骤 —— 它由 `review_050` 的 **L13** 覆盖（本仓纪律：同一口径只在一处声明并有机检盯着）。
-⚠️ **已知覆盖缺口**（诚实记录，别当成已覆盖）：只跑 Python **3.11**（而 `requires-python = ">=3.10"`）；
+`en-sync` 不单列 CI 步骤 —— 它由 `review_050` 的 **L13** 覆盖。
+⚠️ **已知覆盖缺口**：只跑 Python **3.11**（而 `requires-python = ">=3.10"`）；
 宿主依赖不固定版本 ⇒ 上游漂移会造噪声红。详见 `ci.yml` 头部的缺口清单。
 
 ### 英文文档同步闸（`tools/en_sync.py`，2026-09-30 新增）

@@ -242,6 +242,96 @@ expect_raise("E4.10 非 [N,H,W,C] ⇒ raise",
 # ============================================================================
 print()
 print("=" * 78)
+print("0.6.28｜声锚尾窗吸附 anchor_window_start —— 盲取文件尾会把「停顿」钉成「已说过的声音」")
+print("=" * 78)
+print("  背景：`_voice_anchor_tail` 一直 `narrow(-1, total-take, take)`（**盲取文件尾**），")
+print("        而 `auto_audio_ref_seconds` 的 `sec = (n1 - start) / _gps` 是**一直算到文件末尾**")
+print("        ⇒ 素材末尾有停顿时**停顿留在窗里**。生产声库实测三段全部 `tail_clean=false`。")
+print("  纪律：只在**真的更好时**才挪；判不出有声格就不动；**不 raise**（只修复 + 报告）。")
+print()
+
+
+def _anchor(spans, total_s, amp=0.06, quiet=0.0):
+    """造音频 latent：`spans` 用**逐格交替幅度**（差分判据认得出），其余为 `quiet`。"""
+    n = int(total_s * CORE.AUDIO_HZ)
+    x = torch.full((1, 1, 2, n), float(quiet))
+    p = torch.tensor([0.02, 0.06]) * (amp / 0.05)
+    for t0, t1 in spans:
+        i0, i1 = int(t0 * CORE.AUDIO_HZ), int(t1 * CORE.AUDIO_HZ)
+        m = max(0, i1 - i0)
+        if m:
+            x[..., i0:i1] = p.repeat(m // 2 + 1)[:m].view(1, 1, 1, m)
+    return x
+
+
+_a_busy = _anchor([(0.0, 6.0)], 6.0)                       # 全程有声（正常素材）
+_s0, _i0 = CORE.anchor_window_start(_a_busy, 37)           # 窗 = 0.925 s = 37 步
+check("0.6.28 正常素材：窗里大部分是人声 ⇒ **不动**（逐位同旧版）",
+      _i0["repaired"] is False and _s0 == 6 * 40 - 37 and _i0["frac_before"] > 0.9,
+      "start=%d ｜ 有声中 %.2f" % (_s0, _i0["frac_before"]))
+
+# 🔴 「窗里**已经过半**是人声」也要**不动** —— 这条专门守「不许顺手多挪」那个早退分支。
+#    voice 止于 4.75 s ⇒ 默认窗 [163,200) 里 28/37 有声（≥ 0.5）⇒ 应当**不动**。
+#    **去掉早退**（⑨ 注入）后：终点会挪到 4.75+0.10 ⇒ start 158 ⇒ 有声 33/37 ⇒ 真的会动
+#    ⇒ 所以这条能判别（旧版测"全程有声"时，`start` 被 clamp 回默认 ⇒ 注入测不出 = 假门）。
+_a_mix = _anchor([(0.0, 4.75)], 5.0)
+_s_mix, _i_mix = CORE.anchor_window_start(_a_mix, 37)
+check("0.6.28 窗里**已过半**是人声 ⇒ 不动（不许顺手多挪）",
+      _i_mix["repaired"] is False and _s_mix == 5 * 40 - 37 and _i_mix["frac_before"] >= 0.5,
+      "start=%d ｜ 有声中 %.2f" % (_s_mix, _i_mix["frac_before"]))
+
+# 生产声库的形态：窗里**过半是停顿**（`tail_clean=false`：尾部 0.925 s 含停顿）
+_a_pause = _anchor([(0.0, 4.4)], 5.0)
+_s1, _i1 = CORE.anchor_window_start(_a_pause, 37)
+check("0.6.28 窗里过半是停顿 ⇒ 往前挪，终点落在「最后一个有声格 + 0.10 s」",
+      _i1["repaired"] is True and _s1 < 5 * 40 - 37 and _i1["voiced_frac"] > 0.8
+      and abs((_s1 + 37) - (4.4 * 40 + int(round(0.10 * 40)))) <= 2,
+      "start %d（旧 %d）｜ 有声中 %.2f→%.2f ｜ 终点 %d"
+      % (_s1, 5 * 40 - 37, _i1["frac_before"], _i1["voiced_frac"], _s1 + 37))
+
+_s2, _i2 = CORE.anchor_window_start(torch.zeros(1, 1, 2, 8 * 40), 37)
+check("0.6.28 全静音 ⇒ **不动** + 把 `reason` 交出来（不静默、不猜）",
+      _i2["repaired"] is False and bool(_i2["reason"]) and _s2 == 8 * 40 - 37,
+      _i2["reason"])
+
+_s3, _i3 = CORE.anchor_window_start(_a_busy, 6 * 40)
+check("0.6.28 窗 = 整段 ⇒ 没有可挪的余地（不动）",
+      _i3["repaired"] is False and _s3 == 0, "start=%d" % _s3)
+
+_a_pair = _anchor([(0.0, 0.5), (4.0, 4.5)], 5.0)           # 头尾各一小段有声
+_s4, _i4 = CORE.anchor_window_start(_a_pair, 40, min_frac=0.9)
+check("0.6.28 往前挪**不会更好** ⇒ 保持原样 + 出声（不硬挪）",
+      _i4["repaired"] is False and _s4 == 5 * 40 - 40 and "不会更好" in _i4["note"],
+      _i4["note"])
+
+_s5, _i5 = CORE.anchor_window_start(_a_pause, 37, sr=16000)
+check("0.6.28 网格长 ≠ 1 步（sr 不是 `AUDIO_HZ`）⇒ 明说不适用并保持原样（不猜）",
+      _i5["repaired"] is False and "不适用" in _i5["reason"], _i5["reason"])
+
+# 端到端：`_voice_anchor_tail` 现在返回 **4 元组**，且修好的窗里真的有话音
+_tail, _take, _raw, _win = CORE._voice_anchor_tail({"samples": _a_pause}, 22)
+_old = _a_pause[..., 5 * 40 - 37:]
+_tail_live = int((_tail.abs().amax(dim=(0, 1, 2)) > 0).sum())     # 逐**步**统计（不是逐通道）
+_old_live = int((_old.abs().amax(dim=(0, 1, 2)) > 0).sum())
+check("0.6.28 `_voice_anchor_tail` 返回 4 元组，info 带 `repaired`（旧口径会拿到停顿）",
+      _take == 37 and isinstance(_win, dict) and _win["repaired"] is True,
+      "take=%d repaired=%s" % (_take, _win.get("repaired")))
+check("0.6.28 修好的窗：**有话音**（旧口径这里过半是停顿）",
+      _tail_live >= 30 and _old_live < 20,
+      "修后 %d/37 步有信号 ｜ 旧口径 %d/37 步（%.0f%% 是停顿）"
+      % (_tail_live, _old_live, (37 - _old_live) * 100.0 / 37))
+
+# 判据单一真相源：`auto_audio_ref_seconds` 与 `anchor_window_start` 共用 `_voiced_grids`
+check("0.6.28 判据单一真相源：`_voiced_grids` 对同一素材给出同一组有声格（两处共用）",
+      len(CORE._voiced_grids(_a_pause, CORE.AUDIO_HZ)[0]) == len(CORE._voiced_grids(_a_pause, 40)[0])
+      and CORE._voiced_grids(torch.zeros(1, 1, 2, 400), 40)[5] != "",
+      "有声格 %d ｜ 静音素材 reason=%s"
+      % (len(CORE._voiced_grids(_a_pause, CORE.AUDIO_HZ)[0]),
+         CORE._voiced_grids(torch.zeros(1, 1, 2, 400), 40)[5]))
+
+# ============================================================================
+print()
+print("=" * 78)
 print("结果：通过 %d / 失败 %d" % (len(PASS), len(FAIL)))
 if FAIL:
     print("失败项：")

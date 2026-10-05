@@ -1,8 +1,8 @@
 # ComfyUI-H3-Latent-Relay
 
-<!-- EN-SYNC src=README.md stamped=2026-09-30 mode=see tools/en_sync.json -->
+<!-- EN-SYNC src=README.md stamped=2026-10-05 mode=see tools/en_sync.json -->
 
-🌐 **English (this file)** · [中文（默认 / source of truth）](README.md)
+🌐 **English** · [中文](README.md)
 
 A **latent bridge** for MiniMax-H3 multi-segment continuation — a standalone ComfyUI node pack with
 **zero third-party node-pack dependencies**. It needs only ComfyUI's own `torch` and `safetensors`, and is
@@ -10,7 +10,7 @@ not coupled to any third-party H3 node pack.
 
 | Item | Value |
 |---|---|
-| Version | **0.6.26** (8 nodes; the composite bridge `H3RelayCopyBridge` is the **only** bridge) |
+| Version | **0.6.27** |
 | License | **MIT** (third-party attribution in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) |
 | Host | **ComfyUI ≥ 0.35.0 with MiniMax-H3 support** (the host itself is GPL-3.0, see License) |
 
@@ -30,8 +30,7 @@ under `output/relay_kit/<run_id>/`). Mechanism and measurements: [`docs/01`](doc
 
 ## Core features
 
-**8 nodes in three layers — a minimal workflow only needs the first 3** (the other 5 are
-"delete-and-it-still-runs" optionals):
+**8 nodes in three layers — a minimal workflow only needs the first 3**:
 
 | Layer | Nodes | Notes |
 |---|---|---|
@@ -43,7 +42,7 @@ under `output/relay_kit/<run_id>/`). Mechanism and measurements: [`docs/01`](doc
 |---|---|
 | 🔗 **H3 Relay · Latent Save** | after sampling, writes this segment's AV latent to `output/relay_kit/<run_id>/stage_NNNNN.safetensors` |
 | 🔗 **H3 Relay · Latent Load** | reads the previous segment (stage − 1); `explicit_path` overrides the source when resuming |
-| 🔗 **H3 Relay · Copy Bridge（复合桥）** | **bit-copies** the previous segment's tail AV latent into this segment's initial latent + a noise mask (the pinned region is not re-drawn); with `[16] conditioning` connected it **also pins keyframes in parallel** (framing). `mask_mode` defaults to `hard` |
+| 🔗 **H3 Relay · Copy Bridge** | **bit-copies** the previous segment's tail AV latent into this segment's initial latent + a noise mask (the pinned region is not re-drawn); with `[16] conditioning` connected it **also pins keyframes in parallel** (framing). `mask_mode` defaults to `hard` |
 | 🔗 **H3 Relay · Trim AV** | trims the regenerated head frames (**video and audio together**) — without it the splice point replays or jumps; output `[3]` = `prev_tail` |
 | 🔗 **H3 Relay · Post** | **picture domain**: cross-segment statistics matching / low-frequency pull / tone / deconvolution / high-frequency transfer / blur-region sharpening; all off by default |
 | 🔗 **H3 Relay · Audio Seam** | **audio domain**: extends the previous segment's ambience into this segment's head, **length-preserving** (zero A/V shift); off by default |
@@ -54,7 +53,7 @@ under `output/relay_kit/<run_id>/`). Mechanism and measurements: [`docs/01`](doc
 > audio = `H3RelayAudioSeam`.
 >
 > Node labels are **English-only** since **0.6.18**; the Chinese term ↔ label mapping is in
-> [`docs/04`](docs/04-canvas-and-widgets.md) (Chinese).
+> [`docs/04`](docs/04-canvas-and-widgets_EN.md) (Chinese).
 
 ---
 
@@ -149,7 +148,7 @@ The log should show `钉住 22 帧` / `裁首 N 帧 = 钉住 22 + 沉降 0` / `�
 
 | The three most common ways to break it | Fix |
 |---|---|
-| Error "segment N cannot find the previous segment" | all **six** `run_id` values must be identical (on the canvas, editing one field auto-syncs the rest of its group; if it does not, see [`docs/05`](docs/05-troubleshooting.md)); confirm segment 1 ran |
+| Error "segment N cannot find the previous segment" | all **six** `run_id` values must be identical (on the canvas, editing one field auto-syncs the rest of its group; if it does not, see [`docs/05`](docs/05-troubleshooting_EN.md)); confirm segment 1 ran |
 | The output replays the previous segment from frame 1 | TrimAV is not connected, or its `trim_frames` is not wired to bridge `[2]` |
 | A new film picks up an old film's tail | `run_id` was not changed (same name ⇒ same file names) |
 
@@ -158,9 +157,7 @@ The log should show `钉住 22 帧` / `裁首 N 帧 = 钉住 22 + 沉降 0` / `�
 **This pack does not generate prompts and does not parse them** — the bridge and Trim AV only look at
 tensors. Only two things in the prompt affect this pack's behaviour:
 
-**① Voice anchor — the *decision* comes from the prompt, the *execution* does not**
-
-🔴 Get the relationship straight:
+**① Voice anchor — the *decision* comes from the prompt**
 
 | Step | What drives it |
 |---|---|
@@ -168,7 +165,7 @@ tensors. Only two things in the prompt affect this pack's behaviour:
 | **Deciding *who* to anchor** | the **prompt**: `<Subject N> … <d>[line]</d>` is the **only** place where "who speaks first in this segment" can be read by machine |
 | **Speaker changes inside the segment** | the prompt's `<Subject N>` (the model switches on its own) — **the anchor cannot cover this**; its window is only the seam (~0.9 s) |
 
-One command gives the verdict (no need to read prompts by hand):
+One command gives the verdict:
 
 ```bash
 python tools/voice_bank.py advise --bank <voice bank> --prompt-file segN.md --prev-file segN-1.md
@@ -176,7 +173,7 @@ python tools/voice_bank.py advise --bank <voice bank> --prompt-file segN.md --pr
 
 Rule: **the anchor is the first person who speaks in this segment**; **same speaker continuing ⇒ you need
 not connect it**, **speaker change at the seam ⇒ you must**. If ≥2 people speak in one segment the anchor
-only covers the seam — the rest is up to the prompt. Details in [`docs/07`](docs/07-chain.md) §声锚.
+only covers the seam — the rest is up to the prompt. Details in [`docs/07`](docs/07-chain_EN.md) §Voice anchor.
 
 **② Dialogue timing at the seam — three things to write by the book**
 
@@ -186,7 +183,7 @@ only covers the seam — the rest is up to the prompt. Details in [`docs/07`](do
 | **Dialogue-safe moment** | Keep dialogue away from the seam (that region gets trimmed and pinned); place it later per the formula |
 | **Last-frame anchor chain** | Segment N's last-frame state must be **copied verbatim** into segment N+1's prompt — do not just write "continue" |
 
-Mechanism, formulas and measurements: [`docs/06`](docs/06-continuity-scripting.md) (not repeated here).
+Mechanism, formulas and measurements: [`docs/06`](docs/06-continuity-scripting_EN.md).
 
 ### Minimal wiring
 
@@ -207,7 +204,7 @@ prompt node (official / third-party)
                                                            ↓
                                🔗 H3 Relay · Trim AV [0] images ← IMAGE ／ [3] audio ← VAEDecodeAudio
                                      │
-                               [1] audio (optionally via 🔗 音频缝)────→ CreateVideo → SaveVideo
+                               [1] audio (optionally via AudioSeam)────→ CreateVideo → SaveVideo
                                [0] images ────────────────────────────↗
 ```
 
@@ -215,10 +212,10 @@ prompt node (official / third-party)
 > `CreateVideo.audio`. **Wiring `VAEDecodeAudio` straight into `CreateVideo` desynchronizes A/V** — the
 > video drops the overlapping head frames while the audio keeps them, off by ~0.9 s per seam and
 > **accumulating segment by segment** (lip-sync visibly off from segment 3 on). Nodes can detect "an input
-> is unconnected"; they **cannot** detect "an output is left dangling" — this one is on you.
+> is unconnected"; they **cannot** detect "an output is left dangling".
 > Any node that **outputs `CONDITIONING` + `LATENT`** wires up the same way — just swap it in for the
 > prompt node. The production "first pass → 🔍 upscale → second pass → continuation" layout with all 8
-> nodes is in [`docs/03`](docs/03-sampling-and-design.md) §4.1.
+> nodes is in [`docs/03`](docs/03-sampling-and-design_EN.md) §4.1.
 
 ### Concatenating segments into one film
 
@@ -228,7 +225,7 @@ immediately); without the canvas:
 `python tools/concat_segments.py s1.mp4 s2.mp4 -o film.mp4` (exit 0 = four assertions passed).
 ⚠️ Do not use `ffmpeg -f concat -c copy` or `acrossfade` (measured: inflated duration / 0.25 s stolen per
 seam, accumulating). Details and audio-track levels (AAC 256k default / lossless PCM master) in
-[`docs/10`](docs/10-audio-seam-and-concat.md) §7.1.
+[`docs/10`](docs/10-audio-seam-and-concat_EN.md) §7.1.
 
 ### Cross-speaker voice timbre: voice anchor (0.6.19)
 
@@ -254,15 +251,15 @@ collect anchors automatically from already-rendered segments.
 | Anchor shorter than the window | Takes the full anchor + a `report` reminder (≥0.9 s recommended) |
 | `pin_audio=False` | The anchor is ignored and the `report` says so (degradation is visible) |
 
-**Limitations of the voice anchor (spelled out, so you do not get bitten):**
+**Limitations of the voice anchor:**
 
 | Limitation | Details |
 |---|---|
-| 🔴 **Consumes 1 "audio reference" slot** | The official reference node `MiniMaxH3ReferenceToVideo` allows at most **3** `ref_audios`; this pack **always occupies 1** whenever `stage_index >= 1` (either the anchor tail window **or** the previous segment's audio tail). Fill all 3 and the model sees **4** audio references — the model **does not complain** (it does not validate the count), but that is **outside the official envelope and untested by us**. ⚠️ **This 1 has no "use none" switch** (with no anchor wired we still use the previous segment's tail) ⇒ to free a slot you must **reduce the `ref_audio` slots on the reference node yourself**. The bridge node's **title** shows the warning on canvas, and the `report` carries the authoritative number. See [`docs/07`](docs/07-chain.md) §Audio reference budget |
+| 🔴 **Consumes 1 "audio reference" slot** | The official reference node `MiniMaxH3ReferenceToVideo` allows at most **3** `ref_audios`; this pack **always occupies 1** whenever `stage_index >= 1` (either the anchor tail window **or** the previous segment's audio tail). Fill all 3 and the model sees **4** audio references — the model **does not complain** (it does not validate the count), but that is **outside the official envelope and untested by us**. ⚠️ **This 1 has no "use none" switch** (with no anchor wired we still use the previous segment's tail) ⇒ to free a slot you must **reduce the `ref_audio` slots on the reference node yourself**. The bridge node's **title** shows the warning on canvas, and the `report` carries the authoritative number. See [`docs/07`](docs/07-chain_EN.md) §Audio reference budget |
 | **The anchor replaces the whole audio tail window** | Any BGM / ambience inside that window is replaced too. If you have a music bed, **mix it into the anchor** first |
 | **Timbre / pace / emotion are partly pinned** | The anchor is not "timbre only" — emotion and pacing follow it as well. Pick a clean clip whose **emotion matches the target line** |
-| **Multi-speaker segment: only the first is anchored** | There is exactly one `audio_ref` window ⇒ it anchors "**whoever speaks next at the seam**"; for "bring everyone" use `audio_ref_seconds` (above), to "name someone" use the official `ref_audios` slots |
-| **The automatic reference window could in principle trigger recitation** | Since 0.6.25, with no anchor wired the window is chosen automatically (2–6 s, vs 0.93 s before) ⇒ the window **is** the previous segment's dialogue. **No recitation observed in measurement** (0.93 → 4.18 s, no seg-1 content per ASR), but that is one segment, one generation — listen once on dialogue-dense material; for guaranteed-old behaviour set `audio_ref_seconds` (0.93 = old) |
+| **The seam anchors only the first; the reference window can hold several** (0.6.27) | The **pinned** stretch at the seam (= the video pin window `context_frames`, **default** 22 frames ⇒ 0.925 s, adjustable 5/22/39/…/124) always covers only "**whoever speaks next at the seam**"; the `audio_ref` **reference window** since 0.6.27 auto-sizes on the **anchor itself** (`0` ⇒ **takes the full cap**, ≤6 s) ⇒ wire a **multi-speaker recording** as the anchor and the reference holds **several speakers'** timbre. To *name* someone use the official `ref_audios` slots |
+| **The automatic reference window could in principle trigger recitation** | Since 0.6.25, with no anchor wired the window is chosen automatically (**2–6 s** — the official guideline is **2–12 s**; we align the lower bound at 2 s and **deliberately cap at 6 s**, because the reference row is sampled at every step, so longer costs more VRAM and time; vs 0.93 s before) ⇒ the window **is** the previous segment's dialogue. **No recitation observed in measurement** (0.93 → 4.18 s, 4.4×, no seg-1 content per ASR), but that is one segment, one generation — listen once on dialogue-dense material; for guaranteed-old behaviour set `audio_ref_seconds` (0.93 = old) |
 | 🟣 **Other speakers go through the official slots** | This pack anchors only the one at the seam. To give the **other speakers** a voice reference, wire their audio into the **official** `ref_audios` slots — that is the **only** path that emits a text label `<Audio j>`, which is what the prompt references (the one this pack injects is appended to the DiT side only, has **no label and cannot be referenced from the prompt**; the `report` says so). Run it through the official `TrimAudioDuration` to ~0.9 s first (reference rows ride through every sampling step — long references cost time). ⚠️ **Ordinals count wired slots in order, not slot numbers**: wire only `ref_audio_2` and it is `<Audio 1>`; writing `<Audio 3>` **resolves to nothing and reports nothing** (when slots are non-contiguous the bridge node title states the real ordinals) |
 | **Anchor length** | The tail window is 0.925 s ⇒ anchor **>= 0.9 s** (shorter: the full clip is used and the `report` warns); 1–4 s recommended |
 | 🔴 **A pause at the anchor's tail costs you timbre fidelity** | `_voice_anchor_tail` on the consumer side takes only the **last 0.925 s** of the anchor (`a_frames/FPS`) ⇒ **silence at the tail is silence the model sees** (that part of the anchor is effectively no anchor at all). `voice_bank.py` prefers spans whose tail window is fully voiced and, when it cannot, **says so in the `report` and in `voices.json`'s `tail_clean`** ("timbre condition will degrade"). Seeing that warning means **the source's continuous speech is too short** — use a longer, cleaner single-speaker clip |
@@ -278,12 +275,12 @@ audio-grid reconciliation). The anchor source must be **this segment's speaker**
 "**who speaks next at the seam**". ⇒ **the anchor is the first person who speaks in this segment**;
 **same speaker continuing ⇒ you need not connect it**, **speaker change at the seam ⇒ you must**.
 Later speaker changes inside the segment are handled by the prompt's `<Subject N>` (the anchor cannot
-and should not cover them — do not expect it to hold every voice in the segment).
-One command gives the verdict (no need to read prompts by hand):
+cover them).
 
-```bash
-python tools/voice_bank.py advise --bank <voice bank> --prompt-file segN.md --prev-file segN-1.md
-```
+📋 **Ensemble scenes (many segments, many characters, low overlap between segments)** — the full
+decision table + audio-reference budget ledger + degradation order are in
+[`docs/07`](docs/07-chain_EN.md) §Ensemble scenes: one table answers "**N people speak in this segment ⇒ how to wire
+the anchor and split the budget**".
 
 ### Other speakers' voice references: official slots + `<Audio j>` in the prompt (format rules)
 
@@ -318,34 +315,38 @@ Ordinal mapping (the **easiest and completely silent** trap):
 > ⚠️ Rules 1 and 2 are **confirmed by reading the source** (the tokenizer emits labels in enumeration order;
 > this pack appends via `conditioning_set_values`). For rule 3, **which wording works best has not been A/B
 > tested yet** — rely on rules 1 and 2. Mechanism and source references:
-> [`docs/07-chain.md`](docs/07-chain.md) §一段内多人 (Chinese).
+> [`docs/07-chain.md`](docs/07-chain_EN.md) §Several speakers in one segment.
 
-### Want segment 2 to reproduce **everyone's** voice from segment 1? Just don't wire an anchor (0.6.25)
+### Want segment 2 to reproduce **everyone's** voice? One slot is enough (0.6.25; anchors work too since 0.6.27)
 
 The route above (official slots + `<Audio j>`) is for "**naming who is who**". If what you want is
-"**bring the whole timbre over without naming anyone**" — what GG calls **multi-anchor** (**one single
-audio-reference slot**) — use `audio_ref_seconds`:
+"**bring the whole timbre over without naming anyone**" (**multi-anchor**, **one single audio-reference
+slot**) — use `audio_ref_seconds`:
 
 | | Old behaviour | Since 0.6.25 |
 |---|---|---|
-| How much audio goes in that one slot | = the video pin window (22 frames ⇒ **0.93 s** — room for the last speaker only) | **2–6 s automatically** (walks back from the previous segment's tail until 2 s of voiced content) |
+| How much audio goes in that one slot | = the video pin window (22 frames ⇒ **0.93 s** — room for the last speaker only) | **2–6 s automatically** (walks back until 2 s of voiced content; the official guideline is 2–12 s — our cap is deliberately 6 s to save VRAM and time) |
 | Slot budget | 1 | **still 1** (unchanged) |
 
 - **No number to type**: `0` = automatic, the material decides (`min_voiced_s` = 2 s of voiced, cap 6 s).
-- **Do not wire a voice anchor**: an anchor **takes over** the window length (its source is the anchor, not
-  the previous segment) ⇒ the `report` says so by name.
-- ⚠️ **Cost**: the window **is** the previous segment's dialogue ⇒ the model **could in principle recite it**.
-  **Not observed in measurement** (0.93 → 4.18 s window, no seg-1 content per ASR; the same criterion hits
-  seg-1 keywords 3/3 on control samples) — but that covers one segment, one generation. To have a prompt
-  *address* a specific person you still need the official slots above.
+- **No anchor wired** ⇒ the source is the **previous segment's audio tail** (the "everyone in segment 1" route).
+- 🔵 **An anchor works too (0.6.27)** ⇒ the source is the **anchor itself**; `0` = automatic window sized on the
+  **anchor's** voiced tail (**takes the full cap**, ≤6 s — a longer single-speaker reference holds the timbre better) ⇒ wire **your own multi-speaker recording** as the anchor
+  to "bring everyone" **without depending on who was in the previous segment**. The pinned 0.925 s at the seam
+  is **unaffected**.
+- ⚠️ **Cost**: with no anchor the window **is** the previous segment's dialogue ⇒ the model **could in principle
+  recite it**. **Not observed in measurement** (0.93 → 4.18 s window, 4.4×, no seg-1 content per ASR; the same
+  criterion hits seg-1 keywords 3/3 on control samples) — but that covers one segment, one generation.
+  (With an anchor the window is **that speaker's own speech** ⇒ far lower recitation risk.)
+  To have a prompt *address* a specific person you still need the official slots above.
 - The two routes are **complementary, not conflicting**: "bring everyone" ⇒ this parameter; "name someone"
   ⇒ official slots; "pin the timbre and own the seam" ⇒ the voice anchor.
 
 Mechanism, the division of labour between the three channels, and the measured numbers:
-[`docs/07-chain.md`](docs/07-chain.md) §一段内多人 **⑥** (Chinese).
+[`docs/07-chain.md`](docs/07-chain_EN.md) §Several speakers in one segment **⑥**.
 
 Implementation details and more (**audio-reference budget**, BGM, emotion, multi-speaker segments) in
-[`docs/07-chain.md`](docs/07-chain.md) §声锚; bundled auto-collector `tools/voice_bank.py`
+[`docs/07-chain.md`](docs/07-chain_EN.md) §Voice anchor; bundled auto-collector `tools/voice_bank.py`
 (optional ASR dialogue guard — works without funasr too).
 
 ---
@@ -363,7 +364,7 @@ ComfyUI-H3-Latent-Relay/
 ├── web/                   # front-end JS: the 🧩 concat button, Chain panel, `run_id` one-field-syncs-the-group (canvas only)
 ├── examples/              # two openable workflows: minimal continuation (21 nodes) and full flow (47 nodes)
 ├── docs/                  # deep docs 01–10 (mechanism / parameters / sampling / canvas / troubleshooting / scripting / chain / tests / metrics / audio)
-├── tests/                 # offline self-test (zero GPU): 510 assertions + V3 parity + prompt-dispatch pure functions
+├── tests/                 # offline self-test (zero GPU): 512 assertions + V3 parity + prompt-dispatch pure functions
 ├── tools/                 # self-checks / forensic tools / concat CLI / bundler (incl. the en_sync docs gate)
 ├── licenses/              # third-party license texts shipped with the pack
 ├── dist/                  # bundler output (minimal distribution set + zip; not tracked)
@@ -387,7 +388,7 @@ are actually loaded — the minimal distribution set in `dist/` is exactly those
 
 | # | Hard rule |
 |---|---|
-| 1 | **`run_id` must match character-identically across all six places** (LatentSave / bridge / LatentLoad / TrimAV / AudioSeam / Chain). **On the canvas, editing one field auto-syncs the rest of the group** (a name conflict blocks the run and lists which node holds which name — it never guesses); a script submitting JSON should write that field from a single variable (see [`docs/10`](docs/10-audio-seam-and-concat.md) §7.4). Run segments in order, **never skip** |
+| 1 | **`run_id` must match character-identically across all six places** (LatentSave / bridge / LatentLoad / TrimAV / AudioSeam / Chain). **On the canvas, editing one field auto-syncs the rest of the group** (a name conflict blocks the run and lists which node holds which name — it never guesses); a script submitting JSON should write that field from a single variable (see [`docs/10`](docs/10-audio-seam-and-concat_EN.md) §7.4). Run segments in order, **never skip** |
 | 2 | **Segment 1 needs nothing special**: the bridge passes through; `context_latent` is required — **do not unplug or bypass it** |
 | 3 | 🔴 **Audio must come from TrimAV (or AudioSeam) output**; never wire `VAEDecodeAudio` directly into the save node (~0.9 s per seam, accumulating) |
 | 4 | **`context_frames` only accepts `5+17k`** (5/22/39/56/73/90/107/124) and must be smaller than the segment length; out-of-range values **raise instead of snapping** |
@@ -398,7 +399,7 @@ are actually loaded — the minimal distribution set in `dist/` is exactly those
 | 9 | **`chunks=1` is the only path consistent with upstream whole-segment inference**: `chunks>1` **changes the picture** (3D volumetric attention is cut); raise it only under OOM and **re-check the seam** |
 | 10 | 🔴 **The continuation contract is taken in the native domain**: LatentSave goes **before** the upscale; the **second pass's guider must not connect the bridge's `conditioning`** (different grid ⇒ it explodes) |
 | 11 | `diagnostics` is off by default (three print-only passes, **no effect on trimming**); enable it for DTW / trim-amount→jump curves / appearance drift. ⚠️ The "settle 1" seen in older posts is pre-0.5.0 — **trust this page and the node reports** |
-| 12 | 🔴 **The canvas path and the script path must be the same node implementation** (see the iron rule at the top); purely front-end capabilities (the 🧩 button, Chain panel fields, **the `run_id` one-field-syncs-the-group behaviour**) **are ignored** when a script submits JSON — script users take the three non-UI paths in [`docs/10`](docs/10-audio-seam-and-concat.md) §7.4 |
+| 12 | 🔴 **The canvas path and the script path must be the same node implementation** (see the iron rule at the top); purely front-end capabilities (the 🧩 button, Chain panel fields, **the `run_id` one-field-syncs-the-group behaviour**) **are ignored** when a script submits JSON — script users take the three non-UI paths in [`docs/10`](docs/10-audio-seam-and-concat_EN.md) §7.4 |
 
 ---
 
@@ -426,7 +427,7 @@ are actually loaded — the minimal distribution set in `dist/` is exactly those
 
 ## Documentation index
 
-The Chinese documents are the source of truth; `README_EN.md` and the English `docs/01`/`docs/02` are
+The Chinese documents are the source of truth; `README_EN.md` and the English `docs/01`–`docs/10` are
 **derived artifacts**, machine-checked section by section by [`tools/en_sync.py`](tools/en_sync.py)
 (edit the Chinese source and the gate stays red until the English follows).
 
@@ -434,13 +435,13 @@ The Chinese documents are the source of truth; `README_EN.md` and the English `d
 |---|---|
 | [`docs/01-mechanism.md`](docs/01-mechanism.md) · 🇬🇧 [English](docs/01-mechanism_EN.md) | history and trade-offs of both continuation routes · protocol sources · which line stays in the native domain after upscaling · timing grid · why the head must be trimmed · runtime contract |
 | [`docs/02-parameters.md`](docs/02-parameters.md) · 🇬🇧 [English](docs/02-parameters_EN.md) | **full parameter manual** (bridge / TrimAV / Post / AudioSeam / 🔍 upscale, every `advanced` item and default) |
-| [`docs/03-sampling-and-design.md`](docs/03-sampling-and-design.md) | sampling-chain trade-offs · **§4.1 full-flow layout: all 8 nodes present** |
-| [`docs/04-canvas-and-widgets.md`](docs/04-canvas-and-widgets.md) | canvas appearance · `advanced` folding · missing `prev_tail` on older graphs |
-| [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md) | **complete troubleshooting table** · **FAQ** · workflow-file self-check · API submission |
-| [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md) | prompt-side discipline: head padding · dialogue-safe timing · last-frame anchor chaining |
-| [`docs/07-chain.md`](docs/07-chain.md) | the Chain auto-run controller (prompts / concat / resume) |
-| [`docs/08-testing.md`](docs/08-testing.md) | offline self-test: 31 assertion groups (510 assertions) · tool inventory |
-| [`docs/09-metrics.md`](docs/09-metrics.md) | reference ranges for observables (DTW residual / appearance drift) · self-calibration |
+| [`docs/03-sampling-and-design.md`](docs/03-sampling-and-design.md) · 🇬🇧 [English](docs/03-sampling-and-design_EN.md) | sampling-chain trade-offs · **§4.1 full-flow layout: all 8 nodes present** |
+| [`docs/04-canvas-and-widgets.md`](docs/04-canvas-and-widgets.md) · 🇬🇧 [English](docs/04-canvas-and-widgets_EN.md) | canvas appearance · `advanced` folding · missing `prev_tail` on older graphs |
+| [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md) · 🇬🇧 [English](docs/05-troubleshooting_EN.md) | **complete troubleshooting table** · **FAQ** · workflow-file self-check · API submission |
+| [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md) · 🇬🇧 [English](docs/06-continuity-scripting_EN.md) | prompt-side discipline: head padding · dialogue-safe timing · last-frame anchor chaining |
+| [`docs/07-chain.md`](docs/07-chain.md) · 🇬🇧 [English](docs/07-chain_EN.md) | the Chain auto-run controller (prompts / concat / resume) |
+| [`docs/08-testing.md`](docs/08-testing.md) · 🇬🇧 [English](docs/08-testing_EN.md) | offline self-test: 31 assertion groups (512 assertions) · tool inventory |
+| [`docs/09-metrics.md`](docs/09-metrics.md) · 🇬🇧 [English](docs/09-metrics_EN.md) | reference ranges for observables (DTW residual / appearance drift) · self-calibration |
 | 🇨🇳 [`docs/10-audio-seam-and-concat.md`](docs/10-audio-seam-and-concat.md) | **audio seam & multi-segment concatenation** — Chinese only for now: seam conventions and tuning guide · **dialogue protection** · criterion limits · track levels · sidecars · **script usage without the canvas** |
 | [`RELEASE-NOTES.md`](RELEASE-NOTES.md) | **user-facing release notes** (bilingual, one section per version) · **read this before upgrading** |
 | [`CHANGES.md`](CHANGES.md) | version history with the measurement evidence for each change (the **developer** record) |
@@ -449,3 +450,4 @@ The Chinese documents are the source of truth; `README_EN.md` and the English `d
 | [`SECURITY.md`](SECURITY.md) | secrets / dependencies / network behaviour disclosure |
 | [`tools/README.md`](tools/README.md) | the thirteen scripts and their expected values (nine self-check/forensic + concat CLI + bundler + **releaser** + **voice-bank collector**) |
 | [`examples/README.md`](examples/README.md) | the two openable workflows (minimal continuation 21 nodes / full flow 47 nodes) · generators |
+| [`README.md`](README.md) | **Chinese source of truth** (install / wiring / nodes / parameters / troubleshooting / FAQ) — in-depth derivations always link out to that file and `docs/` |

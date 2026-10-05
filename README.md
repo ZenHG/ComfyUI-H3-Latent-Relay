@@ -1,13 +1,13 @@
 # ComfyUI-H3-Latent-Relay
 
-🌐 **中文（本页，默认与唯一真相源）** · [English (condensed)](README_EN.md)
+🌐 **中文** · [English (condensed)](README_EN.md)
 
 MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独立使用、**零第三方节点包依赖**的 ComfyUI 节点包。
 只依赖 ComfyUI 自带的 `torch` 与 `safetensors`，不与任何第三方 H3 节点包耦合。
 
 | 项 | 值 |
 |---|---|
-| 版本 | **0.6.26**（8 个节点，复合桥 `H3RelayCopyBridge` = **唯一桥**） |
+| 版本 | **0.6.27** |
 | 许可 | **MIT**（第三方出处见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)） |
 | 宿主 | **ComfyUI ≥ 0.35.0，且带 MiniMax-H3 支持**（宿主自身为 GPL-3.0，见 §许可与出处） |
 
@@ -24,7 +24,7 @@ anchor 与采样 latent 不同源（会漂）、只能锚第 0 帧。本包直�
 
 ## 核心功能
 
-**8 个节点分三层 —— 一个最小工作流只用得到前 3 个**（后 5 个是"删掉照样跑"的可选项）：
+**8 个节点分三层 —— 一个最小工作流只用得到前 3 个**：
 
 | 层 | 节点 | 说明 |
 |---|---|---|
@@ -137,9 +137,7 @@ git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git  
 
 **本包不产出提示词、也不解析它** —— 桥与裁重叠只看张量。提示词里只有两件事会影响本包的行为：
 
-**① 声锚「该给谁」：判据在提示词，但声锚的执行不在提示词**
-
-🔴 关系先摆清：
+**① 声锚「该给谁」：判据在提示词**
 
 | 环节 | 靠什么 |
 |---|---|
@@ -147,7 +145,7 @@ git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git  
 | **「锚该给谁」的判断** | **提示词**：`<Subject N> … <d>[台词]</d>` 是**唯一**能机器读出「本段谁先开口」的地方 |
 | **段内后续换人** | **提示词**里的 `<Subject N>`（模型自己切）—— **声锚管不到**，锚窗只有缝区 ~0.9 秒 |
 
-一条命令给出判断（不用人肉读提示词）：
+一条命令给出判断：
 
 ```bash
 python tools/voice_bank.py advise --bank <声库> --prompt-file 段N.md --prev-file 段N-1.md
@@ -164,7 +162,7 @@ python tools/voice_bank.py advise --bank <声库> --prompt-file 段N.md --prev-f
 | **台词安全时刻** | 台词不要贴着缝（缝区会被裁、被钉），按公式往后放 |
 | **末帧锚链** | 段 N 的末帧状态要在段 N+1 的出词里**逐字复写**，别只写"继续" |
 
-机制、公式与实测见 [`docs/06`](docs/06-continuity-scripting.md)（本文不重复）。
+机制、公式与实测见 [`docs/06`](docs/06-continuity-scripting.md)。
 
 ### 最小接线
 
@@ -192,7 +190,7 @@ python tools/voice_bank.py advise --bank <声库> --prompt-file 段N.md --prev-f
 > 🔴 **音频线只有一条是对的**：`裁重叠 [1] audio`（或再经 `音频缝 [0] audio`）→ `CreateVideo.audio`。
 > **直接把 `VAEDecodeAudio` 接到 `CreateVideo` 会音画不同步** —— 画面裁了头部重叠帧、音频没裁，
 > 每缝差 ~0.9 s 且**逐段累积**（第 3 段起口型明显对不上）。节点只能发现"输入没接"，
-> **发现不了"输出被悬空"**，这条得自己盯住。
+> **发现不了"输出被悬空"**。
 > 只要某节点**输出 `CONDITIONING` + `LATENT`**，接法就一样 —— 把它替掉图里的出词节点即可。
 > 产线现役的「一采 → 🔍 放大 → 二采 → 续接」8 节点全接法见 [`docs/03`](docs/03-sampling-and-design.md) §4.1。
 
@@ -224,15 +222,15 @@ python tools/voice_bank.py advise --bank <声库> --prompt-file 段N.md --prev-f
 | 锚比窗口短 | 取锚全长 + `report` 提醒（建议 ≥0.9 秒） |
 | `pin_audio=False` | 声锚被忽略，`report` 里写明（降级可见） |
 
-**声锚的局限（逐条说清，别踩）**：
+**声锚的局限**：
 
 | 局限 | 说明 |
 |---|---|
 | 🔴 **占用 1 个「音频参考」额度** | 官方参考节点 `MiniMaxH3ReferenceToVideo` 的 `ref_audios` 上限是 **3 个**；本包在 `stage_index ≥ 1` 时**恒定占 1 个**（声锚尾窗 **或** 上一段音频尾，二选一）。你把这 3 个填满 ⇒ 模型侧看到 **4 个**音频参考 —— 模型**不报错**（它对个数不做校验），但**超出官方口径、我们未实测**。⚠️ **本包这 1 个没有「完全不用」的开关**（不接声锚时用的是上一段音频尾）⇒ 要腾额度只能**自己减少参考节点的 `ref_audio` 槽位**。画布上桥节点的**标题**会直接挂警告，`report` 里给权威数字。详见 [`docs/07`](docs/07-chain.md) §音频参考额度 |
 | **锚替换整个音频尾窗** | 尾窗里的 BGM / 环境垫乐也会被换掉。有垫乐就**把垫乐混进声锚**再接 |
 | **音色 / 语速 / 情绪会被部分钉住** | 锚不是「只偷音色」—— 情绪与节奏也会跟随。请选与目标台词**情绪相近**的干净片段 |
-| **一段内多人只锚第一个** | `audio_ref` 只有一个窗 ⇒ 只锚「缝上接着说的那个人」；想「一带多人」用 `audio_ref_seconds`（见上），想「指名某人」用官方 `ref_audios` 槽 |
-| **自动参考窗理论上可能触发复述** | 0.6.25 起不接声锚时窗长自动（2~6 秒，比旧口径 0.93 秒长）⇒ 窗里**是上一段的台词**，模型**理论上可能复述**。**实测（窗 0.93→4.18 秒，4.4×）未观察到复述**，但只覆盖一段素材一次生成 —— 台词密集的素材请自己听一遍；要绝对稳妥就填 `audio_ref_seconds`（0.93 = 旧行为） |
+| **缝区只锚第一个，参考窗可含多人**（0.6.27） | 缝区**钉住**的那一段（= 视频钉住窗 `context_frames`，**默认** 22 帧 ⇒ 0.925 秒；可调 5/22/39/…/124）恒只覆盖「缝上接着说的那个人」；而 `audio_ref` **参考窗** 0.6.27 起 `0` = **按声锚自身自动定长**（**取满上限** ≤6 秒）⇒ 接一段**多人录音**当锚，参考里就含**多个说话人**的音色。想「指名某人」用官方 `ref_audios` 槽 |
+| **自动参考窗理论上可能触发复述** | 0.6.25 起不接声锚时窗长自动（**2~6 秒** —— 官方建议 **2~12 秒**，本包下限对齐官方 2 s、**上限故意取 6 s**：参考行随每步采样，更长更吃显存也更慢；比旧口径 0.93 秒长）⇒ 窗里**是上一段的台词**，模型**理论上可能复述**。**实测（窗 0.93→4.18 秒，4.4×）未观察到复述**，但只覆盖一段素材一次生成 —— 台词密集的素材请自己听一遍；要绝对稳妥就填 `audio_ref_seconds`（0.93 = 旧行为） |
 | 🟣 **其余人的参考要走官方槽** | 本包只锚缝区那 1 个。要让**其余说话人**也有声音参考，把他们的音频接**官方** `ref_audios` 槽 —— **只有官方那条路会生成文本标签 `<Audio j>`**，prompt 才引用得到（本包注入的那 1 个是事后追加到 DiT 侧的，**没有标签、prompt 引不到它**，`report` 会写明）。先接官方 `TrimAudioDuration` 裁到 ~0.9 s（参考行随每一步采样，长参考=慢）。⚠️ **编号按「已接线顺序」数，不是槽号**：只接了 `ref_audio_2` 时它是 `<Audio 1>`，照槽号写 `<Audio 3>` 会**指空且不报错**（槽位跳号时桥节点标题会直接写出实际编号） |
 | **声锚时长** | 尾窗要 0.925 秒 ⇒ 锚 **≥0.9 秒**（短了按全长取用并在 `report` 提醒）；建议 1–4 秒 |
 | 🔴 **锚的尾部有停顿 ⇒ 音色条件打折** | 消费端 `_voice_anchor_tail` 只取锚的**尾部 0.925 秒**（`a_frames/FPS`）⇒ **锚的尾部静音等于那部分没锚**（模型只拿到静音）。`voice_bank.py` 采集时会择优让尾部全程有声，采不到就在 `report` 与 `voices.json` 的 `tail_clean` 里**点名「音色条件会打折」** —— 遇到这条提示说明**素材连续人声太短**，换更长更干净的单人素材 |
@@ -245,12 +243,10 @@ python tools/voice_bank.py advise --bank <声库> --prompt-file 段N.md --prev-f
 
 🔵 **一段里有多个人说话怎么办**：锚回答的问题**只有一个** —— 「**缝上接着说的那个人是谁**」。
 ⇒ **锚 = 本段第一个开口说话的人**；**同人续接不必接**、**缝上换人才必须接**；
-段内后续换人由 prompt 的 `<Subject N>` 决定（锚管不到、也不该管 —— 别指望它管住整段每个人）。
-判据一条命令（不用人肉读 prompt）：
+段内后续换人由 prompt 的 `<Subject N>` 决定（锚管不到）。
 
-```bash
-python tools/voice_bank.py advise --bank <声库> --prompt-file 段N.md --prev-file 段N-1.md
-```
+📋 **群像戏（跑很多段、角色很多、每段重合度都低）的完整决策表 + 额度账本 + 降级路径**见
+[`docs/07`](docs/07-chain.md) §群像戏 —— 一张表回答「本段有 N 个人说话 ⇒ 锚怎么接、额度怎么分」。
 
 ### 其余人的声音参考：走官方槽 + prompt 里的 `<Audio j>`（有格式要求）
 
@@ -281,19 +277,22 @@ python tools/voice_bank.py advise --bank <声库> --prompt-file 段N.md --prev-f
 > 要求 3 的「**措辞怎么写在效果上最好**」我们**还没做 A/B 实测** —— 编号与「引不到」两条可以直接依赖。
 > 原理与源码出处：[`docs/07-chain.md`](docs/07-chain.md) §一段内多人。
 
-### 想要「段 2 复刻段 1 里**所有人**的音色」？不接声锚就行（0.6.25）
+### 想要「段 2 复刻**所有人**的音色」？一个槽就够（0.6.25；0.6.27 起声锚也支持）
 
 上面那条路（官方槽 + `<Audio j>`）是「**指定谁是谁**」。如果你要的是「**不指定、一整个音色都带过来**」
-—— 也就是 GG 说的**多锚**（**只占一个音频参考槽**）—— 用 `audio_ref_seconds`：
+（**多锚**，**只占一个音频参考槽**）—— 用 `audio_ref_seconds`：
 
 | | 旧口径 | 0.6.25 起 |
 |---|---|---|
-| 那个参考槽里装多长 | = 视频钉住窗（22 帧 ⇒ **0.93 秒**，只装得下最后一个人） | **自动 2~6 秒**（从上一段尾部往前累计够 2 秒有声） |
+| 那个参考槽里装多长 | = 视频钉住窗（22 帧 ⇒ **0.93 秒**，只装得下最后一个人） | **自动 2~6 秒**（从上一段尾部往前累计够 2 秒有声；官方建议 2~12 秒，本包上限故意取 6 s 省显存与速度） |
 | 额度占用 | 1 个 | **仍是 1 个**（不变） |
 
 - **不用手填秒数**：`0` = 自动，素材自己说话（`min_voiced_s=2` 秒有声 / 上限 6 秒）。
-- **不接声锚**：声锚会**接管**窗长（原料变成声锚，长度不由上一段决定）⇒ report 会点名。
-- ⚠️ **代价**：窗里**就是上一段的台词** ⇒ 模型**理论上可能复述**。**实测未观察到**（4.4× 窗长下 ASR 无 seg1 内容），但只一段素材一次生成。
+- **不接声锚** ⇒ 原料 = **上一段音频尾**（「上一段里所有人」那条路）。
+- 🔵 **接了声锚也行（0.6.27）** ⇒ 原料 = **声锚自身**，`0` = 自动按**声锚**的有声尾巴定长（**取满上限** ≤6 秒 —— 单人参考越长、音色保持越好）
+  ⇒ 把**你自己的多人录音**接进声锚就能「一带多人」，**不必依赖上一段有谁**。缝区钉住的那 0.925 秒**不受影响**。
+- ⚠️ **代价**：不接声锚时窗里**就是上一段的台词** ⇒ 模型**理论上可能复述**。**实测未观察到**（4.4× 窗长下 ASR 无 seg1 内容），但只一段素材一次生成。
+  （接声锚时窗里是**该说话人自己的语音** ⇒ 复述风险远低于上一段台词。）
   想要"可被 prompt 指名到某个人"仍然只能用上面的官方槽那条路。
 - 两条通道**互补不冲突**：要「一带多人」用本项；要「指名某人」用官方槽；要「音色钉死 + 管住缝区」用声锚。
 
@@ -318,7 +317,7 @@ ComfyUI-H3-Latent-Relay/
 ├── web/                   # 前端 JS：🧩 拼接按钮、Chain 面板、`run_id` 一处改全组（画布用；脚本用户见 docs/10 §7.4）
 ├── examples/              # 两个可直接打开的工作流：最小续接（21 节点）与全流程（47 节点）
 ├── docs/                  # 深度文档 01–10（原理 / 参数 / 采样链 / 画布 / 排障 / 脚本 / Chain / 测试 / 观测 / 音频）
-├── tests/                 # 离线自测（零 GPU）：510 项断言 + V3 逐字段 + 词分发纯函数
+├── tests/                 # 离线自测（零 GPU）：512 项断言 + V3 逐字段 + 词分发纯函数
 ├── tools/                 # 自检 / 取证 / 拼接 CLI / 打包器（含英文文档同步闸 en_sync.py）
 ├── licenses/              # 随包分发的第三方许可全文
 ├── dist/                  # 打包器的产出（最小分发集 + zip，不入库）
@@ -374,21 +373,21 @@ ComfyUI-H3-Latent-Relay/
 
 ## 文档索引
 
-中文文档是唯一真相源；`README_EN.md` 与 `docs/01·02` 的英文版是**派生物**，由
+中文文档是唯一真相源；`README_EN.md` 与 `docs/01–10` 的英文版是**派生物**，由
 [`tools/en_sync.py`](tools/en_sync.py) 按节机检同步（改了中文必须同步英文，否则门槛红）。
 
 | 文档 | 内容 |
 |---|---|
 | [`docs/01-mechanism.md`](docs/01-mechanism.md) · 🇬🇧 [`_EN`](docs/01-mechanism_EN.md) | 两条续接路线的历史与取舍 · 协议出处 · 放大之后哪条线留在原生域 · 时序网格 · 为什么必须裁头 · 运行时契约 |
 | [`docs/02-parameters.md`](docs/02-parameters.md) · 🇬🇧 [`_EN`](docs/02-parameters_EN.md) | **参数全量手册**（桥 / 裁重叠 / Post / 音频缝 / 🔍 放大，含每个 advanced 项与默认值） |
-| [`docs/03-sampling-and-design.md`](docs/03-sampling-and-design.md) | 采样链取舍（该量的不让用户配）· **§4.1 全流程档：8 节点全在场** |
-| [`docs/04-canvas-and-widgets.md`](docs/04-canvas-and-widgets.md) | 画布外观 · `advanced` 折叠 · 旧图看不到 `prev_tail` 的处理 |
-| [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md) | **完整排障表** · **常见疑问 FAQ** · 工作流文件自检 · API 提交 |
-| [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md) | 出词纪律：段首缓冲 · 台词安全时刻 · 末帧锚链 · 音频缝配套 |
-| [`docs/07-chain.md`](docs/07-chain.md) | Chain 自动连跑（换词 / 拼片 / 断点续跑） |
-| [`docs/08-testing.md`](docs/08-testing.md) | 离线自测：31 组断言明细（510 项）· 工具清单 |
-| [`docs/09-metrics.md`](docs/09-metrics.md) | 观测量参考区间（DTW 残留 / 外观漂移）· 怎么自校准 |
-| [`docs/10-audio-seam-and-concat.md`](docs/10-audio-seam-and-concat.md) | **音频缝与多段拼接**：缝的口径与调参指南 · **台词保护** · 判据能力边界 · 音轨档位 · 边车 · **不开画布的脚本用法** |
+| [`docs/03-sampling-and-design.md`](docs/03-sampling-and-design.md) · 🇬🇧 [`_EN`](docs/03-sampling-and-design_EN.md) | 采样链取舍（该量的不让用户配）· **§4.1 全流程档：8 节点全在场** |
+| [`docs/04-canvas-and-widgets.md`](docs/04-canvas-and-widgets.md) · 🇬🇧 [`_EN`](docs/04-canvas-and-widgets_EN.md) | 画布外观 · `advanced` 折叠 · 旧图看不到 `prev_tail` 的处理 |
+| [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md) · 🇬🇧 [`_EN`](docs/05-troubleshooting_EN.md) | **完整排障表** · **常见疑问 FAQ** · 工作流文件自检 · API 提交 |
+| [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md) · 🇬🇧 [`_EN`](docs/06-continuity-scripting_EN.md) | 出词纪律：段首缓冲 · 台词安全时刻 · 末帧锚链 · 音频缝配套 |
+| [`docs/07-chain.md`](docs/07-chain.md) · 🇬🇧 [`_EN`](docs/07-chain_EN.md) | Chain 自动连跑（换词 / 拼片 / 断点续跑） |
+| [`docs/08-testing.md`](docs/08-testing.md) · 🇬🇧 [`_EN`](docs/08-testing_EN.md) | 离线自测：31 组断言明细（512 项）· 工具清单 |
+| [`docs/09-metrics.md`](docs/09-metrics.md) · 🇬🇧 [`_EN`](docs/09-metrics_EN.md) | 观测量参考区间（DTW 残留 / 外观漂移）· 怎么自校准 |
+| [`docs/10-audio-seam-and-concat.md`](docs/10-audio-seam-and-concat.md) · 🇬🇧 [`_EN`](docs/10-audio-seam-and-concat_EN.md) | **音频缝与多段拼接**：缝的口径与调参指南 · **台词保护** · 判据能力边界 · 音轨档位 · 边车 · **不开画布的脚本用法** |
 | [`RELEASE-NOTES.md`](RELEASE-NOTES.md) | **面向用户的发布说明**（中英双语，一版一节）· **升级前先看这个** |
 | [`CHANGES.md`](CHANGES.md) | 版本史与每次实测证据（**开发者记录**，细节更全） |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 开发环境 · 自测纪律 · **英文文档同步纪律** · 许可条款 |

@@ -300,6 +300,15 @@ def audio_tail_from_latent(
 
 
 #: 音频参考窗**自动**算法的阈值（0.6.25）。语义见 `auto_audio_ref_seconds`。
+#:
+#: 🔵 **官方口径：音频参考建议 2~12 秒**（本仓作者 2026-10-06 确认）。本包这两个数**故意**这样取：
+#:   · `MIN_VOICED_S = 2.0` —— **对齐官方下限**（"从尾往前累计够 2 秒**有声**内容就停"的起步量）。
+#:   · `MAX_S = 6.0` —— **低于官方上限 12 秒**，理由两条，都不是"音色不需要更长"：
+#:     ① 参考行是 `PackedLayout` 里的**常驻行**、随**每一步采样**参与 ⇒ 越长越吃**显存**；
+#:     ② 同一机制决定**速度**（report 文案原文：「参考行随每一步采样，长参考=慢」）。
+#:     ⇒ 取 6 s 是"音色够用"与"显存/速度"的**折中**，不是官方建议值。
+#:   ⇒ 想要更长：显式填 `audio_ref_seconds`（本包不拦，代价由使用者承担）；官方上限 12 s 也在此列。
+#: ⚠️ 改这两个默认值前先读 `auto_audio_ref_seconds` 与 `AUDIO_REF_VOICE_REL` 处的横评实测。
 AUDIO_REF_MIN_VOICED_S: float = 2.0
 AUDIO_REF_MAX_S: float = 6.0
 #: 「有声」判据 = `P99(每格 RMS 的一阶差分) × 本值` —— **相对量**（2026-10-04 的教训：
@@ -321,22 +330,21 @@ AUDIO_REF_MAX_S: float = 6.0
 AUDIO_REF_VOICE_REL: float = 0.20
 
 
-def auto_audio_ref_seconds(wf: Any, sr: int,
-                           min_voiced_s: float = AUDIO_REF_MIN_VOICED_S,
-                           max_s: float = AUDIO_REF_MAX_S) -> Tuple[float, Dict[str, Any]]:
-    """**自动**决定音频参考窗长（秒）—— 让素材自己说话，而不是让人猜一个数。
+def _voiced_grids(wf: Any, sr: int) -> Tuple[Any, int, int, float, float, str]:
+    """算「有声格」下标 —— **本文件唯一的有声判据**（单一真相源）。
 
-    🔵 **为什么自动**（0.6.25，GG 的原话：「参考音频的时长太短会对下一段音色还原度不足」）：
-       手填秒数是在**两个坏结果之间猜** —— 填短了音色还原不足；填长了模型可能**复述**
-       上一段的台词（参考音频里就是那些台词，见 `plan_relay` 的 `audio_ref_seconds`）。
-       本函数把「该多长」交给素材回答：**从上一段尾部往前，累计够 `min_voiced_s` 秒的
-       有声内容就停**，`max_s` 封顶。
+    判据 = 每格 RMS 的**一阶差分** > `P99(差分) × AUDIO_REF_VOICE_REL`。
 
-    🔵 **判据全是相对量**（`P99(每格 RMS 的一阶差分) × AUDIO_REF_VOICE_REL`）⇒ 与素材绝对
-       电平无关。为什么是 P99 而不是 P50 / max，见 `AUDIO_REF_VOICE_REL` 的横评实测。
+    返回 ``(idx, n1, w1, thr, peak, reason)``：
 
-    返回 ``(秒数, 明细)``。**明细要进 `plan.notes``**（铁律 15）——
-    否则用户无法判断「自动」是按什么定的，也就无法信任它。
+      · ``idx``     有声格下标（numpy int 数组，升序）；判不了时是**空数组**
+      · ``n1``      格数（``n // w1``）｜ ``w1`` 每格样本数 ｜ ``thr`` 用的阈值
+      · ``peak``    每格 RMS 的峰值（给「绝对静音」那道**物理**闸用）
+      · ``reason``  **空字符串 = 判据可用**；非空 = 为什么用不了（**不准静默当"安静"**）
+
+    🔴 **为什么抽成本函数**（2026-10-05）：`auto_audio_ref_seconds`（原料 = 上一段音频尾）
+       与 `anchor_window_start`（原料 = 声锚）**必须**用同一套判据 —— 两处各写一份就是
+       "改一处漏一处"的经典病（本仓明文禁止）。本函数是**纯提取**，数值与失败分支逐字保留。
     """
     import numpy as np
 
@@ -348,26 +356,25 @@ def auto_audio_ref_seconds(wf: Any, sr: int,
         _c *= _d
     _wf = wf.reshape(_c, _t) if _c else wf.reshape(1, _t)
     n = _t
-    empty: Dict[str, Any] = {"grids": 0, "voiced_grids": 0, "threshold": 0.0,
-                             "clipped": False, "reason": "素材太短"}
+    _none = np.zeros(0, dtype=np.int64)
     # 🔴 `sr <= 0` 会让 `int(0.001 * sr)` 之后的 `_gps = sr / w1` **除零** ⇒ 显式挡掉
     #    （病态输入不该炸链，也不该静默给一个数）。
     if n <= 0 or int(sr) <= 0:
-        return 0.0, dict(empty, reason="采样率或长度为 0 ⇒ 无从判断")
+        return _none, 0, 1, 0.0, 0.0, "采样率或长度为 0 ⇒ 无从判断"
     w1 = max(1, int(0.001 * int(sr)))
     n1 = n // w1
-    empty["grids"] = int(n1)
     if n1 <= 1:
-        return 0.0, empty
+        return _none, int(n1), int(w1), 0.0, 0.0, "素材太短"
     x = _wf.detach().to(torch.float32)
     # 🔴 **非有限输入 fail-closed**（与 `declick_transients` 同款纪律，2026-10-04）：
     #    含 NaN/Inf 时 `quantile` 返回 NaN ⇒ 阈值 NaN ⇒ 后面一律落空，而"落空"会被
     #    读成"素材很安静" ⇒ **静默降级**。这里显式判掉，并说清是哪一种。
     if not bool(torch.isfinite(x).all()):
-        return 0.0, dict(empty, reason="音频含 NaN/Inf ⇒ 拒绝据此决定窗长")
+        return _none, int(n1), int(w1), 0.0, 0.0, "音频含 NaN/Inf ⇒ 拒绝据此决定窗长"
     t = x[..., :n1 * w1].reshape(int(x.shape[0]), n1, w1)
     rms = (t ** 2).mean(dim=2).sqrt().max(dim=0).values       # 每格 RMS，跨声道取最大
     r = rms.detach().to("cpu").numpy()
+    peak = float(np.max(r))
     # 🔴 判据必须用**一阶差分**而不是 RMS（2026-10-24 实测踩出来的）：真实路径拿到的是
     #    **VAE 音频 latent，不是波形** —— latent 经过归一化，**静音段的 RMS 与语音段同量级**
     #    ⇒ 用 `RMS > P50×N` 判，真实素材上得到「有声格 = 0、阈值 0.00000」**整段判不出声音**。
@@ -379,10 +386,35 @@ def auto_audio_ref_seconds(wf: Any, sr: int,
     thr = float(np.quantile(d, 0.99)) * float(AUDIO_REF_VOICE_REL)
     idx = np.flatnonzero(d > thr)                              # 有声格（升序）
     if not len(idx):
-        return 0.0, dict(empty, reason="整段低于有声阈值（静默素材）⇒ 不给参考")
+        return _none, int(n1), int(w1), thr, peak, "整段低于有声阈值（静默素材）⇒ 不给参考"
+    return idx, int(n1), int(w1), thr, peak, ""
+
+
+def auto_audio_ref_seconds(wf: Any, sr: int,
+                           min_voiced_s: float = AUDIO_REF_MIN_VOICED_S,
+                           max_s: float = AUDIO_REF_MAX_S) -> Tuple[float, Dict[str, Any]]:
+    """**自动**决定音频参考窗长（秒）—— 让素材自己说话，而不是让人猜一个数。
+
+    🔵 **为什么自动**（0.6.25，本仓作者 的原话：「参考音频的时长太短会对下一段音色还原度不足」）：
+       手填秒数是在**两个坏结果之间猜** —— 填短了音色还原不足；填长了模型可能**复述**
+       上一段的台词（参考音频里就是那些台词，见 `plan_relay` 的 `audio_ref_seconds`）。
+       本函数把「该多长」交给素材回答：**从上一段尾部往前，累计够 `min_voiced_s` 秒的
+       有声内容就停**，`max_s` 封顶。
+
+    🔵 **判据全是相对量**（`P99(每格 RMS 的一阶差分) × AUDIO_REF_VOICE_REL`）⇒ 与素材绝对
+       电平无关。为什么是 P99 而不是 P50 / max，见 `AUDIO_REF_VOICE_REL` 的横评实测。
+
+    返回 ``(秒数, 明细)``。**明细要进 `plan.notes``**（铁律 15）——
+    否则用户无法判断「自动」是按什么定的，也就无法信任它。
+    """
+    idx, n1, w1, thr, peak, _reason = _voiced_grids(wf, sr)
+    empty: Dict[str, Any] = {"grids": int(n1), "voiced_grids": 0, "threshold": float(thr),
+                             "clipped": False, "reason": "素材太短"}
+    if _reason:
+        return 0.0, dict(empty, reason=_reason)
     # 🔴 **绝对静音**是物理事实、不是相对判断（上面所有判据都是相对量）⇒ 单独一道：
     #    峰值 < 1e-6（−120 dBFS）时，参考窗里**没有任何音色信息**，给了只是噪声。
-    if float(np.max(r)) < 1e-6:
+    if float(peak) < 1e-6:
         return 0.0, dict(empty, reason="整段近乎无声（峰值 < 1e-6）⇒ 不给参考")
     # ⚠️ **格长不是恒等于 1 ms**：`w1 = max(1, int(0.001*sr))`，而 latent 路的 `sr` 是
     #    **AUDIO_HZ = 40** ⇒ `int(0.04) = 0` ⇒ 被 `max` 兜成 **1** ⇒ **1 格 = 25 ms**。
@@ -395,7 +427,7 @@ def auto_audio_ref_seconds(wf: Any, sr: int,
     clipped = bool(sec > float(max_s))
     if clipped:
         sec = float(max_s)
-    return sec, {"grids": int(n1), "voiced_grids": int(len(idx)), "threshold": thr,
+    return sec, {"grids": int(n1), "voiced_grids": int(len(idx)), "threshold": float(thr),
                  "clipped": clipped, "reason": ""}
 
 
@@ -433,6 +465,20 @@ class RelayPlan:
         )
         return line
 
+
+#: 声锚尾窗的**有声中占比下限** —— 低于它 ⇒ 这个窗里大部分不是人声 ⇒ 试用「往前挪」修。
+#:
+#: 🔵 为什么（2026-10-05，动机与实测见 `anchor_window_start` 的 docstring）：
+#:    `_voice_anchor_tail` 一直**盲取文件尾**；而 `auto_audio_ref_seconds` 算长度时是
+#:    `sec = (n1 - start) / _gps` —— **一直算到文件末尾** ⇒ 素材末尾有停顿时**停顿留在窗里**。
+#:    生产声库实测三段**全部** `tail_clean=false`（尾部 0.925 s 含停顿）。
+#:    前沿共识是「参考要落在**真实语音**上」（CosyVoice 先做静音检测再取关键片段）；
+#:    而 pin 是**硬约束**（钉进输出流头部）⇒ 把它钉成静音，比软条件不准更糟。
+#: ⚠️ **「尾部有停顿」本身不是 bug**（那等于自然句末）⇒ 本闸只治**窗里大部分不是人声**。
+ANCHOR_VOICED_MIN_FRAC: float = 0.5
+#: 往前挪之后，窗的终点落在「最后一个有声格」之后**留多少余量**（秒）—— 给自然收音留一点。
+#: 取 0.10 s：够盖住句末的短促收音，又短到不会把下一个人的话头拉进来。
+ANCHOR_VOICED_MARGIN_S: float = 0.10
 
 #: 声锚尾窗的**时域标准差下限** —— 低于它 = 这个锚没有内容（静音 / 常量 / 空）。
 #:
@@ -479,12 +525,84 @@ def _voice_anchor_audio(voice_anchor: Any) -> torch.Tensor:
     return a
 
 
-def _voice_anchor_tail(voice_anchor: Any, a_frames: int) -> Tuple[torch.Tensor, int, float]:
-    """切声锚的尾窗，返回 ``(tail, take, raw_steps)``。
+def anchor_window_start(a: torch.Tensor, take: int, *,
+                        sr: float = AUDIO_HZ,
+                        min_frac: float = ANCHOR_VOICED_MIN_FRAC,
+                        margin_s: float = ANCHOR_VOICED_MARGIN_S) -> Tuple[int, Dict[str, Any]]:
+    """声锚尾窗的**起点**：默认「文件尾往前 `take` 步」；窗里大部分不是人声时**往前挪**。
+
+    返回 ``(start, info)``。info 键：`repaired` / `voiced_frac` / `frac_before` /
+    `last_voiced` / `reason` / `note` / `grids` / `voiced_grids`。
+
+    为什么要有它（2026-10-05）：动机与实测见 `ANCHOR_VOICED_MIN_FRAC` 的注释。
+
+    纪律（三条，都是"别把修复变成新的不确定性"）：
+
+    · **只在真的更好时才动** —— 挪完之后的有声中占比必须**严格变大**；否则保持原样。
+      素材正常时（窗里大部分是人声）**逐位同旧版**。
+    · **判不出有声格**（静默 / 含 NaN/Inf / 太短）⇒ **不动**，把 `reason` 交给调用方；
+      真正的坏锚（常量场）仍由 `VOICE_ANCHOR_MIN_STD` 那道闸挡住。
+    · **不 raise** —— 这里只做修复与报告。新加硬闸会把"以前能跑"的配置变成炸链。
+    """
+    total = int(a.shape[-1])
+    take = int(take)
+    info: Dict[str, Any] = {"repaired": False, "voiced_frac": 0.0, "frac_before": 0.0,
+                            "last_voiced": -1, "reason": "", "note": "",
+                            "grids": 0, "voiced_grids": 0}
+    default = max(0, total - take)
+    if take <= 0 or take >= total:
+        return default, info                      # 窗 = 整段 ⇒ 没有"挪"的余地
+    idx, n1, w1, _thr, _peak, reason = _voiced_grids(a, sr)
+    info["grids"] = int(n1)
+    info["voiced_grids"] = int(len(idx))
+    if reason:
+        info["reason"] = reason
+        return default, info
+    # ⚠️ 本函数只用于**音频 latent**（`sr = AUDIO_HZ = 40`）⇒ `w1 = max(1, int(0.04)) = 1`
+    #    ⇒ **1 格 = 1 步**，网格下标与步下标可以直接比。换别的 sr 之前先复核这一行。
+    if int(w1) != 1:
+        info["reason"] = "网格长 ≠ 1 步（sr=%s）⇒ 本函数不适用，保持原样" % sr
+        return default, info
+    _in_win = int(((idx >= default) & (idx < default + take)).sum())
+    info["frac_before"] = float(_in_win) / float(take)
+    info["voiced_frac"] = info["frac_before"]
+    if info["frac_before"] >= float(min_frac):
+        return default, info                      # ✅ 窗里大部分是人声 ⇒ **不动**（逐位同旧版）
+    last = int(idx[-1])
+    info["last_voiced"] = last
+    margin = max(0, int(round(float(margin_s) * float(sr))))
+    start = max(0, min(total - take, last + 1 + margin - take))
+    if start == default:
+        info["note"] = ("⚠ 声锚尾窗里只有 %.0f%% 是人声（但没有可挪的余地 ⇒ 保持原样）"
+                        % (info["frac_before"] * 100.0))
+        return default, info
+    after = float(int(((idx >= start) & (idx < start + take)).sum())) / float(take)
+    info["voiced_frac"] = after
+    if after <= info["frac_before"]:
+        info["note"] = ("⚠ 声锚尾窗里只有 %.0f%% 是人声（往前挪不会更好 ⇒ 保持原样）"
+                        % (info["frac_before"] * 100.0))
+        return default, info
+    info["repaired"] = True
+    info["note"] = ("🔧 声锚尾窗里原本只有 %.0f%% 是人声 ⇒ 终点吸附到「最后一个有声格 + %.2f s」，"
+                    "挪到 %.0f%%（原来钉进去的**大部分是停顿**）"
+                    % (info["frac_before"] * 100.0, float(margin_s), after * 100.0))
+    return start, info
+
+
+def _voice_anchor_tail(voice_anchor: Any, a_frames: int
+                       ) -> Tuple[torch.Tensor, int, float, Dict[str, Any]]:
+    """切声锚的尾窗，返回 ``(tail, take, raw_steps, win_info)``。
 
     取窗逻辑与 ``audio_tail_from_latent`` 相同（向上拓宽到整步、要多少给多少），
     但**直接作用于音频张量** —— 不走 ``audio_from_latent``（那会把 VAEEncodeAudio
     的纯音频 latent 误判成 video-only）。
+
+    🆕 **0.6.28：窗里大部分不是人声时往前挪**（`anchor_window_start`）。
+    旧口径是 **盲取文件尾**（`narrow(-1, total-take, take)`），而 `auto_audio_ref_seconds`
+    算长度时是 `sec = (n1 - start) / _gps` —— **一直算到文件末尾** ⇒ 素材末尾有停顿时
+    **停顿留在窗里**。生产声库实测三段全部 `tail_clean=false`（尾部 0.925 s 含停顿）。
+    ⇒ pin 是**硬约束**（钉进输出流头部），把"已说过的声音"钉成静音，比软条件不准更糟。
+    ⚠️ 「尾部有停顿」**本身不是 bug**（= 自然句末）⇒ 本闸只治**窗里大部分不是人声**。
 
     🔴 **内容守卫（0.6.20 补）**：切出来的尾窗还要过一道 fail-closed 检查 ——
     含 `NaN/Inf`、或**时域标准差 < `VOICE_ANCHOR_MIN_STD`**（= 常量场 ⇒ 静音/空锚）一律 raise。
@@ -500,7 +618,8 @@ def _voice_anchor_tail(voice_anchor: Any, a_frames: int) -> Tuple[torch.Tensor, 
     take = min(want, total_t)
     if take < 1:
         raise ValueError("声锚音频为空（总长 %d 步）。" % total_t)
-    tail = a[:1].narrow(-1, total_t - take, take).clone()
+    _start, _win = anchor_window_start(a, take)
+    tail = a[:1].narrow(-1, _start, take).clone()
     if not bool(torch.isfinite(tail).all()):
         raise ValueError(
             "声锚含 NaN/Inf —— 不是可用的音频 latent。请检查上游（LoadAudio → VAEEncodeAudio）。")
@@ -519,7 +638,7 @@ def _voice_anchor_tail(voice_anchor: Any, a_frames: int) -> Tuple[torch.Tensor, 
             "    · 想**关掉**声锚 ⇒ 把 `voice_anchor` 这根线**拔掉**（不接 = 逐位同旧版），"
             "不要接一个空的 latent。"
             % (take, spread, VOICE_ANCHOR_MIN_STD, _why))
-    return tail, take, raw_steps
+    return tail, take, raw_steps, _win
 
 
 def plan_relay(
@@ -631,24 +750,47 @@ def plan_relay(
     _a_sec = float(audio_ref_seconds or 0.0)
     _a_auto: Any = None
     _a_auto_reason = ""
+    _a_auto_from = ""
     if _a_sec > 0.0:
         audio_frames = int(math.ceil(_a_sec * FPS))
     elif _a_sec == 0.0 and audio_frames is None:
         # 🔵 **自动**（0.6.25 的默认，`0` = 让素材自己决定窗长）。用户原话：
         #    「参考音频的时长太短会对下一段音色还原度不足」—— 手填秒数是在两个坏结果之间猜。
-        #    ⚠️ 接了声锚就**不自动**：窗的原料变成声锚，长度不由上一段决定 ⇒ 自动没意义。
+        # 🔵 **接了声锚也自动（0.6.27）** —— 自动算法只认「**给它的那段音频**的有声尾巴」，
+        #    与"原料是谁"无关 ⇒ 直接喂**声锚自身**即可。此前接了声锚就退回旧口径
+        #    （= 视频钉住窗 0.925 s）⇒ 用户把一段**多人录音**接进声锚时**只有最后一个人的
+        #    音色进得来**。这同时是「锚太短」（0.917 s vs 业界 3–10 s）在**节点内**的修法。
+        # ⚠️ 与旧口径比 **步数**（`trim_frames` 换算的音频步 = 地板）：**短锚逐位同旧版**，
+        #    只有更长的锚才会把参考窗拉长 ⇒ 老用户零行为变化。
         if voice_anchor is not None:
-            _a_auto_reason = "已接声锚 ⇒ 窗的原料是声锚，长度不由上一段决定"
+            # 🔵 **锚路径取满上限**（本仓作者 2026-10-04：「单人参考越长，音色保持越好」）：
+            #    锚是**用户自己给的参考素材**（不是上一段的台词）⇒ 复述风险低、没有"够用就停"
+            #    的理由 ⇒ 把 `min_voiced_s` 直接抬到上限，让窗长**只受 `AUDIO_REF_MAX_S` 封顶**。
+            #    （与"上一段音频尾"那条路**故意不同**：那条越长越可能复述 ⇒ 保持 2 秒地板。）
+            try:
+                _auto, _ai = auto_audio_ref_seconds(
+                    _voice_anchor_audio(voice_anchor), AUDIO_HZ, min_voiced_s=AUDIO_REF_MAX_S)
+            except Exception as _e:                            # 读不出声锚 ⇒ 退回旧行为
+                _auto, _ai = 0.0, {"reason": "读不出声锚音频（%s）" % type(_e).__name__}
+            _a_auto_from = "声锚"
+            _a_min_s = float(AUDIO_REF_MAX_S)                  # 锚路径取满上限（见上）
         else:
             try:
                 _auto, _ai = auto_audio_ref_seconds(audio_from_latent(context_latent), AUDIO_HZ)
             except Exception as _e:                            # 读不出上一段音频 ⇒ 退回旧行为
                 _auto, _ai = 0.0, {"reason": "读不出上一段音频（%s）" % type(_e).__name__}
-            if _auto > 0.0:
-                audio_frames = int(math.ceil(_auto * FPS))
-                _a_auto = (_auto, _ai)
-            else:
-                _a_auto_reason = str(_ai.get("reason") or "自动定长失败")
+            _a_auto_from = "上一段音频尾"
+            _a_min_s = float(AUDIO_REF_MIN_VOICED_S)
+        _pin_steps = int(math.ceil(trim_frames / float(FPS) * AUDIO_HZ - 1e-9))
+        _auto_steps = int(math.ceil(_auto * AUDIO_HZ - 1e-9)) if _auto > 0.0 else 0
+        if _auto_steps > _pin_steps:
+            audio_frames = int(math.ceil(_auto * FPS))
+            _a_auto = (_auto, _ai, _a_auto_from, _a_min_s)
+        else:
+            _a_auto_reason = (
+                "%s 只有 %.2f 秒（≤ 视频钉住窗 %.3f 秒）⇒ 保持旧口径"
+                % (_a_auto_from, _auto, trim_frames / float(FPS)) if _auto > 0.0
+                else str(_ai.get("reason") or "自动定长失败"))
     a_frames = int(audio_frames) if audio_frames else trim_frames
     src_total_frames = pixel_frames(int(src.shape[2]))
     overhang, grid_off = 0.0, False
@@ -658,7 +800,7 @@ def plan_relay(
         # 成为**本段嗓音的生成条件** —— 台词逐段换人时音色交叉污染
         # （实测：某角色 F0 114→131、谱质心 1028→1308）。给声锚后离基准距离缩到 1/5。
         # 静默降级纪律：声锚短于窗就取全长，并把「用了声锚」写进 notes 让 report 可见。
-        tail, rt, raw_steps = _voice_anchor_tail(voice_anchor, a_frames)
+        tail, rt, raw_steps, _vwin = _voice_anchor_tail(voice_anchor, a_frames)
         if rt < int(math.ceil(a_frames / float(FPS) * AUDIO_HZ - 1e-9)):
             plan.notes.append(
                 "⚠ 声锚音频只有 %d 步（窗口要 %d 步）⇒ 已按全长取用；"
@@ -668,6 +810,10 @@ def plan_relay(
             "声锚生效：audio_ref 改用 voice_anchor 尾 %d 步（约 %.2f 秒），"
             "不再取上一段音频尾 —— 用于跨说话人续接时锁定本段说话人音色。"
             % (int(rt), int(rt) / AUDIO_HZ))
+        # 🆕 0.6.28 窗尾吸附：窗里大部分不是人声时往前挪（见 `anchor_window_start`）。
+        #    修了就要说；没修但有话要说（比如"挪不动"）也要说 —— 铁律 15：不许静默。
+        if _vwin.get("note"):
+            plan.notes.append(_vwin["note"])
     else:
         tail, rt, overhang, raw_steps, grid_off = audio_tail_from_latent(
             context_latent, a_frames, src_total_frames)
@@ -699,11 +845,13 @@ def plan_relay(
     #    都要说出来 —— 否则用户以为"配了多人音色"，实际参考里只有最后一个说话人。
     if _a_sec > 0.0:
         if voice_anchor is not None:
+            _want = int(math.ceil(_a_sec * AUDIO_HZ))
+            _tail_note = ("声锚比它短 ⇒ 已按声锚全长取用。" if int(rt) < _want
+                          else "声锚够长 ⇒ 按旋钮取用。")
             plan.notes.append(
-                "音频参考窗：已接声锚 ⇒ 参考音频取自**声锚**（实际长 %.2f 秒），"
-                "`audio_ref_seconds=%.2f` **不生效**（声锚比它短 ⇒ 拉不长）。"
-                "要「一段多人只占一个槽」请**不接声锚**（改用上一段音频尾当参考）。"
-                % (int(rt) / float(AUDIO_HZ), _a_sec))
+                "音频参考窗：已接声锚 ⇒ 参考音频取自**声锚**（实际长 %.2f 秒；"
+                "旋钮 `audio_ref_seconds=%.2f` 要 %.2f 秒）—— %s"
+                % (int(rt) / float(AUDIO_HZ), _a_sec, _a_sec, _tail_note))
         else:
             plan.notes.append(
                 "音频参考窗 = **%.2f 秒**（%d 步；旋钮 `audio_ref_seconds`）—— 取自**上一段音频尾**"
@@ -711,16 +859,23 @@ def plan_relay(
                 "⚠️ 参考音频含上一段的台词，模型**可能复述** —— （2026-10-04 端到端 GPU 实测：窗 0.93→4.18 秒（4.4×，覆盖说话片段 4→17 个）⇒ ASR 判据下**未复述**；对照实验同一判据对 seg1 样本 3/3 命中 ⇒ 判据灵敏。⚠️ 仅一段素材一次生成，宿主非确定性）。"
                 % (int(rt) / float(AUDIO_HZ), int(rt)))
     elif _a_auto is not None:
-        _asec, _ai = _a_auto
+        _asec, _ai, _src, _mins = _a_auto
         _clip = ("，⚠ 已达上限 %.1fs" % float(AUDIO_REF_MAX_S)) if _ai.get("clipped") else ""
         _grow = ((int(rt) / float(AUDIO_HZ)) / max(1e-9, trim_frames / float(FPS)))
+        # 复述风险按**原料**分别陈述（铁律 15：不许把一种原料的风险说成另一种的）。
+        _rep = ("⚠️ 参考音频**就是该说话人自己的语音** ⇒ 复述风险远低于「上一段台词」，"
+                "所以窗长**取满上限**（%.1f s）—— 单人参考越长、音色保持越好。"
+                % float(AUDIO_REF_MAX_S)
+                if _src == "声锚" else
+                "⚠️ 参考音频含上一段的台词，模型**可能复述** —— （2026-10-04 端到端 GPU 实测："
+                "窗 0.93→4.18 秒（4.4×，覆盖说话片段 4→17 个）⇒ ASR 判据下**未复述**；"
+                "对照实验同一判据对 seg1 样本 3/3 命中 ⇒ 判据灵敏。⚠️ 仅一段素材一次生成，宿主非确定性）。")
         plan.notes.append(
-            "音频参考窗 = **自动 %.2f 秒**（%d 步）—— 从上一段尾部往前累计够 %.1f 秒**有声**内容"
+            "音频参考窗 = **自动 %.2f 秒**（%d 步）—— 从**%s**往前累计够 %.1f 秒**有声**内容"
             "（有声判据 = 每格 RMS 一阶差分 > P99×%.2f，%d/%d 格有声%s）。"
-            "⇒ 比旧口径（= 视频钉住窗）长 %.2fx，**一个参考槽里可含多个说话人**的音色。"
-            "⚠️ 参考音频含上一段的台词，模型**可能复述** —— （2026-10-04 端到端 GPU 实测：窗 0.93→4.18 秒（4.4×，覆盖说话片段 4→17 个）⇒ ASR 判据下**未复述**；对照实验同一判据对 seg1 样本 3/3 命中 ⇒ 判据灵敏。⚠️ 仅一段素材一次生成，宿主非确定性）。"
-            % (_asec, int(rt), float(AUDIO_REF_MIN_VOICED_S), float(AUDIO_REF_VOICE_REL),
-               int(_ai.get("voiced_grids", 0)), int(_ai.get("grids", 0)), _clip, _grow))
+            "⇒ 比旧口径（= 视频钉住窗）长 %.2fx，**一个参考槽里可含多个说话人**的音色。%s"
+            % (_asec, int(rt), _src, _mins, float(AUDIO_REF_VOICE_REL),
+               int(_ai.get("voiced_grids", 0)), int(_ai.get("grids", 0)), _clip, _grow, _rep))
     elif _a_auto_reason:
         plan.notes.append("音频参考窗：自动定长**未生效**（%s）⇒ 退回旧口径 = 视频钉住窗"
                           "（%.3f 秒）。" % (_a_auto_reason, trim_frames / float(FPS)))
@@ -1154,13 +1309,13 @@ AUDIO_SEAM_BED_SELECT: str = "tail"      # tail（默认，新：取床源尾部
                                          # quiet（0.5.0 旧行为，仅作对照复现）
 AUDIO_SEAM_BED_FLOOR_DB: float = 12.0    # quiet 档的选窗下限：只取「≥ 目标 − 该值 dB」的窗（避免取到静默）
 AUDIO_SEAM_BED_GAIN_MAX_DB: float = 6.0  # 床声电平对齐上限（±dB）；超出则夹住并报 ⚠
-# 🔴 2026-09-21 语音规避（GG 耳检阳性，真渲染）：**tail 窗会撞上一句台词**。
+# 🔴 2026-09-21 语音规避（本仓作者 耳检阳性，真渲染）：**tail 窗会撞上一句台词**。
 #   实测 expE5（patch=1.2 + jitter=1.2）：床窗 @2.05s×1.2s **完整包住**床源段（stage 0）
 #   的台词（该段台词在 3.0–3.2s）⇒ patch 把整句台词搬进本段头部 ⇒ 再叠上缝处 0.25s
 #   crossfade 里的床源尾 ⇒ 听感「**对白重叠**」（4.46–5.66s，很短很轻）。
 #   故：tail 窗撞语音 ⇒ 退到「**非语音窗里能量最高**」的窗
 #   （避开语音，同时避开 771 行那个「最静窗近乎无内容」的坑）。
-#   🔴 2026-09-21 二次修正（GG：发现问题就从根本处理）：规避原先只加在 `tile<=0` 分支，
+#   🔴 2026-09-21 二次修正（本仓作者：发现问题就从根本处理）：规避原先只加在 `tile<=0` 分支，
 #   而 `tile>0` 恰是产线脚本默认档（`TILE_W=1.2`）⇒ 默认档走的是**没被保护**的那条路。
 #   现改为**所有取床源路径共用同一个选窗器** `pick_bed_window`（含 tail / quiet / E5 错开）。
 AUDIO_SEAM_BED_VOICED_K: float = 3.0       # 帧 RMS 超全源中位多少倍 ⇒ 该帧算「有声」
@@ -1179,7 +1334,7 @@ AUDIO_SEAM_BED_VOICED_SUSTAIN: int = 2
 #   守卫 = 探测本段头部台词起点 ⇒ patch 收缩到 onset − MARGIN；onset ≤ MIN ⇒ patch 关闭。
 AUDIO_SEAM_PATCH_GUARD_MARGIN_S: float = 0.40   # 收缩后与台词起点保留的安全间隔（覆盖探测滞后：实测能量判据对弱起音滞后 0.30s）
 AUDIO_SEAM_PATCH_GUARD_MIN_S: float = 0.10      # 收缩后小于此值 ⇒ patch 整个关闭（0）
-#   守卫判据 **宁枉勿纵**：误报（把环境当台词）代价 = patch 变短；漏报代价 = 吞字（GG 耳检抓的）。
+#   守卫判据 **宁枉勿纵**：误报（把环境当台词）代价 = patch 变短；漏报代价 = 吞字（本仓作者 耳检抓的）。
 #   故探测阈值用 **2×P10**（低于床窗判据的 3×中位）—— 实测把「这家店」的起音低估从
 #   0.85s 修正回 0.60s（能量判据对渐强起音天然滞后，margin 再兜一层）。
 _AUDIO_META_KEY = "relay_kit_audio_meta"
@@ -1908,7 +2063,7 @@ def _declick_fade_in_at_cut(x: Any, total: int, cut: int, sr: int) -> Tuple[Any,
 
     🔴 链条：`#931` 工作在**未裁**音频上，`Trim AV` 在它下游裁掉 `context_frames` 帧
        ⇒ **裁帧点落在波形中间** ⇒ 新开头是个「半波形」⇒ 在成片里它前面什么都没有
-       ⇒ 听感就是「无缘无故的孤立瞬态」（GG 耳检定性为伪影 ✓）。
+       ⇒ 听感就是「无缘无故的孤立瞬态」（本仓作者 耳检定性为伪影 ✓）。
        ⚠️ **不是模型生成的** —— 产物本身已是裁后的（我最初判断成「模型生成」是错的）。
     🔴 **必须 `clone` 后再写**：`x` 可能**与输入张量共享存储**
        （`wf.detach().to(torch.float32)` 在 dtype 已匹配时**不复制**）⇒ 原地写会改掉调用方的输入。
@@ -1954,7 +2109,7 @@ def _declick_fill(out: Any, s: int, t: int, total: int,
                   lo_bound: int = 0, hi_bound: Any = None) -> Any:
     """用**左右邻域波形线性过渡**填满 `[s, t)` —— 「消失」的正解：**换掉**，不是压低。
 
-    🔴 2026-10-04 由「压低」改「换掉」（GG：「目标是消失」）：
+    🔴 2026-10-04 由「压低」改「换掉」（本仓作者：「目标是消失」）：
        旧法 `seg * (_scale + (1-_scale)*w)` 只把事件**缩到邻域背景量级** ⇒ 对 1~2ms 脉冲
        **压不到零**（实测残留 ≈10× 背景，仍听得见），且整窗乘系数把窗内背景一起压低 ⇒ 留洞。
        新法把整段替换成「左邻 → 右邻」的线性过渡 ⇒ **脉冲在波形里不存在**。
@@ -1999,10 +2154,10 @@ def _declick_suppress(x: Any, sr: int, w1: int, events: List[Tuple[int, int]],
     `done` = 每处**已治**事件的 `(秒, 事件峰值, 邻域背景中位)` —— 报告与自测都读它。
     `skipped` = 每处**被跳过**事件的 `(秒, 事件峰值, 邻域峰值)`（判定见下）。
 
-    🔴 **不是「压到背景电平」，是「换掉」**（2026-10-04 第二轮，GG：「目标是消失」）：
+    🔴 **不是「压到背景电平」，是「换掉」**（2026-10-04 第二轮，本仓作者：「目标是消失」）：
        · 初版 `out = seg * w`（中间 w=0）⇒ 在背景里**挖了静音洞** ⇒ 洞边缘是新瞬态（10-03 打回）。
        · 上一版压到邻域背景 P50 ⇒ 对 1~2ms 脉冲**压不到零**（实测残留 ≈10× 背景），且整窗
-         乘系数把窗内背景一起压低 ⇒ 留洞 ⇒ GG「抑制始终不生效」。
+         乘系数把窗内背景一起压低 ⇒ 留洞 ⇒ 本仓作者「抑制始终不生效」。
        · **本版**：`_declick_fill` 用左右邻域波形线性过渡填满整段 ⇒ 波形里不再有那个脉冲。
     🔴 **两遍：先算全部区间，再逐个填** —— 填充的邻域必须**避开其他事件**
        （否则把邻居的尖峰搬进来；审核实测残留 83%）。见 `_declick_fill` 的 docstring。
@@ -2147,10 +2302,10 @@ def declick_transients(audio: Any, ratio: float = AUDIO_DECLICK_RATIO,
                        max_len_ms: Any = None) -> Tuple[Any, str]:
     """抑制**背景极静区**里的**孤立瞬态**（<2ms 尖脉冲）。**长度守恒、其余内容逐位不动**。
 
-    【为什么要它（2026-10-03 实测 + GG 耳检定性）】
+    【为什么要它（2026-10-03 实测 + 本仓作者 耳检定性）】
       模型会在**无台词区**生成孤立尖脉冲。实测段2 @**0.930s**：峰值 **0.0095（−40 dBFS）**，
       而该处背景仅 **−60 dBFS** ⇒ 信噪比 ~20 dB ⇒ 在安静背景里突出成
-      **「无缘无故的孤立瞬态」**（GG 原话，并定性为**伪影**而非动作音效）。
+      **「无缘无故的孤立瞬态」**（本仓作者 原话，并定性为**伪影**而非动作音效）。
       ⚠️ 它**不是**接缝 / pin / 交界伪影 —— **各臂都有**（nopin 0.0070 / A 0.0018 / P5 0.0095），
          只是 D/N1 段首有语音把它盖住了（0.26–0.38）。
       ⚠️ 与 `audio_seam_patch` 的区别：patch 是**整段替换** ⇒ 实测把床源瞬态**搬进来**
@@ -2248,7 +2403,7 @@ def declick_transients(audio: Any, ratio: float = AUDIO_DECLICK_RATIO,
         if lim_idx > 0:
             cand[lim_idx:] = False
     # 📌 这里曾有一个「段首跳过闸」（`skip_head_ms`，默认 20ms），**已删**：
-    #    它的理由（「段首是文件头、背景恒为 0 ⇒ 起音会误判」）被实测推翻 —— GG 听到的
+    #    它的理由（「段首是文件头、背景恒为 0 ⇒ 起音会误判」）被实测推翻 —— 本仓作者 听到的
     #    「孤立瞬态」**就在段首 0.0–2.0ms**，那个闸把唯一要治的东西挡在门外（白跑两轮）。
     #    文件头的「背景恒为 0」改由 `s == 0` 的淡出特判解决。
     #    **教训**：加保护闸前先确认「被保护的范围里有没有要治的东西」。
@@ -2495,8 +2650,8 @@ ADVISE_WITHIN: int = MAX_SETTLE - 1
 BLUR_ZONE_RATIO: float = 0.55      # 锐度 < 基准×此比例 → 记为塌陷帧
 BLUR_COLLAPSE_RATIO: float = 0.35  # 塌陷最深要低于基准×此比例才算真模糊（防误伤天生偏软的段）
 BLUR_RECOVER_RATIO: float = 0.5    # 窗内必须看到恢复到基准×此比例，才敢裁（看不到恢复宁少勿多）
-# —— 锐度路三量解耦（2026-09-15，GG 目检「每处接缝都看到模糊沉降」）——
-# ⚠ 版本号待定：本改动与在飞的 v0.4.3+ 未提交改动同处一树，由 GG 决定并入哪个版本。
+# —— 锐度路三量解耦（2026-09-15，本仓作者 目检「每处接缝都看到模糊沉降」）——
+# ⚠ 版本号待定：本改动与在飞的 v0.4.3+ 未提交改动同处一树，由 本仓作者 决定并入哪个版本。
 # 实测（onerA_cond4_4seg，cond 桥）：糊区 11–17 帧宽、最深 0.29–0.31×基准。原实现让
 # MAX_SETTLE=12 同时充当扫描窗宽 → 糊区把窗口填满时 after 为空 →「窗内必须见恢复」
 # 永假 → settle 恒 0（s2/s3 实测 settle=0；段头/段体锐度比 0.71 / 0.41，糊区原样留在成片）。
@@ -2508,7 +2663,7 @@ SETTLE_CAP: int = 36           # 锐度路裁剪上限（= 扫描窗，糊区才
 # 🔴 2026-09-15 实测上调 24→36（依据：节点 report 剖面 + 裁量→跳跃曲线）：
 #   cond 桥的暖机「塌陷 + 爬升」总长**实测 >25 帧**（剖面里到第 17 帧锐度 0.77 仍在涨）
 #   → 24 帧的窗**看不到恢复点** → 只能退回「最后一个塌陷帧」→ 留下几帧 0.53–0.55× 残余
-#   （GG 目检「接缝处从模糊变清晰」）。
+#   （本仓作者 目检「接缝处从模糊变清晰」）。
 #   而 `trim_jump_curve` 显示：裁 8 帧→跳跃 8.4×、裁 12 帧→~9.0×（**多裁 4 帧只多 0.6×**）
 #   ⇒ **把窗放到 36 让恢复点进窗 = 切净糊、跳跃几乎不变**，是净赚。
 #   ⚠ 配套：出词纪律的「段首无台词」要按新裁头上限放宽（≥ 裁头 + 0.2 s）。
@@ -2527,18 +2682,18 @@ REPEAT_MAE: float = 5.0 / 255.0        # 判「这一帧是钉住区内容的复
 REPEAT_MIN_RUN: int = 2                # 连续重复至少几帧才采信（防单帧巧合）
 REPEAT_SCAN: int = 36                  # 扫描窗宽（与 SETTLE_SCAN 同量级）
 # 锐度路的「恢复点」目标：裁到锐度回到此比例的首帧，而不是停在「最后一个塌陷帧」。
-# 动机（2026-09-15 GG 目检）：只裁到塌陷边界（<0.55×）会留下几帧 0.53–0.55× 的**恢复尾巴**，
+# 动机（2026-09-15 本仓作者 目检）：只裁到塌陷边界（<0.55×）会留下几帧 0.53–0.55× 的**恢复尾巴**，
 # 观感 =「接缝处从模糊变清晰」——糊本身修好了，但「从糊变清」这个过渡仍是可见缺陷。
 #
 # 🔴🔴 2026-09-15 深夜**重大修正**：这条「裁到恢复点」把 settle 从 8 推到 16，
 #   **代价被严重低估**——实测跳帧随裁量单调上升（同一条 s2，只改裁量）：
 #
-#     settle  0 → 最大单帧跳 5.08（归一 0.020）  ← GG：「几乎无感」
-#     settle  8 →                7.2×（归一 0.044）  ← GG：「跳了」
-#     settle 16 →               14.08（归一 0.055）  ← GG：「跳」
+#     settle  0 → 最大单帧跳 5.08（归一 0.020）  ← 本仓作者：「几乎无感」
+#     settle  8 →                7.2×（归一 0.044）  ← 本仓作者：「跳了」
+#     settle 16 →               14.08（归一 0.055）  ← 本仓作者：「跳」
 #
 #   **裁切 = 时间跳跃**：裁掉的帧越多，缝处要跨过的时间就越长，跳得越大。
-#   而「糊」是**清晰度的渐变**，人眼对渐变容忍度极高（GG 对 settle 0 的评语就是「几乎无感」）。
+#   而「糊」是**清晰度的渐变**，人眼对渐变容忍度极高（本仓作者 对 settle 0 的评语就是「几乎无感」）。
 #   ⇒ **拿「可容忍的渐变」去换「不可容忍的突变」，是拿错的筹码换对的东西。**
 #
 #   正确方向（2026-09-15 定案）：**时间轴上什么都不做**（不裁沉降、不重影），
@@ -2549,12 +2704,12 @@ REPEAT_SCAN: int = 36                  # 扫描窗宽（与 SETTLE_SCAN 同量�
 # 锐度路单列的深线（硬跳路验身仍用 BLUR_COLLAPSE_RATIO=0.35）：cond 路钉住区本身被重绘
 # 发软 → 自参考基准被污染、塌陷比值被抬浅，实测 S1 深塌陷只到 0.36×，卡在 0.35 门外漏检。
 # —— v0.4.1 色档收敛信号：注噪/taper 路的「收敛尾巴」是低频现象（重影+色档漂移），
-# 锐度法不可见（L1 taper 实测：可见头部 3 帧亮度 0.270→0.282 爬升 + 首帧重影——GG 目检确认）。
+# 锐度法不可见（L1 taper 实测：可见头部 3 帧亮度 0.270→0.282 爬升 + 首帧重影——本仓作者 目检确认）。
 # 旧像素注噪路裁 26=22+4 裁的就是它——本信号是它的观测端版本。
 GRADE_DEV_Z: float = 4.0        # 体区 MAD 的 z 门槛
 GRADE_DEV_FLOOR: float = 0.003  # 绝对下限（0-1 量纲；255 量纲测试由 z 项主导）
 # —— v0.3.3 稳健统计层：参考分布来自段体（窗外体区），z 分数定位，深度比值做证据闸 ——
-# 动机（GG 2026-09-13）：分辨率/步数/LoRA/场景内容都会整体移动锐度与帧差的绝对量级，
+# 动机（本仓作者 2026-09-13）：分辨率/步数/LoRA/场景内容都会整体移动锐度与帧差的绝对量级，
 # 任何"绝对常数"都会在某个参数组合下失效。因此：
 #   · 参考分布 = 段体自身（窗外 ≥8 帧，median + MAD）——4 步软渲染、运动模糊、平坦场景
 #     自动进基准，零配置、零量纲；
@@ -2717,15 +2872,15 @@ BOUNDARY_JUMP_WARN: float = 6.0   # 报警阈值：边界帧差 ÷ 段内基线
 # 原设想：把缝处一跳拆成两个半跳跨两格 → 眼不及辨。数值上确实如此
 # （最大单帧跳 14.08 → 7.51，归一 0.055 → 0.029）。
 #
-# **但观感实测更差**（GG 目检原话：「比之前的实现还差，有明显跳帧、不流畅」）。根因：
+# **但观感实测更差**（本仓作者 目检原话：「比之前的实现还差，有明显跳帧、不流畅」）。根因：
 #   ① **总位移几乎没减**：超基线总量 12.61 → 11.68（仅 −7%）—— 一跳变两跳，位移守恒；
 #   ② **异常帧数 1 → 2**：单帧瞬跳可能被当成眨眼/运动模糊，**连续两帧异常 = 卡了两下**；
 #   ③ 重影帧是**鬼影**：内容既不属于上段尾也不属于本段首，本身就是一个可见异物。
 #   ⇒ **「把突变摊平成两个小突变」不等于消除突变**——人眼对「持续异常」比对「瞬时异常」更敏感。
 #
 # 更重要的对照（同一条 s2，只改裁量）：
-#   settle 0  → 跳帧 0.020（GG：**几乎无感**）
-#   settle 16 → 跳帧 0.055（GG：跳）
+#   settle 0  → 跳帧 0.020（本仓作者：**几乎无感**）
+#   settle 16 → 跳帧 0.055（本仓作者：跳）
 #   ⇒ **跳的源头是「裁切」本身**（裁切 = 时间跳跃）。重影治不了它，只会改变它的形状。
 #   ⇒ 正确方向见 `SETTLE_RECOVER_TARGET` 处的注释：**时间轴不动，画质域修复**。
 SEAM_GHOST_FRAMES: int = 0        # 重影帧数（**默认 0 = 关**；>0 仅在确知收益时手动开）
@@ -2750,7 +2905,7 @@ def seam_ghost_blend(head: torch.Tensor, prev_last: torch.Tensor,
     return torch.cat([a * ref + (1.0 - a) * head[:k], head[k:]], dim=0)
 
 
-# —— 画质域修复：糊区锐化（2026-09-16 GG 定方向：先试零 GPU 传统锐化）——
+# —— 画质域修复：糊区锐化（2026-09-16 本仓作者 定方向：先试零 GPU 传统锐化）——
 # 动机：默认 settle_frames=0（不裁沉降）后，成片段头保留几帧「模型重绘导致的糊」
 #   （实测锐度 0.33–0.8× 基准）；而「裁掉它」会引入跳帧（裁 16 帧跳 0.055）。
 #   ⇒ 时间轴两条路都不走，改走**画质域**：不裁、不动时间轴，只提升糊区高频。
@@ -3345,7 +3500,7 @@ def trim_jump_curve(images: torch.Tensor, pin: int,
         ``raw[pin-1]``（= 上段末帧的复现，裁后它成为缝前末帧）
       → ``raw[pin+settle]``（= 裁后首帧）
     —— **两者相隔 settle+1 帧**。所以那个"跳"不是相邻帧差，而是**跨过被裁区的「时间跳跃量」**。
-    ⇒ **裁得越多，跳得越大**（GG：「裁切 = 时间跳跃 = 跳切」）。节点可在裁之前就把它算出来。
+    ⇒ **裁得越多，跳得越大**（本仓作者：「裁切 = 时间跳跃 = 跳切」）。节点可在裁之前就把它算出来。
 
     返回 ``[(settle, 归一跳跃), ...]``；跳跃 = ``MAE(raw[pin+s], raw[pin-1]) ÷ 段内基线``。
     纯比值、无量纲；``settle=0`` 那一项即"只裁钉住区"时的天然跳跃（下界）。
@@ -3374,7 +3529,7 @@ def observation_profile(images: torch.Tensor, pin: int,
                         scan: int = SETTLE_SCAN) -> dict:
     """节点实测的**多通道观测剖面**：锐度 / 亮度 / 色阶(RGB) / 帧差，覆盖「钉住区之后 scan+1 帧」。
 
-    动机（2026-09-15 GG 要求「不只是锐度，色阶、明暗等都需要」）：
+    动机（2026-09-15 本仓作者 要求「不只是锐度，色阶、明暗等都需要」）：
     沉降检测本来就是**三路**（帧差 / 锐度 / 色档），report 只报一路 = **只开了三分之一的窗**。
     把节点实际看到的**各通道原始数**全报出来，人眼与机检才能在同一组数上对话。
 
@@ -3490,7 +3645,7 @@ def detect_settle(
     硬跳路 = 帧差，锐度路 = Laplacian 均方，色档路 = RGB 均值偏离；全**纯比值判定**。
     三路独立出候选，**取 settle 最大者**（不同伪影类型互补，谁检测到得深听谁的）。
 
-    v0.4.1 四层判定（GG 要求的多维度/自参考方案）：
+    v0.4.1 四层判定（本仓作者 要求的多维度/自参考方案）：
 
       0. **结构性护栏**（不变）：窄窗贴 ``pin`` 不做全局 argmax；``settle ≤ max_settle``；
          测不准 ⇒ 0 ⇒ 与"只裁钉住区"的旧行为逐位一致，最坏不会更差。
@@ -3579,7 +3734,7 @@ def detect_settle(
                 if after.numel() > 0 and float(after.max()) >= BLUR_RECOVER_RATIO * ref_sh:
                     # 🔴 2026-09-15 修：裁到**恢复点**，不是「最后一个塌陷帧」。
                     #   实测（onerA_cond4）：只裁到塌陷边界（<0.55×）会留下 4 帧
-                    #   0.53–0.55× 的「恢复尾巴」——GG 目检 = 「接缝处从模糊变清晰」。
+                    #   0.53–0.55× 的「恢复尾巴」——本仓作者 目检 = 「接缝处从模糊变清晰」。
                     #   故继续往后找锐度回到 SETTLE_RECOVER_TARGET×ref 的首帧，从那里起算 settle。
                     # ⚠ 必须**从最后一个塌陷帧之后**开始找恢复点！
                     #   2026-09-15 实测踩到：真实数据的形态是「首帧还算锐(0.79×) → 塌陷 → 恢复」，
@@ -3976,8 +4131,10 @@ def build_continue_latent(
         if voice_anchor is not None:
             # 0.6.1 声锚：钉住的音频前缀同样改用声锚尾窗（与 plan_relay 的
             # audio_ref 同源 —— 两处读的都是"上段尾"，只改一处会打架）。
-            a_tail, rt, _raw = _voice_anchor_tail(voice_anchor, int(frames))
+            a_tail, rt, _raw, _vwin = _voice_anchor_tail(voice_anchor, int(frames))
             va_desc = "；音频前缀改用声锚（voice_anchor）尾 %d 步" % int(rt)
+            if _vwin.get("note"):
+                va_desc += "（%s）" % _vwin["note"]
         else:
             a_tail, rt, _overhang, _raw, _grid_off = audio_tail_from_latent(
                 prev, int(frames), pixel_frames(int(pv.shape[2])))
@@ -4039,7 +4196,7 @@ def build_continue_latent(
 
 
 # —— 音频拼接（0.5.0 第 9 节点用；2026-09-19 立）——
-# 为什么放进**节点层**（GG 2026-09-19 指令「功能完整地在节点层面实现」）：
+# 为什么放进**节点层**（本仓作者 2026-09-19 指令「功能完整地在节点层面实现」）：
 #   缝上的两个音频病**都不在单段节点的可达范围内** ——
 #     · 编码器 priming：每段 mp4 的 AAC 流头 ~33 ms 近静音（实测 @32k = 1056 样本；
 #       同位置节点落盘有内容 −22.9 dBFS、mp4 解码 −66.8 dBFS，差 44 dB）。它在**编码之后**产生。
@@ -4239,7 +4396,7 @@ def dtw_residual(a: torch.Tensor, b: torch.Tensor, max_steps: int = 64):
       构造样例见 ``tests/test_experimental.py`` E3 组（同源 < 异源；
       「a=b 追加 k 帧新内容」的代价随 k 单调升）。
 
-    ⚠ 为什么只作**观测**、不进裁量契约（2026-09-20 GG 要求）：
+    ⚠ 为什么只作**观测**、不进裁量契约（2026-09-20 本仓作者 要求）：
         ``detect_settle`` 的三路各有**体参考 + 比值门槛 + 衰减形态**约束，
         而 DTW 路径对「运动中的相似姿态」也给低代价 ⇒ 单独看会把
         「正常运动」误判成「残留」。故接进 TrimAV 的 report 只读数，
@@ -4313,7 +4470,7 @@ def head_repeat_dtw(images: torch.Tensor, pin: int,
       · ``feat``        = 实际喂给 DTW 的特征形状（出问题时可复现）
       · ``frames``      = 参与比较的 (窗帧数, 钉住帧数）
 
-    🔴 2026-09-21 删 ``reverse_cost``（GG 拍板方案 a）——**对称性证明**：
+    🔴 2026-09-21 删 ``reverse_cost``（本仓作者 拍板方案 a）——**对称性证明**：
       ``dtw_residual`` 的局部代价是 ``|a−b|``，对调换两个参数**不变**（对称）
       ⇒ DP 递推的总代价矩阵转置不变 ⇒ 最优总代价对称；回溯的 tie-break 在镜像
       输入下也镜像 ⇒ **两方向路径步数相等、平均代价恒等**。

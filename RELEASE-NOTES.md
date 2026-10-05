@@ -18,6 +18,52 @@
 
 ---
 
+## 0.6.27 — 2026-10-06
+
+**接了声锚，音频参考窗也按素材自己定长 —— 原料就是声锚自身。**
+
+旧行为：一旦接声锚，窗长退回 0.925 秒 ⇒ 接一段**多人录音**当锚时，只有最后一个人的音色进得来。
+现在 `audio_ref_seconds = 0`（默认）按**声锚自身**往前取满上限（≤6 秒）⇒ 想「一段里多人各有音色」，
+接一段多人录音当锚即可。
+
+🔴 **有行为变化，无需动图**：锚不比 0.925 秒长 ⇒ **逐位同 0.6.26**（比的是步数不是秒）；锚更长 ⇒ 窗自动变长；想固定就显式填 `audio_ref_seconds`；缝区**钉住**的那 0.925 秒不受影响。
+
+🆕 **上限为什么是 6 秒**：官方建议 2~12 秒。本包下限对齐 2 秒，**上限故意取 6 秒** —— 参考行随每步采样，更长更吃显存也更慢。
+
+🆕 **VA（跨段音色累积）**：实验层、**默认关**。素材改从**本 run 已生成的段**按人累积；开关 = run 目录下的 `_va.json`（没有 = 关），台账可由 `voice_bank.py va-ledger` **从提示词生成**（零新依赖）。⚠️ 声锚与 VA 走同一条通道：接了声锚时 VA 默认跳过，要叠加填 `config.with_anchor = true`。
+
+报告现在会点名参考窗的**原料**（声锚 / 上一段音频尾），复述风险按原料分开陈述。
+
+**升级动作**：无需改图或连线。想让声锚参考窗更长：接一段多人录音当锚、`audio_ref_seconds` 留 `0`。
+
+<!-- EN -->
+
+**The voice-anchor reference window now auto-sizes from the anchor itself.**
+
+Old behaviour: wiring an anchor made the window **fall back to 0.925 s** ⇒ with a **multi-speaker recording** as
+the anchor, **only the last speaker's timbre** got in. Now `audio_ref_seconds = 0` (default) walks back through
+the **anchor itself**, up to 6 s ⇒ wire a multi-speaker recording to keep several voices. No number to type.
+
+🔴 **Behaviour change, no graph edits needed**: an anchor **no longer than 0.925 s** ⇒ **bit-identical to
+0.6.26** (we compare steps, not seconds); a **longer** anchor ⇒ the window grows automatically; set
+`audio_ref_seconds` explicitly to pin it; the **pinned** 0.925 s at the seam is **unaffected**.
+
+🆕 **Why 6 s**: the official guideline is **2–12 s**. We align the lower bound at 2 s and **cap at 6 s** — the
+reference row rides through every sampling step, so longer costs more VRAM and time.
+
+🆕 **VA (cross-segment timbre accumulation)** — **experimental, off by default**: timbre accumulates per speaker
+from segments **this run already produced**, instead of material you wire. Switch = `_va.json` in the run
+directory (absent ⇒ off); the ledger can be generated **from your prompt** by `voice_bank.py va-ledger` (no new
+dependency). ⚠️ **Anchor and VA share one channel**: with an anchor wired VA is skipped; to combine them set
+`config.with_anchor = true`.
+
+The report now names the window's **source** (anchor / previous tail) and states the recitation risk per source.
+
+**Action required**: none — no graph or wiring changes. For a longer anchor reference window, wire a
+multi-speaker recording as the anchor and leave `audio_ref_seconds` at `0`.
+
+---
+
 ## 0.6.26 — 2026-10-04
 
 **修一个你可能已经听出来的问题：`voice_bank.py` 采出的声锚变调。**

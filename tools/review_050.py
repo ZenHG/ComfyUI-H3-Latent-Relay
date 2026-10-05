@@ -716,7 +716,7 @@ ck("K12 段体基准离散度超阈 ⇒ 弃权；baseline=legacy ⇒ 不弃权",
 ck("K12b 逐层审计：报告含「↳ …后：段头亮度 … 高频 …」",
    "↳ 直方图匹配 后：段头亮度" in _r11 and "高频" in _r11)
 
-# K13~K14 —— 2026-09-19：拼接**复合在第 8 节点内**（不新增轮子；GG 指令）
+# K13~K14 —— 2026-09-19：拼接**复合在第 8 节点内**（不新增轮子；本仓作者 指令）
 _SeamNode = N.H3RelayAudioSeam
 ck("K13 AudioSeam 第 3 路输出 joined + 拼接旋钮折叠（复合而非新节点；当时 7 个，0.6.8 起 8 个）",
    _SeamNode.RETURN_NAMES == ("audio", "report", "joined")

@@ -77,6 +77,14 @@ PAIRS = [
     ("README.md", "README_EN.md", "condensed"),
     ("docs/01-mechanism.md", "docs/01-mechanism_EN.md", "full"),
     ("docs/02-parameters.md", "docs/02-parameters_EN.md", "full"),
+    ("docs/03-sampling-and-design.md", "docs/03-sampling-and-design_EN.md", "full"),
+    ("docs/04-canvas-and-widgets.md", "docs/04-canvas-and-widgets_EN.md", "full"),
+    ("docs/05-troubleshooting.md", "docs/05-troubleshooting_EN.md", "full"),
+    ("docs/06-continuity-scripting.md", "docs/06-continuity-scripting_EN.md", "full"),
+    ("docs/07-chain.md", "docs/07-chain_EN.md", "full"),
+    ("docs/08-testing.md", "docs/08-testing_EN.md", "full"),
+    ("docs/09-metrics.md", "docs/09-metrics_EN.md", "full"),
+    ("docs/10-audio-seam-and-concat.md", "docs/10-audio-seam-and-concat_EN.md", "full"),
 ]
 
 EXIT_OK, EXIT_STALE, EXIT_BROKEN = 0, 1, 2
@@ -85,7 +93,10 @@ SEC_RE = re.compile(r"^## (.+?)\s*$", re.M)
 NUM_RE = re.compile(r"^(\d+(?:\.\d+)*)")
 VER_ZH = re.compile(r"^\|\s*版本\s*\|\s*\*\*([\d.]+)\*\*", re.M)
 VER_EN = re.compile(r"^\|\s*Version\s*\|\s*\*\*([\d.]+)\*\*", re.M)
-MARK_RE = re.compile(r"<!--\s*EN-SYNC(?P<body>[^>]*)-->", re.M)
+# 🔴 `^` 锚定（2026-10-05 修）：原正则**不锚行首** ⇒ 文件正文里只要**出现过这个字样**
+#   （`docs/08-testing_EN.md` 的表格里就有 `` `<!-- EN-SYNC -->` `` 一行）就被判成「标记已在」
+#   ⇒ 那份文件**根本没有标记**却一路绿。判据必须落在「文件头那一行」，不是「文本里出现过」。
+MARK_RE = re.compile(r"^<!--\s*EN-SYNC(?P<body>[^>]*)-->", re.M)
 LINK_RE = re.compile(r"\]\(([^)\s#:]+\.md)\)")
 
 

@@ -1,20 +1,15 @@
 # Mechanism: continuation routes · protocol sources · timing grid · head trimming and how much
 
-<!-- EN-SYNC src=docs/01-mechanism.md stamped=2026-09-30 mode=see tools/en_sync.json -->
+<!-- EN-SYNC src=docs/01-mechanism.md stamped=2026-10-05 mode=see tools/en_sync.json -->
 
 🌐 English translation of [`docs/01-mechanism.md`](01-mechanism.md). **The Chinese file is the source of
 truth** — if the two ever disagree, the Chinese one wins.
 
-> This file was split out of the README (0.6.0 restructuring).
 > 📐 **Port notation:** throughout this document `[N]` is **0-based** (the *N+1*-th port in the UI = `[N-1]`).
 > The "route N" style carried over from older drafts was 1-based and has been converted to `[N]` at the
 > places that matter.
-> The main README keeps only the conclusions and pointers needed for a quick read.
 
 ---
-
-> The main README explains **how to use it**; this file explains **why it is designed this way**, which
-> traps were hit, and what the evidence is.
 
 ## 🧭 The two continuation routes: how to choose (measured comparison)
 
@@ -33,10 +28,6 @@ its strength — **neither blurry** nor **hard brightness jumps**:
 | **Content / story risk** | **zero** | **yes** (when the head contains new content) |
 | Suits | **content first**: dialogue or a key action in the head, not a single frame to lose | **smoothness first**: a little blur at the head is acceptable, and a dialogue-free buffer can be budgeted |
 
-**In one sentence:** the composite bridge runs both routes in parallel ⇒ you get both "zero blur from the
-copy route" and "low brightness jump from the keyframe route"; taking only one of them (connecting only
-`[0]` or only `[3]`) brings back that route's own trade-off in the table.
-
 > **Want a third route:** `mask_mode="ramp"` (added in 0.4.3) — "soft evidence at the seam": every step
 > still anchors back to `(1−m)`, with `m` ramping from 0 up to `ramp_top` (default 0.25). In design it
 > might mitigate both blur and hard jumps.
@@ -44,8 +35,8 @@ copy route" and "low brightness jump from the keyframe route"; taking only one o
 > of step / sharpness / motion cosine (0.0407 vs 0.0402) — no intermediate state appeared ⇒ **treat it as
 > a control arm for now, not a default**.
 >
-> Switching instructions are in the "Nodes" and "Parameters" sections; the fact that `settle_frames` trims
-> **new content** is in the warning box of item 1 under "Dialogue avoidance and audio handling at the seam".
+> The fact that `settle_frames` trims **new content** is in the warning box of item 1 under "Dialogue
+> avoidance and audio handling at the seam".
 
 ## Protocol sources (native ComfyUI, no monkey patching needed)
 
@@ -57,9 +48,6 @@ comfy/model_base.py:2186-2196
     refs      = kwargs.get("minimax_refs")      → payload["refs"]
 ```
 
-Keyframe anchors at arbitrary positions are supported natively, so this pack needs no ComfyUI
-modifications.
-
 ## 🔍 After upscaling: which line stays in the native domain (measured on the 0.6.8 full flow)
 
 The production route is **first pass (native) → latent upscale → second pass (high resolution) → next
@@ -69,7 +57,7 @@ segment's continuation**. It touches two **different** protocol channels whose a
 | Channel | Who uses it | May it differ in resolution from this segment's target? | What a violation looks like |
 |---|---|---|---|
 | `minimax_keyframes` (**keyframe pin**) | composite bridge's `[3] conditioning` output | 🔴 **not allowed** | explodes deep inside the model: `shape mismatch [2392,96] vs [3134,96]` |
-| `minimax_refs` (**appearance anchor**) | `ref_anchor_latent` / reference images, reference videos | ✅ allowed | —— |
+| `minimax_refs` (**appearance anchor**) | `ref_anchor_latent` / reference images, reference videos | ✅ allowed | — |
 
 **Why keyframes are not allowed:** when the packer `PackedLayout` computes the row count for the keyframe
 block it uses the **target grid** (`n = vt × frame_rows(target H,W)`; the source comment says
@@ -157,8 +145,7 @@ depends on segment length and prompt — it is a **per-segment** quantity.
 ⇒ So it must not be a value you fill in, but **a value measured on the spot**: `H3RelayTrimAV` receives the
 fully decoded frames, so the true switch point is in hand at that moment. With the default
 `settle_frames = 0` (**no settle trimming**, since 0.5.0) **not a single settling frame is trimmed** —
-measured, "trimming the settle" is what actually causes jumps at the seam (numbers in the red box below);
-what remains is only a **sharpness gradient**, which the eye tolerates very well.
+measured, "trimming the settle" is what actually causes jumps at the seam (numbers in the red box below).
 Want the old automatic trimming: use `-1` (measures the switch point and trims it, but **introduces a
 jump**); use `N` = always trim N extra frames.
 
@@ -189,7 +176,6 @@ jump**); use `N` = always trim N extra frames.
 **do not trim → keep the blur**.
 ⇒ A third path: **fix it in the picture domain** — do not trim, do not touch the timeline, just lift the
 high frequencies in the blurry region.
-**Because the timeline is untouched, a jump is impossible by construction.**
 
 `settle_sharpen` applies an unsharp mask to the **first few frames after trimming**, with strength decaying
 **linearly to 0** from the seam end (the blur itself is a gradient, so the strength should be one too);

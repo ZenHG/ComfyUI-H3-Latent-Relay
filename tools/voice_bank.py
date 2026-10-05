@@ -16,7 +16,7 @@
        查询未命中 ⇒ 调用方走"无锚"老路径。绝不静默装作有锚。
     4. 声锚质量下限：有声时长 ≥ MIN_VOICED_S（默认 0.6s）、峰值归一 0.9。
 
-台词守卫的两层分工（2026-10-02 GG 指正后理清）：
+台词守卫的两层分工（2026-10-02 本仓作者 指正后理清）：
     · **节点侧守卫**（H3RelayAudioSeam 的 speech-onset 守卫，relay_core.py:838 起，
       纯能量判据、零依赖、随包分发）—— 通用层：任何人开箱即用。
       本模块的 `longest_voiced_span`（能量法）与它同族：不需要 funasr 也能采。
@@ -81,7 +81,7 @@ SR = 16000                    # **分析**用重采样率（有声检测 / RMS /
 #       ⇒ 结论落回本模块能负责的范围：**当前这批人声素材（4.7~5.3 kHz）** 就是窄的，
 #          换采样率救不了；**要宽带语音必须换人声音源**（真人 / 原始录音）。
 #    （过程记录：我先写成"边车是 32 kHz 无损"却仍用 mp4 数字下结论（推理链断裂，
-#      GG 抓出）；重测边车后改成"H3 没有高频"，再扫全量才发现是被审素材的问题。）
+#      本仓作者 抓出）；重测边车后改成"H3 没有高频"，再扫全量才发现是被审素材的问题。）
 # ⚠️ 旧的 16 kHz 声库**不会被自动重采**（手动锚优先、采集要显式 --force），
 #    ⇒ 想吃到高频得手动 `--force` 重采。
 SR_OUT_MIN = 32000             # 落盘采样率下限（**仅作文档与登记标注**，不再触发任何转换）
@@ -217,8 +217,9 @@ def longest_voiced_span(mp4: str):
     # 🔴 **尾部优先**选段（2026-10-04）：消费端 `_voice_anchor_tail` 只取锚的**尾部**
     #    `TAIL_S≈0.925s` ⇒ 尾部静音 = 那部分等于没锚。
     #    「取最长段」会把**句中停顿**（<0.5s，被 `_voiced_spans` 并进来）也带上：
-    #    实测 `2c_m2s2_00002` 最长段 3.856–5.408s 内含 4.43–4.82s 的 0.39s 停顿
-    #    ⇒ 尾部 0.925s 只有 65% 有声（另一个锚 100%）。
+    #    实测「取最长段」会把**句中停顿**（<0.5s，被 `_voiced_spans` 并进来）也带上：
+    #    某素材的最长段 3.86–5.41s 内含 0.39s 停顿 ⇒ 尾部 0.925s 只有 65% 有声
+    #    （另一个锚 100%）。
     #    口径：候选段按长度降序，取**第一个尾部 0.925s 全程有声**的；
     #    全都不满足就退回最长（并在返回里带上 `tail_clean`，供上层提示）。
     cand = sorted(spans, key=lambda ab: -(ab[1] - ab[0]))
@@ -369,33 +370,255 @@ def lookup(bank_dir: str, name: str):
 # 说话人标记（`<Subject N>` 或兼容形态 `(Sx)`），不能取"第一个" ——
 # 120 字符窗会跨到上一个 Shot 的正文里（那里也有 `<Subject N>`）。
 
-_D_RE = re.compile(r"<d>")
-_SPK_RE = re.compile(r"<Subject (\d+)>|\(S(\d+)\)")
+#: 台词块的**默认**规则（`--line-re` 可覆盖）。`<d>` / `<D>` 都认（六段式的标记）。
+#: ⚠️ `<d>` **不是官方约定**（宿主 `comfy_extras/nodes_minimax_h3.py` 里没有它）——
+#:    它是**产线/本仓的六段式约定**。⇒ 别的开源用户的提示词**不保证**长这样 ⇒
+#:    所以两个规则都**可覆盖**，且解析**必须报告**"我按什么规则、命中多少"（见 `speaker_lines` 的 `probe`）。
+_DEFAULT_LINE_RE = r"<[dD]>"
+#: 说话人标记的**默认**规则（`--speaker-re` 可覆盖）。
+#: **捕获组 = 说话人标识**：纯数字 ⇒ 当作 `<Subject N>` 的编号（再去 `subject_definitions` 查名字）；
+#: 其它 ⇒ 标识**就是名字**（不再查定义段）⇒ `<张三>` 这种写法靠 `--speaker-re '<([^>]+)>'` 就能用。
+_DEFAULT_SPK_RE = r"<Subject\s*(\d+)>|\(S(\d+)\)"
 
 
-def speakers_in_order(prompt: str) -> list:
-    """本段说话人，按**开口顺序**去重（`<Subject N>` 形态）。"""
+def compile_rules(line_re=None, speaker_re=None):
+    """编译台词块 / 说话人规则。**不合法 ⇒ raise，消息里给可照做的示例**。
+
+    ⚠️ 编译时**同时开 `re.I` 与 `re.M`**：
+       · `re.I` ⇒ `<d>`/`<D>`、`<subject 1>` 都认（省得用户为大小写发愁）；
+       · `re.M` ⇒ 你的正则可以用 `^` **锚到行首**（多说话人提示词常见的 `名字: 台词` 写法靠它）。
+    """
+    try:
+        return (re.compile(line_re or _DEFAULT_LINE_RE, re.I | re.M),
+                re.compile(speaker_re or _DEFAULT_SPK_RE, re.I | re.M))
+    except re.error as e:
+        raise ValueError(
+            "正则不合法：%s\n"
+            "    · `--line-re`：**捕获组 1 = 台词正文**（例：--line-re '<台词>(.*?)</台词>'）；\n"
+            "      没给捕获组时按「标记之后到 `</d>` 或行尾」取正文。\n"
+            "    · `--speaker-re`：**捕获组 1 = 说话人标识**（例：--speaker-re '<([^>]+)>'，\n"
+            "      或 `^([^:\\n：]+)[:：]` 匹配行首的「名字:」）；\n"
+            "      标识是纯数字 ⇒ 当作 `<Subject N>` 编号；其它 ⇒ 当作**名字本身**。\n"
+            "    · 已开 `re.I` + `re.M` ⇒ 大小写不敏感、`^`/`$` 按**行**匹配。" % e)
+
+
+def speaker_lines(prompt, *, line_re=None, speaker_re=None, probe=None):
+    """本段的**逐句**信息：``[(tag, text), …]``，顺序 = 开口顺序（**一处台词块一项**）。
+
+    🔴 **单一真相源**：`speakers_in_order()` 是它的**薄包装**（去重后返回 tag）。
+       两处**共用同一套正则、同一条规则**（"每个台词块取**最近的前驱**说话人标记"）。
+       ⇒ 加新能力（逐句 / 每句字数）**不需要第二套解析** —— 本仓铁律一要求的。
+
+    🔵 **为什么需要逐句**（2026-10-05）：提示词里其实**已经写好了四件事**，全是零依赖的：
+
+    | 提示词里的东西 | 等价于 |
+    |---|---|
+    | 台词块的**个数** | 本段**有几句**（开口次数）—— 比"人数"强得多的闸 |
+    | 每个台词块最近的**前驱**说话人标记 | **第 i 句是谁说的** |
+    | 台词块的**正文** | 每句的**字数 → 相对时长**（切分权重） |
+    | `[zh]` / `[en]` 标记 | 语言（决定按汉字还是按音节计权重） |
+
+    ⇒ **VA 的台账不该手写、也不必用 ASR**：它可以从提示词长出来。
+      本地 ASR 只是"把边界做准"的**可选**增强（它给 `t0/t1`，见 `_va.json` 的档 3）。
+
+    ## 兼容性（**默认聪明，可被接管，永不静默**）
+
+    | 层 | 怎么用 |
+    |---|---|
+    | ① 默认规则 | `<d>`/`<D>` 台词块 + `<Subject N>`/`(S N)` 说话人 ⇒ 六段式**开箱可用** |
+    | ② 给规则 | `line_re` / `speaker_re`（捕获组语义见 `compile_rules`） |
+    | ③ 全手工 | 解析不出来就别解析 —— `--who` + `--lines` 直接给逐句（**任何格式都能用**） |
+
+    🔴 **`probe`（可选字典）**：给了就填 `line_re` / `speaker_re` / `line_hits` / `speaker_hits` /
+       `lines` / `no_speaker` ⇒ CLI 拿它打印**解析报告**。
+       **判不准就报告、不猜**：`line_hits == 0` 说明规则不匹配（调用方要报错，不许给空台账）。
+
+    ⚠️ **正文取法**：`line_re` **有捕获组 1** ⇒ 用它；**没有** ⇒ 按「标记之后到 `</d>` 或行尾」取。
+    """
+    lre, sre = compile_rules(line_re, speaker_re)
+    src = prompt or ""
+    if probe is not None:
+        probe["line_re"], probe["speaker_re"] = lre.pattern, sre.pattern
+        probe["line_hits"] = len(lre.findall(src))
+        probe["speaker_hits"] = len(sre.findall(src))
     out = []
-    for m in _D_RE.finditer(prompt or ""):
-        marks = list(_SPK_RE.finditer(prompt[:m.start()]))
-        if not marks:
+    for m in lre.finditer(src):
+        marks = list(sre.finditer(src[:m.start()]))
+        if not marks:                       # 台词块**前面没有说话人标记** ⇒ 这一句归不了人（跳过）
             continue
-        g = marks[-1]
-        tag = "Subject %s" % (g.group(1) or g.group(2))
+        ident = next((x for x in marks[-1].groups() if x), None)
+        if ident is None:
+            continue
+        ident = ident.strip()
+        tag = ("Subject %s" % ident) if ident.isdigit() else ident
+        _g1 = m.group(1) if lre.groups >= 1 else None
+        if _g1 is not None:
+            body = _g1
+        else:
+            _e = src.find("</d>", m.end())
+            if _e == -1:                    # 没有闭合标记 ⇒ 取到**该行**行尾（不吞掉后面的描述）
+                _e = src.find("\n", m.end())
+            body = src[m.end(): _e if _e != -1 else len(src)]
+        out.append((tag, body.strip()))
+    if probe is not None:
+        probe["lines"] = len(out)
+        probe["no_speaker"] = probe["line_hits"] - len(out)
+    return out
+
+
+def speakers_in_order(prompt, *, line_re=None, speaker_re=None) -> list:
+    """本段说话人，按**开口顺序**去重。`speaker_lines()` 的**薄包装**（不写第二套解析）。"""
+    out = []
+    for tag, _txt in speaker_lines(prompt, line_re=line_re, speaker_re=speaker_re):
         if tag not in out:
             out.append(tag)
     return out
 
 
+#: `line_weight` 用：语言标记（`[zh]` / `[en]` / `[ja]`…）—— **不占发音时长**。
+_LANG_RE = re.compile(r"\[[A-Za-z]{2,3}\]")
+#: `line_weight` 用：标点与空白 —— **不占发音时长**（全角/半角都要收，**含 ASCII 的 `. , ! ? ; :`**）。
+#: 🔴 2026-10-05 自检抓到的真 bug：原写法只收了**全角**标点 ⇒ `[en]I looked at it again.` 里的 `.`
+#:    被当成 1 个字符计权（6.5 而不是 5.5）。英文提示词会**系统性高估**长句 ⇒ 切点偏。
+_PUNCT_RE = re.compile(
+    r"[\s，。、；：？！…—～·「」『』（）()《》〈〉【】〔〕“”‘’"
+    r".,!?;:\"'`*#\-_/\\|<>@^%$&+=~\[\]{}]+")
+#: `line_weight` 用：连续拉丁/数字串（按"3 字母 ≈ 1 音节"折算）。
+_LATIN_RUN_RE = re.compile(r"[A-Za-z0-9]+")
+
+
+def line_weight(text: str) -> float:
+    """一句台词的**近似音节数** —— 比例切的权重。**只用于相对比较，不做绝对判断。**
+
+    规则（零依赖、可解释、**一处只写一次**）：
+
+    · 先去掉**语言标记**（`[zh]`/`[en]`）与**标点/空白**（它们不占发音时长）；
+    · 每个**非拉丁字符**（汉字 / 假名 / 谚文…）记 **1**；
+    · 连续**拉丁或数字串**记 `len / 3`（英文 ≈ 3 字母 1 音节），取整到 **0.5**；
+    · 结果**下限 0.5**（避免零权重把某句切没）。
+
+    ⚠️ 它**不是**时长估计，也**不是 ASR 的替代** —— 它只回答"**谁的话更长**"。
+       想让边界落到真实停顿上，靠 `assign_by_prior` 的**能量间隙吸附**；想要精确时间戳，
+       仍用档 3（本地 ASR 生成，**不进开源依赖**）。
+    """
+    s = _PUNCT_RE.sub(" ", _LANG_RE.sub(" ", text or ""))
+    latin = float(sum(len(m.group(0)) for m in _LATIN_RUN_RE.finditer(s)))
+    non_latin = float(len(_LATIN_RUN_RE.sub("", s).replace(" ", "")))
+    w = non_latin + round(latin / 3.0 * 2.0) / 2.0
+    return max(0.5, w)
+
+
+#: 生成的台账带这一行**来源说明**（`_note` 已在 `voice_accum.KNOWN_TOP_KEYS` 白名单里 ⇒ 不报未知键）。
+_LEDGER_NOTE = ("由 tools/voice_bank.py va-ledger 生成（档 2：逐句 who + chars；"
+                "chars = 近似音节数，只作比例权重）。手写台账（含档 3 的 t0/t1）请勿覆盖。")
+
+
+def ledger_from_parts(who_groups, weight_groups, *, start_stage=0, note="") -> dict:
+    """**逐句手工**建台账：`who_groups[i]` / `weight_groups[i]` = 第 i 段的逐句名单与权重。
+
+    🔵 为什么要有这条**绕开解析**的路（2026-10-05）：`<d>` 与 `<Subject N>` 都是**产线约定**
+       （宿主里没有它们）⇒ 别的开源用户的提示词**不保证**长这样。
+       ⇒ 解析不出来时**不许硬猜**，但也不该直接判死刑 —— 给一条"我自己写"的路，
+         **任何提示词格式都能用**（代价 = 用户要数一下每句多长）。
+    """
+    stages = {}
+    for i, (ws, xs) in enumerate(zip(who_groups or [], weight_groups or [])):
+        ws = [str(w).strip() for w in ws]
+        xs = [float(x) for x in xs]
+        if len(ws) != len(xs):
+            raise ValueError("第 %s 段：`--who` 有 %d 项、`--lines` 有 %d 项 —— 必须**一一对应**"
+                             % (start_stage + i, len(ws), len(xs)))
+        if not ws:
+            continue
+        stages[str(start_stage + i)] = [{"who": w, "chars": x} for w, x in zip(ws, xs)]
+    return {"_note": _LEDGER_NOTE + ((" · " + note) if note else ""), "stages": stages}
+
+
+def va_ledger(prompts, *, start_stage: int = 0, speakers=None,
+              line_re=None, speaker_re=None, probe=None) -> tuple:
+    """把若干段提示词变成 **VA 台账**（**档 2**：逐句 `{"who": …, "chars": …}`）。
+
+    为什么是档 2 而不是档 1（只有开口顺序）：档 1 下 `assign_by_prior` 只能**等分**，
+    而等分**必然**把别人的音色算进来（2026-10-05 实测：日志明写"按字数比例切 3 段（等分）"）。
+    补上**逐句字数**之后，切分变成"按句长比例 + 吸附到能量间隙" ⇒ 边界落在真实停顿上。
+
+    参数
+      `start_stage`  第 1 个提示词对应的**段号**
+      `speakers`     角色名（按**首次出现顺序**）—— 只在提示词**没有** `subject_definitions:`
+                     段、`subject_name()` 拿不到名字时用
+      `line_re` / `speaker_re`  **覆盖默认规则**（见 `compile_rules`）—— 兼容别的提示词格式
+      `probe`        可选**列表**；每个阶段 append 一个 dict（规则 / 命中数 / 句数）⇒ 供 CLI 出**解析报告**
+
+    返回 ``(台账 dict, 警告列表)``。**解析不出就叫调用方知道**（不静默给空台账）。
+    """
+    explicit = [s for s in (speakers or []) if s]
+    stages, warn = {}, []
+    for i, txt in enumerate(prompts or []):
+        pr = {}
+        raw = speaker_lines(txt, line_re=line_re, speaker_re=speaker_re, probe=pr)
+        pr["stage"] = start_stage + i
+        if probe is not None:
+            probe.append(pr)
+        if not raw:
+            warn.append("第 %s 段：解析不出**逐句**信息（台词块 `%s` 命中 %d 处；说话人 `%s` 命中 %d 处）⇒ 跳过"
+                        % (start_stage + i, pr.get("line_re"), pr.get("line_hits", 0),
+                           pr.get("speaker_re"), pr.get("speaker_hits", 0)))
+            continue
+        if pr.get("no_speaker"):
+            warn.append("第 %s 段：有 %d 处台词块**前面没有说话人标记** ⇒ 那几句归不了人（已跳过）"
+                        % (start_stage + i, pr["no_speaker"]))
+        tag2name, ents = {}, []
+        for tag, body in raw:
+            if tag not in tag2name:
+                nm = tag if not tag.startswith("Subject ") else subject_name(txt, tag)
+                if nm == tag and explicit:
+                    k = len(tag2name)
+                    nm = explicit[k] if k < len(explicit) else nm
+                if nm.startswith("@") or (nm == tag and tag.startswith("Subject ")):
+                    # ⚠️ `nm == tag` **只在 tag 是 `Subject N` 时**才算失败 ——
+                    #    tag 若是**名字本身**（用户给了 `--speaker-re`），`nm == tag` 是**正常的**。
+                    warn.append("段 %s：`%s` 的名字没解析出来（拿到 `%s`）—— "
+                                "用 `--speakers` 显式给角色名（逗号分隔，按首次出现顺序）"
+                                % (start_stage + i, tag, nm))
+                tag2name[tag] = nm
+            ents.append({"who": tag2name[tag], "chars": line_weight(body)})
+        stages[str(start_stage + i)] = ents
+    return {"_note": _LEDGER_NOTE, "stages": stages}, warn
+
+
+#: `subject_name` 用：`<Subject N>` 行开头的 **@引用**（`@图片1` / `@视频2`…）—— 它排在名字**前面**。
+_AT_REF_RE = re.compile(r"^(?:\s*@\S+)+")
+#: `subject_name` 用：名字的**终止符**（中英逗号 / 冒号 / 顿号 / 分号）。
+_NAME_END_RE = re.compile(r"[,，:：、；;]")
+
+
 def subject_name(prompt: str, tag: str) -> str:
     """把 `<Subject N>` 映射成**角色名**（best-effort）。
 
-    六段式有 `subject_definitions:` 段（`<Subject 1> <角色名>，…`）⇒ 取名字。
+    六段式有 `subject_definitions:` 段（`<Subject 1> @图片1 角色名, 描述…`）⇒ 取**角色名**。
     **最小格式没有这个段**（`<Subject N>` 后面跟的是动作句）⇒ 拿不到名字，
     原样返回 `Subject N`，由调用方自己映射（或用 `--speakers` 显式给）。
+
+    🔴 **2026-10-05 修**（`va-ledger` 一跑真实提示词就暴露）：旧写法取 `<Subject N>` 后的
+       **第一个 token**，而真实格式的第一个 token 是 **`@图片N`** ⇒ 返回 `@图片1`。
+       后果：`who` 成了 `@图片1` ⇒ 声库里没有这个名字 ⇒ **`advise` 永远查不到锚**（静默退 3）。
+       新写法：① 只在**六段式**（有 `subject_definitions:`）里取名字（最小格式**不猜**）；
+       ② 先剥掉开头的 **@引用**；③ 名字取到第一个**逗号/冒号/顿号**为止；
+       ④ 跳过含 `<d>` 的行（那是**台词行**不是定义行 —— 同一 tag 在两处出现时别取错）。
     """
-    m = re.search(r"<%s>\s*([^\s，,：:；;。、\n]+)" % re.escape(tag), prompt or "")
-    return m.group(1) if m else tag
+    src = prompt or ""
+    if "subject_definitions" not in src:
+        return tag
+    _m0 = re.match(r"Subject\s*(\d+)$", tag)
+    pat = (r"<Subject\s*%s>" % re.escape(_m0.group(1))) if _m0 else (r"<%s>" % re.escape(tag))
+    for m in re.finditer(pat + r"([^\n]*)", src, re.I):
+        line = m.group(1)
+        if "<d>" in line or "<D>" in line:     # 台词行 ⇒ 跳过
+            continue
+        rest = _AT_REF_RE.sub("", line).strip()
+        name = _NAME_END_RE.split(rest, 1)[0].strip()
+        return name or tag
+    return tag
 
 
 def advise_anchor(bank_dir: str, prompt: str = "", prev_prompt: str = "",
@@ -750,6 +973,94 @@ def _selftest_low_rate_source() -> int:
     return bad
 
 
+def _selftest_va_ledger():
+    """⑥ 逐句解析 / 字数权重 / 名字解析 / 规则覆盖 —— **VA 台账**那条链的断言。
+
+    为什么单独一组（2026-10-05）：`va-ledger` 的全部价值在"从提示词里**读出**逐句信息"，
+    而 `<d>` / `<Subject N>` **不是官方约定**（宿主里没有它们）⇒
+    "默认能解 / 能被覆盖 / 解不了要报错"这三件事必须**各自有断言**守着。
+
+    返回 ``(失败数, 检查数)`` —— **自己数**（别在外面写死数字，那正是本仓反复踩的漂移坑）。
+    """
+    res = []
+
+    def chk(ok, title, detail=""):
+        res.append(bool(ok))
+        print("  [%s] %s%s" % ("OK" if ok else "FAIL", title, ("  " + detail) if detail else ""))
+
+    six = ("subject_definitions:\n"
+           "<Subject 1> @图片1 张三, an East Asian man in his forties: short black hair.\n"
+           "<Subject 2> @图片2 李四, an East Asian woman.\n"
+           "[Shot 1] <Subject 1> 目光不离桌面开口说话:<d>[zh]我还看了第二遍。</d> he says. "
+           "<Subject 2> 抬起下巴开口说话:<d>[zh]是我的。</d> she says. "
+           "<Subject 1> 又开口:<d>[zh]别走。</d>\n")
+    _lines = speaker_lines(six)
+    chk([t for t, _b in _lines] == ["Subject 1", "Subject 2", "Subject 1"],
+        "逐句：3 处台词 ⇒ 3 项，且**同一人两句出现两次**（不是去重成 2 项）",
+        str([t for t, _b in _lines]))
+    chk([b for _t, b in _lines] == ["[zh]我还看了第二遍。", "[zh]是我的。", "[zh]别走。"],
+        "逐句：正文取到 `</d>` 之前（不吞掉后面的英文描述）", str([b for _t, b in _lines]))
+    chk(speakers_in_order(six) == ["Subject 1", "Subject 2"],
+        "顺序：仍是**去重**的（与旧口径一致 ⇒ `speakers_in_order` 是薄包装）",
+        str(speakers_in_order(six)))
+    chk(line_weight("[zh]我还看了第二遍。") == 7.0
+        and line_weight("[zh]第三页不是我的字。") == 8.0 and line_weight("[zh]是我的。") == 3.0,
+        "权重：汉字各记 1；标点与 `[zh]` **不计**（7 / 8 / 3）",
+        "%.1f / %.1f / %.1f" % (line_weight("[zh]我还看了第二遍。"),
+                                line_weight("[zh]第三页不是我的字。"), line_weight("[zh]是我的。")))
+    chk(abs(line_weight("[en]I looked at it again.") - 5.5) < 1e-9 and line_weight("……") == 0.5,
+        "权重：拉丁按 3 字母 ≈ 1 音节（16 字母 ⇒ 5.5）；纯标点 ⇒ **下限 0.5**",
+        "%.1f / %.1f" % (line_weight("[en]I looked at it again."), line_weight("……")))
+    chk(abs(line_weight("Hello, world! OK?") - 4.0) < 1e-9,
+        "权重：**ASCII 标点也剥**（`Hello, world! OK?` ⇒ 12 字母 = 4.0，不是把 3 个标点也算进去）",
+        "%.1f" % line_weight("Hello, world! OK?"))
+    chk(subject_name(six, "Subject 1") == "张三" and subject_name(six, "Subject 2") == "李四",
+        "名字：六段式里剥掉开头的 `@图片N` 取**真名**（旧写法返回 `@图片1` ⇒ 声库永远查不到）",
+        "%s / %s" % (subject_name(six, "Subject 1"), subject_name(six, "Subject 2")))
+    # 🔴 **2026-10-06 补的防回归**：同日发现产线脚本里写成字符类 `[^，,<d]`（本意是排除
+    #    标记 `<d>`，实际变成"排除字母 d"）⇒ 英文名被截断（`David` ⇒ `Davi`）⇒ 声库查不到
+    #    ⇒ **静默降级不接锚**。本仓写法本来就对，加一条钉住，防止有人"顺手统一风格"改坏。
+    _six_en = ("subject_definitions: <Subject 1> @图片1 David, an East Asian man in his forties.\n"
+               "<Subject 2> @图片2 Ding Yi, an East Asian woman.\n")
+    chk(subject_name(_six_en, "Subject 1") == "David"
+        and subject_name(_six_en, "Subject 2") == "Ding Yi",
+        "名字：**英文名含字母 `d` 不许被截断**（`[^<d]` 字符类陷阱：`David` 会变成 `Davi`）",
+        "%s / %s" % (subject_name(_six_en, "Subject 1"), subject_name(_six_en, "Subject 2")))
+    chk(subject_name("<Subject 1> 抬眼看他们开口说话:<d>你好。</d>", "Subject 1") == "Subject 1",
+        "名字：**最小格式**（无 `subject_definitions`）⇒ 原样返回 tag（**不猜**）", "")
+    _pr = {}
+    _alt = speaker_lines("<台词>你好世界。</台词>\n甲: <台词>在。</台词>",
+                         line_re=r"<台词>(.*?)</台词>", speaker_re=r"^([^:\n：]+)[:：]", probe=_pr)
+    chk(_alt == [("甲", "在。")] and _pr.get("line_hits") == 2 and _pr.get("no_speaker") == 1,
+        "覆盖：换一套格式（`--line-re` + 行首「名字:」）解得出；**前无说话人标记那句被跳过并记账**",
+        "%s ｜ probe=%s" % (_alt, {k: _pr[k] for k in ("line_hits", "speaker_hits", "no_speaker")}))
+    try:
+        compile_rules(line_re="([")
+        _bad_re = False
+    except ValueError:
+        _bad_re = True
+    chk(_bad_re, "规则：**不合法正则 ⇒ raise**（fail-closed，不静默退回默认）", "")
+    _led, _warn = va_ledger([six], start_stage=7)
+    _ents = _led["stages"].get("7") or []
+    chk([e["who"] for e in _ents] == ["张三", "李四", "张三"]
+        and [e["chars"] for e in _ents] == [7.0, 3.0, 2.0],
+        "台账：段号按 `start_stage` 偏移；逐句 `who` = **名字**、`chars` = 音节数",
+        str([(e["who"], e["chars"]) for e in _ents]))
+    chk(bool(_led.get("_note")) and "档 2" in _led["_note"] and not _warn,
+        "台账：带 `_note` 来源说明且**无警告**（`_note` 已在 `KNOWN_TOP_KEYS` 白名单）",
+        str(_warn)[:60])
+    try:
+        ledger_from_parts([["甲", "乙"]], [[5.0]])
+        _bad_len = False
+    except ValueError:
+        _bad_len = True
+    chk(_bad_len, "手工档：`--who` 与 `--lines` **长度不等 ⇒ raise**（不猜）", "")
+    _led2 = ledger_from_parts([["甲", "乙"]], [[5.0, 3.0]], start_stage=0)
+    chk(_led2["stages"]["0"] == [{"who": "甲", "chars": 5.0}, {"who": "乙", "chars": 3.0}],
+        "手工档：逐句 `who` + 权重 ⇒ 台账（**任何提示词格式都能用**）", "")
+    return sum(1 for x in res if not x), len(res)
+
+
 def _selftest() -> int:
     bad = 0
     print("① 说话人解析（取每个 <d> 最近的前驱说话人标记，按开口顺序去重）")
@@ -773,7 +1084,10 @@ def _selftest() -> int:
     bad += _selftest_pitch_roundtrip()
     print("⑤ 低采样率素材原样通过（防「切片补长」式变调；用户素材常是 16k/22.05k）")
     bad += _selftest_low_rate_source()
-    n = len(_SELFTEST_CASES) + len(_BW_CASES) + 4 + 5 + 4
+    print("⑥ 逐句解析 / 字数权重 / 名字解析 / 规则覆盖（VA 台账那条链 —— **兼容性也是断言**）")
+    _b6, _n6 = _selftest_va_ledger()
+    bad += _b6
+    n = len(_SELFTEST_CASES) + len(_BW_CASES) + 4 + 5 + 4 + _n6
     print("  自检：%d/%d 通过" % (n - bad, n))
     return 0 if bad == 0 else 1
 
@@ -1076,6 +1390,139 @@ def collect(mp4: str, name: str, bank_dir: str, force: bool = False,
                      % (dur, t0, t1, sr_out, _norm, _tail))
 
 
+# ------------------------------------------------- VA 台账（`va-ledger` 子命令）
+def _split_groups(s):
+    """`"甲,乙;丙"` ⇒ `[["甲", "乙"], ["丙"]]`（`;` 分段、`,` 分句）。"""
+    return [[x.strip() for x in g.split(",") if x.strip()] for g in (s or "").split(";")]
+
+
+def _print_ledger(led):
+    for k in sorted(led["stages"], key=lambda x: int(x)):
+        ents = led["stages"][k]
+        print("  段 %s：%d 句 —— %s"
+              % (k, len(ents), " ｜ ".join("%s:%.1f" % (e["who"], e["chars"]) for e in ents)))
+
+
+def _write_ledger(led, a) -> int:
+    """写台账：`--out` / `--run`；`--dry-run` 或没给路径 ⇒ 只打印。**绝不静默覆盖**。"""
+    out_path = a.out
+    if not out_path and a.run:
+        root = a.relay_root or (os.path.join(os.environ["COMFYUI_PATH"], "output", "relay_kit")
+                                if os.environ.get("COMFYUI_PATH") else "")
+        if not root:
+            print("🔴 给 `--run` 时必须给 `--relay-root`（或设 `COMFYUI_PATH` 环境变量）")
+            return 2
+        out_path = os.path.join(root, a.run, "_va.json")
+    if a.dry_run or not out_path:
+        print(json.dumps(led, ensure_ascii=False, indent=1))
+        if not out_path and not a.dry_run:
+            print("  ℹ️ 只打印（没给 `--out` / `--run`）—— 加 `--out <file>` 或 `--run <id>` 才写盘")
+        return 0
+    if os.path.isfile(out_path) and not a.force:
+        print("🔴 已存在，**不覆盖**：%s" % out_path)
+        print("   · 它可能是**手写的**（含档 3 的 `t0/t1` = ASR 精确时间），覆盖会丢。")
+        print("   · 确认覆盖加 `--force`；想并存请改 `--out`。")
+        return 3
+    _d = os.path.dirname(out_path)
+    if _d:
+        os.makedirs(_d, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as fh:
+        json.dump(led, fh, ensure_ascii=False, indent=1)
+        fh.write("\n")
+    print("✅ 已写 %s（%d 段 / %d 句）"
+          % (out_path, len(led["stages"]), sum(len(v) for v in led["stages"].values())))
+    return 0
+
+
+def _cmd_va_ledger(a) -> int:
+    """`va-ledger` 的**三层**：① 默认规则（六段式开箱）② 用户给规则 ③ **完全手工**（绕开解析）。
+
+    🔵 为什么分三层（2026-10-05，「尽量兼容其他开源用户的提示词」）：
+       `<d>` 与 `<Subject N>` 都**不是官方约定**（宿主里没有）⇒ 别人的提示词不保证长这样。
+       ⇒ 默认要够聪明（⑥ 段式开箱可用）；不匹配时要**能被接管**（给正则）；
+         实在不行要**有出路**（手工给逐句）——**但任何一层失败都必须说出来**（不许静默给空台账）。
+    """
+    # ③ 全手工 —— 任何提示词格式都能用
+    if a.who or a.lines:
+        if not (a.who and a.lines):
+            print("🔴 `--who` 与 `--lines` 必须**成对**给（逐句名单 ↔ 逐句权重一一对应）")
+            return 2
+        who_g = _split_groups(a.who)
+        num_g = []
+        for gi, g in enumerate(_split_groups(a.lines)):
+            try:
+                num_g.append([float(x) for x in g])
+            except ValueError:
+                print("🔴 `--lines` 第 %d 组里有非数字：%s" % (gi + 1, g))
+                return 2
+        if len(who_g) != len(num_g):
+            print("🔴 `--who` 有 %d 组、`--lines` 有 %d 组 —— 多段用 `;` 分隔，两边段数必须相等"
+                  % (len(who_g), len(num_g)))
+            return 2
+        try:
+            led = ledger_from_parts(who_g, num_g, start_stage=int(a.start_stage),
+                                    note="**手工给**的逐句名单与权重（未解析提示词）")
+        except ValueError as e:
+            print("🔴 " + str(e))
+            return 2
+        _print_ledger(led)
+        return _write_ledger(led, a)
+
+    # ①② 从提示词生成
+    import glob as _glob
+    prompts, src = list(a.prompt_inline), []
+    if a.prompt_inline:
+        src.append("--prompt-inline × %d" % len(a.prompt_inline))
+    files = list(a.prompt_file)
+    if a.prompts_dir:
+        files = sorted(_glob.glob(os.path.join(a.prompts_dir, a.pattern)))
+        if not files:
+            print("🔴 `--prompts-dir %s` 下没有匹配 `%s` 的文件" % (a.prompts_dir, a.pattern))
+            return 2
+    for f in files:
+        try:
+            with open(f, encoding="utf-8") as fh:
+                prompts.append(fh.read())
+            src.append(os.path.basename(f))
+        except OSError as e:
+            print("🔴 读不了 %s：%s" % (f, e))
+            return 2
+    if not prompts:
+        print("🔴 没给提示词。三种给法：")
+        print("   · `--prompt-file <文件>`（可多次，按段号顺序）")
+        print("   · `--prompts-dir <目录>`（配合 `--pattern`，当前 = %s）" % a.pattern)
+        print("   · `--prompt-inline '<正文>'`（可多次，便于脚本 / 管道）")
+        print("   · 或**完全手工**：`--who '甲,乙,甲' --lines '6,8,5'`（任何提示词格式都能用）")
+        return 2
+    probe = []
+    try:
+        led, warn = va_ledger(prompts, start_stage=int(a.start_stage),
+                              speakers=[s.strip() for s in a.speakers.split(",") if s.strip()],
+                              line_re=a.line_re or None, speaker_re=a.speaker_re or None,
+                              probe=probe)
+    except ValueError as e:
+        print("🔴 " + str(e))
+        return 2
+    # —— **解析报告**（无论成败都打）：用户要能看出"我按什么规则、命中多少" ——
+    print("  解析报告（来源：%s）" % ("、".join(src) or "—"))
+    for pr in probe:
+        print("    段 %s：台词块 `%s` 命中 %d ｜ 说话人 `%s` 命中 %d ｜ 逐句 %d%s"
+              % (pr["stage"], pr.get("line_re"), pr.get("line_hits", 0),
+                 pr.get("speaker_re"), pr.get("speaker_hits", 0), pr.get("lines", 0),
+                 ("（%d 处没有说话人标记 ⇒ 归不了人）" % pr["no_speaker"]) if pr.get("no_speaker") else ""))
+    for w in warn:
+        print("  ⚠ " + w)
+    if not led["stages"]:
+        print("🔴 一段都建不出来（**判不准就不硬猜**，所以这里直接失败）。两条路：")
+        print("   ① 告诉我你的提示词长什么样：")
+        print("      `--line-re '<台词>(.*?)</台词>'`（捕获组 1 = 台词正文）")
+        print("      `--speaker-re '<([^>]+)>'`（捕获组 1 = 说话人；纯数字 ⇒ 当作 Subject 编号）")
+        print("   ② 或**完全手工**给逐句：`--who '甲,乙,甲' --lines '6,8,5'`")
+        return 2
+    _print_ledger(led)
+    return _write_ledger(led, a)
+
+
 # ---------------------------------------------------------------- CLI
 def _main(argv):
     import argparse
@@ -1101,8 +1548,36 @@ def _main(argv):
     p4.add_argument("--speakers", default="", help="显式给说话人（逗号分隔，按开口顺序）——"
                                                  "最小格式没有 subject_definitions 时用它")
     p4.add_argument("--prev-speaker", default="", help="显式给「上一段最后一个说话人」")
+    p5 = sub.add_parser("va-ledger",
+                        help="生成 VA 台账（档 2：逐句 who + chars）—— **零依赖，不需要 ASR**")
+    p5.add_argument("--prompt-file", action="append", default=[],
+                    help="提示词文件（**按段号顺序**可给多次）")
+    p5.add_argument("--prompt-inline", action="append", default=[],
+                    help="提示词**正文**（按段号顺序可给多次）—— 便于脚本 / 管道")
+    p5.add_argument("--prompts-dir", default="", help="提示词目录（按 `--pattern` 排序取全部文件）")
+    p5.add_argument("--pattern", default="seg*_提交.txt", help="配合 `--prompts-dir` 的通配（默认 seg*_提交.txt）")
+    p5.add_argument("--start-stage", type=int, default=0, help="第 1 个提示词对应的**段号**（默认 0）")
+    p5.add_argument("--speakers", default="",
+                    help="名字解析不出来时显式给角色名（逗号分隔，按首次出现顺序）")
+    p5.add_argument("--line-re", default="",
+                    help="**覆盖台词块规则**（捕获组 1 = 台词正文；不给捕获组则取「标记后到 </d> 或行尾」）")
+    p5.add_argument("--speaker-re", default="",
+                    help="**覆盖说话人规则**（捕获组 1 = 标识；标识是纯数字 ⇒ 当作 Subject 编号，其它 ⇒ 当作名字）")
+    p5.add_argument("--who", default="",
+                    help="**完全手工**（不解析提示词）：逐句名单，逗号分隔；多段用 `;` 分段")
+    p5.add_argument("--lines", default="",
+                    help="**完全手工**：逐句权重，逗号分隔；多段用 `;` 分段（与 `--who` 一一对应）")
+    p5.add_argument("--run", default="", help="写到 `<relay-root>/<run>/_va.json`")
+    p5.add_argument("--relay-root", default="",
+                    help="relay_kit 根目录；给 `--run` 时必填（或设 `COMFYUI_PATH` 环境变量）")
+    p5.add_argument("--out", default="", help="直接指定输出文件（与 `--run` 二选一）")
+    p5.add_argument("--dry-run", action="store_true", help="只打印，不写盘")
+    p5.add_argument("--force", action="store_true",
+                    help="覆盖已存在的台账（**默认拒绝** —— 手写台账可能含档 3 的 ASR 时间）")
     sub.add_parser("selftest", help="说话人解析规则的自检（可证伪）")
     a = ap.parse_args(argv)
+    if a.cmd == "va-ledger":
+        return _cmd_va_ledger(a)
     if a.cmd == "selftest":
         print("说话人解析自检（规则：取每个 <d> 最近的前驱说话人标记，按开口顺序去重）")
         return _selftest()

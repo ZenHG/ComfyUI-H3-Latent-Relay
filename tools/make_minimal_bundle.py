@@ -7,7 +7,7 @@
 
 ## 为什么要有它
 
-本仓是**开发者仓**：`docs/`（9 篇，其中 01/02 另有英文版 `*_EN.md`）· `tests/`（4 套）· `tools/`（10 个）· `.github/`（CI 与模板）
+本仓是**开发者仓**：`docs/`（10 篇，每篇均有英文版 `*_EN.md`）· `tests/`（4 套）· `tools/`（10 个）· `.github/`（CI 与模板）
 加起来比运行期代码还多。想让用户 git clone 一份干净的，或者想打 zip 发给别人时，
 手挑文件容易**漏**（漏一个 `.py` 就是 `ImportError`，且往往是别人先发现）。
 
@@ -70,6 +70,14 @@ MANIFEST_RUNTIME = [
     "exp/history_anchor_v2/__init__.py",
     "exp/history_anchor_v2/history_anchor.py",
     "exp/history_anchor_v2/h3_adapter.py",
+    # 🧪 VA（Voice Accumulate）跨段「按人累积」音色参考：nodes.py 顶层 import
+    #    `.exp.voice_accum.h3_adapter`。同样**默认关**（无 `_va.json` 即不生效），
+    #    但**会被 import** ⇒ 必须随分发集一起发。
+    #    ⚠ **零新依赖**：`voice_accum.py` 只用 torch / numpy（ComfyUI 自带），
+    #      刻意**不 import ASR/funasr**（944 MB，用户不该装）—— 台账 `_va.json` 是纯数据。
+    "exp/voice_accum/__init__.py",
+    "exp/voice_accum/voice_accum.py",
+    "exp/voice_accum/h3_adapter.py",
 ]
 
 MANIFEST_FRONTEND = [
@@ -102,7 +110,7 @@ MANIFEST = MANIFEST_RUNTIME + MANIFEST_FRONTEND + MANIFEST_EXAMPLES + MANIFEST_M
 
 # 明确排除（写出来是为了让「为什么不带」有据可查，也便于将来有人问）
 EXCLUDED_NOTE = {
-    "docs/": "9 篇深度文档（机制/参数/画布/troubleshooting；01/02 另有英文版 *_EN.md）"
+    "docs/": "10 篇深度文档（机制/参数/采样链/画布/排障/出词/Chain/测试/观测/音频；每篇均有英文版 *_EN.md）"
              "——开发与排查用，非运行必需",
     "tests/": "4 套离线自测 ——开发用（**项数不在此复述**，见 tools/README.md 与 ci.yml）",
     "tools/": "10 个自检/取证/CLI ——开发用（含本脚本自身）",

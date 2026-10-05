@@ -8,16 +8,16 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "condensed",
-          "h_en": "4d3a65d050587335",
-          "h_src": "70b636f3f2cf6fcc",
+          "h_en": "114cc78f208f3731",
+          "h_src": "231d81fa057b4623",
           "seeded": "by-position"
         },
         {
           "zh": "核心功能",
           "en": "Core features",
           "mode": "condensed",
-          "h_en": "fa95e007ad1e37b1",
-          "h_src": "571aa1df426bba46",
+          "h_en": "2a41f2a16bb3059f",
+          "h_src": "617f27360365b39c",
           "seeded": "by-position"
         },
         {
@@ -40,23 +40,23 @@
           "zh": "使用方法",
           "en": "Usage",
           "mode": "condensed",
-          "h_en": "1ea51479df0ae2da",
-          "h_src": "0970111210beb721",
+          "h_en": "5e2f446e913fa6c3",
+          "h_src": "c47b59d733a98ea9",
           "seeded": "by-position"
         },
         {
           "zh": "目录结构",
           "en": "Repository layout",
           "mode": "condensed",
-          "h_en": "ae7615f8215f5da4",
-          "h_src": "33a7507b5b8b852c",
+          "h_en": "28cc21a9f304b154",
+          "h_src": "a29367fff92c5ac4",
           "seeded": "by-position"
         },
         {
           "zh": "配置与注意事项",
           "en": "Configuration & hard rules",
           "mode": "condensed",
-          "h_en": "89aa3077b4b04808",
+          "h_en": "ffad53cca0b46369",
           "h_src": "d40c155bd146df5b",
           "seeded": "by-position"
         },
@@ -72,14 +72,14 @@
           "zh": "文档索引",
           "en": "Documentation index",
           "mode": "condensed",
-          "h_en": "00b4e56b66768c29",
-          "h_src": "b53730cc870b5e7b",
+          "h_en": "3646c373c48208cc",
+          "h_src": "bc07f9ca2043990d",
           "seeded": "by-position"
         }
       ],
       "acks": [],
-      "stamped": "2026-10-04",
-      "src_sha": "be8a8172613da19d"
+      "stamped": "2026-10-06",
+      "src_sha": "29bb20863e040484"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -88,31 +88,31 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "full",
-          "h_en": "18767786e3ef968f",
-          "h_src": "7d0c728cbea0e9c7",
+          "h_en": "30cdc5be66158982",
+          "h_src": "151a1938ed6aa1ba",
           "seeded": "by-position"
         },
         {
           "zh": "🧭 两条续接路线：怎么选（实测对比）",
           "en": "🧭 The two continuation routes: how to choose (measured comparison)",
           "mode": "full",
-          "h_en": "23d43129d8ed6d15",
-          "h_src": "8558398d5a6fb075",
+          "h_en": "d7d96d7f7495eed4",
+          "h_src": "9e7bc783b9482525",
           "seeded": "by-position"
         },
         {
           "zh": "协议出处（ComfyUI 原生，无需 monkey patch）",
           "en": "Protocol sources (native ComfyUI, no monkey patching needed)",
           "mode": "full",
-          "h_en": "0ed54990b3177dd2",
-          "h_src": "a71c896c837ca165",
+          "h_en": "6e0709cf043707ab",
+          "h_src": "4e8089da47d55d69",
           "seeded": "by-position"
         },
         {
           "zh": "🔍 放大之后：哪条线留在原生域（0.6.8 全流程实测）",
           "en": "🔍 After upscaling: which line stays in the native domain (measured on the 0.6.8 full flow)",
           "mode": "full",
-          "h_en": "6be662246d7f4d44",
+          "h_en": "cb59e4c39f1e3c5b",
           "h_src": "acd3e56322b18cc6",
           "seeded": "by-position"
         },
@@ -144,8 +144,8 @@
           "zh": "🔍 裁多少帧：不让你配，由节点当场量",
           "en": "🔍 How many frames to trim: not configurable, measured on the spot by the node",
           "mode": "full",
-          "h_en": "7d9b1c48f147b6d1",
-          "h_src": "cd847672d78d5150",
+          "h_en": "005df3ca20948853",
+          "h_src": "4d5f140292637850",
           "seeded": "by-position"
         },
         {
@@ -166,8 +166,8 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-04",
-      "src_sha": "997bb34f6092cf08"
+      "stamped": "2026-10-06",
+      "src_sha": "06ca2288755a21d0"
     },
     "docs/02-parameters.md": {
       "en": "docs/02-parameters_EN.md",
@@ -176,22 +176,414 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "full",
-          "h_en": "9169e919f880810f",
-          "h_src": "495055744a2bdb1b",
+          "h_en": "079cc17199a493a9",
+          "h_src": "259e6c3355d1dffb",
           "seeded": "by-position"
         },
         {
           "zh": "参数",
           "en": "Parameters",
           "mode": "full",
-          "h_en": "61382a6a17fd3043",
-          "h_src": "05c59dc969f1be14",
+          "h_en": "1401b17c25e5adbd",
+          "h_src": "bd057407fc45a83a",
           "seeded": "by-position"
         }
       ],
       "acks": [],
-      "stamped": "2026-10-04",
-      "src_sha": "76a0ce46ac4e389a"
+      "stamped": "2026-10-06",
+      "src_sha": "e963fef3e3351b25"
+    },
+    "docs/03-sampling-and-design.md": {
+      "en": "docs/03-sampling-and-design_EN.md",
+      "sections": [
+        {
+          "zh": "(preamble)",
+          "en": "(preamble)",
+          "mode": "full",
+          "h_en": "fa8219b10a8df960",
+          "h_src": "91d08ea4bdee6025",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "✅ 默认够用 —— 先别调参",
+          "en": "✅ Good enough by default — don't touch the knobs first",
+          "mode": "full",
+          "h_en": "738bf32f0c15f0f8",
+          "h_src": "9d9abafabb472104",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "4.1 全流程档：**8 个节点全在场**（`examples/fullflow_second_pass_latent_upscale_ui.json`）（原 README §4.1）",
+          "en": "4.1 Full-flow tier: **all 8 nodes present** (`examples/fullflow_second_pass_latent_upscale_ui.json`) (formerly README §4.1)",
+          "mode": "full",
+          "h_en": "5f70367bc0052ef4",
+          "h_src": "684a8ee96026ec61",
+          "seeded": "by-number"
+        }
+      ],
+      "acks": [],
+      "stamped": "2026-10-06",
+      "src_sha": "e0c4d1c18fb4b8e2"
+    },
+    "docs/04-canvas-and-widgets.md": {
+      "en": "docs/04-canvas-and-widgets_EN.md",
+      "sections": [
+        {
+          "zh": "(preamble)",
+          "en": "(preamble)",
+          "mode": "full",
+          "h_en": "4e015072a6a449fb",
+          "h_src": "230b1738585dda2f",
+          "seeded": "by-position"
+        }
+      ],
+      "acks": [],
+      "stamped": "2026-10-06",
+      "src_sha": "230b1738585dda2f"
+    },
+    "docs/05-troubleshooting.md": {
+      "en": "docs/05-troubleshooting_EN.md",
+      "sections": [
+        {
+          "zh": "(preamble)",
+          "en": "(preamble)",
+          "mode": "full",
+          "h_en": "79f8b270ff765405",
+          "h_src": "f540ab61d5b9ca1e",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "排障",
+          "en": "Troubleshooting",
+          "mode": "full",
+          "h_en": "f986ba10792f08ea",
+          "h_src": "4b5cd3f7b903c2e3",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "🔧 工作流文件被改坏的自检（随包工具）",
+          "en": "🔧 Self-check for a corrupted workflow file (bundled tool)",
+          "mode": "full",
+          "h_en": "ad9dd488d9f3e01b",
+          "h_src": "8b292d45855ef871",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "🤖 API 提交（脚本 / 程序化）",
+          "en": "🤖 API submission (script / programmatic)",
+          "mode": "full",
+          "h_en": "a6a55a54b7add1f1",
+          "h_src": "c9e291adb616865a",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "排障表（补：原 README §9）",
+          "en": "Troubleshooting table (addendum: former README §9)",
+          "mode": "full",
+          "h_en": "07877ffd011bb0c8",
+          "h_src": "32c2e74d65a25c9b",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "常见疑问（FAQ，补：原 README §10）",
+          "en": "FAQ (addendum: former README §10)",
+          "mode": "full",
+          "h_en": "95cf3f1dd2367626",
+          "h_src": "93b63cce8cde798c",
+          "seeded": "by-position"
+        }
+      ],
+      "acks": [],
+      "stamped": "2026-10-06",
+      "src_sha": "18d37bd707ece8ff"
+    },
+    "docs/06-continuity-scripting.md": {
+      "en": "docs/06-continuity-scripting_EN.md",
+      "sections": [
+        {
+          "zh": "(preamble)",
+          "en": "(preamble)",
+          "mode": "full",
+          "h_en": "163e6eaebe9a4d53",
+          "h_src": "bcfb2f147a98344f",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "🎬 接缝处的对话规避与音频处理（出词纪律 + 音频缝配套）",
+          "en": "🎬 Dialogue avoidance and audio handling at the seam (prompt-side discipline + audio-seam pairing)",
+          "mode": "full",
+          "h_en": "35e6b1008829166e",
+          "h_src": "e978decc7b9b051e",
+          "seeded": "by-position"
+        }
+      ],
+      "acks": [],
+      "stamped": "2026-10-06",
+      "src_sha": "c046d84ff172f569"
+    },
+    "docs/07-chain.md": {
+      "en": "docs/07-chain_EN.md",
+      "sections": [
+        {
+          "zh": "(preamble)",
+          "en": "(preamble)",
+          "mode": "full",
+          "h_en": "b250faf701508203",
+          "h_src": "c5965475439ea449",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "参数（可选格，一律在 `status` 之后追加 / **默认 ⇒ 老图行为逐位不变**）",
+          "en": "Parameters (optional cells, always appended after `status` / **default ⇒ old-graph behaviour bit-exact unchanged**)",
+          "mode": "full",
+          "h_en": "369ec94f8cf157d8",
+          "h_src": "ddd3fcb26502005b",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "词分发：第 k 块喂第 k 段",
+          "en": "Prompt dispatch: block k feeds stage k",
+          "mode": "full",
+          "h_en": "f1aa3af18a5dab6d",
+          "h_src": "34f9c858377bb240",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "拼接成片：包内一键，不依赖外部 ffmpeg",
+          "en": "Concat into a film: one click in the pack, no external ffmpeg",
+          "mode": "full",
+          "h_en": "101f00009cbabd53",
+          "h_src": "8b2b7b72d2d30147",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "音轨档 / 画质档（`audio_out` · `video_crf`，2026-09-22 追加）",
+          "en": "Audio profile / video profile (`audio_out` · `video_crf`, added 2026-09-22)",
+          "mode": "full",
+          "h_en": "0a41e197454de742",
+          "h_src": "5670116dcb2bb6b5",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "段号推进：**表驱动，五处一起动**",
+          "en": "Stage-number advance: **table-driven, five places move together**",
+          "mode": "full",
+          "h_en": "64da3a556b649a22",
+          "h_src": "254d59c28c4800af",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "`run_id` 同步：**同样表驱动，六处一起动**（0.6.19）",
+          "en": "`run_id` sync: **also table-driven, six places move together** (0.6.19)",
+          "mode": "full",
+          "h_en": "44686ab230470140",
+          "h_src": "584c91c1328e6be0",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "第 1 段：**什么都不用做**（不用手动旁路）",
+          "en": "Stage 1: **nothing to do** (no manual bypass)",
+          "mode": "full",
+          "h_en": "b67672a6cd06e76e",
+          "h_src": "e26c14632a5c8dba",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "状态格（点了没反应就看它）",
+          "en": "The status cell (look here when a click does nothing)",
+          "mode": "full",
+          "h_en": "671e1bf1138d8237",
+          "h_src": "b84662775d8fb532",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "声锚（voice_anchor，0.6.19）：跨说话人续接时锁定音色",
+          "en": "Voice anchor (voice_anchor, 0.6.19): lock timbre when continuing across speakers",
+          "mode": "full",
+          "h_en": "7fdd297d8b825561",
+          "h_src": "8a21a3c3e7262d51",
+          "seeded": "by-position"
+        }
+      ],
+      "acks": [],
+      "stamped": "2026-10-06",
+      "src_sha": "af2dd08ab08cd366"
+    },
+    "docs/08-testing.md": {
+      "en": "docs/08-testing_EN.md",
+      "sections": [
+        {
+          "zh": "(preamble)",
+          "en": "(preamble)",
+          "mode": "full",
+          "h_en": "307e739d611b83bd",
+          "h_src": "4a7fa1eb1883ab86",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "单测（零 GPU、秒级）",
+          "en": "Unit tests (zero GPU, seconds)",
+          "mode": "full",
+          "h_en": "325b4559b046a8cf",
+          "h_src": "a77a6adf83740ecc",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "前端纯函数的单测（node 跑、零依赖）",
+          "en": "Unit tests for front-end pure functions (run by node, zero dependencies)",
+          "mode": "full",
+          "h_en": "7017652117bff9f7",
+          "h_src": "f8d4543b6bb4ad35",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "V3 外壳与默认出口（零 GPU、秒级）",
+          "en": "V3 shell and default exit (zero GPU, seconds)",
+          "mode": "full",
+          "h_en": "0fa4be2681d7affc",
+          "h_src": "1b5d7b9c09db3309",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "tools/ 下的其他自检（完整清单见 [`tools/README.md`](../tools/README.md)）",
+          "en": "Other self-checks under tools/ (full list in [`tools/README.md`](../tools/README.md))",
+          "mode": "full",
+          "h_en": "b08c73b13a84d773",
+          "h_src": "2f73a472f40ba97a",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "最小可运行分发集（给用户/分发用，不是开发件）",
+          "en": "Minimal runnable distribution set (for users/distribution, not a development artifact)",
+          "mode": "full",
+          "h_en": "de713f6ada4e0999",
+          "h_src": "42660dc6dd520293",
+          "seeded": "by-position"
+        }
+      ],
+      "acks": [],
+      "stamped": "2026-10-06",
+      "src_sha": "502e4746f6f4d1f2"
+    },
+    "docs/09-metrics.md": {
+      "en": "docs/09-metrics_EN.md",
+      "sections": [
+        {
+          "zh": "(preamble)",
+          "en": "(preamble)",
+          "mode": "full",
+          "h_en": "9106471bf929709b",
+          "h_src": "dc0a1dfa6cd657a4",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "1. 先说结论：哪些量有数、哪些没数",
+          "en": "1. The conclusion first: which quantities have numbers and which don't",
+          "mode": "full",
+          "h_en": "b64ec75dc72a3421",
+          "h_src": "087ffdd8ed7b105a",
+          "seeded": "by-number"
+        },
+        {
+          "zh": "2. E3 · DTW 对齐代价怎么读",
+          "en": "2. E3 · How to read the DTW alignment cost",
+          "mode": "full",
+          "h_en": "5e34b1796bc2b977",
+          "h_src": "90d9527d1ed9d7f4",
+          "seeded": "by-number"
+        },
+        {
+          "zh": "3. E4 · 漂移曲线斜率怎么读",
+          "en": "3. E4 · How to read the drift-curve slope",
+          "mode": "full",
+          "h_en": "54e14d067caff506",
+          "h_src": "c1aec2c89cba091e",
+          "seeded": "by-number"
+        },
+        {
+          "zh": "4. 为什么这些只能是「参考区间」而不是「阈值」",
+          "en": "4. Why these can only be \"reference ranges\" and not \"thresholds\"",
+          "mode": "full",
+          "h_en": "7ee403d17e42462f",
+          "h_src": "802dc1244432da26",
+          "seeded": "by-number"
+        },
+        {
+          "zh": "5. 自校准三步（推荐每台机器自己跑）",
+          "en": "5. Self-calibration in three steps (recommended: run it on each machine yourself)",
+          "mode": "full",
+          "h_en": "dc4c29e7d622a9c5",
+          "h_src": "222de6f1f1a1b57f",
+          "seeded": "by-number"
+        }
+      ],
+      "acks": [],
+      "stamped": "2026-10-06",
+      "src_sha": "6886d24ff831c09b"
+    },
+    "docs/10-audio-seam-and-concat.md": {
+      "en": "docs/10-audio-seam-and-concat_EN.md",
+      "sections": [
+        {
+          "zh": "(preamble)",
+          "en": "(preamble)",
+          "mode": "full",
+          "h_en": "f536b7a73371761b",
+          "h_src": "669e39acec5b0099",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "7.1 多段拼接：N 个 mp4 怎么接成一条",
+          "en": "7.1 Multi-segment concatenation: how to join N mp4 files into one",
+          "mode": "full",
+          "h_en": "2c90b250f96a4b95",
+          "h_src": "05c7937903590388",
+          "seeded": "by-number"
+        },
+        {
+          "zh": "7.2 床窗语音规避：判据能抓什么、抓不住什么（务必先读）",
+          "en": "7.2 Bed-window speech avoidance: what the criteria can and cannot catch (read this first)",
+          "mode": "todo",
+          "h_en": "a743f89748838318",
+          "h_src": "0405146eb15ac4b0",
+          "seeded": "by-number"
+        },
+        {
+          "zh": "7.3 调参指南：每个旋钮的推荐值与开关理由（0.6.5 实测定稿）",
+          "en": "7.3 Tuning guide: recommended value and rationale for every knob (finalized by measurement in 0.6.5)",
+          "mode": "full",
+          "h_en": "665b3d8a79c62d83",
+          "h_src": "a6781e59fb73e8e6",
+          "seeded": "by-number"
+        },
+        {
+          "zh": "7.3.1 🔴 台词保护：**缩短 patch 才是主防线，守卫只是兜底**",
+          "en": "7.3.1 🔴 Dialogue protection: **shortening patch is the main defense; the guard is only a backstop**",
+          "mode": "full",
+          "h_en": "38e1c551525663b3",
+          "h_src": "41cdd545c36d2cd7",
+          "seeded": "by-number"
+        },
+        {
+          "zh": "7.3.2 孤立瞬态抑制（declick）：治「安静背景里的一处孤立瞬态」",
+          "en": "7.3.2 Isolated-transient suppression (declick): fixing \"a single isolated transient in a quiet background\"",
+          "mode": "full",
+          "h_en": "a6217461e5a116f0",
+          "h_src": "1e0ff9e687496291",
+          "seeded": "by-number"
+        },
+        {
+          "zh": "7.4 API / 脚本用户：不开画布怎么用（⚠ 先看\"哪些是 UI 特性\"）",
+          "en": "7.4 API / script users: how to use it without the canvas (⚠ read \"which features are UI-only\" first)",
+          "mode": "full",
+          "h_en": "f0bc998d169fce68",
+          "h_src": "1c5ccc8192fa2e66",
+          "seeded": "by-number"
+        }
+      ],
+      "acks": [],
+      "stamped": "2026-10-06",
+      "src_sha": "a216f2142e169787"
     }
   }
 }
