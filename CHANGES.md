@@ -69,11 +69,73 @@
 实跑 **43/0**（原 39）；`voice_accum._selftest` 只测 `anchor_gate` 纯函数，
 **测不到「适配层有没有把 note 传出去」** ⇒ 那才是真正的断裂点。
 
-### 3. ⚠️ bump 后的正常红灯（**下一个会话先看这条**）
+### 3. 🆕 画布节点中英切换（`web/relay_kit_i18n*.js`，**UI-only**）
 
-`RELEASE-NOTES.md` 还没有 `## 0.6.28` 一节 ⇒ `review_050` 的 **H3l 现在是红的**。
-这是**预期状态**（发布器会在 push 之前拦住，不是 regression）⇒
-**开工时先补那一节**（中英双语、中文 ≤700 字符 / 英文 ≤1700 字符）**再提交**，否则 CI 红。
+参考同机的 `Comfyui-XH_Toolbox`（`xh_ui_kit.js` + `xh_*_lang.js` 的「语言桥 + DOM 工具条」），
+但**刻意不共用它的全局变量**（`window.XH_LANG` / `localStorage.xh_node_lang`）——
+两个包各管各的，免得互相覆盖对方的语言状态。
+
+| 决策 | 理由 |
+|---|---|
+| **默认跟随界面语言**（读 `Comfy.Locale`） | 本机与很多用户装了 Global Translation 一类的界面汉化插件；界面是英文时若本包硬把节点翻成中文 ⇒ 界面英文 + 节点中文 = 更乱 |
+| **只改 `label` / `title`，绝不改 `name` / 下拉框 `values`** | `name` 是后端取参与序列化的依据（改它 = 改图）；`values` 是存档值（模型文件名翻了 = 找不到文件）。枚举中文显示走官方 `options.getOptionLabel` 钩子（函数不进 JSON） |
+| **标题只换前缀、保留后缀** | `relay_kit_refs_ui.js` 把额度提示**追加在标题末尾**；两个模块都写 `title` ⇒ 不做前缀替换就会互相抹掉（`swapTitle()` + 一条「切回英文也对称」的断言守着） |
+| 未知词条**静默跳过** | 开源用户的节点千奇百怪 ⇒ 不崩、不改、不猜（铁律八） |
+| 按钮 `addDOMWidget(serialize:false)`，失败退化为角标 | 不进工作流 JSON；前端版本没有该 API 时**降级但不掀画布** |
+
+**两条防漂移的门**（这个功能的失败模式全是静默的）：
+
+| 门 | 守什么 | 位置 |
+|---|---|---|
+| `tests/test_i18n.mjs`（**24/0**） | 改 `name`、整段替换 `title`、白名单外猜译、自定义标题被覆盖、钩子没卸、幂等性 | `web/relay_kit_i18n.js` 是纯函数 ⇒ 零浏览器可测 |
+| **`review_050` 的 H3n**（4 项） | **新增参数忘了翻译**（JS 单测天生测不到：测试里的键名是它自己写的）· 输出端口漏词条 · 节点少标题词条 · **死词条**（改名后忘删） | 直接拿 `nodes.py` 的 `INPUT_TYPES` 键 ⊆ 词表 |
+
+🔴 **H3n 的两个实现坑**：① `H3RelayLatentUpscale.INPUT_TYPES()` 要宿主注册表，在 CI 的 CPU-only
+torch 环境抛 `ImportError` ⇒ 只认"真读到的 schema"会让**死词条门误报**（把跳过节点的键全算成多余）
+⇒ 加了**源码 AST 兜底**（只取 `required`/`optional` 两层的键）。② AST 第一版"取所有 dict 的键"
+把参数项里的 `default`/`min`/`max`/`step`/`tooltip` 也算成参数名 ⇒ **6 个假缺**，自己踩过。
+
+### 3b. 🔴 真机验证抓到的**两个真 bug**（零 GPU 测不出来的那种）
+
+用 playwright 驱动**真前端**（`I://_seam_tmp//probe_i18n_ui.mjs`，headless Chromium + 真实 `loadGraphData`）
+跑了一遍，验证 + 抓错各一轮：
+
+| # | bug | 现象 | 修法 |
+|---|---|---|---|
+| 1 | 🔴 **读不到界面语言** | `app.uiSettings.get("Comfy.Locale")` **在新前端里已经不存在**（实测 `window.app.uiSettings` 为 `undefined`，`Comfy.Locale` 也不在 localStorage）⇒ 恒定掉到 `navigator.language`（本机 `zh-CN`，**界面却是英文**）⇒ **界面英文 + 节点中文**，正是本功能要避免的 | 改成先读 **`<html lang>`**（实测 `="en"`，官方前端会写），旧前端才退回 `Comfy.Locale`。文档口径同步改成"读界面语言" |
+| 2 | 🔴 **按钮文字被别的插件改掉** | 本机装了 Global Translation：它按 **DOM textNode** 翻译界面，把按钮的 `EN` 翻成「**英语**」—— 连 `translate="no"` + `notranslate` 类名都不认 | 按钮文字改走 **CSS 伪元素** `::before{content:'EN'}`（不是 textNode ⇒ 插件碰不到）；`textContent` 留空。实测按钮稳定显示 `EN` / `中` |
+
+**验证结果（同一进程内连续跑，证据在 `I://_seam_tmp//i18n_ui_*.png`）**：
+
+- 6 个本包节点**各 1 个**按钮（`barCount=1` / `widgetsWithName=1` / `domDescendants=1`）—— 顺带排除了「V1+V3 双注册导致按钮挂两遍」的担心；
+- 英文态 → 点一次 → **全包 6 个节点**同时变中文（`运行 ID` / `钉住帧数` / `匹配上段` …），再点一次**对称变回**；
+- **前缀替换 + 后缀保留**在真机上成立：`🔗 H3 Relay · Latent Load（第 1 段自动交空上下文…）`
+  ⇄ `🔗 H3 Relay · 读上段潜空间（第 1 段自动交空上下文…）`；
+- 自定义标题（示例图里那些带说明的）**原样不动** ✅ 符合设计；
+- 样式表注入成功、按钮文字不再被翻译插件改。
+
+⚠️ 已知边界（**不算 bug**）：外部代码改了 `title` 之后，要等下一次语言切换 / 节点创建 / 图变化
+才会被本模块重新套用语言（示例图里 `Post` 节点被外部重置成默认名后，当场仍是英文）。
+⇒ 想立刻生效点一下按钮即可。
+
+### 4. 🔴 修一个**已发布**的分发集缺陷：最小集漏发 3 个前端文件
+
+`MANIFEST_FRONTEND` 只有 `relay_kit_chain.js` + `relay_kit_prompt.js`，而
+`relay_kit_chain.js:133` 用 ES `import` 依赖 `relay_kit_sync.js`，`relay_kit_refs_ui.js` 依赖
+`relay_kit_refs.js` ⇒ **装最小分发集的用户整个 chain.js 都不执行**（连跑 / 🧩 拼接 / 额度提示全废），
+**而打包器自验打印 [OK]** —— 典型的假绿：① 的静态推导只管 Python 文件，前端**从来没被门覆盖过**。
+
+- 修：`MANIFEST_FRONTEND` 补齐 5 个（`sync` / `refs` / `refs_ui`）+ 本轮新增 2 个 i18n。
+- 加门：`verify_manifest` 增 ②「`git ls-files web/` 与清单**一一对应**」（漏发与"清单里有仓库没有"都红）。
+  ⚠️ 判据必须先 `git add` 新文件（`git ls-files` 只列受控文件）—— 否则新文件会被误报成"仓库里没有"
+  （本轮真的先踩了一次）。
+
+### 5. ⚠️ bump 后的正常红灯（**下一个会话先看这条**）
+
+`RELEASE-NOTES.md` 起初没有 `## 0.6.28` 一节 ⇒ **H3l 红**（预期状态，发布器会在 push 前拦住）。
+0.6.28 发布说明已补齐（中英双语）⇒ 门槛 **95/0** 全绿。
+📌 **纪律**：bump 之后**先补发布说明再提交**，否则 CI 一定红；
+长度是硬闸门（中文 ≤700 / 英文 ≤1700 字符，**英文段里混进一个汉字就红**）。
 
 ---
 

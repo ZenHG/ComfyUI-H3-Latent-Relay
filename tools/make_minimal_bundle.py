@@ -82,8 +82,21 @@ MANIFEST_RUNTIME = [
 
 MANIFEST_FRONTEND = [
     # WEB_DIRECTORY="./web"：画布按钮（🧩 拼接）与 Chain 词分发靠它们
+    #
+    # 🔴 2026-10-06 补齐（**这是已发布 0.6.27 分发集里的真缺陷**）：
+    #   清单里只有 chain.js + prompt.js，**漏了 sync.js / refs.js / refs_ui.js**。
+    #   `relay_kit_chain.js:133` `import … from "./relay_kit_sync.js"` ⇒ 装最小集的用户
+    #   **chain.js 直接 404**（ES module 依赖解析失败 ⇒ 整块前端不执行）⇒ run_id 同步、
+    #   状态格、🧩 拼接、额度提示**全废**，而打包器自验还打印 [OK]
+    #   （它只验「清单里的文件在不在」，**从不验「有没有漏」** —— 典型的假绿）。
+    #   下方 `_check_frontend_complete()` 补上了反向门。
     "web/relay_kit_chain.js",
     "web/relay_kit_prompt.js",
+    "web/relay_kit_sync.js",
+    "web/relay_kit_refs.js",
+    "web/relay_kit_refs_ui.js",
+    "web/relay_kit_i18n.js",
+    "web/relay_kit_i18n_ui.js",
 ]
 
 MANIFEST_EXAMPLES = [
@@ -216,7 +229,33 @@ def verify_manifest():
         print("   ℹ️ 清单里这些文件没被静态推导到（可能由动态 import / 契约使用，保留）：")
         for f in extra:
             print("        %s" % f)
-    return ok
+
+    # —— ② 前端同理：漏一个 .js 就是**整块功能 404** ——
+    # 🔴 2026-10-06 加这条的原因：`relay_kit_chain.js` 用 ES `import` 依赖
+    #    `relay_kit_sync.js` / `relay_kit_prompt.js`。分发集漏了被依赖的那个文件时，
+    #    **浏览器整个模块解析失败**（不是"少一个功能"，是 chain.js 整块不执行），
+    #    而 ① 的静态推导只管 Python 文件 ⇒ 前端从来没被这条门覆盖过（实测真的漏了三个）。
+    #    判据取 **`git ls-files web/`**：受版本控制的前端文件**必须**全在清单里。
+    print("② 前端清单完整性（漏一个 .js ⇒ 依赖它的模块整块 404）")
+    try:
+        tracked = [f for f in subprocess.run(
+            ["git", "-C", KIT, "ls-files", "web/"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        ).stdout.split() if f.endswith(".js")]
+    except Exception as exc:                          # noqa: BLE001 —— git 不可用要说清，不能当过
+        print("   [FAIL] 跑不了 git ls-files（%s）⇒ 前端完整性**未校验**" % type(exc).__name__)
+        return False
+    declared_js = set(MANIFEST_FRONTEND)
+    miss_js = sorted(set(tracked) - declared_js)
+    ghost_js = sorted(declared_js - set(tracked))
+    ok_js = not miss_js and not ghost_js
+    print("   受控前端 %d 个；清单声明 %d 个" % (len(tracked), len(declared_js)))
+    print("   [%s] 前端清单与受控文件**一一对应**" % ("OK" if ok_js else "FAIL"))
+    for f in miss_js:
+        print("        ❌ 漏发：%s" % f)
+    for f in ghost_js:
+        print("        ❌ 清单里有、仓库里没有：%s" % f)
+    return ok and ok_js
 
 
 # ---------------------------------------------------------------------------

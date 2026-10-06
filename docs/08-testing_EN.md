@@ -74,6 +74,7 @@ The script locates the ComfyUI root by walking up automatically; if it is instal
 ```bash
 node tests/test_prompt_dispatch.mjs      # expected 35/0
 node tests/test_audio_ref_budget.mjs     # expected 45/0
+node tests/test_i18n.mjs                 # expected 24/0
 ```
 
 Covers the pure functions in `web/` that **run the same copy as the browser**, plus two sets of **static
@@ -101,6 +102,17 @@ failure):
   conflict wording**, and **scans `nodes.py` to check whether that node table is complete**. A
   hand-written list misses a category, and the missed category is a **silent failure** — exactly the
   disease of 2026-09-30 "the stage advance missed the audio seam ⇒ the film's A/V was the wrong segment";
+- `relay_kit_i18n.js` (added 0.6.28) — the word table and rewrite logic of the canvas **Chinese/English
+  toggle**, guarding three **silent failures**: (1) changing `name` instead of `label` (= modifying the
+  graph: dirty workflow, misplaced links); (2) replacing the whole `title` ⇒ wiping the budget hint that
+  `relay_kit_refs_ui.js` appends (**only the prefix is swapped, the suffix is kept**); (3) guessing a
+  translation for a **value outside the enum whitelist** (`model_name` is a file name, a stage number is
+  a digit ⇒ translating them means the file can no longer be found). Also: custom titles must not be
+  overwritten · an empty title gets the translation · idempotence · word-table shape self-check
+  (empty entries / zh==en / all eight nodes present).
+  🔴 **Word-table completeness is not this layer's job** (that is Python's): `review_050.py`'s
+  J-i18n item checks the keys of `nodes.py`'s `INPUT_TYPES` against the table ⇒ **a new parameter
+  without a translation fails at the machine-check layer**;
 - static scan: the phase table ↔ the `say()` phase string, **whether every submitting button passed the
   `run_id` gate**;
 - **assertion-count self-reference**: the "expected N/0" written in `ci.yml` and in this document must
@@ -180,7 +192,7 @@ real problem on its very first run** (in CI the V3 exit actually could not load)
 
 | Tool | What it judges | Expected |
 |---|---|---|
-| `tools/review_050.py` | doc–code consistency (node list / parameter table / assertion count / version / example-graph slots / **the three iron rules** / **the L13 English-doc sync gate** / **the H3j smoke expected values** / **H3k registry metadata** / **H3l release policy present** / **H3m no credential literals**) | **91/0** |
+| `tools/review_050.py` | doc–code consistency (node list / parameter table / assertion count / version / example-graph slots / **the three iron rules** / **the L13 English-doc sync gate** / **the H3j smoke expected values** / **H3k registry metadata** / **H3l release policy present** / **H3m no credential literals** / **H3n i18n word-table completeness**) | **95/0** |
 | `tools/smoke_nodes.py` | node-layer functional smoke test (the seven continuation items really run once; 🔍 the upscale node needs upstream weights and is not in the smoke test) | **16/0** |
 | `tools/assert_default_exit.py` | default exit = V3 (contract 1 + behaviour 3) | **4/4** |
 | `tools/sync_deploy_check.py` | the deployed copy matches the commit state of the given commit | all `OK` |

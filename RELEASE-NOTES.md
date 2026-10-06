@@ -18,6 +18,53 @@
 
 ---
 
+## 0.6.28 — 2026-10-06
+
+**节点上加一个中/EN 按钮；顺手修掉分发集漏发前端文件的毛病。**
+
+🆕 **画布节点中英切换**（**UI-only**）：本包 8 个节点各多一个中/EN 按钮，点一下就把**全包**的
+节点标题、参数标签、端口名切成中文 / 英文（下拉框显示中文、**存档值不变**）。
+**默认跟随界面语言**，点按钮才覆盖（记在浏览器本地）。🔴 **只改显示**：`name`、下拉框的值、
+工作流 JSON 一个字节都不动；你自己改过的节点标题原样保留；「音频参考额度」提示不会被抹掉。
+
+🔴 **修一个分发集缺陷**：最小分发集里**漏发了 3 个前端文件**（`relay_kit_sync.js` /
+`relay_kit_refs.js` / `relay_kit_refs_ui.js`）。`relay_kit_chain.js` 用 ES `import` 依赖它们
+⇒ 装最小集的用户**整个 chain.js 都不执行**（连跑 / 🧩 拼接 / 额度提示全废），
+而打包器自验还打印 [OK]（只验「清单里的在不在」，从不验「有没有漏」）。
+已补齐，并给打包器加了**反向门**：`web/` 下受控的 `.js` 必须与清单**一一对应**。
+
+另：深度文档补上 **VA（跨段音色累积）** 与声锚叠加的说明（中英双语）。
+
+**升级动作**：无需改图或连线。**装了最小分发集（`dist/`）的请重装一次**；
+从 Comfy Registry / Manager 装的**不受影响**（那个包按 `.comfyignore` 打包，`web/` 是全的）。
+
+<!-- EN -->
+
+**A Chinese/EN button on every node — plus a fix for the minimal distribution set.**
+
+🆕 **Canvas Chinese/EN toggle** (**UI-only**): each of this pack's 8 nodes now carries a small Chinese/EN button;
+one click switches the titles, parameter labels and port names of **the whole pack** (dropdowns show Chinese
+while their **stored value stays untouched**). It **follows the UI language by default**; the button overrides
+that and the choice is remembered in the browser. 🔴 **Display only**: `name`, dropdown values and the workflow
+JSON do not change by a single byte; a title you renamed yourself is kept; the audio-reference-budget hint
+appended to a title survives.
+
+🔴 **A distribution-set defect, fixed**: the minimal bundle **shipped without 3 front-end files**
+(`relay_kit_sync.js` / `relay_kit_refs.js` / `relay_kit_refs_ui.js`). `relay_kit_chain.js` imports them as ES
+modules ⇒ anyone installing the minimal bundle got **`chain.js` not executing at all** (auto-run, the 🧩
+concat button and the budget hint all dead) — while the bundler's self-check still printed [OK] (it only checks
+that the files **in** the list exist, never that any are **missing**). They are shipped now, and the bundler
+gained the **reverse gate**: every version-controlled `.js` under `web/` must match the manifest one-to-one.
+
+Also: the deep docs now cover **VA (cross-segment timbre accumulation)** and how it combines with the voice
+anchor (bilingual).
+
+**Action required**: no graph or wiring changes. **If you installed the minimal bundle (`dist/`), reinstall
+it**; installs from the Comfy Registry / Manager are unaffected (that package is built from `.comfyignore` and
+ships the whole `web/`).
+
+---
+
 ## 0.6.27 — 2026-10-06
 
 **接了声锚，音频参考窗也按素材自己定长 —— 原料就是声锚自身。**

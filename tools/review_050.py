@@ -1364,6 +1364,154 @@ ck("H3l 发布规范在位且成对（RELEASING.md 提到两个渠道 + 指向 t
    not _bad_rel, "%d 处：%s" % (len(_bad_rel), _bad_rel[:6]))
 
 # ============================================================================
+# ============================================================================
+# H3n 画布中英切换的**词表完整性**（2026-10-06 新增，0.6.28）
+# ============================================================================
+# 🔴 为什么放在这里、而不是只靠 `tests/test_i18n.mjs`：
+#   JS 单测只能验「已知的键译得对不对」；**「新增的参数忘了翻译」它天然测不到**
+#   （测试里的键名是它自己写的，代码改了测试不知道）。而漏翻译的后果是
+#   **静默失效**：那个参数在中文态下显示英文，用户看不出是漏了还是故意保留。
+#   ⇒ 这里的判据是「**nodes.py 的 schema ⊆ 词表**」—— 唯一能让"漏了"变红的比对。
+#   端口名同理：`RETURN_NAMES` 每个都要有词条，否则输出端口在中文态下不翻译。
+# ⚠️ 某个节点 `INPUT_TYPES()` 抛异常（要宿主注册表，CI 的 CPU-only torch 环境会）时
+#    **明确记为跳过并说明**，不静默当通过 —— 门变弱要看得见。
+_I18N_JS = os.path.join(KIT, "web", "relay_kit_i18n.js")
+_i18n_src = ""
+try:
+    with open(_I18N_JS, encoding="utf-8") as _fh:
+        _i18n_src = _fh.read()
+except OSError:
+    pass
+
+
+def _js_table_keys(src, table):
+    """从一个 `export const <table> = { … }` 里取**顶层键**。
+
+    🔴 不 eval 任何 JS（外来文本当代码跑 = 不可接受）。用「行首恰好 4 个空格 + 键」
+    这个结构特征切，够稳：词表是本仓自己写的固定排版。
+    """
+    m = re.search(r"export const %s = \{" % re.escape(table), src)
+    if not m:
+        return []
+    keys, depth = [], 0
+    for line in src[m.end():].splitlines():
+        if re.match(r"^\};", line):
+            if depth <= 0:
+                break
+        km = re.match(r"^    (\w+):", line)
+        if km and depth == 0:
+            keys.append(km.group(1))
+        depth += line.count("{") - line.count("}")
+    return keys
+
+
+_i18n_w = set(_js_table_keys(_i18n_src, "H3_WIDGETS"))
+_i18n_s = set(_js_table_keys(_i18n_src, "H3_SLOTS"))
+_i18n_n = set(_js_table_keys(_i18n_src, "H3_NODES"))
+
+
+def _static_schema_keys(cls_name):
+    """从 **源码 AST** 取某个类 `INPUT_TYPES()` 里声明的键（不执行任何代码）。
+
+    🔴 为什么需要兜底：`H3RelayLatentUpscale.INPUT_TYPES()` 要宿主注册表（列放大器模型），
+    在 CI 的 CPU-only torch 环境里抛 ImportError ⇒ 那个节点的键会"看起来像死词条"。
+    只认"真读到的 schema"会让死词条门误报（把读不到的那些键全算成多余），
+    那样的门红起来没人会当真 ⇒ 宁可多写一个 AST 提取器。
+    ⚠️ 只取 `required` / `optional` 这**两层**的键 —— 早先"取所有 dict 的键"会把参数项里的
+       `default` / `min` / `max` / `step` / `tooltip` 也当成参数名（自己踩过：6 个假缺）。
+    ⚠️ 只认**字面量**：若某节点用变量拼 dict（`{**_extra()}` 之类）⇒ 取不到 ⇒ 返回空集，
+       那台节点**不被门覆盖**（比"误报红"好：误报会让门被人忽略）。
+    """
+    try:
+        import ast
+        with open(os.path.join(KIT, "nodes.py"), encoding="utf-8") as _fh:
+            tree = ast.parse(_fh.read())
+    except (OSError, SyntaxError):
+        return set()
+    keys = set()
+    for _node in ast.walk(tree):
+        if not (isinstance(_node, ast.ClassDef) and _node.name == cls_name):
+            continue
+        for _fn in _node.body:
+            if not (isinstance(_fn, ast.FunctionDef) and _fn.name == "INPUT_TYPES"):
+                continue
+            for _ret in ast.walk(_fn):
+                if not (isinstance(_ret, ast.Return) and isinstance(_ret.value, ast.Dict)):
+                    continue
+                for _k, _v in zip(_ret.value.keys, _ret.value.values):
+                    if not (isinstance(_k, ast.Constant) and _k.value in ("required", "optional")):
+                        continue
+                    if not isinstance(_v, ast.Dict):
+                        continue
+                    for _kk in _v.keys:
+                        if isinstance(_kk, ast.Constant) and isinstance(_kk.value, str):
+                            keys.add(_kk.value)
+    return keys
+
+
+def _static_return_names(cls_name):
+    """同理：从源码 AST 取类里 `RETURN_NAMES = ("a", "b")` 的字符串（不执行代码）。"""
+    try:
+        import ast
+        with open(os.path.join(KIT, "nodes.py"), encoding="utf-8") as _fh:
+            tree = ast.parse(_fh.read())
+    except (OSError, SyntaxError):
+        return set()
+    out = set()
+    for _node in ast.walk(tree):
+        if not (isinstance(_node, ast.ClassDef) and _node.name == cls_name):
+            continue
+        for _st in _node.body:
+            _targets = []
+            if isinstance(_st, ast.Assign):
+                _targets = [t.id for t in _st.targets if isinstance(t, ast.Name)]
+            elif isinstance(_st, ast.AnnAssign) and isinstance(_st.target, ast.Name):
+                _targets = [_st.target.id]
+            if "RETURN_NAMES" not in _targets or _st.value is None:
+                continue
+            for _el in ast.walk(_st.value):
+                if isinstance(_el, ast.Constant) and isinstance(_el.value, str):
+                    out.add(_el.value)
+    return out
+
+
+_miss_w, _miss_s, _skip = [], [], []
+_used = set()
+for _cls in sorted(_reg):
+    _inst = N.NODE_CLASS_MAPPINGS[_cls]()
+    _keys, _outs = set(), set()
+    try:
+        _it = _inst.INPUT_TYPES()
+        for _kind in ("required", "optional"):
+            _keys |= set(_it.get(_kind) or {})
+        _outs = set(getattr(_inst, "RETURN_NAMES", None) or ())
+    except Exception as _exc:                        # noqa: BLE001 —— 宿主注册表不可用
+        _keys = _static_schema_keys(_cls)
+        _outs = _static_return_names(_cls)
+        _skip.append("%s（%s ⇒ schema 改从源码 AST 取%s）"
+                     % (_cls, type(_exc).__name__,
+                        "，但 AST 也没取到 ⇒ 该节点不被门覆盖" if not (_keys and _outs) else ""))
+    _used |= _keys | _outs
+    for _k in sorted(_keys):
+        if _k not in _i18n_w:
+            _miss_w.append("%s.%s" % (_cls, _k))
+    for _rn in sorted(_outs):
+        if _rn not in _i18n_s:
+            _miss_s.append("%s.%s" % (_cls, _rn))
+ck("H3n-i18n 词表完整性：每个节点的**参数名**都有中文词条（漏了 = 中文态静默留英文）",
+   not _miss_w, "词表 %d 条 ｜ 缺 %d 个：%s ｜ 读不到 schema 改用源码：%s"
+   % (len(_i18n_w), len(_miss_w), _miss_w[:6], _skip))
+ck("H3n-i18n 词表完整性：每个节点的**输出端口名**都有中文词条",
+   not _miss_s, "词表 %d 条 ｜ 缺 %d 个：%s ｜ schema 走 AST 的节点：%s"
+   % (len(_i18n_s), len(_miss_s), _miss_s[:6], _skip))
+ck("H3n-i18n 词表完整性：**每个注册节点**都有标题词条（少一个就有一个节点切不了语言）",
+   set(_reg) <= _i18n_n, "注册 %d 个 ｜ 词表 %d 个 ｜ 缺：%s"
+   % (len(_reg), len(_i18n_n), sorted(set(_reg) - _i18n_n)))
+# 🔴 反向门：词表里有、但**没有任何节点在用**的键 —— 通常是改名后忘了删（死词条）
+_dead = sorted((_i18n_w | _i18n_s) - _used)
+ck("H3n-i18n 词表里没有**死词条**（没有任何节点在用的键 ⇒ 改名后忘了删）",
+   not _dead, "死词条 %d 个：%s" % (len(_dead), _dead[:8]))
+
 # H3m 仓库内无凭据字面量（2026-09-30 新增）
 # ============================================================================
 # 🔴 为什么：凭据一旦进了 git 历史就**擦不干净**（要 rewrite + force push，而公开仓的历史重写

@@ -40,24 +40,24 @@
           "zh": "使用方法",
           "en": "Usage",
           "mode": "condensed",
-          "h_en": "5e2f446e913fa6c3",
-          "h_src": "c47b59d733a98ea9",
+          "h_en": "9e461d3f01314d34",
+          "h_src": "e694d0e54a39e373",
           "seeded": "by-position"
         },
         {
           "zh": "目录结构",
           "en": "Repository layout",
           "mode": "condensed",
-          "h_en": "28cc21a9f304b154",
-          "h_src": "a29367fff92c5ac4",
+          "h_en": "7d73b23b1fe857a2",
+          "h_src": "9f9074e52f25aab3",
           "seeded": "by-position"
         },
         {
           "zh": "配置与注意事项",
           "en": "Configuration & hard rules",
           "mode": "condensed",
-          "h_en": "ffad53cca0b46369",
-          "h_src": "d40c155bd146df5b",
+          "h_en": "600782e13d09a47c",
+          "h_src": "94869ae8c12914e8",
           "seeded": "by-position"
         },
         {
@@ -79,7 +79,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-06",
-      "src_sha": "afae169fb686f213"
+      "src_sha": "819db08770724c11"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -232,14 +232,14 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "full",
-          "h_en": "4e015072a6a449fb",
-          "h_src": "230b1738585dda2f",
+          "h_en": "4ed4ec03b31cc22a",
+          "h_src": "53b45240782c09cb",
           "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-10-06",
-      "src_sha": "230b1738585dda2f"
+      "src_sha": "53b45240782c09cb"
     },
     "docs/05-troubleshooting.md": {
       "en": "docs/05-troubleshooting_EN.md",
@@ -432,8 +432,8 @@
           "zh": "前端纯函数的单测（node 跑、零依赖）",
           "en": "Unit tests for front-end pure functions (run by node, zero dependencies)",
           "mode": "full",
-          "h_en": "7017652117bff9f7",
-          "h_src": "f8d4543b6bb4ad35",
+          "h_en": "e8855275d959cd76",
+          "h_src": "fce58d45c974ad55",
           "seeded": "by-position"
         },
         {
@@ -448,8 +448,8 @@
           "zh": "tools/ 下的其他自检（完整清单见 [`tools/README.md`](../tools/README.md)）",
           "en": "Other self-checks under tools/ (full list in [`tools/README.md`](../tools/README.md))",
           "mode": "full",
-          "h_en": "b08c73b13a84d773",
-          "h_src": "2f73a472f40ba97a",
+          "h_en": "3fd1d286719dd874",
+          "h_src": "d6a3621812e3aa90",
           "seeded": "by-position"
         },
         {
@@ -463,7 +463,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-06",
-      "src_sha": "502e4746f6f4d1f2"
+      "src_sha": "e7491dd1e7b91a76"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",

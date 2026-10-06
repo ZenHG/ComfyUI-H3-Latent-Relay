@@ -349,6 +349,25 @@ Implementation details and more (**audio-reference budget**, BGM, emotion, multi
 [`docs/07-chain.md`](docs/07-chain_EN.md) §Voice anchor; bundled auto-collector `tools/voice_bank.py`
 (optional ASR dialogue guard — works without funasr too).
 
+### Node Chinese/EN toggle (0.6.28, **canvas button**)
+
+Every node of this pack now carries a small 「**中 / EN**」 button: one click switches the titles, parameter
+labels and port names of **all 8 nodes** between Chinese and English (dropdowns show Chinese while their
+**stored value stays untouched**).
+
+- It **follows the UI language by default** ⇒ an English UI does not get Chinese node
+  labels; clicking the button overrides that, and the choice is remembered in the browser.
+- 🔴 **Display only, never the graph**: only `label` / `title` are touched, **never `name` and never a
+  dropdown's values** ⇒ not one byte of the workflow JSON changes. A title you renamed yourself is **kept**.
+- It **coexists with the audio-reference-budget hint**: only the name part of the title is swapped, so a
+  budget hint appended after it survives.
+- It does **not** fight interface translation plugins (Global Translation & co.): those translate UI text,
+  this one only handles this pack's own nodes.
+- 🔴 **UI-only**: a script submitting JSON (`/prompt`) never touches the canvas ⇒ no button there
+  (and nothing is lost).
+
+Details and the word table: [`docs/04`](docs/04-canvas-and-widgets_EN.md) §Node Chinese/EN toggle.
+
 ---
 
 ## Repository layout
@@ -361,7 +380,7 @@ ComfyUI-H3-Latent-Relay/
 ├── layout_contract.py     # layout contract: pass through + leave a trace when upstream is missing, raise only on a real mismatch
 ├── v3/                    # V3 shell (io.ComfyNode + comfy_entrypoint); V1 goes through NODE_CLASS_MAPPINGS
 ├── exp/history_anchor_v2/ # E1' time-invariant history anchor (top-level import ⇒ required; inert without _tiha.json)
-├── web/                   # front-end JS: the 🧩 concat button, Chain panel, `run_id` one-field-syncs-the-group (canvas only)
+├── web/                   # front-end JS: the 🧩 concat button, Chain panel, `run_id` one-field-syncs-the-group, **the node Chinese/EN toggle** (canvas only)
 ├── examples/              # two openable workflows: minimal continuation (21 nodes) and full flow (47 nodes)
 ├── docs/                  # deep docs 01–10 (mechanism / parameters / sampling / canvas / troubleshooting / scripting / chain / tests / metrics / audio)
 ├── tests/                 # offline self-test (zero GPU): 512 assertions + V3 parity + prompt-dispatch pure functions
@@ -399,7 +418,7 @@ are actually loaded — the minimal distribution set in `dist/` is exactly those
 | 9 | **`chunks=1` is the only path consistent with upstream whole-segment inference**: `chunks>1` **changes the picture** (3D volumetric attention is cut); raise it only under OOM and **re-check the seam** |
 | 10 | 🔴 **The continuation contract is taken in the native domain**: LatentSave goes **before** the upscale; the **second pass's guider must not connect the bridge's `conditioning`** (different grid ⇒ it explodes) |
 | 11 | `diagnostics` is off by default (three print-only passes, **no effect on trimming**); enable it for DTW / trim-amount→jump curves / appearance drift. ⚠️ The "settle 1" seen in older posts is pre-0.5.0 — **trust this page and the node reports** |
-| 12 | 🔴 **The canvas path and the script path must be the same node implementation** (see the iron rule at the top); purely front-end capabilities (the 🧩 button, Chain panel fields, **the `run_id` one-field-syncs-the-group behaviour**) **are ignored** when a script submits JSON — script users take the three non-UI paths in [`docs/10`](docs/10-audio-seam-and-concat_EN.md) §7.4 |
+| 12 | 🔴 **The canvas path and the script path must be the same node implementation** (see the iron rule at the top); purely front-end capabilities (the 🧩 button, Chain panel fields, **the `run_id` one-field-syncs-the-group behaviour**, **the node Chinese/EN toggle**) **are ignored** when a script submits JSON — script users take the three non-UI paths in [`docs/10`](docs/10-audio-seam-and-concat_EN.md) §7.4 |
 
 ---
 

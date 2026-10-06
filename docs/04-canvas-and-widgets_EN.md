@@ -91,3 +91,38 @@ Since 0.6.19, **editing any one field ⇒ the rest of the group follows automati
 > ⚠️ This is **pure frontend** behaviour: it **does not take effect** when a script submits the graph JSON (a script
 > just writes that field from a single variable; see [`docs/10`](10-audio-seam-and-concat_EN.md) §7.4).
 > ⚠️ **Renaming does not move the old directory**: segment files stay under the old name ("directory name = film name" is the long-standing semantics).
+
+### Node Chinese/EN toggle (0.6.28, **canvas-only**)
+
+Each of this pack's 8 nodes now carries a small 「**中 / EN**」 button. Clicking any one of them switches the
+titles / parameter labels / port names of **the whole pack** (not just that node).
+
+| | Behaviour |
+|---|---|
+| Default language | **follows the UI language** (reads `<html lang>`) ⇒ an English UI keeps English node labels; the button overrides that |
+| Remembered | the override lives in the browser's `localStorage` (key `h3relay_lang`) ⇒ it survives closing the page |
+| What changes | node `title`, widget `label`, port `label`, the **display text** of dropdowns |
+| What never changes | 🔴 **`name`, dropdown `values`, the workflow JSON** — not one byte |
+
+**Three design constraints (all of them guard silent failures)**:
+
+1. 🔴 **Display only, never the graph**. `name` is what the backend reads parameters by and what gets
+   serialized — changing it means changing the graph. Dropdown Chinese text uses the official
+   `options.getOptionLabel` hook (a function never enters the JSON ⇒ sharing the graph does not pollute it).
+2. 🔴 **Coexists with the audio-reference-budget hint**. That hint is **appended to the end of the title**
+   (`relay_kit_refs_ui.js`) and both modules write `title` ⇒ this one **swaps only the name part and keeps the
+   suffix** ⇒ correct in either order.
+3. 🔴 **Never guesses a translation it is unsure about.** Only **whitelisted** enum values get Chinese display
+   text (`hard` → 硬边); `model_name` (a model file name), stage numbers, paths and your own names are
+   **never translated** — translating those means the file can no longer be found.
+
+**Relation to interface translation plugins**: plugins like Global Translation translate **DOM text**, this
+feature changes `label`/`title` **data** and only for **this pack's own nodes** ⇒ the two do not fight. Keys
+missing from the table are **skipped silently** (no crash, no change); forgetting to translate a new parameter
+is caught by `tools/review_050.py`'s **H3n** check.
+
+> ⚠️ **Pure frontend**: it **does not take effect** when a script submits the graph JSON (nor is it needed —
+> labels are only there for humans).
+> ⚠️ The button is mounted via `addDOMWidget(serialize:false)` (never enters the workflow JSON); if a frontend
+> version lacks that API the button degrades to a 「中/EN」 **corner tag** on the node (state still visible, not
+> clickable) and **nothing about execution changes**.
