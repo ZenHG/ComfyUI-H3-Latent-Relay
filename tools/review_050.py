@@ -1512,6 +1512,60 @@ _dead = sorted((_i18n_w | _i18n_s) - _used)
 ck("H3n-i18n 词表里没有**死词条**（没有任何节点在用的键 ⇒ 改名后忘了删）",
    not _dead, "死词条 %d 个：%s" % (len(_dead), _dead[:8]))
 
+# ============================================================================
+# H3o 文档里的**仓库内路径 / 链接**必须真实存在（2026-10-06 新增）
+# ============================================================================
+# 🔴 为什么要有这条：本仓文档互相引用极多（README ↔ docs/01–10 ↔ tools/README ↔ CHANGES），
+#   而**改结构 / 搬文件 / 改文件名**之后，引用不会自动跟着改 ⇒ 读者点进去是 404。
+#   以前靠人工核一遍 —— 那种核对一次就忘。
+# ⚠️ 口径（每条都是被**误报**逼出来的，第一版 88 个误报）：
+#   · 扫 git ls-files 里所有 *.md；**CHANGES.md 豁免**（它记历史，历史里的文件名就该留着）。
+#   · 两种形态都扫：markdown 链接 ](…) 与反引号包裹的仓库内路径。
+#   · 跳过：、#锚点、通配与省略号（docs/NN-*.md、tests/…）、`::成员`（代码定位）、
+#     **纯编号简写**（docs/08）、命令行/子命令写法（tools/x.py --go）、无后缀简写（tools/README）。
+#   · 以 docs/ tools/ web/ tests/ exp/ examples/ licenses/ v3/ 开头 ⇒ 按**仓库根**解析
+#     （本仓文档的既有惯例就是写仓库根路径，不是相对当前文件）；其余按当前文件目录解析。
+#   · 豁免表只放「**不是文件路径**的东西」，每条必须写理由。
+_H3O_EXEMPT = {
+    "exp/seam-frontier": "已删除的**分支名**（docs/09 提到它被并入 main），不是仓库内路径",
+}
+_H3O_ROOT = ("docs/", "tools/", "web/", "tests/", "exp/", "examples/", "licenses/", "v3/")
+_mds = [f for f in subprocess.run(["git", "-C", KIT, "ls-files", "*.md"],
+                                   capture_output=True, text=True, encoding="utf-8",
+                                   errors="replace").stdout.split() if f != "CHANGES.md"]
+_dangling = []
+for _md in _mds:
+    try:
+        with open(os.path.join(KIT, _md), encoding="utf-8") as _fh:
+            _txt = _fh.read()
+    except OSError:
+        continue
+    _cands = re.findall(r"\]\(([^)]+)\)", _txt)
+    _cands += re.findall(r"\`((?:docs|tools|web|tests|exp|examples|licenses|v3)/[^\`]+)\`", _txt)
+    for _c in _cands:
+        _c = _c.strip()
+        if not _c or "://" in _c or _c.startswith("#"):
+            continue
+        _c = _c.split("#", 1)[0].strip()
+        if not _c or any(_x in _c for _x in "*…{}<>–") or "::" in _c:
+            continue
+        if " " in _c:                     # 命令行 / 子命令写法 ⇒ 只看路径那段
+            _c = _c.split(" ", 1)[0].strip()
+        if re.match(r"^(docs|tools|tests|web|exp|examples)/[0-9]+$", _c):
+            continue
+        if _c.endswith("/"):
+            _c = _c[:-1]
+        if not os.path.splitext(_c)[1] and os.path.exists(os.path.join(KIT, _c + ".md")):
+            continue                        # 简写（tools/README）
+        if _c in _H3O_EXEMPT:
+            continue
+        _base = KIT if _c.startswith(_H3O_ROOT) else os.path.dirname(os.path.join(KIT, _md))
+        if not os.path.exists(os.path.normpath(os.path.join(_base, _c))):
+            _dangling.append("%s → %s" % (_md, _c))
+ck("H3o 文档里的仓库内链接 / 反引号路径都真实存在（CHANGES.md 豁免：它记历史）",
+   not _dangling, "扫了 %d 个 md ｜ 悬空 %d 个：%s"
+   % (len(_mds), len(_dangling), _dangling[:8]))
+
 # H3m 仓库内无凭据字面量（2026-09-30 新增）
 # ============================================================================
 # 🔴 为什么：凭据一旦进了 git 历史就**擦不干净**（要 rewrite + force push，而公开仓的历史重写

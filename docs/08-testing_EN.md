@@ -192,7 +192,7 @@ real problem on its very first run** (in CI the V3 exit actually could not load)
 
 | Tool | What it judges | Expected |
 |---|---|---|
-| `tools/review_050.py` | doc–code consistency (node list / parameter table / assertion count / version / example-graph slots / **the three iron rules** / **the L13 English-doc sync gate** / **the H3j smoke expected values** / **H3k registry metadata** / **H3l release policy present** / **H3m no credential literals** / **H3n i18n word-table completeness**) | **95/0** |
+| `tools/review_050.py` | doc–code consistency (node list / parameter table / assertion count / version / example-graph slots / **the three iron rules** / **the L13 English-doc sync gate** / **the H3j smoke expected values** / **H3k registry metadata** / **H3l release policy present** / **H3m no credential literals** / **H3n i18n word-table completeness** / **H3o dangling doc references**) | **96/0** |
 | `tools/smoke_nodes.py` | node-layer functional smoke test (the seven continuation items really run once; 🔍 the upscale node needs upstream weights and is not in the smoke test) | **16/0** |
 | `tools/assert_default_exit.py` | default exit = V3 (contract 1 + behaviour 3) | **4/4** |
 | `tools/sync_deploy_check.py` | the deployed copy matches the commit state of the given commit | all `OK` |
