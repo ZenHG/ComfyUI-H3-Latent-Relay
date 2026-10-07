@@ -26,22 +26,48 @@ import {
 // ---- ① 语言桥（幂等）----
 let _lang = null;                       // null = 还没读过（懒读，避免过早碰 localStorage）
 
+// 🔴 **官方设置读取**（2026-10-06 真机定位到正确入口）。
+//    入口是 `app.extensionManager.setting`，API 是 `.get(id)` / `.set(id,v)`。
+//    真机实测：`setting.get("Comfy.Locale")` 返回 `"zh"` / `"en"`。
+//    这是**权威源**——官方下拉框、官方翻译、我们的节点，都该以它为准。
+//    ⚠️ 旧文档写的另一个入口「app.点 uiSettings」**实测已不存在**，别照抄旧文档。
+export function readOfficialLocale() {
+    try {
+        const st = app && app.extensionManager && app.extensionManager.setting;
+        if (st && typeof st.get === "function") {
+            const v = st.get("Comfy.Locale");
+            if (v) return String(v);
+        }
+    } catch (e) { /* 官方接口变了 ⇒ 走下面的兜底，绝不掀画布 */ }
+    return "";
+}
+
+/** 官方 locale → 变化时通知（无障碍/多标签共用）。取不到入口就静默失效。 */
+function watchOfficialLocale(onChange) {
+    try {
+        const st = app && app.extensionManager && app.extensionManager.setting;
+        // Pinia store：$subscribe 是官方 store 的标准订阅口。有的版本叫 subscribe。
+        const sub = st && (st.$subscribe || st.subscribe);
+        if (typeof sub === "function") {
+            sub.call(st, () => { try { onChange(); } catch (e) { /* 回调里自己兜 */ } });
+            return true;
+        }
+    } catch (e) { /* 版本差异 */ }
+    return false;
+}
+
 function readHostLang() {
-    // ① 官方前端把**界面语言**写在 `<html lang>` 上。
-    // 🔴 2026-10-06 真机实测（ComfyUI 0.39 前端）：**`app.uiSettings` 已经不存在了**
-    //    （`window.app` 上没有它、`Comfy.Locale` 在 localStorage 里也没有）⇒ 只读旧接口的话
-    //    永远拿不到界面语言，会掉到 `navigator.language`（本机是 zh-CN，界面却是英文）
-    //    ⇒ 出现"界面英文 + 节点中文"，正是本功能要避免的情况。`<html lang>` 是实测有效的那个。
+    // ① **首选官方设置 `Comfy.Locale`**（权威源；见上）。
+    const off = readOfficialLocale();
+    if (off) return off;
+    // ② `<html lang>` —— 🔴 **只在官方取不到时**才用，且它**可能不可信**：
+    //    2026-10-06 真机实测，同一时刻 `setting.get("Comfy.Locale")` = `"zh"` 而
+    //    `<html lang>` = `"en"`（官方只把它当作浏览器语种的声明，**不随语言设置更新**）。
+    //    ⇒ 只要官方入口可用就**绝不**读它，否则会出现"节点英文、官方界面中文"。
     try {
         const l = document && document.documentElement && document.documentElement.lang;
         if (l) return String(l);
     } catch (e) { /* 无 document（不该发生）*/ }
-    // ② 旧前端：官方设置项 `Comfy.Locale`（保留兼容，不是当前路径）
-    try {
-        const s = app && app.uiSettings && app.uiSettings.get
-            ? app.uiSettings.get("Comfy.Locale") : "";
-        if (s) return String(s);
-    } catch (e) { /* 取不到就按下面的兜底 */ }
     return "";
 }
 
@@ -49,15 +75,77 @@ function readStored() {
     try { return localStorage.getItem(LANG_KEY) || ""; } catch (e) { return ""; }
 }
 
+// 🔴 两层模型（2026-10-06 改为**单向跟随**官方语言）：
+//    ① **跟随层** = 官方 `Comfy.Locale`（首选）/ `<html lang>` / `navigator.language`
+//    ② **覆盖层** = 本包 localStorage（用户点过节点上的「中/EN」才存在）
+//    覆盖层为空 ⇒ 就是"跟随官方"（默认，也是官方切语言时该有的表现）。
+//    🔴 单向：**官方改了语言，我们跟着变**；我们的按钮**只改本包节点**，不回写官方设置 ——
+//       因为官方 watch 一旦看到 `Comfy.Locale` 变化就会 `refreshNodeDefinitions()` +
+//       `reloadCurrentWorkflow()`（真机读源码确认），点一下按钮重载整个工作流是不能接受的代价。
+//
+// 探测路径有两条（官方切语言时**两条都可能动**，各装各的、任一命中就重刷）：
+//   ① 官方 store 订阅（`$subscribe`）—— 最直接。
+//   ② `<html lang>` 属性变化 —— 官方的等价副作用，store 订阅拿不到时的兜底。
+// 🔴 只在**有覆盖层之外**的语言上生效（即用户没手动覆盖时）：
+//    用户手动点过按钮 ⇒ 他就是要那个语言，官方切语言不该把他的选择冲掉。
+function onOfficialLocaleChanged() {
+    try {
+        if (readStored()) return;        // 用户手动覆盖过 ⇒ 尊重他，不跟随
+        _lang = null;                    // 丢缓存 ⇒ 重读官方
+        safeApply();
+    } catch (e) { /* 不掀画布 */ }
+}
+
+/** 装官方 locale 订阅（幂等）。🔴 必须在 `app.extensionManager` 就绪后调 —— 模块顶层时它不存在。 */
+let _localeWatchInstalled = false;
+function installOfficialLocaleWatch() {
+    if (_localeWatchInstalled) return true;
+    // ① 官方 store 订阅（`$subscribe`）—— 最直接。
+    if (watchOfficialLocale(onOfficialLocaleChanged)) {
+        _localeWatchInstalled = true;
+        return true;
+    }
+    // ② `<html lang>` 属性变化 —— 官方 store 订阅拿不到时的兜底（官方切语言会同时改它）。
+    try {
+        if (typeof MutationObserver === "function") {
+            new MutationObserver(onOfficialLocaleChanged)
+                .observe(document.documentElement, { attributes: true, attributeFilter: ["lang"] });
+            _localeWatchInstalled = true;
+            return true;
+        }
+    } catch (e) { /* 老环境 */ }
+    return false;
+}
+
 export function currentLang() {
     if (_lang == null) _lang = normLang(readStored() || defaultLang(readHostLang));
     return _lang;
 }
 
+/** 丢弃缓存 ⇒ 下次 `currentLang()` 重读官方语言（官方切语言/测试用）。 */
+export function resetLangCache() {
+    _lang = null;
+    return currentLang();
+}
+
+/**
+ * 用户**手动**指定语言 ⇒ 写覆盖层（localStorage）+ 广播。
+ * 🔴 只影响本包节点；**不动官方 `Comfy.Locale`**（见文件头「单向跟随」）。
+ * 覆盖层一旦存在，官方再切语言**不会**冲掉这个选择 —— 直到用户清掉它。
+ */
 export function setLang(v) {
     const L = normLang(v);
     _lang = L;
     try { localStorage.setItem(LANG_KEY, L); } catch (e) { /* 隐私模式 */ }
+    try { window.dispatchEvent(new CustomEvent(LANG_EVENT, { detail: { lang: L } })); } catch (e) { /* 老浏览器 */ }
+    return L;
+}
+
+/** 清掉覆盖层 ⇒ 回到「跟随官方语言」（按钮第 3 态 / 排障用）。 */
+export function clearLangOverride() {
+    _lang = null;
+    try { localStorage.removeItem(LANG_KEY); } catch (e) { /* 隐私模式 */ }
+    const L = currentLang();
     try { window.dispatchEvent(new CustomEvent(LANG_EVENT, { detail: { lang: L } })); } catch (e) { /* 老浏览器 */ }
     return L;
 }
@@ -97,7 +185,8 @@ function styleBtn(btn, lang) {
 function makeLangBtn() {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.title = "切换本包节点的中 / EN 标签（H3 Latent Relay · UI-only）";
+    btn.title = "切换本包节点的中 / EN 标签（H3 Latent Relay · UI-only）"
+        + "｜默认跟随官方 Language 设置；点这儿只改本包节点，不改官方语言";
     // 🔴 `translate="no"`：界面汉化插件（Global Translation 等）会按 DOM 文本翻译界面，
     //   实测它把本按钮的 "EN" 翻成了「英语」⇒ 按钮表意被改坏、还多一次无谓的重绘。
     //   这两行是给翻译插件的**标准跳过标记**（多数实现认 `translate` 属性与 `notranslate` 类名）。
@@ -196,6 +285,58 @@ function safeApply() {
     try { return applyLangAll(); } catch (e) { return null; }
 }
 
+// ---- ③.5 防覆盖兜底（🔴 与界面汉化插件共存的关键） ----
+// 背景（2026-10-06 真机定位）：`ComfyUI-Chinese-Translation` 那类界面汉化插件有一个
+// **每 1000 ms 的守护轮询**，会按它自己的词典把节点槽位标签/提示**改回中文**。
+// 它的源码注释原话：「兜底补刷**被第三方扩展覆盖**/重建的节点槽位标签」——
+// 也就是说它**本来就是设计来覆盖我们的**。而它的总开关只看自己的设置，
+// **不对"界面是英文"做任何屏蔽**（`utils.js` 里写明「英文同样需要翻译」）。
+// ⇒ 两个模块以 1 s 为周期抢同一批字段，表现为**同一节点上部分英文、部分中文**。
+//
+// 对策：我们在 `applyLang` 里把"期望值"记在 widget 上（`__h3I18nWant` /
+// `__h3I18nWantTip`），这里每帧比对，不一致就写回。前端渲染每帧读 `widget.label`
+// ⇒ **只要在渲染前写对，显示就是对的**，而且不需要改汉化插件一行代码。
+//
+// ⚠ 只在**值真的被改掉**时才写（无谓赋值会打脏画布）；值是内存标记、不进 JSON。
+let _guardRaf = 0;
+let _guardOn = false;
+
+function guardPass() {
+    const L = currentLang();
+    for (const n of ownNodes(nodesOf)) {
+        for (const w of (n.widgets || [])) {
+            try {
+                if (w && w.__h3I18nWant != null && w.label !== w.__h3I18nWant) {
+                    w.label = w.__h3I18nWant;
+                }
+                if (w && w.__h3I18nWantTip != null && w.tooltip !== w.__h3I18nWantTip) {
+                    w.tooltip = w.__h3I18nWantTip;
+                }
+            } catch (e) { /* 单格失败不影响其它 */ }
+        }
+    }
+    for (const b of _BTNS) styleBtn(b, L);
+}
+
+/** 启动帧级兜底（幂等）。只在宿主提供 requestAnimationFrame 时启用。 */
+export function startGuard() {
+    if (_guardOn) return;
+    if (typeof requestAnimationFrame !== "function") return;   // 老环境：靠 setup 的多拍重试
+    _guardOn = true;
+    const tick = () => {
+        try { guardPass(); } catch (e) { /* 不掀画布 */ }
+        _guardRaf = requestAnimationFrame(tick);
+    };
+    _guardRaf = requestAnimationFrame(tick);
+}
+
+/** 停掉兜底（测试/卸载用）。 */
+export function stopGuard() {
+    _guardOn = false;
+    try { if (_guardRaf && typeof cancelAnimationFrame === "function") cancelAnimationFrame(_guardRaf); } catch (e) { /* 忽略 */ }
+    _guardRaf = 0;
+}
+
 // 语言一变：所有节点 + 所有按钮一起跟着变
 if (typeof window !== "undefined" && window.addEventListener) {
     window.addEventListener(LANG_EVENT, () => safeApply());
@@ -222,15 +363,24 @@ app.registerExtension({
 
     async setup() {
         currentLang();                                  // 尽早读一次（锁定默认语言）
+        // 🔴 `setup()` 可能**早于官方 store 就绪**（那时 `setting.get("Comfy.Locale")` 取不到）
+        //    ⇒ 后面几拍**重读官方语言**把跟随层补对，并**装上官方语言订阅**（模块顶层时装不上，
+        //    那时 `app.extensionManager` 还不存在 —— 2026-10-06 真机实测到过这个静默失效）。
+        for (const ms of [0, 250, 1000, 2500]) {
+            setTimeout(() => {
+                try { installOfficialLocaleWatch(); resetLangCache(); safeApply(); }
+                catch (e) { /* 不掀画布 */ }
+            }, ms);
+        }
         try {
             if (app.graph && typeof app.graph.onGraphChanged === "function") {
                 app.graph.onGraphChanged(() => safeApply());
             }
-        } catch (e) { /* 图 API 变了 ⇒ 靠下面的多拍重试 */ }
-        // 🔴 `setup()` 可能早于工作流加载完成（那时图里一个节点都没有）⇒ 补几拍。
-        //    不补 = 打开工作流后节点仍是英文（静默失效），本仓已因此踩过（见 relay_kit_refs_ui.js）。
+        } catch (e) { /* 图 API 变了 ⇒ 靠上面的多拍重试 */ }
         safeApply();
-        for (const ms of (0, 250, 1000, 2500)) setTimeout(safeApply, ms);
+        // 🔴 帧级防覆盖兜底：界面汉化插件有 1 s 守护轮询，会把我们写的标签/提示改回中文。
+        //    不启这个 = 装了汉化插件的用户看到的是「部分英文部分中文」（真机实测）。
+        startGuard();
     },
 
     nodeCreated(node) {
@@ -240,4 +390,12 @@ app.registerExtension({
     },
 });
 
-export { currentLang as __h3I18nCurrentLang, applyLangAll as __h3I18nApplyAll };
+export {
+    currentLang as __h3I18nCurrentLang,
+    applyLangAll as __h3I18nApplyAll,
+    startGuard as __h3I18nStartGuard,
+    stopGuard as __h3I18nStopGuard,
+    readOfficialLocale as __h3I18nReadOfficialLocale,
+    resetLangCache as __h3I18nResetLangCache,
+    clearLangOverride as __h3I18nClearOverride,
+};

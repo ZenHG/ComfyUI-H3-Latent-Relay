@@ -7,15 +7,15 @@
 #
 # 期望值：
 #   · 512/0  tests/test_relay_core.py      算法层
-#   ·  96/0  tools/review_050.py           文档—代码一致性（✅ 本数字由**本文件的 H3g 自引用机检**盯着）
+#   ·  104/0  tools/review_050.py           文档—代码一致性（✅ 本数字由**本文件的 H3g 自引用机检**盯着）
 #   ·  16/0  tools/smoke_nodes.py          节点层冒烟（✅ H3j 自 2026-09-30 起机检）
 #   ·   4/4  tools/assert_default_exit.py  默认出口 = V3（契约 1 + 行为 3；必须单进程、不设环境变量）
 #   ·  70/0  tests/test_v3_schema.py       V3 与 V1 逐字段一致（两种环境各一个数，原因见下：
 #                                          能拿到宿主注册表 ⇒ **8 节点 / 122 个 input**；
 #                                          `sys.modules["nodes"]=None` 硬挡 ⇒ **7 节点 / 109 input**）
-#   ·  期望 35/0  tests/test_prompt_dispatch.mjs  前端纯函数（词分发 + run_id 同步）（node）
+#   ·  期望 41/0  tests/test_prompt_dispatch.mjs  前端纯函数（词分发 + run_id 同步）（node）
 #   ·  期望 45/0  tests/test_audio_ref_budget.mjs  前端纯函数（音频参考额度：3 槽 + 本包 1）（node）
-#   ·  期望 24/0  tests/test_i18n.mjs            前端纯函数（画布中英切换：只改 label 不改 name）（node）
+#   ·  期望 33/0  tests/test_i18n.mjs            前端纯函数（画布中英切换：标签 + 悬浮提示）（node）
 # 改动后若这些数字变了，请同步 CONTRIBUTING.md「方面数/断言数」、tests 头注释 **以及本文件**。
 # ⚠️ 本文件曾是**已知盲区**（自己漂移过：停在 384；`assert_default_exit` 的期望值与第 11 行
 #    自相矛盾 3/3 vs 4/4；`review_050` 的执行行写 82 而真值 83）。2026-09-25 已收口：
@@ -116,7 +116,7 @@ jobs:
           PYTHONPATH: ${{ runner.temp }}/ComfyUI
         run: |
           python tests/test_relay_core.py   # 期望 512/0
-          python tools/review_050.py        # 期望 96/0（H3g 自引用机检；L13 + H3j/H3k/H3l/H3m + H3n i18n 词表 + H3o 文档悬空引用）
+          python tools/review_050.py        # 期望 104/0（H3g 自引用机检；L13 + H3j/H3k/H3l/H3m + H3n i18n 词表 + H3p i18n 悬浮提示 + H3q JS 逗号表达式 + H3r 防覆盖兜底 + H3s link 端点字段 + H3t 官方语言入口 + H3o 文档悬空引用）
           python tools/smoke_nodes.py       # 期望 16/0
           # 这两个此前**只在本地清单里、CI 没跑**（2026-09-30 补齐覆盖缺口）：
           python tests/test_experimental.py                              # 期望 29/0（实验层）
@@ -149,7 +149,7 @@ jobs:
 
       # Chain 词分发的纯函数（与浏览器里跑的是同一份 web/relay_kit_prompt.js）
       - name: Chain prompt dispatch (node)
-        run: node tests/test_prompt_dispatch.mjs   # 期望 35/0
+        run: node tests/test_prompt_dispatch.mjs   # 期望 41/0
 
       # 音频参考额度的纯函数（与浏览器里跑的是同一份 web/relay_kit_refs.js）。
       # 🔴 为什么必须进 CI：这组的核心是两条**静默失效**回归 —— ① 槽位正则不认 Autogrow 的
@@ -164,7 +164,7 @@ jobs:
       #    追加的额度提示；③ 枚举白名单外的值被猜译（模型文件名翻了 = 找不到文件）。
       #    三条都不会报错，只有单测能拦。
       - name: Canvas i18n (node)
-        run: node tests/test_i18n.mjs   # 期望 24/0
+        run: node tests/test_i18n.mjs   # 期望 33/0
 
       # 🔴 2026-09-30 新增：**真的构建一次分发集**（此前它零 CI 覆盖）。
       #    为什么必须进 CI：用户下载的就是 `dist/` 那个 zip —— 打包器坏了、或

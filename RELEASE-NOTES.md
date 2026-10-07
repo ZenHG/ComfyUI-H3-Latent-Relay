@@ -18,6 +18,39 @@
 
 ---
 
+## 0.6.29 — 2026-10-06
+
+**节点上的中/EN 按钮改成跟随官方语言设置；顺手修掉一个把「改了没生效」拖了整整一轮的坑。**
+
+🔴 **默认语言改为跟随官方设置**（设置里的 `Language`，即 `Comfy.Locale`），不再是"看界面语言"。
+官方改语言 ⇒ 本包节点跟着变；点节点上的按钮才覆盖，**覆盖后官方再切语言不冲掉你的选择**。
+**单向**：我们的按钮**只改本包节点**，**不写官方设置** —— 写它会触发 ComfyUI 重载当前工作流。
+🔴 **修的坑**：此前读的 `<html lang>` 实测**与官方设置不一致**（官方设了中文，它仍是 `en`）
+⇒ 会出现"官方界面中文、本包节点英文"。
+
+**升级动作**：无需改图或连线，但**必须刷新浏览器页面**（F5）—— 重启 ComfyUI 进程不算。
+想让节点回到跟随官方语言：清一次浏览器本地存储里的 `h3relay_lang`。
+
+<!-- EN -->
+
+**The per-node Chinese/EN button now follows the official language setting — plus a fix for a trap that
+wasted a whole round of "my change did nothing".**
+
+🔴 **The default language now follows the official setting** (Settings → `Language`, i.e. `Comfy.Locale`)
+instead of "whatever the interface language is". Changing the official language makes this pack's nodes
+follow; the node button overrides that, and **the official setting no longer clobbers your choice**.
+**One-way**: our button changes **only this pack's nodes** and **never writes the official setting** —
+writing it makes ComfyUI reload the current workflow. 🔴 **The trap it fixes**: the previously read
+`<html lang>` was **measured to disagree with the official setting** (official set to Chinese while it
+still said `en`) ⇒ producing "Chinese official UI, English pack nodes".
+
+**Action required**: no graph or wiring changes, but you **must reload the browser page** (F5) —
+restarting the ComfyUI process is not enough. To put the nodes back on the official language, clear the
+`h3relay_lang` key in browser local storage.
+
+---
+
+
 ## 0.6.28 — 2026-10-06
 
 **节点上加一个中/EN 按钮；顺手修掉分发集漏发前端文件的毛病。**

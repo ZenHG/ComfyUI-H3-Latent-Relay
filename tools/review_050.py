@@ -1513,6 +1513,208 @@ ck("H3n-i18n 词表里没有**死词条**（没有任何节点在用的键 ⇒ �
    not _dead, "死词条 %d 个：%s" % (len(_dead), _dead[:8]))
 
 # ============================================================================
+# H3p 悬浮提示的**双语完整性**（2026-10-06 新增，0.6.28）
+# ============================================================================
+# 🔴 判据与 H3n 同源：`nodes.py` 的 (class_type, 参数名) 组合 **⊆** `H3_TIPS`。
+#   为什么必须一条条对上、不能只查"表非空"：
+#     提示是**按节点分别写**的（`run_id` 在 6 个节点各有一套语义），
+#     漏一个 ⇒ 那一格悬浮时仍是**后端中文**（英文界面下露馅），且**没人会发现**。
+# ⚠️ 反向也查（表里多余 = 参数改名后忘了删）。
+# ⚠️ 与 H3n 一样：schema 读不到就退源码 AST，读不到就**记跳过并说明**，不静默变弱。
+_i18n_tips = set(re.findall(r'^\s{4}"([^"]+)":\s*\{', _i18n_src, re.M))
+_tips_ok = bool(re.search(r"export const H3_TIPS = \{", _i18n_src))
+
+_miss_t, _bad_tip = [], []
+for _cls in sorted(_reg):
+    _inst = N.NODE_CLASS_MAPPINGS[_cls]()
+    _keys = set()
+    try:
+        _it = _inst.INPUT_TYPES()
+        for _kind in ("required", "optional"):
+            _keys |= set(_it.get(_kind) or {})
+    except Exception as _exc:                        # noqa: BLE001 —— 宿主注册表不可用
+        _keys = _static_schema_keys(_cls)
+    for _k in sorted(_keys):
+        if "%s.%s" % (_cls, _k) not in _i18n_tips:
+            _miss_t.append("%s.%s" % (_cls, _k))
+ck("H3p-i18n 悬浮提示：每个 (节点, 参数) 都有双语条目（漏了 = 那天英文界面下露中文）",
+   _tips_ok and not _miss_t,
+   "H3_TIPS %d 条｜缺 %d 个：%s｜读不到 schema 改用源码：%s"
+   % (len(_i18n_tips), len(_miss_t), _miss_t[:6], _skip))
+
+# 🔴 反向：表里的键必须**真的是**某节点的参数（改名后忘删 = 死条目）
+_all_used = set()
+for _cls in sorted(_reg):
+    _keys = set()
+    try:
+        _it = N.NODE_CLASS_MAPPINGS[_cls]().INPUT_TYPES()
+        for _kind in ("required", "optional"):
+            _keys |= set(_it.get(_kind) or {})
+    except Exception:                                # noqa: BLE001
+        _keys = _static_schema_keys(_cls)
+    for _k in _keys:
+        _all_used.add("%s.%s" % (_cls, _k))
+_dead_tips = sorted(_i18n_tips - _all_used)
+ck("H3p-i18n 悬浮提示里没有**死条目**（键不是任何节点的参数 ⇒ 改名后忘了删）",
+   not _dead_tips, "死条目 %d 个：%s" % (len(_dead_tips), _dead_tips[:8]))
+
+# 🔴 每条必须**两种语言都齐**（只有中文 = 英文界面下露中文，本项就是治这个）
+_incomplete = []
+for _k, _v in re.findall(r'^\s{4}"([^"]+)":\s*\{(.*?)\n\s{4}\},', _i18n_src, re.M | re.S):
+    if _k not in _i18n_tips:
+        continue
+    if not re.search(r"\bzh:\s*\"", _v) or not re.search(r"\ben:\s*\"", _v):
+        _incomplete.append(_k)
+ck("H3p-i18n 每条悬浮提示都**中英俱全**（只有一边 = 另一种界面下露错语言）",
+   not _incomplete, "缺语言的条目 %d 个：%s" % (len(_incomplete), _incomplete[:8]))
+
+# 🔴 提示**不得写进工作流 JSON**：`applyLang` 必须写 `w.tooltip`（前端只序列化 `value`
+#    ⇒ 提示不进 JSON）。本项**只正面断言"写了 w.tooltip"**，是全链路的必要条件 ——
+#    真机验证过前端只序列化 `value`（见 CHANGES §7）；若日后有人把提示改去写
+#    `options.values`，需要**另加一条反向断言**（本项**测不到**那个，别当它覆盖了）。
+_serialize_guard = bool(re.search(
+    r"applyLang[\s\S]{0,4000}?w\.tooltip\s*=", _i18n_src))
+ck("H3p-i18n 提示写进 `widget.tooltip`（不落 JSON 的那一格），且代码里真的写了它",
+   _serialize_guard, "在 relay_kit_i18n.js 的 applyLang 里找到 `w.tooltip =`：%s" % _serialize_guard)
+
+# ============================================================================
+# H3q 前端 JS 不许出现「`for…of (a, b, c)` 逗号表达式」——**这是真 bug 的化石**（2026-10-06）
+# ============================================================================
+# 🔴 为什么必须机检：`for (const x of (0, 250, 1000, 2500))` 里那对**圆括号是逗号表达式**，
+#    值 = 最后一个（`2500`，一个**数**），`for…of` 一个数立刻抛
+#    `TypeError: number is not iterable` ⇒ **整个 `setup()` 当场中断**、
+#    其后所有补刷一拍都跑不了 ⇒ 表现为「打开工作流后提示/角标不出现」的**静默失效**。
+#    2026-10-06 真机（playwright + 真前端）抓到的实况就是它，
+#    且**同款抄了两处**（`relay_kit_i18n_ui.js` + `relay_kit_refs_ui.js`）——
+#    人手写的"想写数组、漏了方括号"几乎必犯，机检能一次拦住这一整类。
+# ⚠️ 判据：`for (const … of (` 后面**紧跟数字或数字加逗号**（不是 `[` / 变量 / 函数调用）。
+#    正常数组写 `of [0, 250]`、变量写 `of (node.widgets || [])` 都不命中。
+# 🔴 `dist/` 副本**也扫** —— 生成物最容易留着旧 bug（打包器只抄不查）。
+_js_dirs = [("web", os.path.join(KIT, "web")),
+            ("dist/web", os.path.join(KIT, "dist", "ComfyUI-H3-Latent-Relay", "web"))]
+_comma_for = []
+for _tag, _js_dir in _js_dirs:
+    try:
+        _names = sorted(os.listdir(_js_dir))
+    except OSError:
+        continue
+    for _fn in _names:
+        if not _fn.endswith(".js"):
+            continue
+        try:
+            with open(os.path.join(_js_dir, _fn), encoding="utf-8") as _fh:
+                for _ln, _line in enumerate(_fh, 1):
+                    if re.search(r"for\s*\(\s*(?:const|let|var)\s+\w+\s+of\s*\(\s*\d", _line):
+                        _comma_for.append("%s/%s:%d" % (_tag, _fn, _ln))
+        except OSError:
+            pass
+ck("H3q 前端 JS（含 dist 副本）无 `for…of (数字,数字)` 逗号表达式（值是一个数 ⇒ 抛 not-iterable ⇒ setup 中断）",
+   not _comma_for, "命中 %d 处：%s" % (len(_comma_for), _comma_for[:6]))
+
+# ============================================================================
+# H3r 防覆盖兜底必须成对存在（2026-10-06 新增）——**这是真 bug 的化石**
+# ============================================================================
+# 🔴 为什么必须机检：界面汉化插件（`ComfyUI-Chinese-Translation` 等）有一个**每 1000 ms
+#    的守护轮询**，会按它自己的词典把节点标签/提示**改回中文**（其源码注释原话：
+#    「兜底补刷**被第三方扩展覆盖**/重建的节点槽位标签」）⇒ 与本包的 `applyLang` 抢同一批
+#    字段，表现为**同一节点上部分英文、部分中文**（2026-10-06 真机复现）。
+#    对策 = 写值时记期望值（`__h3I18nWant` / `__h3I18nWantTip`）+ 每帧比对写回。
+# 🔴 这条检查守的是「**两侧成对**」：只写了标记没开兜底（或反之）⇒ 功能**静默失效**，
+#    而单测测不到（单测跑的是纯函数，没有"另一个插件来抢"这个场景）。
+# ⚠️ 三个文件都要在：纯函数层写标记、挂钩层开兜底、入口真的调了它。
+_i18n_pure = os.path.join(KIT, "web", "relay_kit_i18n.js")
+_i18n_ui = os.path.join(KIT, "web", "relay_kit_i18n_ui.js")
+_pure_src = ""
+_ui_src = ""
+for _p, _var in ((_i18n_pure, "_pure_src"), (_i18n_ui, "_ui_src")):
+    try:
+        with open(_p, encoding="utf-8") as _fh:
+            if _var == "_pure_src":
+                _pure_src = _fh.read()
+            else:
+                _ui_src = _fh.read()
+    except OSError:
+        pass
+_guard_missing = []
+if "__h3I18nWant" not in _pure_src:
+    _guard_missing.append("relay_kit_i18n.js 里没有写期望值标记 `__h3I18nWant`")
+if "__h3I18nWantTip" not in _pure_src:
+    _guard_missing.append("relay_kit_i18n.js 里没有写期望值标记 `__h3I18nWantTip`")
+if "function guardPass" not in _ui_src and "guardPass" not in _ui_src:
+    _guard_missing.append("relay_kit_i18n_ui.js 里没有 `guardPass`（每帧比对写回）")
+if "startGuard()" not in _ui_src:
+    _guard_missing.append("relay_kit_i18n_ui.js 的 `setup()` 里没有调用 `startGuard()`")
+if "__h3I18nWant" not in _ui_src:
+    _guard_missing.append("relay_kit_i18n_ui.js 的兜底没有比对 `__h3I18nWant`")
+ck("H3r 防覆盖兜底成对存在（汉化插件 1s 轮询会改回中文 ⇒ 必须记期望值 + 每帧写回）",
+   not _guard_missing, "缺：%s" % _guard_missing)
+
+# ============================================================================
+# H3s link 端点字段必须**两代都读**（2026-10-06 新增）——**这是真 bug 的化石**
+# ============================================================================
+# 🔴 为什么必须机检：前端两代 link 的端点字段名**不同** ——
+#   旧版 `link.origin_id` / `link.target_id`；新版（实测 1.53.10）返回带 `_state` 的实例，
+#   字段是 **`originNodeId` / `targetNodeId`**。
+#   只读 `link.origin_id` ⇒ 新版上恒为 `undefined` ⇒ `getNodeById(undefined)` 落空
+#   ⇒ `upstreamText` **一律返回「找不到上游节点」** ⇒ 所有依赖它的功能**静默失效**：
+#      · `run_id` 跨节点同步（六格各自退回自己的旧值，永远统一不了）
+#      · 连跑前的冲突闸（把"六格同源"误判成冲突，拦住连跑）
+#      · `prompts` 词分发（`.value` 那条老路的兜底）
+#   2026-10-06 真机实测抓到：`getLink(1)` = `{_state:{originNodeId:"1",...}}`。
+# ⚠️ 判据：代码里出现 `link.origin_id` / `link.target_id` 的**直接**读取时必须同时有
+#   驼峰版兜底（同一行或邻近行出现 `originNodeId`/`targetNodeId`）。
+#   只扫 `web/*.js`（dist 由打包器同步，另在 H3q 里扫过它是防旧 bug，这里不必重复）。
+_link_field_bad = []
+for _fn in sorted(os.listdir(os.path.join(KIT, "web"))):
+    if not _fn.endswith(".js"):
+        continue
+    try:
+        with open(os.path.join(KIT, "web", _fn), encoding="utf-8") as _fh:
+            _src = _fh.read()
+    except OSError:
+        continue
+    for _pat, _need in (("link.origin_id", "originNodeId"), ("link.target_id", "targetNodeId")):
+        if _pat in _src and _need not in _src:
+            _link_field_bad.append("%s 读了 `%s` 但没有 `%s` 兜底" % (_fn, _pat, _need))
+ck("H3s link 端点字段两代都读（新版 `originNodeId`／旧版 `origin_id`；只读旧名 ⇒ 上游恒取不到 ⇒ run_id 同步与词分发静默失效）",
+   not _link_field_bad, "问题：%s" % _link_field_bad)
+
+# ============================================================================
+# H3t 官方语言入口：**必须用 `app.extensionManager.setting`**，且 `<html lang>` 只作兜底
+#     （2026-10-06 新增）——**这是真 bug 的化石**
+# ============================================================================
+# 🔴 为什么必须机检：官方设置入口在版本间**搬过家** ——
+#   · 旧文档/旧前端：`app.uiSettings.get("Comfy.Locale")`（实测已不存在）
+#   · 现前端（实测 1.53.10）：**`app.extensionManager.setting.get("Comfy.Locale")`**（实测返回 "zh"）
+#   只写旧入口 ⇒ 恒取不到 ⇒ 掉到 `<html lang>`，而 **`<html lang>` 不可信**：
+#   真机实测同一时刻 `Comfy.Locale="zh"` 而 `<html lang>="en"`（官方只把它当浏览器语种声明，
+#   **不随语言设置更新**）⇒ 出现「官方界面中文 + 本包节点英文」。
+#   另有**订阅时机**坑：模块**顶层**装订阅时 `app.extensionManager` 还不存在 ⇒ 静默装不上。
+# ⚠️ 判据：`relay_kit_i18n_ui.js` 必须同时满足
+#   ① 读官方走 `extensionManager` + `setting`（出现 `extensionManager` 与 `.setting`）；
+#   ② **不出现** `app.uiSettings`（那是已死的旧入口 ⇒ 写了就是死代码）；
+#   ③ 官方读不到的兜底路径上必须有 `<html lang>`（`documentElement.lang`）；
+#   ④ 订阅安装必须在 `setup` 里重试（出现 `installOfficialLocaleWatch`，且它被 `setup` 调用）。
+_off_entry_bad = []
+try:
+    with open(os.path.join(KIT, "web", "relay_kit_i18n_ui.js"), encoding="utf-8") as _fh:
+        _ui = _fh.read()
+    if "extensionManager" not in _ui or ".setting" not in _ui:
+        _off_entry_bad.append("没有走官方新入口 `app.extensionManager.setting`（只写旧入口 ⇒ 恒取不到）")
+    if "app.uiSettings" in _ui:
+        _off_entry_bad.append("仍写着已失效的旧入口 `app.uiSettings`（死代码，实测不存在）")
+    if "documentElement.lang" not in _ui:
+        _off_entry_bad.append("官方读不到时没有 `<html lang>` 兜底（旧前端会掉到 navigator.language）")
+    if "installOfficialLocaleWatch" not in _ui:
+        _off_entry_bad.append("没有 `installOfficialLocaleWatch` ⇒ 模块顶层装订阅会静默失效")
+    elif _ui.count("installOfficialLocaleWatch") < 2:
+        _off_entry_bad.append("`installOfficialLocaleWatch` 只定义了没在 `setup` 里调用（订阅装不上）")
+except OSError as _e:
+    _off_entry_bad.append("读不到 relay_kit_i18n_ui.js：%s" % _e)
+ck("H3t 官方语言入口走 `app.extensionManager.setting`（旧 `app.uiSettings` 已失效；`<html lang>` 实测与 `Comfy.Locale` 不一致 ⇒ 只能作兜底；订阅须在 setup 里装）",
+   not _off_entry_bad, "问题：%s" % _off_entry_bad)
+
+# ============================================================================
 # H3o 文档里的**仓库内路径 / 链接**必须真实存在（2026-10-06 新增）
 # ============================================================================
 # 🔴 为什么要有这条：本仓文档互相引用极多（README ↔ docs/01–10 ↔ tools/README ↔ CHANGES），

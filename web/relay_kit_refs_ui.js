@@ -107,7 +107,10 @@ app.registerExtension({
         // 🔴 `setup()` 可能早于「工作流加载完成」（那时 `_nodes` 还空）⇒ 补几拍重算。
         //    不补 = 打开工作流后提示根本不出现（静默失效）。三拍覆盖"本地快 / 远端慢"两档。
         safeRefresh();
-        for (const ms of (0, 250, 1000, 2500)) setTimeout(safeRefresh, ms);
+        // 🔴 `(0, 250, 1000, 2500)` 是**逗号表达式**（值 = 2500，一个数）⇒ `for...of` 抛
+        //    `TypeError: number 2500 is not iterable` ⇒ **整个 setup 中断**，补刷一拍都跑不了。
+        //    必须是**数组**。2026-10-06 真机抓到（与 i18n 同款，两处都是这个写法）。
+        for (const ms of [0, 250, 1000, 2500]) setTimeout(safeRefresh, ms);
     },
 
     /**

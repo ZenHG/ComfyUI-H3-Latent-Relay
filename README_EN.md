@@ -10,7 +10,7 @@ not coupled to any third-party H3 node pack.
 
 | Item | Value |
 |---|---|
-| Version | **0.6.28** |
+| Version | **0.6.29** |
 | License | **MIT** (third-party attribution in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) |
 | Host | **ComfyUI ≥ 0.35.0 with MiniMax-H3 support** (the host itself is GPL-3.0, see License) |
 
@@ -352,19 +352,49 @@ Implementation details and more (**audio-reference budget**, BGM, emotion, multi
 ### Node Chinese/EN toggle (0.6.28, **canvas button**)
 
 Every node of this pack now carries a small 「**中 / EN**」 button: one click switches the titles, parameter
-labels and port names of **all 8 nodes** between Chinese and English (dropdowns show Chinese while their
-**stored value stays untouched**).
+labels, port names and **hover tooltips** of **all 8 nodes** between Chinese and English (dropdowns show
+Chinese while their **stored value stays untouched**).
 
-- It **follows the UI language by default** ⇒ an English UI does not get Chinese node
-  labels; clicking the button overrides that, and the choice is remembered in the browser.
-- 🔴 **Display only, never the graph**: only `label` / `title` are touched, **never `name` and never a
-  dropdown's values** ⇒ not one byte of the workflow JSON changes. A title you renamed yourself is **kept**.
+- It **follows the official language setting by default** (Settings → `Language`, i.e.
+  `Comfy.Locale`) ⇒ an English UI does not get Chinese node labels; clicking the button overrides
+  that, and once overridden the official setting no longer clobbers your choice (remembered in the
+  browser). **One-way**: changing the official language makes our nodes follow; our button changes
+  **only this pack's nodes** and **never writes the official language setting** (writing it makes
+  ComfyUI reload the current workflow — an unacceptable cost).
+- 🔴 **Display only, never the graph**: only `label` / `title` / **`widget.tooltip`** are touched,
+  **never `name` and never a dropdown's values** ⇒ not one byte of the workflow JSON changes.
+  A title you renamed yourself is **kept**.
+- **Hover tooltips** are now condensed to "what the parameter does + the recommended value"
+  (the original text, up to 1084 chars of history, stays in `docs/`); a parameter not in the table
+  **keeps the backend original** and is never garbled.
 - It **coexists with the audio-reference-budget hint**: only the name part of the title is swapped, so a
   budget hint appended after it survives.
-- It does **not** fight interface translation plugins (Global Translation & co.): those translate UI text,
-  this one only handles this pack's own nodes.
+- 🔴 **It competes for the same fields with interface translation plugins** (ComfyUI-Chinese-Translation,
+  Global Translation & co.) — and this pack ships a **per-frame anti-overwrite guard**, measured to win
+  against 344 overwrite attempts with zero losses. Why it is needed: those plugins run a **1-second
+  watchdog poll** that rewrites node labels/tooltips **back to Chinese** using their own dictionary
+  (their source comment says it exists to "re-patch node slot labels **overwritten by third-party
+  extensions**"), and they **do not shield the English UI at all**. This pack's countermeasure: record
+  the expected value when writing, then **compare and rewrite every frame** (frame rate ≫ their 1 Hz) —
+  so what you see is ours.
 - 🔴 **UI-only**: a script submitting JSON (`/prompt`) never touches the canvas ⇒ no button there
   (and nothing is lost).
+- 🔴 **After upgrading you must reload the browser page** (F5). **Restarting the ComfyUI process
+  is not enough**: the front end is a single-page app, and once the page is open the extension JS
+  stays resident in memory — **without a reload you are still running the old version**. Someone
+  already mis-reported "tooltips are still Chinese" this way (new version on disk, old one in the
+  browser).
+- 💡 **Editing the code for local verification**: a machine may have **more than one** ComfyUI
+  installed (e.g. a standalone build plus a desktop build). Before claiming "my change did nothing",
+  confirm **which copy port 8188 is actually serving**:
+
+  ```bash
+  curl -s http://127.0.0.1:8188/extensions/ComfyUI-H3-Latent-Relay/relay_kit_i18n_ui.js \
+    | grep -c '<an identifier that exists only in the new code>'   # 0 ⇒ still the old copy
+  netstat -ano | grep ':8188.*LISTENING'  # take the PID ⇒ look up that process's exe path
+  ```
+
+  "I synced the file over" ≠ "the host is reading the copy I synced".
 
 Details and the word table: [`docs/04`](docs/04-canvas-and-widgets_EN.md) §Node Chinese/EN toggle.
 

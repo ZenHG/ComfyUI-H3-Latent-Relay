@@ -99,10 +99,25 @@ titles / parameter labels / port names of **the whole pack** (not just that node
 
 | | Behaviour |
 |---|---|
-| Default language | **follows the UI language** (reads `<html lang>`) ⇒ an English UI keeps English node labels; the button overrides that |
+| Default language | 🔴 **follows the official language setting** (`Comfy.Locale`, i.e. `Language` in Settings); only if that is unavailable does it fall back to `<html lang>`, then to the browser locale. The button overrides it |
+| Override | once overridden, **changing the official language no longer clobbers your choice**; clearing the `localStorage` key returns to following |
+| Direction | 🔴 **one-way**: changing the official language makes the nodes follow; our button changes **only this pack's nodes** and **never writes the official setting** |
 | Remembered | the override lives in the browser's `localStorage` (key `h3relay_lang`) ⇒ it survives closing the page |
-| What changes | node `title`, widget `label`, port `label`, the **display text** of dropdowns |
+| What changes | node `title`, widget `label`, port `label`, the **display text** of dropdowns, and **hover tooltips** |
 | What never changes | 🔴 **`name`, dropdown `values`, the workflow JSON** — not one byte |
+
+**Why one-way (read the official setting, never write it)**: as soon as the official front end sees
+`Comfy.Locale` change, it runs `Comfy.RefreshNodeDefinitions` and **reloads the current workflow**
+(confirmed by reading the official front-end source). Reloading the whole workflow — and losing
+unsaved edits — because someone clicked a node button is an unacceptable cost, so this pack only
+**reads** the official setting. To change it, use the official `Language` dropdown.
+
+**Which entry point is the real one (a pit we hit)**: `app.extensionManager.setting.get("Comfy.Locale")`.
+🔴 **`<html lang>` cannot be trusted** — measured on a real machine: at the same moment
+`Comfy.Locale = "zh"` while `<html lang> = "en"` (the official front end treats it only as a browser
+locale declaration and **does not update it with the language setting**) ⇒ as long as the official
+entry point is readable, that is **never** consulted, otherwise you get "Chinese official UI + English
+nodes". Both rules are guarded by the **H3t** machine check.
 
 **Three design constraints (all of them guard silent failures)**:
 
@@ -116,10 +131,29 @@ titles / parameter labels / port names of **the whole pack** (not just that node
    text (`hard` → 硬边); `model_name` (a model file name), stage numbers, paths and your own names are
    **never translated** — translating those means the file can no longer be found.
 
-**Relation to interface translation plugins**: plugins like Global Translation translate **DOM text**, this
-feature changes `label`/`title` **data** and only for **this pack's own nodes** ⇒ the two do not fight. Keys
-missing from the table are **skipped silently** (no crash, no change); forgetting to translate a new parameter
-is caught by `tools/review_050.py`'s **H3n** check.
+**Tooltips (`H3_TIPS`, 0.6.28)**: hovering a parameter shows a **condensed bilingual** tip — one line on what
+the parameter does plus its default/recommended value. The originals in `nodes.py` go up to 1084 characters
+(history, war stories, dead branches); a tooltip is a quick reference, not a manual, so the long-form reasoning
+stays in `docs/` and `CHANGES.md`.
+
+- Keyed by **`class_type.parameter`**, not by parameter name alone: `run_id` means "required film name" on
+  LatentSave but "resume only, may be empty" on Chain — merging them would lose the meaning.
+- Written to **`widget.tooltip`** — the cell the front end reads first (`widget.tooltip || nodeData.inputs[name].tooltip`)
+  and one that **serialization never writes** (the serializer emits only `widget.value`) ⇒ no translation
+  travels with a shared graph, and other people's graphs are unaffected.
+- A combination **missing from the table is left untouched** — the backend's Chinese original stays (rather
+  miss than guess wrong). A new parameter without a tip is caught by `review_050.py`'s **H3p** check.
+
+**Relation to interface translation plugins**: plugins like Global Translation / ComfyUI-Chinese-Translation
+translate **DOM text**, this feature changes `label`/`title`/`tooltip` **data**, and only for **this pack's own
+nodes**. 🔴 **But the two do compete for the same fields**: those plugins run a **1-second watchdog poll** that
+rewrites node labels/tooltips **back to Chinese** with their own dictionary (their source comment says it exists
+to "re-patch node slot labels **overwritten by third-party extensions**"), and they **do not shield the English
+UI at all**. This pack's countermeasure is to record the expected value on write and **compare and rewrite every
+frame** (frame rate ≫ their 1 Hz) ⇒ the display stays ours, **without changing one line of their code**
+(guarded by the **H3r** machine check that both halves are present). Keys missing from the table are **skipped
+silently** (no crash, no change); forgetting to translate a new parameter is caught by `tools/review_050.py`'s
+**H3n** check (labels) and **H3p** check (tooltips).
 
 > ⚠️ **Pure frontend**: it **does not take effect** when a script submits the graph JSON (nor is it needed —
 > labels are only there for humans).

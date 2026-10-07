@@ -68,6 +68,26 @@ function rid(m) {
 }
 
 /**
+ * 这一格的 `run_id` 是否**被连线接管**。
+ *
+ * 🔴 为什么必须单独标出来（2026-10-06 修，实图 `Cobijada-官方采样-一采-全流程PREVIEW`）：
+ *   `run_id` 可以被**转成输入并连线** —— 本包文档 §`run_id` 同步只写「六个格子改一处同步」，
+ *   没写这种接法，于是有一张实图把**六类节点的 run_id 全接到同一个 `PrimitiveString`**。
+ *   那是**比广播更干净**的做法（一处改、六处动），却会因为
+ *   ① 快照读本机残留值 ⇒ 六格读成六个不同值 ⇒ **误判冲突、拦住连跑**；
+ *   ② 广播把值写进本机格子 ⇒ **写了也不生效**（生效的是连线值）⇒ 假同步。
+ *   ⇒ 有连线时一律**沿 link 取上游**；本机格子是"死值"，既不参与裁决、也不许被广播写。
+ */
+function linked(m) {
+    return m?.linked === true;
+}
+
+/** 可以被广播写入的成员（**有连线的排除掉** —— 写它的 widget 不生效）。 */
+function writable(list) {
+    return (Array.isArray(list) ? list : []).filter((m) => m && m.id != null && !linked(m));
+}
+
+/**
  * 裁决同组 `run_id` 是否一致。**不猜**。
  *
  * @param members `[{id, type, runId}]` —— 同组内带 `run_id` 的节点快照
@@ -76,19 +96,24 @@ function rid(m) {
  *                            `empty` = 还是空的节点 id（**这些格要补齐**）
  *   · `state: "empty"`    —— 全组都空（后端 `_stage_path` 会直接 raise「run_id 不能为空」）
  *   · `state: "conflict"` —— 有 ≥2 个不同的非空值；`values` = 各值，`byValue` = 值 → 节点 id
+ *
+ * ⚠️ `ids` / `empty` / `byValue` 里报出去的 id 一律 `String()` 归一（与 `planRunIdSync` 同一规矩）：
+ *    调用方拿它们去 `nodeById()` 里比，混着 `"961"` 与 `902` 两种写法就会静默找不到节点
+ *    （2026-09-28 状态机栽在同一个坑上）。**别只归一其中一处** —— 同一个清单里两种写法最难查。
  */
 export function resolveRunId(members) {
     const list = (Array.isArray(members) ? members : []).filter((m) => m && m.id != null);
     const byValue = new Map();
     const empty = [];
     for (const m of list) {
+        const id = String(m.id);
         const v = rid(m);
         if (!v) {
-            empty.push(m.id);
+            empty.push(id);
             continue;
         }
         if (!byValue.has(v)) byValue.set(v, []);
-        byValue.get(v).push(m.id);
+        byValue.get(v).push(id);
     }
     const values = [...byValue.keys()];
     if (values.length === 0) return { state: "empty", value: "", values, ids: [], empty, byValue };
@@ -102,23 +127,33 @@ export function resolveRunId(members) {
 /**
  * 规划一次广播：把 `value` 写到**同组里还没有这个值的**节点上。
  *
- * @param members  `[{id, type, runId}]`
+ * @param members  `[{id, type, runId, linked?}]`
+ *                 `linked: true` = 这一格被连线接管 ⇒ **跳过**（见 `linked()` 的说明：
+ *                 写它的 widget 不生效，写了就是"假同步"，比不做更坏）
  * @param originId 发起改动／提供权威值的节点 id（跳过它 —— 它已经是这个值了）
  * @param value    要广播的值
- * @returns `{targets, value, reason}`；`reason` = `"empty"`（空值不扩散）/ `"sync"` / `"none"`（已全一致）
+ * @returns `{targets, value, reason, skipped}`；`reason` = `"empty"`（空值不扩散）/ `"sync"` /
+ *          `"none"`（已全一致）/ `"linked"`（目标全是连线接管的、无处可写）；
+ *          `skipped` = 因连线被跳过的节点 id（给提示用，**不静默**）
  *
  * ⚠️ id 一律用 `String()` 归一后再比：新版前端 `node.id` 是**字符串**（`"961"`），
  *    直接 `===` 比数字会恒 false ⇒ 该同步的没同步（2026-09-28 状态机上踩过同款）。
  */
 export function planRunIdSync(members, originId, value) {
     const v = String(value ?? "").trim();
-    if (!v) return { targets: [], value: "", reason: "empty" };
+    if (!v) return { targets: [], value: "", reason: "empty", skipped: [] };
     const origin = originId == null ? null : String(originId);
-    const targets = (Array.isArray(members) ? members : [])
-        .filter((m) => m && m.id != null && String(m.id) !== origin)
-        .filter((m) => rid(m) !== v)
-        .map((m) => m.id);
-    return { targets, value: v, reason: targets.length ? "sync" : "none" };
+    const rest = (Array.isArray(members) ? members : [])
+        .filter((m) => m && m.id != null && String(m.id) !== origin);
+    // ⚠️ 报出去的 id 一律 `String()` 归一（与 `targets` 同一条规矩）——
+    //    否则同一份清单里会混着 `"961"` 与 `902` 两种写法，调用方拿去 `nodeById` 对比时
+    //    再翻一次车（2026-09-28 状态机上就是栽在"数字 id vs 字符串 id"上）。
+    const skipped = rest.filter((m) => linked(m) && rid(m) !== v).map((m) => String(m.id));
+    const targets = writable(rest).filter((m) => rid(m) !== v).map((m) => String(m.id));
+    if (!targets.length && skipped.length) {
+        return { targets, value: v, reason: "linked", skipped };
+    }
+    return { targets, value: v, reason: targets.length ? "sync" : "none", skipped };
 }
 
 /**
@@ -130,14 +165,24 @@ export function planRunIdSync(members, originId, value) {
  *
  * @param verdict `resolveRunId()` 的返回值
  * @param nameOf  `(id) => "显示名"`；调用方给（前端有 `title` / `type` 可挑）
+ * @param linkedIds 被连线接管、**改不动**的节点 id（可选）。
+ *        为什么要给它们单独一句话：这些格子的 `run_id` 由**上游节点**决定，
+ *        用户在自己的格子里怎么删怎么填都不生效 ⇒ 不说清楚就会一直在错的格子上改。
  */
-export function describeRunIdConflict(verdict, nameOf = (id) => `#${id}`) {
+export function describeRunIdConflict(verdict, nameOf = (id) => `#${id}`, linkedIds = []) {
+    const linkedSet = new Set((linkedIds ?? []).map((x) => String(x)));
+    const mark = (id) => (linkedSet.has(String(id)) ? `${nameOf(id)}（连线接管）` : nameOf(id));
     const lines = (verdict?.values ?? []).map((v) => {
-        const ids = (verdict.byValue.get(v) ?? []).map(nameOf).join("、");
+        const ids = (verdict.byValue.get(v) ?? []).map(mark).join("、");
         return `  · 「${v}」← ${ids}`;
     });
-    return "⚠ 同组的 `run_id` 不一致（有 " + lines.length + " 个不同的名字）：\n"
+    let msg = "⚠ 同组的 `run_id` 不一致（有 " + lines.length + " 个不同的名字）：\n"
         + lines.join("\n")
         + "\n  ⇒ 段文件会落到不同目录、桥找不到文件。请把它们改成**同一个名字**后重试。";
+    if (linkedSet.size) {
+        msg += "\n  · 标了**（连线接管）**的：它的值来自上游那个节点，"
+            + "改它自己的格子没用 ⇒ 请改**上游**，或把其余格子的值填成和上游一致。";
+    }
+    return msg;
 }
 

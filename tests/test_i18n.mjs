@@ -11,17 +11,18 @@
 //   ③ 与 `relay_kit_refs_ui.js` 的**共存**：标题只换前缀、后缀（额度提示）原样保留
 //   ④ 枚举值**白名单外不翻**（模型文件名/段号/路径翻了 = 找不到文件）
 //   ⑤ 幂等：同一语言应用两次，第二次**零改动**
-//   ⑥ 自引用：ci.yml / docs/08 里写的「N/0」== 本文件实跑数（改测试必须同步这三处）
+//   ⑥ 🔴 悬浮提示只写 `widget.tooltip`，**不碰** name / value / options.values（不落 JSON）
+//   ⑦ 自引用：ci.yml / docs/08 里写的「N/0」== 本文件实跑数（改测试必须同步这三处）
 //
 // ⚠️ 词表**完整性**不由本文件负责（那是 Python 侧的事）：`tools/review_050.py` 的
-//    J-i18n 项直接拿 `nodes.py` 的 `INPUT_TYPES` 键去核对 `H3_WIDGETS`
+//    H3n（标签）/ H3p（提示）项直接拿 `nodes.py` 的 `INPUT_TYPES` 键去核对
 //    ⇒ 「新增参数忘了翻译」在机检那一层红，不必在这里维护第二份名单。
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
-    H3_NODES, H3_WIDGETS, H3_SLOTS, LANG_KEY, LANG_EVENT,
-    normLang, defaultLang, comboLabel, isDefaultTitle, swapTitle, applyLang, ownNodes,
+    H3_NODES, H3_WIDGETS, H3_SLOTS, H3_TIPS, LANG_KEY, LANG_EVENT,
+    normLang, defaultLang, comboLabel, isDefaultTitle, swapTitle, applyLang, ownNodes, tipFor, pickTip,
 } from "../web/relay_kit_i18n.js";
 
 let pass = 0;
@@ -191,9 +192,89 @@ check("5.3 英文态回落显示原值（不留中文钩子）",
         && LANG_KEY !== "xh_node_lang" && LANG_EVENT !== "xh:lang-changed");
 }
 
-// ---- 9. 自引用：ci.yml / docs/08 的期望数 == 本文件实跑 ----
+// ---- 9. 悬浮提示（H3_TIPS）----
 {
-    const EXPECTED_CHECKS = 24;                 // 含本行这条自检自己（pass 在本行执行时还没算上自己 ⇒ 比的是 pass+1）
+    // 9.1 按 class_type+参数名 取值；同名参数在不同节点要**取到各自那条**（这是本表建表的理由）
+    const zhRunId = tipFor("H3RelayChain", "run_id", "zh");
+    const zhRunIdSave = tipFor("H3RelayLatentSave", "run_id", "zh");
+    check("9.1 提示按 `class_type.参数名` 分节点取值（同名参数不许串台）",
+        typeof zhRunId === "string" && typeof zhRunIdSave === "string"
+        && zhRunId !== zhRunIdSave
+        && zhRunId.includes("续跑") && zhRunIdSave.includes("片名"),
+        `chain=${(zhRunId || "").slice(0, 18)}… / save=${(zhRunIdSave || "").slice(0, 18)}…`);
+
+    // 9.2 中英两版都取得到，且**不相等**（只有一边 = 另一种界面下露错语言）
+    const enRunId = tipFor("H3RelayChain", "run_id", "en");
+    check("9.2 同一条提示中英都能取到、且内容不同",
+        typeof enRunId === "string" && enRunId !== zhRunId && /[A-Za-z]/.test(enRunId),
+        `en=${(enRunId || "").slice(0, 24)}…`);
+
+    // 9.3 🔴 词表里没有的组合 ⇒ null（决定"一个字节都不动"的那一步）
+    check("9.3 词表里没有的 (节点,参数) ⇒ `null`（**保留后端原文**，宁缺勿错）",
+        tipFor("H3RelayChain", "不存在的参数", "zh") === null
+        && tipFor("KSampler", "run_id", "zh") === null
+        && tipFor(null, "run_id", "zh") === null
+        && tipFor("H3RelayChain", null, "zh") === null);
+
+    // 9.4 写进 `w.tooltip`；且**不碰** label / name / value / options.values
+    const n = mkNode("H3RelayChain", {
+        widgets: [{ name: "run_id", label: "run id", value: "myfilm", options: { values: ["a", "b"] } }],
+    });
+    const before = JSON.stringify(n.widgets[0].options.values);
+    applyLang(n, "zh");
+    const w = n.widgets[0];
+    check("9.4 🔴 提示写进 `widget.tooltip`，**不碰** name / value / options.values",
+        w.tooltip === zhRunId && w.name === "run_id" && w.value === "myfilm"
+        && JSON.stringify(w.options.values) === before,
+        `tooltip=${String(w.tooltip).slice(0, 16)}… name=${w.name} value=${w.value}`);
+
+    // 9.5 切英文 ⇒ 提示跟着换（不是单向的）
+    applyLang(n, "en");
+    check("9.5 切回英文时提示也换成英文版",
+        n.widgets[0].tooltip === enRunId, String(n.widgets[0].tooltip).slice(0, 24) + "…");
+
+    // 9.6 词表里没有的参数 ⇒ tooltip **保持 undefined**（不许被填成空串）
+    const n2 = mkNode("H3RelayPost", { widgets: [{ name: "某个未来参数" }] });
+    applyLang(n2, "zh");
+    check("9.6 词表里没有的参数 ⇒ 不写 tooltip（undefined，不是空串 ⇒ 前端回落后端原文）",
+        !("tooltip" in n2.widgets[0]) || n2.widgets[0].tooltip === undefined);
+
+    // 9.7 幂等：同一语言应用两次，提示零改动
+    const n3 = mkNode("H3RelayChain", { widgets: [{ name: "run_id" }] });
+    applyLang(n3, "zh");
+    const again = applyLang(n3, "zh");
+    check("9.7 幂等：第二次应用提示零改动（否则每次重刷都动一次画布）",
+        again.tips === 0, `tips=${again.tips}`);
+
+    // 9.8 表形状：键都带 `类型.参数` 点号、无空项、无 zh==en
+    const bad = [];
+    for (const [k, v] of Object.entries(H3_TIPS)) {
+        if (!k.includes(".")) bad.push(k + ":nokey");
+        if (!v || !v.zh || !v.en) bad.push(k + ":missing");
+        if (v && v.zh === v.en) bad.push(k + ":zh==en");
+    }
+    check("9.8 H3_TIPS 形状自检（键带点号 / 无空项 / 无 zh==en）", bad.length === 0, bad.slice(0, 5).join(","));
+
+    // 9.9 🔴 查找优先级：精确键 > `*.` 通配；缺一边语言时**当没命中**（不许只翻一半）
+    //     ⚠ 今天表里一条通配都没有 ⇒ 用一张**假表**测这条纯逻辑（`pickTip` 不碰模块状态）
+    const fake = {
+        "NewNode.foo": { zh: "精确中文", en: "exact en" },
+        "*.foo": { zh: "通配中文", en: "fallback en" },
+        "*.bar": { zh: "只有中文" },                       // 缺 en ⇒ 应当**不算命中**
+    };
+    check("9.9 查找优先级：精确键 > `*.` 通配；缺一边语言 ⇒ 当没命中",
+        pickTip(fake, "NewNode", "foo").zh === "精确中文"
+        && pickTip(fake, "OtherNode", "foo").zh === "通配中文"
+        && pickTip(fake, "OtherNode", "bar") === null
+        && pickTip(fake, "", "foo") === null
+        && pickTip(fake, "OtherNode", "") === null
+        && pickTip(fake, "OtherNode", "nope") === null,
+        `exact=${pickTip(fake, "NewNode", "foo").zh} / fallback=${pickTip(fake, "OtherNode", "foo").zh} / half-lang=${pickTip(fake, "OtherNode", "bar")}`);
+}
+
+// ---- 10. 自引用：ci.yml / docs/08 的期望数 == 本文件实跑 ----
+{
+    const EXPECTED_CHECKS = 33;                 // 含本行这条自检自己（pass 在本行执行时还没算上自己 ⇒ 比的是 pass+1）
     const root = fileURLToPath(new URL("..", import.meta.url));
     const decl = [];
     for (const rel of [".github/workflows/ci.yml", "docs/08-testing.md"]) {
@@ -207,7 +288,7 @@ check("5.3 英文态回落显示原值（不留中文钩子）",
         }
     }
     const shown = decl.map((d) => `${d.rel.split("/").pop()}=${d.n}`).join(" ");
-    check("9.1 ci.yml / docs/08 里写的「N/0」== 本文件实跑数（改测试必须同步这三处）",
+    check("10.1 ci.yml / docs/08 里写的「N/0」== 本文件实跑数（改测试必须同步这三处）",
         decl.length >= 2 && decl.every((d) => d.n === EXPECTED_CHECKS) && pass + 1 === EXPECTED_CHECKS,
         `${shown} ｜ 本文件=${pass} ｜ 常量=${EXPECTED_CHECKS}`);
 }

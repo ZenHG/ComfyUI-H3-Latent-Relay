@@ -237,6 +237,31 @@ It is stored in a copy on **six nodes** (the places in `nodes.py` that declare t
 > see [`docs/10`](10-audio-seam-and-concat_EN.md) §7.4).
 > ⚠️ **After renaming, the old directory is not moved along**: stage files stay under the old name ("directory name = film name" is this pack's consistent semantics).
 
+### The other wiring: turn `run_id` into an **input** (supported since 0.6.28)
+
+The scheme above is "fill six cells, change one and it broadcasts to the rest". **There is a lazier way**:
+wire the `run_id` of all six nodes **to the same `PrimitiveString`** (right-click the input → convert to input → connect it).
+Then changing **that one upstream node** is enough, and the six cells never get a chance to disagree.
+
+This pack **supports both wirings**, with identical behaviour:
+
+| Wiring | What you edit | How this pack handles it |
+|---|---|---|
+| Six cells filled individually (default) | any one of them | a non-empty value is **broadcast** to the rest of the group |
+| Wired to one upstream node (the wiring the real graph uses) | **only the upstream node** | reads **upstream** along the link to decide; **does not write** those taken-over cells |
+
+> 🔴 **Why this must be spelled out (the trap hit on a real graph, 2026-10-06)**: the sync logic in 0.6.19–0.6.28
+> read only the **leftover value inside each node's own cell**. When a cell is taken over by a link, that leftover value
+> **does not participate in execution** — so the six cells read as six different old texts ⇒ it **wrongly judged
+> "names do not match" and blocked the chain run outright**, while in reality the six nodes used the same value at run time
+> (which was perfectly fine). This is **the same trap** `prompts` hit in 0.6.12 (back then too it "read only `widget.value`" and read the wrong source).
+>
+> ⇒ Now: **when there is a link, read the upstream node**; cells taken over are marked "(linked)" in the message with the note
+> "editing their own cell is useless, go edit the upstream node". **A cell that does not take effect is never treated as the authoritative value.**
+
+> ⚠️ With the linked wiring you **must make sure the content of that upstream node** is the film name — this pack does not validate
+> its meaning, it only reads it. Leaving upstream empty = all six nodes empty ⇒ blocked before submit (the backend also raises "run_id must not be empty").
+
 ## Stage 1: **nothing to do** (no manual bypass)
 
 Stage 1 has no previous stage to copy, but **neither the wiring nor the run needs any extra operation**:

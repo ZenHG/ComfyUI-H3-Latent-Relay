@@ -8,8 +8,8 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "condensed",
-          "h_en": "9d5bad297144803a",
-          "h_src": "321cc9248cce906f",
+          "h_en": "5f9cbc92eb490882",
+          "h_src": "90c1af6c51152a01",
           "seeded": "by-position"
         },
         {
@@ -40,8 +40,8 @@
           "zh": "使用方法",
           "en": "Usage",
           "mode": "condensed",
-          "h_en": "9e461d3f01314d34",
-          "h_src": "e694d0e54a39e373",
+          "h_en": "96edfa93c01252c6",
+          "h_src": "cf2410e8467b1675",
           "seeded": "by-position"
         },
         {
@@ -79,7 +79,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-06",
-      "src_sha": "819db08770724c11"
+      "src_sha": "29d2bb66177fa4ec"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -232,14 +232,14 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "full",
-          "h_en": "4ed4ec03b31cc22a",
-          "h_src": "53b45240782c09cb",
+          "h_en": "f86aa38e1ffac72e",
+          "h_src": "d39be80cc6d876ab",
           "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-10-06",
-      "src_sha": "53b45240782c09cb"
+      "src_sha": "d39be80cc6d876ab"
     },
     "docs/05-troubleshooting.md": {
       "en": "docs/05-troubleshooting_EN.md",
@@ -376,8 +376,8 @@
           "zh": "`run_id` 同步：**同样表驱动，六处一起动**（0.6.19）",
           "en": "`run_id` sync: **also table-driven, six places move together** (0.6.19)",
           "mode": "full",
-          "h_en": "44686ab230470140",
-          "h_src": "584c91c1328e6be0",
+          "h_en": "50264265c83ae782",
+          "h_src": "41e91af93b3d8278",
           "seeded": "by-position"
         },
         {
@@ -407,7 +407,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-06",
-      "src_sha": "569c78a3a9d95b8a"
+      "src_sha": "0a440b2a70334909"
     },
     "docs/08-testing.md": {
       "en": "docs/08-testing_EN.md",
@@ -432,8 +432,8 @@
           "zh": "前端纯函数的单测（node 跑、零依赖）",
           "en": "Unit tests for front-end pure functions (run by node, zero dependencies)",
           "mode": "full",
-          "h_en": "e8855275d959cd76",
-          "h_src": "fce58d45c974ad55",
+          "h_en": "73274876f1e55eed",
+          "h_src": "62dad2408ae4fa96",
           "seeded": "by-position"
         },
         {
@@ -448,8 +448,8 @@
           "zh": "tools/ 下的其他自检（完整清单见 [`tools/README.md`](../tools/README.md)）",
           "en": "Other self-checks under tools/ (full list in [`tools/README.md`](../tools/README.md))",
           "mode": "full",
-          "h_en": "6176c40adad6d207",
-          "h_src": "82efe72df64cb494",
+          "h_en": "e57ada5fc1f38e0f",
+          "h_src": "8ea1cc133006d202",
           "seeded": "by-position"
         },
         {
@@ -463,7 +463,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-06",
-      "src_sha": "684ce7ad30576487"
+      "src_sha": "98f81698330bba7e"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",

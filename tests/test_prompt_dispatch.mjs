@@ -152,7 +152,7 @@ check("8.2 全组都是同一个名字 ⇒ ok（无需动作）",
     && resolveRunId(M(["1", "myfilm"], [2, "myfilm"])).ids.length === 2
     && resolveRunId(M(["1", "myfilm"], [2, "myfilm"])).empty.length === 0);
 check("8.3 唯一非空 + 有空格 ⇒ ok，且点出**哪几格是空的**（这些格要补齐）",
-    JSON.stringify(resolveRunId(M(["1", "myfilm"], [2, "  "], [3, ""])).empty) === "[2,3]"
+    JSON.stringify(resolveRunId(M(["1", "myfilm"], [2, "  "], [3, ""])).empty) === '["2","3"]'
     && resolveRunId(M(["1", "myfilm"], [2, ""])).value === "myfilm");
 check("8.4 两个不同的非空名 ⇒ **conflict**（不猜、不自动挑一个）",
     resolveRunId(M(["1", "a"], [2, "b"])).state === "conflict"
@@ -165,11 +165,11 @@ check("8.6 畸形输入不炸（null / undefined / 无 id）",
     && resolveRunId([null, { runId: "x" }]).state === "empty");
 check("8.7 空值**不扩散**（清空格子 ≠ 想把全组清空）—— 这正是「误删一个字符」的护栏",
     JSON.stringify(planRunIdSync(M(["1", "old"], [2, "old"]), "1", "")) ===
-    '{"targets":[],"value":"","reason":"empty"}'
+    '{"targets":[],"value":"","reason":"empty","skipped":[]}'
     && planRunIdSync(M(["1", "old"]), "1", "   ").reason === "empty");
 check("8.8 非空 ⇒ 只列「值不同的」、且**跳过发起者自己**",
     JSON.stringify(planRunIdSync(M(["1", "old"], [2, "new"], [3, "old"]), "2", "new").targets)
-    === '["1",3]');
+    === '["1","3"]');
 check("8.9 已经全一致 ⇒ reason=`none`（不刷屏、不做无谓写入）",
     planRunIdSync(M(["1", "same"], [2, "same"]), "1", "same").reason === "none");
 check("8.10 id 一律 `String()` 归一：数字 id 与字符串 id 必须认作同一个",
@@ -178,6 +178,40 @@ check("8.11 冲突提示点名**哪个节点是哪个名字**（用户能照着�
     describeRunIdConflict(resolveRunId(M(["1", "a"], [2, "b"])), (id) => "落盘#" + id)
         .includes("落盘#1") && describeRunIdConflict(resolveRunId(M(["1", "a"], [2, "b"])),
         (id) => "落盘#" + id).includes("落盘#2"));
+
+// —— 0.6.28：`run_id` **被连线接管**（实图 Cobijada-官方采样-一采-全流程PREVIEW 2026-10-06）
+//   🔴 为什么必须机检：那张图把**六类节点的 run_id 全接到同一个 PrimitiveString**
+//     （一处改、六处动，比广播更干净）。旧代码只读本机残留值 ⇒ 六格读成六个不同值
+//     ⇒ **误判冲突、拦住连跑**；而实际运行起来六个节点用的是同一个值（本该毫无问题）。
+//     这与 `prompts` 在 0.6.12 踩的是同一个坑。三件事要一起测：
+//     ① 连线成员不参与"补齐写入"；② 目标全被连线接管时给 `linked` 而不是假报"已同步"；
+//     ③ 冲突提示要把"连线接管"标出来（否则用户一直在改不生效的格子）。
+const L = (...xs) => xs.map(([id, runId, isLinked]) => ({
+    id, type: "H3RelayLatentSave", runId, linked: !!isLinked }));
+check("8.15 连线接管的成员**不参与补齐写入**（写它的格子不生效）",
+    JSON.stringify(planRunIdSync(L(["1", "myfilm"], [2, "", true]), null, "myfilm").targets) === "[]"
+    && JSON.stringify(planRunIdSync(L(["1", "myfilm"], [2, "", true]), null, "myfilm").skipped) === '["2"]');
+check("8.16 目标**全**被连线接管 ⇒ reason=`linked`（不假报「已同步」）",
+    planRunIdSync(L(["1", "a", true], [2, "b", true]), null, "c").reason === "linked"
+    && JSON.stringify(planRunIdSync(L(["1", "a", true]), null, "c").skipped) === '["1"]');
+check("8.17 可写的照写、接管的只记账（一次改动里两种目标并存）",
+    JSON.stringify(planRunIdSync(L(["1", "a"], [2, "b", true], [3, "a", true]), null, "c").targets) === '["1"]'
+    && JSON.stringify(planRunIdSync(L(["1", "a"], [2, "b", true], [3, "a", true]), null, "c").skipped)
+        === '["2","3"]');
+check("8.18 冲突提示把**连线接管**标出来（用户才知道该去改上游）",
+    describeRunIdConflict(resolveRunId(L(["1", "a", true], [2, "b"])), (id) => "落盘#" + id,
+        ["1"]).includes("落盘#1（连线接管）")
+    && !describeRunIdConflict(resolveRunId(L(["1", "a", true], [2, "b"])), (id) => "落盘#" + id,
+        ["1"]).includes("落盘#2（连线接管）"));
+check("8.19 无 `linked` 字段（旧快照/离线调用）⇒ 全部成员都可写、skipped 恒空",
+    JSON.stringify(planRunIdSync(M([1, "old"], [2, "other"]), 1, "new"))
+        === '{"targets":["2"],"value":"new","reason":"sync","skipped":[]}'
+    && JSON.stringify(planRunIdSync(M([1, "same"], [2, "same"]), 1, "same"))
+        === '{"targets":[],"value":"same","reason":"none","skipped":[]}');
+check("8.20 `resolveRunId` 报出的 id 也一律 `String()` 归一（ids / empty / byValue）",
+    JSON.stringify(resolveRunId(M([961, "f"], ["902", "f"])).ids) === '["961","902"]'
+    && JSON.stringify(resolveRunId(M([961, ""], ["902", " "])).empty) === '["961","902"]'
+    && JSON.stringify(resolveRunId(M([961, "a"], ["902", "b"])).byValue.get("a")) === '["961"]');
 
 // —— 静态对账：表（手写）↔ nodes.py（真相源）
 {
@@ -229,7 +263,7 @@ check("8.11 冲突提示点名**哪个节点是哪个名字**（用户能照着�
 //   `LOCAL-维护规范` 的 §六 门槛表漂了 7 天）。`ci.yml` 与 `docs/08` 都要给用户写"期望 N/0"，
 //   而 N 的真正来源是**这份文件实跑出来的数** ⇒ 让它自引用：谁改了测试而没同步那两处，这里就红。
 //   （同款做法见 `tools/review_050.py` 的 H3g 自引用机检。）
-const EXPECTED_CHECKS = 35;   // 含本行这条自检自己
+const EXPECTED_CHECKS = 41;   // 含本行这条自检自己
 console.log("");
 console.log("[9] 断言数自引用（ci.yml / docs/08 里写的「期望 N/0」必须等于本文件实跑数）");
 {

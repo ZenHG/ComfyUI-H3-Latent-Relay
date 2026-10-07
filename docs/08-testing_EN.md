@@ -72,9 +72,9 @@ The script locates the ComfyUI root by walking up automatically; if it is instal
 ## Unit tests for front-end pure functions (run by node, zero dependencies)
 
 ```bash
-node tests/test_prompt_dispatch.mjs      # expected 35/0
+node tests/test_prompt_dispatch.mjs      # expected 41/0
 node tests/test_audio_ref_budget.mjs     # expected 45/0
-node tests/test_i18n.mjs                 # expected 24/0
+node tests/test_i18n.mjs                 # expected 33/0
 ```
 
 Covers the pure functions in `web/` that **run the same copy as the browser**, plus two sets of **static
@@ -108,11 +108,14 @@ failure):
   `relay_kit_refs_ui.js` appends (**only the prefix is swapped, the suffix is kept**); (3) guessing a
   translation for a **value outside the enum whitelist** (`model_name` is a file name, a stage number is
   a digit ⇒ translating them means the file can no longer be found). Also: custom titles must not be
-  overwritten · an empty title gets the translation · idempotence · word-table shape self-check
-  (empty entries / zh==en / all eight nodes present).
+  overwritten · an empty title gets the translation · idempotence · **bilingual tooltips (`H3_TIPS`,
+  keyed by `class_type.parameter`, keeping only the core sentence + the recommended value)** ·
+  word-table shape self-check (empty entries / zh==en / all eight nodes present).
   🔴 **Word-table completeness is not this layer's job** (that is Python's): `review_050.py`'s
-  J-i18n item checks the keys of `nodes.py`'s `INPUT_TYPES` against the table ⇒ **a new parameter
-  without a translation fails at the machine-check layer**;
+  H3n/H3p items check the keys of `nodes.py`'s `INPUT_TYPES` against the tables ⇒ **a new parameter
+  without a label or a tooltip fails at the machine-check layer**. The tooltip is written to
+  `widget.tooltip` (the cell the front end reads first, and one that serialization never writes), so
+  sharing a workflow carries no translation and other people's graphs are unaffected;
 - static scan: the phase table ↔ the `say()` phase string, **whether every submitting button passed the
   `run_id` gate**;
 - **assertion-count self-reference**: the "expected N/0" written in `ci.yml` and in this document must
@@ -192,7 +195,7 @@ real problem on its very first run** (in CI the V3 exit actually could not load)
 
 | Tool | What it judges | Expected |
 |---|---|---|
-| `tools/review_050.py` | doc–code consistency (node list / parameter table / assertion count / version / example-graph slots / **the three iron rules** / **the L13 English-doc sync gate** / **the H3j smoke expected values** / **H3k registry metadata** / **H3l release policy present** / **H3m no credential literals** / **H3n i18n word-table completeness** / **H3o dangling doc references**) | **96/0** |
+| `tools/review_050.py` | doc–code consistency (node list / parameter table / assertion count / version / example-graph slots / **the three iron rules** / **the L13 English-doc sync gate** / **the H3j smoke expected values** / **H3k registry metadata** / **H3l release policy present** / **H3m no credential literals** / **H3n i18n word-table completeness** / **H3p bilingual tooltip completeness** / **H3q JS comma expression** / **H3r i18n anti-overwrite guard** / **H3s link endpoint field compat** / **H3t official locale entry** / **H3o dangling doc references**) | **104/0** |
 | `tools/smoke_nodes.py` | node-layer functional smoke test (the seven continuation items really run once; 🔍 the upscale node needs upstream weights and is not in the smoke test) | **16/0** |
 | `tools/assert_default_exit.py` | default exit = V3 (contract 1 + behaviour 3) | **4/4** |
 | `tools/sync_deploy_check.py` | the deployed copy matches the commit state of the given commit | all `OK` |

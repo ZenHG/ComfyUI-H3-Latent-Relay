@@ -475,11 +475,52 @@ let RUN_ID_SYNCING = false;
  *
  * 范围与段号推进同源（都走 `nodesInSameGroup`）：一张图里放两部片子是正常用法
  * （`stage_index` 也是按分组隔离的），跨组同步会把另一部片子的目录名改掉。
+ *
+ * 🔴 0.6.28 修（2026-10-06 实图 `Cobijada-官方采样-一采-全流程PREVIEW`）：
+ *   快照里的值必须是**实际会参与执行的那个值**，不是本机格子的残留值。
+ *   `run_id` 可以被**转成输入并连线**（典型接法：六个节点全接到同一个 `PrimitiveString`）——
+ *   此时生效的是**连线值**，而 `widget.value` 只是那一格的旧文本，两者可以完全不同。
+ *   旧代码只读 `widgetValue` ⇒ 六格读成六个不同的值 ⇒ **误判冲突、拦住连跑**；
+ *   而真正运行起来六个节点用的其实是同一个值（不会有任何问题）。
+ *   这与 `prompts` 在 0.6.12 踩的是**同一个坑**（见 `readPrompts` 的注释）。
+ *
+ * ⇒ 有连线：`runId` = 上游文本值，`linked: true`（这一格**不许被广播写**）。
+ *   取不到上游 ⇒ `runId` 留空并记 `linkedUnreadable`，让裁决把它当"读不到"而不是"空"。
  */
 function runIdMembers(originNode) {
     const all = graphNodes().filter((n) => isRunIdType(n.type));
-    return nodesInSameGroup(originNode, all)
-        .map((n) => ({ id: n.id, type: n.type, runId: widgetValue(n, "run_id", "") }));
+    return nodesInSameGroup(originNode, all).map((n) => {
+        const src = readRunId(n);
+        return {
+            id: n.id, type: n.type,
+            runId: src.ok ? src.value : "",
+            linked: src.linked,
+            linkedUnreadable: src.linked && !src.ok,
+        };
+    });
+}
+
+/**
+ * 取一个节点**实际生效**的 `run_id`。
+ *
+ * 有连线 ⇒ 沿 link 取上游文本（`linked: true`）；无连线 ⇒ 本机 widget 的值。
+ * 上游取不到 ⇒ `ok:false` —— 调用方**不许**把它当"空值"处理（空值会被广播补齐，
+ * 而"读不到"是不能猜的：补一个名字进去可能覆盖掉上游真正的值）。
+ */
+function readRunId(n) {
+    const inp = (n?.inputs ?? []).find((i) => i.name === "run_id");
+    if (!inp || inp.link == null) {
+        return { ok: true, value: String(widgetValue(n, "run_id", "") ?? ""), linked: false };
+    }
+    const up = upstreamText(inp.link, "run_id");
+    return up.ok
+        ? { ok: true, value: String(up.text ?? ""), linked: true, from: up.from }
+        : { ok: false, linked: true, message: up.message };
+}
+
+/** 被连线接管的成员 id（提示里要单独点名 —— 它们的格子改不动）。**去重且归一**。 */
+function linkedIds(members) {
+    return [...new Set((members ?? []).filter((m) => m.linked).map((m) => String(m.id)))];
 }
 
 /** 按 id 找回节点（新版前端 id 是字符串、旧版是数字 ⇒ 一律 `String()` 归一）。 */
@@ -494,19 +535,28 @@ function runIdNodeName(id) {
     return `${runIdSpec(n.type)?.label ?? n.type} #${n.id}`;
 }
 
-/** 把广播规划真正写下去。返回被改动的 id 列表（便于排查"到底同步了谁"）。 */
+/**
+ * 把广播规划真正写下去。返回被改动的 id 列表（便于排查"到底同步了谁"）。
+ *
+ * 🔴 写之前**再查一次连线**（0.6.28）：`plan.targets` 是上游算好的，但格子可能在
+ *   "规划"与"落笔"之间被接上了线（用户手快 / 别的扩展改的）。写一个被连线接管的 widget
+ *   **不生效**，却会 `graph.change()` ⇒ 制造"我改了但它没跟着变"的假象。
+ *   这一层是**兜底**，与 `planRunIdSync` 里的 `writable()` 过滤是同一条规矩。
+ */
 function applyRunIdPlan(plan) {
     const driven = [];
+    const skipped = [];
     for (const id of plan.targets ?? []) {
         const n = nodeById(id);
         const w = n ? findWidget(n, "run_id") : null;
         if (!w) continue;                       // 节点已被删 / 没有这一格 ⇒ 跳过，不影响其余
+        if (readRunId(n).linked) { skipped.push(id); continue; }   // 被连线接管 ⇒ 写了也不生效
         w.value = plan.value;
         n.setDirtyCanvas?.(true, true);
         driven.push(id);
     }
     if (driven.length) app?.graph?.change?.();  // 标记图已改（触发前端的"未保存"提示）
-    return driven;
+    return { driven, skipped };
 }
 
 /**
@@ -585,16 +635,39 @@ function broadcastRunId(originNode, value) {
         return null;
     }
     if (plan.reason === "none") return null;    // 已经全一致：不刷屏
+    // 🔴 0.6.28：这一格**被连线接管** ⇒ 一个格子也写不动。这必须说出来，
+    //   否则用户会以为"同步成功了"，而实际生效的值仍是上游那个（可能不一样）。
+    //   ⚠ 当前唯一的调用方（`hookRunIdWidget`）已经提前挡掉了"发起者自己被连线"的情形，
+    //     所以这条路只在**其余成员全被接管**时才走到 —— 但它是**二道防线**：
+    //     以后若从别处调 `broadcastRunId`，这里仍要给出正确的话（纯函数侧见单测 8.16）。
+    if (plan.reason === "linked") {
+        const names = plan.skipped.map(runIdNodeName).join("、");
+        notifyRunId(originNode, "warn",
+            `\`run_id\` 要统一成「${plan.value}」，但 ${names} 的格子**被连线接管**`
+            + "（值来自上游节点）⇒ 改它们自己的格子不生效。请改**上游那个节点**，"
+            + "或把其余格子的值填成和上游一致。");
+        return null;
+    }
     RUN_ID_SYNCING = true;
     let driven = [];
+    let skippedAtWrite = [];
     try {
-        driven = applyRunIdPlan(plan);
+        ({ driven, skipped: skippedAtWrite } = applyRunIdPlan(plan));
     } finally {
         RUN_ID_SYNCING = false;
     }
     const scope = runIdScope(originNode);
-    notifyRunId(originNode, scope === "group" ? "done" : "warn",
-        `\`run_id\` 已统一为「${plan.value}」（同步 ${driven.length} 个节点${scopeNote(scope)}）。`);
+    let msg = `\`run_id\` 已统一为「${plan.value}」（同步 ${driven.length} 个节点`
+        + `${scopeNote(scope)}）。`;
+    // 两处 skipped 要**并集**：规划时判定的 + 落笔时才发现的（格子可能在两者之间被接上线）。
+    // 只报一处会漏名字 ⇒ 用户以为"都同步好了"，实际有一个格子的值另有来源。
+    const skippedAll = [...new Set([...(plan.skipped ?? []), ...skippedAtWrite])];
+    if (skippedAll.length) {
+        const names = skippedAll.map(runIdNodeName).join("、");
+        msg += `\n  ⚠ ${names} 的格子**被连线接管**，没被改动 —— `
+            + "它的值由上游决定，请改上游那个节点。";
+    }
+    notifyRunId(originNode, scope === "group" ? "done" : "warn", msg);
     return driven;
 }
 
@@ -609,24 +682,56 @@ function broadcastRunId(originNode, value) {
 function runIdPreflight(node, state) {
     const members = runIdMembers(node);
     if (!members.length) return true;           // 图上没有带 run_id 的节点 ⇒ 不管
+    // 🔴 0.6.28：有节点的 `run_id` 接了线但**读不到上游**（接口变了 / 上游被删）。
+    //   这时既不能说它"空"（补一个名字进去可能盖掉上游真值），也不能放行
+    //   （跑起来用的什么名字是未知的）⇒ **拦住并说清楚**，由人去查那根线。
+    const unreadable = members.filter((m) => m.linkedUnreadable);
+    if (unreadable.length) {
+        const names = unreadable.map((m) => runIdNodeName(m.id)).join("、");
+        say(node, state, "warn",
+            `⚠ ${names} 的 \`run_id\` **接了线但读不到上游的值**\n`
+            + "  ⇒ 无法判断会用到哪个目录名，已拦下不排队。\n"
+            + "  请检查那根连线（上游节点是否被删 / 前端接口是否变了），"
+            + "或把它改成直接在本格填名字。");
+        return false;
+    }
     const verdict = resolveRunId(members);
     if (verdict.state === "conflict") {
-        say(node, state, "warn", describeRunIdConflict(verdict, runIdNodeName));
+        say(node, state, "warn",
+            describeRunIdConflict(verdict, runIdNodeName, linkedIds(members)));
         return false;
     }
     if (verdict.state === "empty") {
-        say(node, state, "warn", "同组的 `run_id` 全是空的 ⇒ 段文件没有目录可落"
-            + "（后端会直接报「run_id 不能为空」）。请在桥 / 落盘 / 读上段 latent / 裁重叠"
-            + " / 本节点任一处填上这部片子的名字。");
+        // 🔴 0.6.28：全空时要说清**空在哪儿** —— 若这些格子的值是连线送来的，
+        //   "在某一格填个名字"是**无效动作**（填了不生效）⇒ 必须指向**上游那个节点**。
+        //   只报数量、不逐个点名：全连线时六个名字排一屏，重点反而看不见。
+        const nLink = linkedIds(members).length;
+        say(node, state, "warn",
+            "同组的 `run_id` 全是空的 ⇒ 段文件没有目录可落"
+            + "（后端会直接报「run_id 不能为空」）。"
+            + (nLink
+                ? `\n  ⚠ 其中 ${nLink} 个格子的值是**连线**送来的 ⇒ 请去改**上游那个节点**里的内容`
+                  + "（在这几个格子上打字不生效）。"
+                : "\n  请在桥 / 落盘 / 读上段 latent / 裁重叠 / 本节点任一处填上这部片子的名字。"));
         return false;
     }
     if (verdict.empty.length) {                 // 唯一非空 + 还有空格 ⇒ 补齐
-        const driven = applyRunIdPlan(planRunIdSync(members, null, verdict.value));
+        const plan = planRunIdSync(members, null, verdict.value);
+        const { driven, skipped } = applyRunIdPlan(plan);
         if (driven.length) {
             const scope = runIdScope(node);
             notifyRunId(node, scope === "group" ? "done" : "warn",
                 `\`run_id\` 还没填的 ${driven.length} 个节点已补齐为「${verdict.value}」`
                 + `${scopeNote(scope)}。`);
+        }
+        // 有连线接管的空格子 ⇒ 补不了，但也不能装看不见（它的值由上游决定，
+        // 与"唯一非空"那个值不一定是同一个）。
+        const skippedLinked = [...new Set([...(plan.skipped ?? []), ...skipped])];
+        if (skippedLinked.length) {
+            const names = skippedLinked.map(runIdNodeName).join("、");
+            notifyRunId(node, "warn",
+                `⚠ ${names} 的格子**被连线接管**、没法补齐 —— 它的值由上游节点决定。\n`
+                + `  ⇒ 若上游给的不是「${verdict.value}」，跑起来仍会不一致。请改上游那个节点。`);
         }
     }
     return true;
@@ -649,8 +754,13 @@ function hookRunIdWidget(node) {
         const r = typeof orig === "function" ? orig.apply(this, [value, ...rest]) : undefined;
         if (!RUN_ID_SYNCING) {
             try {
-                const now = value == null ? widgetValue(node, "run_id", "") : value;
-                broadcastRunId(node, now);
+                // 🔴 0.6.28：被连线接管的格子**不广播** —— 它的值由上游决定，
+                //   在这一格敲字根本不参与执行，广播出去等于把"死值"当权威值扩散。
+                const src = readRunId(node);
+                if (!src.linked) {
+                    const now = value == null ? src.value : value;
+                    broadcastRunId(node, now);
+                }
             } catch (err) {
                 // 同步失败**不许影响这一格的值** —— 那是用户刚敲进去的东西。
                 console.warn("[H3 Relay Chain] run_id 同步出错（这一格的值不受影响）：", err);
@@ -746,16 +856,44 @@ async function queuePrompt(chainNode, state, stage) {
 /**
  * 沿一条 link 找上游节点，从它身上取一个文本格的值。取不到返回 `{ok:false, message}`。
  * 新版前端 `graph.links` 是 Map、旧版是数组/对象，且两代都有 `getLink(id)` ⇒ 三路兜底。
+ *
+ * 🔴 0.6.28 修（2026-10-06 真机）：**link 对象的字段名两代不同**。
+ *   新版前端（实测 1.53.10）`getLink(id)` 返回的是带 `_state` 的实例，端点字段是
+ *   **`originNodeId` / `targetNodeId`（驼峰 + Id）**；旧版是 `origin_id` / `target_id`。
+ *   旧代码只读 `link.origin_id` ⇒ 新版上恒为 `undefined` ⇒ `getNodeById(undefined)` 落空、
+ *   `String(n.id) === String(undefined)` 也恒不命中 ⇒ **一律返回「找不到上游节点」**。
+ *   后果：`readRunId` 被判成"读不到"，六格各自退回自己的 `widget.value`（六个旧值）
+ *   ⇒ **六格永远同步不起来 + 连跑被误判冲突拦住**（正是用户报的「run_id 不会自动同步」）。
+ *   这与 `origin_id` 是同一个坑的第二次出现 —— 凡是"图接口字段名"都要**两种都试**。
+ *
+ * @param linkId  要追踪的 link
+ * @param want    期望的格名（可选）。**给了就先按它精确匹配** —— 对 `run_id` 必须走这条：
+ *                上游只要是「只有一格文本」的节点（`PrimitiveString` 等）就不会歧义，
+ *                但上游若是多文本格的节点，落进下面的通用候选表会把 `positive` 当词取出来
+ *                ⇒ 拿"台词"去当目录名。**有精确名字时不许猜。**
  */
-function upstreamText(linkId) {
+function upstreamText(linkId, want = null) {
     const graph = app?.graph;
     const link = graph?.getLink?.(linkId) ?? graph?.links?.get?.(linkId) ?? graph?.links?.[linkId];
     if (!link) return { ok: false, message: `找不到连线 ${linkId}（宿主前端接口可能变了）` };
-    const origin = graph?.getNodeById?.(link.origin_id)
-        ?? graphNodes().find((n) => String(n.id) === String(link.origin_id));
-    if (!origin) return { ok: false, message: `找不到上游节点 #${link.origin_id}` };
+    // 🔴 端点字段两种写法都读（`_state` 里那层也认）：新版 `originNodeId`、旧版 `origin_id`。
+    const st = link._state ?? link;
+    const originId = st.originNodeId ?? st.origin_node_id ?? link.origin_id ?? link.originId;
+    const origin = graph?.getNodeById?.(originId)
+        ?? graphNodes().find((n) => String(n.id) === String(originId));
+    if (!origin) return { ok: false, message: `找不到上游节点 #${originId}（连着，但取不到那一头）` };
     const strs = (origin.widgets ?? []).filter((w) => typeof w?.value === "string");
     let pick = null;
+    if (want) {
+        pick = strs.find((w) => String(w.name) === want)
+            ?? (strs.length === 1 ? strs[0] : null);   // 上游只有一格 ⇒ 名字不同也无歧义
+        if (!pick) {
+            const names = strs.map((w) => String(w.name)).join("、") || "（一个文本格都没有）";
+            return { ok: false, message: `上游 #${origin.id}（${origin.type}）上没有 \`${want}\` 格，`
+                + `且文本格不止一个 ⇒ 不猜（候选：${names}）` };
+        }
+        return { ok: true, text: String(pick.value ?? ""), from: `#${origin.id} ${origin.type}.${pick.name}` };
+    }
     for (const name of ["positive", "prompt", "text", "string"]) {
         pick = strs.find((w) => String(w.name) === name);
         if (pick) break;
@@ -947,7 +1085,24 @@ function stageNote(pair) {
 /** 拼接成片（走后端 /h3relay/concat；包内实现，不依赖外部 ffmpeg）。 */
 async function concatFilm(chainNode, state, auto = false) {
     const pair = findPair(chainNode);
-    const runId = pair ? String(widgetValue(pair.bridge, "run_id", "")) : "";
+    // 🔴 0.6.28：拼接要用的 run_id 必须是**实际生效**的那个（有连线就取上游）。
+    //   读本机残留值 ⇒ 拼接会去错的目录捞段文件（而这正是这条链路最怕的静默错）。
+    //   ⚠ 有连线但**读不到上游** ⇒ `readRunId` 返回 `ok:false`（**没有 `.value`**）。
+    //     此时绝不能拿 `?? ""` 兜成空 —— 那会去错目录捞段，静默拼出错误的成片。
+    //     与 `runIdPreflight` 同一条规矩：读不到就**拦下并说清楚**，不猜。
+    let runId = "";
+    if (pair) {
+        const src = readRunId(pair.bridge);
+        if (!src.ok) {
+            say(chainNode, state, "warn",
+                "拼接已取消：桥节点的 `run_id` **接了线但读不到上游的值**\n"
+                + "  ⇒ 无法确定去哪取段文件。请检查那根连线（上游是否被删 / 接口是否变了），"
+                + "或把它改成直接在本格填名字。"
+                + (src.message ? `\n  （${src.message}）` : ""));
+            return;
+        }
+        runId = String(src.value ?? "");
+    }
     const seg = Math.round(widgetValue(chainNode, "segments", 0) || 0);
     const outName = String(widgetValue(chainNode, "concat_name", "")).trim();
     const { stages, holes } = collectStageIds(state.stageIds);
@@ -1486,7 +1641,17 @@ app.registerExtension({
                 // 0.6.19：先跑闸 —— 它顺带把本节点（Chain）的 `run_id` 从同组的唯一非空值补齐，
                 // 否则下面那句"续跑要先在 run_id 格里填上"会白拦一次（默认是空的）。
                 if (!runIdPreflight(node, state)) return;
-                const runId = String(widgetValue(node, "run_id", "")).trim();
+                // 🔴 0.6.28：续跑找进度文件，用的也必须是**生效值**（有连线取上游）。
+                //   （`runIdPreflight` 已在上面挡掉"接线但读不到"，此处只处理正常路径；
+                //    仍按 `ok` 判、不拿 `?? ""` 兜 —— 与拼接那条同一条纪律。）
+                const srcRun = readRunId(node);
+                if (!srcRun.ok) {
+                    say(node, state, "warn",
+                        "续跑已取消：`run_id` **接了线但读不到上游的值** ⇒ 无法确定进度文件在哪。"
+                        + (srcRun.message ? `（${srcRun.message}）` : ""));
+                    return;
+                }
+                const runId = String(srcRun.value ?? "").trim();
                 if (!runId) {
                     say(node, state, "warn", "续跑要先在 `run_id` 格里填上（与桥 / 落盘的 run_id 填一样）"
                         + " —— 它用来找上次的进度文件。");
