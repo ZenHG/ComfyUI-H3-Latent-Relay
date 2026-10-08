@@ -27,6 +27,7 @@ import ast
 import os
 import re
 import sys
+from pathlib import Path
 
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 R50 = os.path.join(KIT, "tools", "review_050.py")
@@ -45,6 +46,7 @@ KIND = {
     "H3j": "consistency", "H3z": "consistency",
     "H3u": "truth", "H3v": "truth", "H3y": "truth", "H4b": "truth",
     "H4c": "truth", "H4d": "truth", "H4e": "truth",
+    "H4f": "hygiene",
     "H3e": "hygiene", "H3l": "hygiene", "H3m": "hygiene", "H3n": "hygiene", "H3o": "hygiene",
     "H3p": "hygiene", "H3q": "hygiene", "H3r": "hygiene", "H3s": "hygiene", "H3t": "hygiene",
     "H3w": "hygiene", "H3x": "hygiene", "H4a": "hygiene",
@@ -92,6 +94,7 @@ MUTATION = {
     "H4c": "从本台账删掉一个编号（或 `review_050` 里加一条未登记的编号）",
     "H4d": "把 `ci.yml` 头注释里 `test_run_id_parity` 的期望数改成 22",
     "H4e": "把 `make_minimal_bundle.py` 的 `MANIFEST_RUNTIME` 删一项（42 → 41）",
+    "H4f": "把任一受控 `*.py` 改成「`return` 后直接跟 `open(`」的形态",
     "H3f": "把 `ci.yml` 里 `test_relay_core` 的期望数改成 562",
     "H3g": "把 `docs/08-testing.md` 里 `review_050` 的期望数改成 105",
     "H3h": "把 `ci.yml` 里 V3 的 input 数改成 121",
@@ -121,7 +124,7 @@ ENV = {
 
 def ids_in_review_050() -> dict:
     """从 `review_050.py` 抽「编号 → 标题」（AST，不执行它）。"""
-    tree = ast.parse(open(R50, encoding="utf-8").read())
+    tree = ast.parse(Path(R50).read_text(encoding="utf-8"))
     out = {}
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and getattr(node.func, "id", "") == "ck"):
@@ -193,7 +196,7 @@ def cmd_check() -> int:
         bad.append("缺 `tools/CHECKS.md`（跑 `--write` 生成）")
     else:
         want = render(titles)
-        have = open(DOC, encoding="utf-8").read()
+        have = Path(DOC).read_text(encoding="utf-8")
         if want.strip() != have.strip():
             bad.append("`tools/CHECKS.md` 与台账不一致（跑 `--write` 重新生成）")
     if bad:

@@ -10,6 +10,8 @@
 #   但不是本文件定义的 ⇒ F821 必报。
 #   真正的兜底是**执行**：这条脚本每次全量跑，任何未定义名会当场 NameError，不会静默。
 
+from pathlib import Path   # 本分片自己用到的（其余名字仍来自 runner 的命名空间）
+
 # ---------------------------------------------------------------- 第 8 组：接缝自检
 print()
 print("[8] 接缝自检 find_head_jump / describe_head_jump")
@@ -182,7 +184,7 @@ except Exception as e:
 #   这里认**两种写法**：抽出来的 `findWidget(..., "status")`，或内联的 `name === "status"`。
 _js = os.path.join(_KIT_DIR, "web", "relay_kit_chain.js")
 try:
-    _src = open(_js, encoding="utf-8").read()
+    _src = Path(_js).read_text(encoding="utf-8")
     _found = ('findWidget(chainNode, "status")' in _src) or ('x.name === "status"' in _src)
     check("11.4 前端 JS 找的 widget 名与后端一致（status）", _found,
           "未在 relay_kit_chain.js 里找到对 status 的查找")
@@ -206,7 +208,7 @@ try:
 except Exception as e:
     check("11.7 run 能吃下 0.6.7 的四个新参数（不会 TypeError）", False, repr(e))
 try:
-    _js2 = open(os.path.join(_KIT_DIR, "web", "relay_kit_prompt.js"), encoding="utf-8").read()
+    _js2 = Path(os.path.join(_KIT_DIR, "web", "relay_kit_prompt.js")).read_text(encoding="utf-8")
     # ⚠ 2026-09-15：0.6.15 把「前端写词」那条老路删了（词改由 Chain 节点输出）
     #   ⇒ 断言改为「只留两个还需要的纯函数」，并**反向**确认老路函数已不在（防它悄悄回来）。
     check("11.8 词分发纯函数模块只留 splitPromptBlocks + collectStageIds（老路已删）",
@@ -281,8 +283,7 @@ check("11.18 未填 prompts ⇒ 输出空词并说明不换词（老行为不变
 #   但**口径只能有一份**。工具里曾经还照抄过第三份（用 splitlines，与 JS 已经漂移）。
 try:
     import json as _json
-    _cases = _json.load(open(os.path.join(_KIT_DIR, "tests", "prompt_blocks_cases.json"),
-                             encoding="utf-8"))["cases"]
+    _cases = _json.loads(Path(os.path.join(_KIT_DIR, "tests", "prompt_blocks_cases.json")).read_text(encoding="utf-8"))["cases"]
     _bad = [c["name"] for c in _cases
             if CORE.split_prompt_blocks(c["text"]) != c["expect"]]
     check("11.19 分块口径与共享样本一致（%d 例，跨语言锁）" % len(_cases), not _bad,

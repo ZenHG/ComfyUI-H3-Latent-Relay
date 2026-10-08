@@ -60,10 +60,11 @@ def _load_lines(paths) -> set:
     out = set()
     for p in paths:
         try:
-            for ln in io.open(p, encoding="utf-8", errors="replace"):
-                n = _norm(ln)
-                if n:
-                    out.add(n)
+            with io.open(p, encoding="utf-8", errors="replace") as fh:
+                for ln in fh:
+                    n = _norm(ln)
+                    if n:
+                        out.add(n)
         except OSError:
             pass
     return out

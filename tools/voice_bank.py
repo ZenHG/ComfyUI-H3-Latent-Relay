@@ -54,6 +54,7 @@ import re
 import subprocess
 import sys
 import wave
+from pathlib import Path
 
 SR = 16000                    # **分析**用重采样率（有声检测 / RMS / ASR 取窗；与实测量化脚本同口径）
 # 🔴 **落盘**采样率（2026-10-04 修）。原来落盘也用 `SR` = 16 kHz ⇒ **砍掉了一半频谱**，
@@ -1585,7 +1586,8 @@ def _main(argv):
             if inline:
                 return inline
             if path:
-                return open(path, encoding="utf-8").read()
+                # ⚠️ 别在 return 处直接调用 open —— **`SIM115` 不报那个形态**（`review_050` 的 **H4f** 盯着）
+                return Path(path).read_text(encoding="utf-8")
             return ""
         ok, lines, path = advise_anchor(
             a.bank, prompt=_txt(a.prompt, a.prompt_file),

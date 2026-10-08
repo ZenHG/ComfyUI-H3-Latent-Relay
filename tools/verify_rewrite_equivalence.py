@@ -32,13 +32,13 @@ from __future__ import annotations
 
 import argparse
 import copy
-import io
 import itertools
 import math
 import os
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -480,7 +480,7 @@ def main() -> int:
     # 2026-10-07 拆包：工作树里已没有单文件 relay_core.py ⇒ "new" 侧 = 包内全文拼接。
     # 本工具只按**函数名**定位重写前后的实现，与函数落在哪个文件无关 ⇒ 拼接即可。
     _rc_dir = os.path.join(REPO, "relay_core")
-    new_src = "".join(io.open(os.path.join(_rc_dir, _f), encoding="utf-8").read()
+    new_src = "".join(Path(os.path.join(_rc_dir, _f)).read_text(encoding="utf-8")
                       for _f in sorted(os.listdir(_rc_dir)) if _f.endswith(".py"))
 
     total_pass = total_fail = 0

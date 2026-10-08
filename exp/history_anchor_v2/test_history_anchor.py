@@ -19,6 +19,7 @@ import os
 import sys
 
 import torch
+from pathlib import Path
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _KIT_DIR = os.path.dirname(os.path.dirname(_HERE))
@@ -424,7 +425,7 @@ def _grab_keys(path, varname):
     不 import —— ``h3_adapter`` 是相对导入（无包上下文），``precheck_tiha`` 顶层有执行代码。
     用 ``(?<![A-Za-z_])`` 前视，避免 ``_KEYS`` 误匹配到 ``KNOWN_KEYS`` 里的 ``_KEYS``。
     """
-    src = open(path, encoding="utf-8").read()
+    src = Path(path).read_text(encoding="utf-8")
     m = _re.search(r"(?<![A-Za-z_])" + varname + r"\s*=\s*\((.*?)\)", src, _re.S)
     return set(_re.findall(r"\"([a-z_]+)\"", m.group(1))) if m else set()
 
@@ -432,8 +433,8 @@ def _grab_keys(path, varname):
 _fields = {f.name for f in _dc.fields(HA.TIHAConfig)}
 # 唯一真相源：**直接读模块常量**（旧版从源码文本抽 —— 两侧都改成别名后，文本抽法只会得空集 ⇒ 假绿）
 _known = set(HA.KNOWN_CONFIG_KEYS)
-_ad_src = open(_os.path.join(_HERE, "h3_adapter.py"), encoding="utf-8").read()
-_pre_src = open(_os.path.join(_HERE, "precheck_tiha.py"), encoding="utf-8").read()
+_ad_src = Path(_os.path.join(_HERE, "h3_adapter.py")).read_text(encoding="utf-8")
+_pre_src = Path(_os.path.join(_HERE, "precheck_tiha.py")).read_text(encoding="utf-8")
 _ad_lit = _grab_keys(_os.path.join(_HERE, "h3_adapter.py"), "KNOWN_KEYS")
 _pre_lit = _grab_keys(_os.path.join(_HERE, "precheck_tiha.py"), "_KEYS")
 

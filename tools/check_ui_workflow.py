@@ -49,12 +49,12 @@ from __future__ import annotations
 import argparse
 import glob
 import importlib.util
-import io
 import json
 import os
 import sys
 import types
 import urllib.request
+from pathlib import Path
 
 DEFAULT_API = "http://127.0.0.1:8188"
 WIDGET_TYPES = {"INT", "FLOAT", "STRING", "BOOLEAN", "COMBO"}
@@ -505,7 +505,7 @@ def check_chain_prompts(wf, oi):
 def check_file(path: str, oi: dict, verbose: bool = True) -> int:
     name = os.path.basename(path)
     try:
-        wf = json.load(io.open(path, encoding="utf-8"))
+        wf = json.loads(Path(path).read_text(encoding="utf-8"))
     except Exception as e:
         print("  [ERROR] %s 解析失败：%s" % (name, e))
         return 1

@@ -21,6 +21,7 @@ import math
 import os
 import re
 import sys
+from pathlib import Path
 
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 不写死本机路径：本包通常装在 <ComfyUI>/custom_nodes/<本包>/ ⇒ 往上两级即 ComfyUI 根；
@@ -69,11 +70,11 @@ _disp = list(N.NODE_DISPLAY_NAME_MAPPINGS)
 ck("A1 注册表与显示名一一对应", sorted(_reg) == sorted(_disp),
    "reg=%s" % _reg)
 
-_init = open(os.path.join(KIT, "__init__.py"), encoding="utf-8").read()
+_init = Path(os.path.join(KIT, "__init__.py")).read_text(encoding="utf-8")
 _missing = [n for n in _reg if n not in _init]
 ck("A2 __init__.py 头注释/清单含全部节点", not _missing, "缺=%s" % _missing)
 
-_readme = open(os.path.join(KIT, "README.md"), encoding="utf-8").read()
+_readme = Path(os.path.join(KIT, "README.md")).read_text(encoding="utf-8")
 # ⚠ README 的「节点」表用**显示名**，且常写成 `🔗 **H3 Relay · Trim AV**`（加粗把字符串拆开）
 #   ⇒ 必须**去掉 markdown 标记**再比，否则是假阳性。
 _readme_flat = _readme.replace("*", "").replace("`", "")
@@ -84,7 +85,7 @@ print()
 print("=" * 78)
 print("B. 返回契约：RETURN_TYPES 长度 == 所有 return 的路数")
 print("=" * 78)
-_src = open(os.path.join(KIT, "nodes.py"), encoding="utf-8").read()
+_src = Path(os.path.join(KIT, "nodes.py")).read_text(encoding="utf-8")
 for cls in _reg:
     body = re.search(r"\nclass %s\b.*?(?=\nclass |\Z)" % cls, _src, re.S)
     if not body:
@@ -232,8 +233,8 @@ print("=" * 78)
 print("G. 历史错误对照（v0.4.2 的 17 项是否被破坏）")
 print("=" * 78)
 ck("G1 契约缓存降级不缓存（#9 仍在）",
-   "not cache" in open(os.path.join(KIT, "layout_contract.py"), encoding="utf-8").read()
-   or "不写" in open(os.path.join(KIT, "layout_contract.py"), encoding="utf-8").read())
+   "not cache" in Path(os.path.join(KIT, "layout_contract.py")).read_text(encoding="utf-8")
+   or "不写" in Path(os.path.join(KIT, "layout_contract.py")).read_text(encoding="utf-8"))
 ck("G2 TrimAV fps 服务端校验（#10 仍在）", "fps" in _src and "有限正数" in _src)
 def _core_text():
     """`relay_core/` 包的**全文**（2026-10-07 拆包：单文件 relay_core.py 已变成 11 个文件）。
@@ -264,13 +265,12 @@ import re as _re
 # ⚠️ **刻意不扫 `docs/*.md`**：那里的版本号是**历史语义**（「本文件由 README（0.6.0 梳理）拆出」
 #   「0.6.7 重写」），不是「当前版本声明」⇒ 纳入只会造假红。docs 只写「适用版本：主干」，不写数字。
 _v_init = _re.search(r'__version__\s*=\s*"([^"]+)"',
-                     open(os.path.join(KIT, "__init__.py"), encoding="utf-8").read())
+                     Path(os.path.join(KIT, "__init__.py")).read_text(encoding="utf-8"))
 _v_py = _re.search(r'^version\s*=\s*"([^"]+)"',
-                   open(os.path.join(KIT, "pyproject.toml"), encoding="utf-8").read(), _re.M)
-_v_ch = _re.search(r"^## ([\d.]+)", open(os.path.join(KIT, "CHANGES.md"),
-                                         encoding="utf-8").read(), _re.M)
+                   Path(os.path.join(KIT, "pyproject.toml")).read_text(encoding="utf-8"), _re.M)
+_v_ch = _re.search(r"^## ([\d.]+)", Path(os.path.join(KIT, "CHANGES.md")).read_text(encoding="utf-8"), _re.M)
 _v_readme = _re.search(r"^\|\s*版本\s*\|\s*\*\*([\d.]+)\*\*",
-                       open(os.path.join(KIT, "README.md"), encoding="utf-8").read(), _re.M)
+                       Path(os.path.join(KIT, "README.md")).read_text(encoding="utf-8"), _re.M)
 print("      __init__=%s pyproject=%s CHANGES 顶=%s README 首部=%s"
       % (_v_init.group(1) if _v_init else "?",
          _v_py.group(1) if _v_py else "?",
@@ -300,7 +300,7 @@ def _zh(n):
 
 
 import subprocess
-_tst = open(os.path.join(KIT, "tests", "test_relay_core.py"), encoding="utf-8").read()
+_tst = Path(os.path.join(KIT, "tests", "test_relay_core.py")).read_text(encoding="utf-8")
 _r = subprocess.run([sys.executable, os.path.join(KIT, "tests", "test_relay_core.py")],
                     capture_output=True, text=True, encoding="utf-8", errors="replace",
                     env=dict(os.environ, COMFYUI_PATH=COMFY))
@@ -318,7 +318,7 @@ print("      实跑：通过 %s（失败 %s）／tests 头注释列了 %d 个方
 ck("H3 单测实跑全绿（通过数与失败数为 0 对齐）",
    bool(_m_res) and _m_res.group(2) == "0" and _n_assert > 0)
 
-_con = open(os.path.join(KIT, "CONTRIBUTING.md"), encoding="utf-8").read()
+_con = Path(os.path.join(KIT, "CONTRIBUTING.md")).read_text(encoding="utf-8")
 _m_asp = _re.search(r"覆盖(.{1,4})个方面", _con)
 _m_assert = _re.search(r"实测执行\s*\**\s*(\d+)\s*\**\s*项断言", _con)
 print("      CONTRIBUTING：%s 个方面 / %s 项断言"
@@ -332,7 +332,7 @@ ck("H3b CONTRIBUTING 的方面数/断言数 == 实跑真值",
 # 「离线自测」的计数与分组明细表**已随 README 瘦身搬到 docs/08**（2026-09-30 重构）：
 #   机检跟着**内容**走 —— README 只留命令与指针，分组表的真相源是 docs/08。
 #   ⚠️ 别改回读 README：那会让"README 保持薄"这件事每次都把闸弄红（重构时踩过）。
-_d08 = open(os.path.join(KIT, "docs", "08-testing.md"), encoding="utf-8").read()
+_d08 = Path(os.path.join(KIT, "docs", "08-testing.md")).read_text(encoding="utf-8")
 _m_r_assert = _re.search(r"\*\*(\d+) 项断言[^*]*\*\*，覆盖(.{1,4})个方面", _d08)
 _m_r_group = _re.search(r"^\| 21 \|", _d08, _re.M)
 print("      docs/08：%s 项断言 / %s 个方面%s"
@@ -382,7 +382,7 @@ _need = ["18.", "19.", "20.", "21."]
 #   —— 却**没提它自己**，于是它自己漂移了（停在 384；且 `assert_default_exit` 的期望值
 #   与同文件第 11 行自相矛盾：3/3 vs 4/4）。凡"多处声明同一个数字"，就必须有机检盯着，
 #   否则漏掉的永远是**没被盯的那一处**。
-_ci = open(os.path.join(KIT, ".github", "workflows", "ci.yml"), encoding="utf-8").read()
+_ci = Path(os.path.join(KIT, ".github", "workflows", "ci.yml")).read_text(encoding="utf-8")
 
 
 def _ci_numbers(script):
@@ -412,13 +412,12 @@ ck("H4 tests 头注释覆盖清单含 18/19/20/21 组",
    "缺=%s" % [n for n in _need if (" %s" % n) not in _head])
 
 # H5 requirements.txt 如实
-_req = open(os.path.join(KIT, "requirements.txt"), encoding="utf-8").read()
+_req = Path(os.path.join(KIT, "requirements.txt")).read_text(encoding="utf-8")
 ck("H5 requirements.txt 存在且非空", bool(_req.strip()), "%d 字节" % len(_req.strip()))
 
 # H6 CHANGES 顶部条目不是「版本号待定」
 ck("H6 CHANGES 顶部条目已是正式版本号（非「待定」）",
-   _v_ch and "待定" not in open(os.path.join(KIT, "CHANGES.md"),
-                                encoding="utf-8").read()[:400],
+   _v_ch and "待定" not in Path(os.path.join(KIT, "CHANGES.md")).read_text(encoding="utf-8")[:400],
    "顶=%s" % (_v_ch.group(1) if _v_ch else "?"))
 
 print()
@@ -457,7 +456,7 @@ def _widget_slots(cls):
 #   覆盖数变小本身就该被看见（"只守一张图"正是这次漏洞的成因）。
 _EX_FILES = sorted(f for f in os.listdir(os.path.join(KIT, "examples"))
                    if f.endswith(".json"))
-_EX = [(f, json.load(open(os.path.join(KIT, "examples", f), encoding="utf-8")))
+_EX = [(f, json.loads(Path(os.path.join(KIT, "examples", f)).read_text(encoding="utf-8")))
        for f in _EX_FILES]
 print("      覆盖示例图 %d 张：%s" % (len(_EX), "、".join(_EX_FILES)))
 
@@ -559,8 +558,7 @@ ck("I3 **全部**示例图的 widget 输入带 `widget` 标记（缺标记会被
 #   而示例图是**手工维护**的 ⇒ 加减节点后数字最容易停下不动（本仓已吃过同类的亏）。
 _claim = {}
 for _m in re.finditer(r"^\|\s*`([A-Za-z0-9_.\-]+\.json)`\s*\|[^|]*\|\s*(\d+)\s*节点\s*\|",
-                      open(os.path.join(KIT, "examples", "README.md"),
-                           encoding="utf-8").read(), re.M):
+                      Path(os.path.join(KIT, "examples", "README.md")).read_text(encoding="utf-8"), re.M):
     _claim[_m.group(1)] = int(_m.group(2))
 _bad_cnt = []
 for _fn, _wf in _EX:
@@ -587,7 +585,7 @@ if os.path.isdir(_WFDIR):
     import glob as _glob
     for _p in sorted(_glob.glob(os.path.join(_WFDIR, "*.json"))):
         try:
-            _d = json.load(open(_p, encoding="utf-8"))
+            _d = json.loads(Path(_p).read_text(encoding="utf-8"))
         except Exception:
             continue
         if not isinstance(_d, dict) or not isinstance(_d.get("nodes"), list):
@@ -632,15 +630,14 @@ if os.path.isdir(_CNODES):
         if not os.path.exists(_nj):
             continue
         try:
-            _body = open(_nj, encoding="utf-8", errors="replace").read(8192)
+            _body = Path(_nj).read_text(encoding="utf-8", errors="replace")[:8192]
         except Exception:
             continue
         if "H3Relay" in _body:
             _shadow.append("%s（%s，版本 %s）" % (
                 _nm, "会让 ComfyUI 忽略" if _nm.endswith(".disabled") else "🔴 会覆盖节点定义",
                 (re.search(r'__version__\s*=\s*"([^"]+)"',
-                           open(os.path.join(_p, "__init__.py"), encoding="utf-8",
-                                errors="replace").read()) or [None, "?"])[1]
+                           Path(os.path.join(_p, "__init__.py")).read_text(encoding="utf-8", errors="replace")) or [None, "?"])[1]
                 if os.path.exists(os.path.join(_p, "__init__.py")) else "?"))
 print("      custom_nodes=%s" % _CNODES)
 if _shadow:
@@ -659,7 +656,7 @@ if os.path.isdir(_WFDIR):
     import glob as _glob2
     for _p in sorted(_glob2.glob(os.path.join(_WFDIR, "*.json"))):
         try:
-            _d = json.load(open(_p, encoding="utf-8"))
+            _d = json.loads(Path(_p).read_text(encoding="utf-8"))
         except Exception:
             continue
         if not isinstance(_d, dict) or not isinstance(_d.get("nodes"), list):
@@ -1009,10 +1006,10 @@ finally:
                ignore_errors=True)
     _sh.rmtree(_td, ignore_errors=True)
 
-_rd = open(os.path.join(KIT, "README.md"), encoding="utf-8").read()
+_rd = Path(os.path.join(KIT, "README.md")).read_text(encoding="utf-8")
 # ⚠️ 2026-09-30 README 瘦身：音频缝那一整节搬进 docs/10 ⇒ 这两条检查**跟着内容走**，
 #    改读新家（README 只留结论与指针）。判据语义一字未改，只是换了查询目标。
-_l10 = open(os.path.join(KIT, "docs", "10-audio-seam-and-concat.md"), encoding="utf-8").read()
+_l10 = Path(os.path.join(KIT, "docs", "10-audio-seam-and-concat.md")).read_text(encoding="utf-8")
 ck("L9 docs/10 的音频缝章节口径：节点实现（且不再写「要靠组装层补」）",
    "要靠组装层补" not in _l10 and "必须在节点里做" in _l10
    and "音频缝" in _l10 and "音频缝" in _rd)
@@ -1020,7 +1017,7 @@ ck("L9 docs/10 的音频缝章节口径：节点实现（且不再写「要靠�
 # L10 —— 2026-09-21 铁律：UI 与 API 必须同一套节点实现（写在 README 约定块 + CONTRIBUTING 纪律里）
 #   为什么机检它：这条规则若只活在人的记忆里，下一个人照样会去改私有脚本 ——
 #   而本包**多数用户是画布手动跑的**，"只在脚本里生效"等于对他们不存在。
-_cg = open(os.path.join(KIT, "CONTRIBUTING.md"), encoding="utf-8").read()
+_cg = Path(os.path.join(KIT, "CONTRIBUTING.md")).read_text(encoding="utf-8")
 ck("L10 双轨铁律在位：UI 与 API 同一套节点实现（README 约定块 + CONTRIBUTING 纪律）",
    "同一套节点实现" in _rd and "UI 与 API 必须同一套实现" in _cg
    and "只在脚本里生效" in _cg)
@@ -1106,9 +1103,9 @@ _v3_pass = _v3_envs[0][1][0] if _v3_envs[0][1] else -1
 #      复现法：`sys.modules["nodes"] = None` 后跑 test_v3_schema。
 _v3_docs = {
     "ci.yml": _ci,
-    "docs/08-testing.md": open(os.path.join(KIT, "docs", "08-testing.md"), encoding="utf-8").read(),
+    "docs/08-testing.md": Path(os.path.join(KIT, "docs", "08-testing.md")).read_text(encoding="utf-8"),
     "README.md": _rd,
-    "__init__.py": open(os.path.join(KIT, "__init__.py"), encoding="utf-8").read(),
+    "__init__.py": Path(os.path.join(KIT, "__init__.py")).read_text(encoding="utf-8"),
 }
 _decl_in, _decl_nd, _decl_ps = set(), set(), set()
 for _fn, _txt in _v3_docs.items():
@@ -1194,8 +1191,8 @@ print("      实跑：assert_default_exit %s/%s" % (_aex_n, _aex_d))
 # 四处"声明数字"的文档 —— H3i 与 H3g 共用（H3h 另有自己的子集）
 _doc_txt = {
     "ci.yml": _ci,
-    "docs/08-testing.md": open(os.path.join(KIT, "docs", "08-testing.md"), encoding="utf-8").read(),
-    "tools/README.md": open(os.path.join(KIT, "tools", "README.md"), encoding="utf-8").read(),
+    "docs/08-testing.md": Path(os.path.join(KIT, "docs", "08-testing.md")).read_text(encoding="utf-8"),
+    "tools/README.md": Path(os.path.join(KIT, "tools", "README.md")).read_text(encoding="utf-8"),
     "README.md": _rd,
 }
 _bad_aex = []
@@ -1394,7 +1391,7 @@ _bad_rel = []
 if not os.path.isfile(_rel_doc):
     _bad_rel.append("缺 RELEASING.md（发布规范正文）")
 else:
-    _rd_txt = open(_rel_doc, encoding="utf-8").read()
+    _rd_txt = Path(_rel_doc).read_text(encoding="utf-8")
     for _kw, _why in (("GitHub", "渠道一"), ("Comfy Registry", "渠道二"),
                       ("tools/release.py", "执行体指针")):
         if _kw not in _rd_txt:
@@ -1404,11 +1401,11 @@ if not os.path.isfile(_rel_tool):
 else:
     try:
         import ast as _ast
-        _ast.parse(open(_rel_tool, encoding="utf-8").read())
+        _ast.parse(Path(_rel_tool).read_text(encoding="utf-8"))
     except SyntaxError as _e:
         _bad_rel.append("tools/release.py 语法错误：%s" % _e)
 # 规范是**开发件**：它自己必须留在用户包外面（否则用户会拿到一堆内部流程）
-_ci_txt2 = open(_ci_path, encoding="utf-8").read() if os.path.isfile(_ci_path) else ""
+_ci_txt2 = Path(_ci_path).read_text(encoding="utf-8") if os.path.isfile(_ci_path) else ""
 if "RELEASING.md" not in _ci_txt2:
     _bad_rel.append(".comfyignore 没排 RELEASING.md（规范不该发给用户）")
 
@@ -1904,7 +1901,7 @@ _tracked = (subprocess.run(["git", "-C", KIT, "ls-files"], capture_output=True,
 # 为什么能纯标准库算准：该文件只用「整目录（以 `/` 结尾）」「单文件」「根级通配」三种形态，
 #   **无 `!` 取反、无 `**`**。实测与 `pathspec`（真 gitignore 语义）**逐文件一致**。
 # ⚠️ fail-closed：一旦出现取反 / 双星，本判据**立刻报红**（不许静默按错语义算）。
-_ci_txt = open(os.path.join(KIT, ".comfyignore"), encoding="utf-8").read()
+_ci_txt = Path(os.path.join(KIT, ".comfyignore")).read_text(encoding="utf-8")
 _ci_pats = [ln.strip() for ln in _ci_txt.splitlines()
             if ln.strip() and not ln.lstrip().startswith("#")]
 _bad_ci = []
@@ -1996,8 +1993,7 @@ for _f in _tracked:
     if not _f.endswith(".py"):
         continue
     try:
-        _t = open(os.path.join(KIT, _f.replace("/", os.sep)), encoding="utf-8",
-                  errors="ignore").read()
+        _t = Path(os.path.join(KIT, _f.replace("/", os.sep))).read_text(encoding="utf-8", errors="ignore")
     except OSError:
         continue
     for _ln, _line in enumerate(_t.splitlines(), 1):
@@ -2016,7 +2012,7 @@ ck("H3x 无「`setdefault` 到 `PYTHONPATH`」（调用者已设时**静默 no-o
 #   这两条都能**从被测对象真算**，不需要人读语义。
 _tool_files = sorted(_f for _f in os.listdir(os.path.join(KIT, "tools"))
                      if _f.endswith((".py", ".cjs")))
-_tools_rd = open(os.path.join(KIT, "tools", "README.md"), encoding="utf-8").read()
+_tools_rd = Path(os.path.join(KIT, "tools", "README.md")).read_text(encoding="utf-8")
 _bad_reg2 = [_f for _f in _tool_files if _f not in _tools_rd]
 print("      `tools/` 脚本 %d 个 ｜ `tools/README.md` 未登记的：%s"
       % (len(_tool_files), _bad_reg2 or "无"))
@@ -2027,9 +2023,9 @@ ck("H3y `tools/` 顶层每个脚本都在 `tools/README.md` 里登记过（新�
 # 为什么单挑发布器：它的 flag **语义容易误解、后果不可逆** ——
 #   `--verify-only` 只跑 ⑥ 交叉验证、**不跑 ① 前置**；`--skip-ci-wait` 直接跳过 CI 闸。
 #   实测 2026-10-08：`--skip-ci-wait` 当时**没写进 `RELEASING.md`** —— 本条当场就抓到了。
-_rel_src = open(os.path.join(KIT, "tools", "release.py"), encoding="utf-8").read()
+_rel_src = Path(os.path.join(KIT, "tools", "release.py")).read_text(encoding="utf-8")
 _rel_flags = sorted(set(_re.findall(r'add_argument\("(--[a-z][a-z0-9\-]*)"', _rel_src)))
-_rel_doc = open(os.path.join(KIT, "RELEASING.md"), encoding="utf-8").read()
+_rel_doc = Path(os.path.join(KIT, "RELEASING.md")).read_text(encoding="utf-8")
 _bad_flag = [_f for _f in _rel_flags if _f not in _rel_doc]
 print("      `release.py` flags %d 个 ｜ `RELEASING.md` 未提及的：%s"
       % (len(_rel_flags), _bad_flag or "无"))
@@ -2061,7 +2057,7 @@ for _f in _tool_files:
     if not _f.endswith(".py"):
         continue
     try:
-        _tree = _ast.parse(open(os.path.join(KIT, "tools", _f), encoding="utf-8").read())
+        _tree = _ast.parse(Path(os.path.join(KIT, "tools", _f)).read_text(encoding="utf-8"))
     except SyntaxError as _e:
         _bad_env.append("%s 语法错误：%s" % (_f, _e))
         continue
@@ -2094,7 +2090,7 @@ ck("H4a 跑 Python 的子进程都**显式**给了 `env=`（靠调用者环境 =
 #   🔴 **能力边界**：它只能挡「字面恒真」，**挡不住「语义偏弱」** —— H3h 曾只查
 #      「值在不在集合里」而不查 (节点数, input 数) **配对**，那种弱**只能靠人发现**。
 #      别把这条当全覆盖。
-_ck_tree = _ast.parse(open(os.path.join(KIT, "tools", "review_050.py"), encoding="utf-8").read())
+_ck_tree = _ast.parse(Path(os.path.join(KIT, "tools", "review_050.py")).read_text(encoding="utf-8"))
 _ck_names, _ck_true = [], []
 for _node in _ast.walk(_ck_tree):
     if not (isinstance(_node, _ast.Call) and getattr(_node.func, "id", "") == "ck"):
@@ -2172,8 +2168,7 @@ ck("H4d JS 测试（4 个 `.mjs`）的期望数在 ci.yml·docs/08 与**实跑**
 #   `dist/` 在时**再核实际文件数**（那是更强的真值）。
 # ⚠️ 声明必须写成 `N 文件 /`（带斜杠）—— 否则会被同段的「运行期 25 文件」这类
 #   **叙述数字**污染判据。这条写作纪律写在 `tools/CHECKS.md` 的口径表里。
-_mb_tree = _ast.parse(open(os.path.join(KIT, "tools", "make_minimal_bundle.py"),
-                           encoding="utf-8").read())
+_mb_tree = _ast.parse(Path(os.path.join(KIT, "tools", "make_minimal_bundle.py")).read_text(encoding="utf-8"))
 _seg = {}
 for _n in _mb_tree.body:
     if (isinstance(_n, _ast.Assign) and isinstance(_n.targets[0], _ast.Name)
@@ -2199,6 +2194,31 @@ print("      dist 白名单：%s = **%d 文件** ｜ `dist/` 实际 = %s"
          _tot_mb, _real_mb if _real_mb >= 0 else "（不在，未核）"))
 ck("H4e dist 白名单文件数：`MANIFEST` 各段之和 == 文档声明（`dist/` 在时还核实际文件数）",
    not _bad_mb and _tot_mb > 0, "%d 处：%s" % (len(_bad_mb), _bad_mb[:4]))
+
+# ============================================================================
+# H4f 判据的**已知盲点**：`return` 后直接跟 `open(`（2026-10-08 新增）
+# ============================================================================
+# 🔴 实测：`ruff` 的 `SIM115` **不报**「`return` 后直接跟一个 `open(...)` 调用」这个形态 ——
+#   其余形态它都报（`x = open(...).read()` / `json.load(open(...))` 都红）。
+#   而本仓**真有两处**踩了这个形态（`layout_contract.py` / `tools/voice_bank.py`），
+#   都是「文件句柄不关」（Windows 上会让文件被锁住：后续删除/改名报 `PermissionError`）
+#   ⇒ **光开 `SIM115` 挡不住它** ⇒ 补一条窄判据盯着。
+#   ⚠️ 判据本身用**拼串**构造，免得本文件因为"写着要禁的字面量"而被自己抓到（同 H3e / H3x 的做法）。
+_re_ret_open = _re.compile("return" + r"\s+(?:io\.)?" + "open" + r"\s*\(")
+_ro = []
+for _f in _tracked:
+    if not _f.endswith(".py"):
+        continue
+    try:
+        _t = Path(os.path.join(KIT, _f)).read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        continue
+    for _ln, _line in enumerate(_t.splitlines(), 1):
+        if _re_ret_open.search(_line):
+            _ro.append("%s:%d" % (_f, _ln))
+ck("H4f 无「`return` 后直接跟一个 `open(` 调用」的形态"
+   "（**`SIM115` 的已知盲点**：实测它不报这一种 ⇒ 补一条窄判据盯着）",
+   not _ro, "%d 处：%s" % (len(_ro), _ro[:4]))
 
 # ============================================================================
 # H3g 本文件**自己的**期望数（2026-09-25 新增）

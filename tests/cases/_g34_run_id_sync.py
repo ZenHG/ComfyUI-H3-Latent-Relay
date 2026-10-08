@@ -30,6 +30,7 @@ print("=" * 78)
 
 import json as _json34  # （就近用；本分片由 runner 顺序执行）
 import re as _re34
+from pathlib import Path
 
 _HERE34 = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 with open(os.path.join(_HERE34, "tests", "parity", "run_id_cases.json"), encoding="utf-8") as _fh34:
@@ -94,7 +95,7 @@ for _c in _FX34["cases"]:
           "实得 targets=%s reason=%s skipped=%s" % (_p["targets"], _p["reason"], _p["skipped"]))
 
 # 34.3 表与 nodes.py 对账（与前端同一个 `RUN_ID_TYPES` 概念，少一类 = 那一类永远用别的目录名）
-_src34 = open(os.path.join(_HERE34, "nodes.py"), encoding="utf-8").read()
+_src34 = Path(os.path.join(_HERE34, "nodes.py")).read_text(encoding="utf-8")
 _decl34 = set()
 for _m34 in _re34.finditer(r"^class\s+(\w+)", _src34, _re34.M):
     _nxt = _src34.find("\nclass ", _m34.end())

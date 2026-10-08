@@ -36,11 +36,11 @@ UI 格式工作流的 ``widgets_values`` 是**按位置**对应前端 widget 槽
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import os
 import sys
 import urllib.request
+from pathlib import Path
 
 DEFAULT_API = "http://127.0.0.1:8188"
 
@@ -690,8 +690,8 @@ def main():
     # 🔴 `newline="\n"` 必须显式给：Python 在 Windows 上默认把 `\n` 翻成 `\r\n`，
     #   会让同一份生成结果在 Windows / Linux 上**字节不同**，且与 `.gitattributes`
     #   的 `* text=auto eol=lf` 打架（git 会在 commit 时改回去 ⇒ 工作树与提交态不一致）。
-    io.open(a.out, "w", encoding="utf-8", newline="\n").write(
-        json.dumps(wf, ensure_ascii=False, indent=2))
+    Path(a.out).write_text(
+        json.dumps(wf, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
     print("已写出：%s（节点 %d / 连线 %d）" % (a.out, len(g.nodes), len(g.links)))
     print("下一步复核：python tools/check_ui_workflow.py %s" % a.out)
 

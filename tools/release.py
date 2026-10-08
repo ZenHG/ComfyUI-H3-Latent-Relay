@@ -42,6 +42,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from pathlib import Path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REGISTRY_API = "https://api.comfy.org"
@@ -646,7 +647,7 @@ def sync_deploy(deploy: str, head: str = "HEAD") -> None:
         blob = subprocess.run([GIT, "-C", REPO, "show", "%s:%s" % (head, rel)],
                               capture_output=True).stdout
         dst = os.path.join(deploy, rel.replace("/", os.sep))
-        cur = open(dst, "rb").read() if os.path.isfile(dst) else None
+        cur = Path(dst).read_bytes() if os.path.isfile(dst) else None
         if cur is None or cur.replace(b"\r\n", b"\n") != blob.replace(b"\r\n", b"\n"):
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             with open(dst, "wb") as fh:

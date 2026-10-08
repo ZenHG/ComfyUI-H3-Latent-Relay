@@ -33,12 +33,12 @@
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import os
 import sys
 
 import torch
+from pathlib import Path
 
 # 退出码：0 通过 / 2 不要提交 / 3 未审（本文档 §3.2「闸读不到输入时必须喊，绝不沉默通过」）
 EXIT_OK, EXIT_FAIL, EXIT_SKIP = 0, 2, 3
@@ -146,7 +146,7 @@ def main() -> int:
         return EXIT_SKIP
     print("[1] 配置：%s" % cfg_path)
     try:
-        raw = json.load(io.open(cfg_path, encoding="utf-8"))
+        raw = json.loads(Path(cfg_path).read_text(encoding="utf-8"))
     except Exception as exc:
         print("[FAIL] 配置文件不是合法 JSON：%s" % exc)
         return EXIT_FAIL

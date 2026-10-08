@@ -173,7 +173,7 @@ Combo `options` **全序** / outputs 路数与显示名 / `is_output_node` / 显
 
 | 工具 | 判什么 | 期望 |
 |---|---|---|
-| `tools/review_050.py` | 文档—代码一致性（节点清单 / 参数表 / 断言数 / 版本号 / **全部示例图**槽位（I1-I4：槽位 / 节点数 / widget 标记） / **三条铁律** / **L13 英文文档同步闸** / **H3j smoke 期望值** / **H3k registry 元数据** / **H3l 发布规范在位** / **H3m 无凭据字面量** / **H3n i18n 词表完整性** / **H3p i18n 悬浮提示双语完整性** / **H3q JS 逗号表达式** / **H3r i18n 防覆盖兜底** / **H3s link 端点字段两代兼容** / **H3t 官方语言入口** / **H3o 文档悬空引用** / **H3u registry 包文件数真值** / **H3v tools 脚本数真值** / **H3w 未跟踪文件** /  **H3x `setdefault` 到 `PYTHONPATH`** / **H3y tools 脚本登记** / **H3z release.py flag 齐全** / **H4a Python 子进程显式 env** / **H4b 判据表自检** / **H4c 台账一致** / **H4d JS 期望数真值** / **H4e dist 白名单真值**） | **116/0** |
+| `tools/review_050.py` | 文档—代码一致性（节点清单 / 参数表 / 断言数 / 版本号 / **全部示例图**槽位（I1-I4：槽位 / 节点数 / widget 标记） / **三条铁律** / **L13 英文文档同步闸** / **H3j smoke 期望值** / **H3k registry 元数据** / **H3l 发布规范在位** / **H3m 无凭据字面量** / **H3n i18n 词表完整性** / **H3p i18n 悬浮提示双语完整性** / **H3q JS 逗号表达式** / **H3r i18n 防覆盖兜底** / **H3s link 端点字段两代兼容** / **H3t 官方语言入口** / **H3o 文档悬空引用** / **H3u registry 包文件数真值** / **H3v tools 脚本数真值** / **H3w 未跟踪文件** /  **H3x `setdefault` 到 `PYTHONPATH`** / **H3y tools 脚本登记** / **H3z release.py flag 齐全** / **H4a Python 子进程显式 env** / **H4b 判据表自检** / **H4c 台账一致** / **H4d JS 期望数真值** / **H4e dist 白名单真值** / **H4f `SIM115` 盲点**） | **117/0** |
 | `tools/smoke_nodes.py` | 节点层功能冒烟（续接七件真跑一遍；🔍 放大节点要上游权重，不在冒烟内） | **16/0** |
 | `tools/assert_default_exit.py` | 默认出口 = V3（契约 2 + 行为 3；含 **V3 实际注册的节点集合**） | **5/5** |
 | `tools/sync_deploy_check.py` | 部署副本与指定提交的提交态一致 | 全 `OK` |

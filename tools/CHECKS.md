@@ -3,7 +3,7 @@
 > 🔴 **本文件由 `tools/checks_ledger.py --write` 生成，别手改**（改台账 → 重新生成）。
 > 机检：`review_050.py` 的 **H4c** 核「本台账 ↔ `review_050.py` 的编号**双向一致**」。
 
-共 **53** 条带编号的判据 ｜ 其中盯**口径数字**的 **14** 条 ｜ 有**变异测试**的 **20** 条。
+共 **54** 条带编号的判据 ｜ 其中盯**口径数字**的 **14** 条 ｜ 有**变异测试**的 **21** 条。
 
 ## 一、盯「口径数字」的判据（**这些数字不许裸写**）
 
@@ -49,6 +49,7 @@
 | **H4a** | hygiene | 跑 Python 的子进程都**显式**给了 `env=` | 加一处 `subprocess.run([sys.executable, "-c", "pass"])`（不传 `env=`） | — |
 | **H4b** | truth | `review_050.py` 自身判据表自检 | 注入 `ck("X", True)`（恒真）或两条同名 `ck()` | — |
 | **H4c** | truth | 判据台账 | 从本台账删掉一个编号（或 `review_050` 里加一条未登记的编号） | git |
+| **H4f** | hygiene | 无「`return` 后直接跟一个 `open | 把任一受控 `*.py` 改成「`return` 后直接跟 `open(`」的形态 | — |
 | **I1** | hygiene | 示例图 widgets_values **未超出** schema 槽位数 | — | — |
 | **I2** | hygiene | 取值都在候选/范围内 | — | host |
 | **I3** | hygiene | **全部**示例图的 widget 输入带 `widget` 标记 | — | — |
