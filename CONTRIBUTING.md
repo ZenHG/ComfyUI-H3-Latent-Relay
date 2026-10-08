@@ -393,14 +393,26 @@ dimension size -1 can be any value and is ambiguous`。而**空音频是合法�
 ## 发布（GitHub + Comfy Registry）
 
 🔴 **发布流程的唯一真相源 = [`RELEASING.md`](RELEASING.md)** —— 两个渠道必须**成对**更新，
-执行体是 `tools/release.py`（预演 / `--go` / `--verify-only`）。这里只留三条与"改代码的人"直接相关的：
+执行体是 `tools/release.py`（预演 / `--go` / `--verify-only`）。这里只留四条与"改代码的人"直接相关的：
 
 - 包名（`[project].name`）= registry 的**安装 id 与 URL，发布后不可改**；`license` 只认
   `{ file = … }` / `{ text = … }`（裸 SPDX 会被拒）⇒ 两条都由 `tools/review_050.py` 的 **H3k** 盯着。
 - **打什么包由 `.comfyignore` 决定**（默认会带上 `docs/` `tests/` `tools/`）⇒ 加新目录前先想它该不该发出去；
   运行期目录（`exp/` `v3/` `web/` `examples/`）**一个都不能排**（H3k 有反向断言）。
 - **版本号四处一致**（H1）：`__init__.py` / `pyproject.toml` / `CHANGES.md` 顶部 / `README.md` 首部；
-  registry 的 changelog 就取 `CHANGES.md` 顶部那一节，**发出去之后改不动**。
+  registry 的 changelog 取 `RELEASE-NOTES.md` 的本版一节，**发出去之后改不动**（所以格式在 push 前硬校验）。
+- 🔴 **凭据助手别让它弹 GUI**（Windows 实测，2026-10-08）。`git push` 需要凭据；若 `credential.helper`
+  指向 **Git Credential Manager（GCM）**，它在 Windows 上会**弹 GUI 窗口 + 读注册表**（`reg.exe`）——
+  在**无人值守环境**（CI / agent / 脚本）里会**直接挂住**：`git push` 超时、**零输出**、退出码 **124**。
+  ⚠️ 它**看起来像网络问题**，其实 `git ls-remote`（读，不需要凭据）一直正常 —— 别往网络上查。
+  - **判据**（秒回应答 = 好；卡住或弹窗 = 坏）：
+    `printf "protocol=https\nhost=github.com\n\n" | git credential fill`
+    （⚠️ 它会把 token 打出来，别贴到公开地方。）
+  - **修法**：把**不弹 GUI** 的助手排在前面，**保留 GCM 作非 GitHub 主机的兜底**：
+    `git config --global credential.helper ""`（空值 = **重置累积列表**，**这步必须做** ——
+    `credential.helper` 是**多值累积**的，系统级 `gitconfig` 里可能已经有一个，不重置它会先跑）
+    → `git config --global --add credential.helper "!gh auth git-credential"`
+    → `git config --global --add credential.helper "<你原来的 GCM 值>"`。
 
 ## 许可（提 PR 前必读）
 
