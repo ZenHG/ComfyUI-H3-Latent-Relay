@@ -49,14 +49,25 @@ python tools/release.py --set-token     # 轮换 registry PAT（从 stdin 读，
    `README.md` 首部 `| 版本 | **x.y.z** |`。
 3. **两份记录都写了本版**：
    - `CHANGES.md` 顶部那一节 = 本版（面向开发者；版本不符会被 H1 报出来）。
-   - `RELEASE-NOTES.md` 有本版一节、**中英双语、≤2000 字符**（面向用户；**registry 的 changelog 与
-     GitHub Release 正文都取它**）。格式与机器判据见 **§6**，`tools/release.py` 会在 **push 之前**拦住。
+   - `RELEASE-NOTES.md` 有本版一节、**中英双语**（面向用户；**registry 的 changelog 与
+     GitHub Release 正文都取它**）。⚠️ **字符预算是分段算的**：**中文段 ≤700 · 英文段 ≤1700**
+     （不是"总共 2000" —— 那两个常量是 `tools/release.py` 的 `NOTES_MAX_ZH` / `NOTES_MAX_EN`）。
+     格式与机器判据见 **§6**，`tools/release.py` 会在 **push 之前**拦住。
 4. **本地门槛全绿**：跑 `h3relay_check_all.py`（本机工具，在**仓库之外的** tools 目录里；
    12 项，与 CI 逐步对应）。`tools/release.py` 自己只跑最会翻车的两项（`review_050` / `en_sync`），
    全量请你手跑。
 5. **Registry 元数据合规**（`review_050` 的 H3k 盯着）：`name` 不带 `ComfyUI`、`license` 为
    `{ file = … }`/`{ text = … }`、`PublisherId` 非占位、`Icon` 是能取到的 https 直链、
    `.comfyignore` 排开发件而**不排运行期目录**。
+6. **`comfy` CLI 能跑**（渠道二用它发布）。🔴 **「装了」≠「能跑」**：PATH 上那个可能是
+   `hermes` 之类的 **wrapper**，报 `no dependency environment is committed` /
+   `uv.lock needs to be updated, but --locked was provided` ⇒ **退出码非 0**（实测 2026-10-08）。
+   **判据是真跑一次 `comfy --version`**，不是"文件在不在" —— 而且
+   `which comfy`（bash）**不认 `.bat`**，用它找会**假阴性**（让人误判"没装"去做无用重装）。
+   - 跑不动 ⇒ `hermes pm repair`，或另建一个**隔离 venv** 再用 **`COMFY_CLI=<它的 comfy 路径>`** 指过去。
+   - ⚠️ 装的时候：**清华源没有 `comfy-cli`**，要 `-i https://pypi.org/simple`；
+     且隔离 venv 要用**系统 Python 3.12** 建（3.13 建的在清华源上装不上）。
+   - `tools/release.py` 的 `_find_comfy()` 会**自己按候选顺序逐个试跑**并把结论打出来。
 
 ## 3. 执行体做的六步（`tools/release.py --go`）
 

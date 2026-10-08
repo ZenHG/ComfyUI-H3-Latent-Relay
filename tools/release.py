@@ -369,12 +369,71 @@ def wait_ci(slug: str) -> None:
             "    修完再跑一次本脚本（registry 那步还没做，版本仍是旧的，安全）。" % (rid, rid, slug))
 
 
+def _find_comfy() -> str:
+    """找一个**能跑**的 `comfy`。找不到或跑不动都返回 `""`，并把试过什么、为什么不行**打出来**。
+
+    🔴 为什么不能只写 `shutil.which("comfy")`（2026-10-08 立；两条都是实测踩的）：
+      ① **「装了」≠「能跑」** —— 实测：PATH 上那个 `comfy` 存在，但它是
+         `hermes -p comfy %*` 的 **wrapper**，而 hermes 报
+         `no dependency environment is committed for this install` ⇒ **退出码 1**；
+         另一台机器上同类 wrapper 报的是 `uv.lock needs to be updated, but --locked was provided`。
+         ⇒ 判据只能是「**真跑一次 `--version`**」，不是「文件在不在」。
+      ② **`which comfy`（bash）不认 `.bat`** ⇒ 用 shell 找会**假阴性**，让人误判「没装」而去做无用的重装。
+         （2026-10-08 我本人就因此误判过一次 —— 所以这里用 `shutil.which`（认 `PATHEXT`）+ 显式候选。）
+      ⇒ 结论：**先真跑验活，跑不动就点名说是哪个、报什么错** —— 别让下一个人再翻一遍。
+    """
+    home = os.path.expanduser("~")
+    cands = []
+    if (os.environ.get("COMFY_CLI") or "").strip():
+        cands.append(("COMFY_CLI", os.environ["COMFY_CLI"].strip()))
+    if shutil.which("comfy"):
+        cands.append(("PATH", shutil.which("comfy")))
+    # 常见位置：PATH 上那个常常是坏的 wrapper ⇒ 这些是"另一条路"
+    for label, base in (
+        ("~/.local/bin", os.path.join(home, ".local", "bin", "comfy")),
+        ("隔离 venv（~/.local/comfy-cli）", os.path.join(home, ".local", "comfy-cli", "Scripts", "comfy")),
+        ("当前 Python 的 Scripts", os.path.join(os.path.dirname(sys.executable), "comfy")),
+    ):
+        for ext in (".exe", ".bat", ""):
+            cands.append((label, base + ext))
+    tried, seen = [], set()
+    for label, c in cands:
+        if not c or c in seen:
+            continue
+        seen.add(c)
+        if not (os.path.isfile(c) or shutil.which(c)):
+            continue
+        try:
+            r = run([c, "--version"], quiet=True)
+        except Exception as e:
+            tried.append("%s → %s（起不来：%r）" % (label, c, e))
+            continue
+        lines = ((r.stdout or "") + "\n" + (r.stderr or "")).strip().splitlines()
+        tail = (lines[-1][:110] if lines else "(无输出)")
+        if r.returncode == 0:
+            say("  能跑的 `comfy`：%s（%s）" % (c, label))
+            say("      %s" % tail)
+            return c
+        tried.append("%s → %s（退出码 %d：%s）" % (label, c, r.returncode, tail))
+    if tried:
+        say("  ⚠️ 试过这些 `comfy`，**没一个能跑**：")
+        for t in tried:
+            say("     · " + t)
+    return ""
+
+
 def publish(f: dict) -> None:
     say("\n⑤ 渠道二 · Comfy Registry：publish")
-    comfy = os.environ.get("COMFY_CLI") or shutil.which("comfy")
+    comfy = _find_comfy()
     if not comfy:
-        die("找不到 comfy-cli：`pip install comfy-cli`，或用 COMFY_CLI 指定其路径。\n"
-            "    ⚠️ 它必须能跑（早前实测：隔离 venv 要用系统 Python 3.12 建，3.13 建的在清华源上装不上）")
+        die("找不到**能跑的** comfy-cli。两条路：\n"
+            "    · **没装** ⇒ `pip install comfy-cli`。⚠️ 隔离 venv 要用**系统 Python 3.12** 建"
+            "（3.13 建的在清华源上装不上）；⚠️ **清华源没有这个包**，要 `-i https://pypi.org/simple`。\n"
+            "    · **装了但跑不动** ⇒ PATH 上那个可能是 **hermes 托管的 wrapper**（报 "
+            "`no dependency environment is committed` 或 `uv.lock needs to be updated`）"
+            "⇒ `hermes pm repair`，或另建一个隔离 venv 再用 `COMFY_CLI=<它的 comfy 路径>` 指过去。\n"
+            "    ⚠️ 判据是「**真跑一次 `--version`**」而不是「文件在不在」——"
+            "`which comfy`（bash）**不认 `.bat`**，会假阴性。")
     r = run([comfy, "node", "validate"])
     # 🔴 2026-10-04：失败回显**必须连 stderr 一起看**。此前只打 stdout 的最后一行 ——
     #    而 **CLI 自身没起来**时（实测：PATH 上那个 `comfy` 是 hermes 托管的，隔离运行时坏掉，
