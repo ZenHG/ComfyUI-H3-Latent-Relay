@@ -383,7 +383,12 @@ for k in range(SEGMENTS):
 
 **The three non-UI paths for splicing** (all go through the same core code `relay_core.assemble_mp4_segments`, behaving identically):
 
-① **Command line** (easiest; use a python with torch+av installed, usually the ComfyUI interpreter):
+🔴 **Read this first**: the CLI in ① lives under `tools/`, and `tools/` is **not shipped** with the
+installed package (Comfy Registry / Manager installs do not contain it — `.comfyignore` excludes it)
+⇒ **only people who `git clone` the repo can use ①**. If you installed from the registry, use ② or ③ —
+they live **inside the package** and need no extra files.
+
+① **Command line** (easiest; ⚠️ **only present in a `git clone`**):
 
 ```bash
 python tools/concat_segments.py s1.mp4 s2.mp4 s3.mp4 -o film.mp4 --audio aac256

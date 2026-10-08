@@ -113,7 +113,7 @@ def main() -> int:
     rows = []
     for p in _py_files(REPO):
         rel = os.path.relpath(p, REPO)
-        for name, start, body in _functions(p):
+        for name, _start, body in _functions(p):
             mine = [_norm(l) for l in body]
             mine = [m for m in mine if m]
             if len(mine) < args.min_lines:

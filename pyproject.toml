@@ -16,7 +16,7 @@
 #    ④ `PublisherId` 必须与 registry 网站上 @ 后面那串完全一致，否则发布会被拒。
 [project]
 name = "h3-latent-relay"
-version = "0.6.29"
+version = "0.6.31"
 description = "Latent bridge for MiniMax-H3 multi-segment continuation: the previous segment's AV latent is spliced into this segment's conditioning — zero re-encoding."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -53,7 +53,19 @@ target-version = "py310"
 exclude = ["__pycache__", ".git"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W"]
+# 规则集分两层（2026-10-07 扩）：
+#   ① 现役 E/F/W —— 语法与未用名，最低门槛；
+#   ② **刻意加进来的一批**：挑的是「**能静态发现的真 bug 形态**」+「**零维护成本的死代码**」。
+#      选型判据 = 先量代价再定（`ruff check . --exclude dist --select <集> --statistics`），
+#      **不追求把规则开满** —— 开满会引入大批与本仓风格无关的噪声，噪声会淹没真信号。
+select = [
+    "E", "F", "W",
+    "B",      # bugbear：`raise` 丢异常链、`zip` 静默截断、循环变量没用上…… 都是真 bug 形态
+    "C4",     # 多余的一次性容器构造（`dict([...])` / `list(...)` 包一层）
+    "PIE",    # 无意义的 `range(0, n)`、可合并的 `startswith`、重复实现的内建
+    "RET",    # 多余的临时变量（`x = f(); return x`）
+    "RUF100", # **死 `noqa`** —— 它抑制的规则早已不触发 ⇒ 留着会让人以为那里真有例外
+]
 ignore = [
     "E501",   # 行长度由 line-length 管；中文 tooltip 本来就有长行
     # —— 以下三条是**刻意保留**的（2026-09-25 接进 CI 时逐条看过，不是懒得改）——
@@ -61,6 +73,18 @@ ignore = [
     "E731",   # 测试/工具里的 lambda 简写（`f = lambda: ...`），改 def 只是更长
     "E741",   # 测试/工具里的局部变量 `l`（length/list），改名要动测试代码、收益低
 ]
+
+# —— 刻意**没**开的规则，连同理由（免得下次有人再量一遍）——
+#
+# | 规则 | 量到的量 | 为什么不开 |
+# |---|---|---|
+# | `RUF001/002/003` | 19530 | **全是中文标点**（`（）`/`：`/`、`）出现在注释与字符串里的误报。本仓是中文仓库 ⇒ 开了等于噪声淹没一切 |
+# | `UP031` | 1281 | `%-格式`。本仓通篇用它，换成 f-string 是**全仓重写**，收益只有风格 |
+# | `UP`（其余） | ~370 | 注解现代化（`Dict`→`dict`、`Optional`→`| None`）。要动 300+ 处签名，而本仓**没有类型检查器**去兑现它的收益 |
+# | `SIM115` | 44 | `open()` 没走 context manager —— **价值真实**，但 20 处在 `tools/review_050.py`（它的期望数被 **H3g 自引用机检**盯着，大改会牵动计数）。⇒ **留给单独一轮**，不混在本次 |
+# | `ARG` | 29 | 未用参数。本仓的节点方法签名是**宿主契约**，参数不能删 ⇒ 大部分是必然的假阳性 |
+#
+# ⚠️ 改本表前先跑：`ruff check . --exclude dist --select <集> --statistics`，**先量再定**。
 
 # 宿主版本下限：用**官方字段**（宿主 `comfy_config/config_parser.py` 读 comfy_data["requires-comfyui"]）。
 # ComfyUI 启动时真的会读它 —— 比只写在注释或 README 里强。

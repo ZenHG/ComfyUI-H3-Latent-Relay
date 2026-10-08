@@ -24,7 +24,9 @@
 
 用法：
     set COMFYUI_PATH=<你的 ComfyUI 根目录>
-    python tools/verify_rewrite_equivalence.py [--old-rev HEAD]
+    python tools/verify_rewrite_equivalence.py
+    # --old-rev 默认 = 最近一个**仍有单文件 relay_core.py** 的提交（拆包后 HEAD 上没有了）
+    python tools/verify_rewrite_equivalence.py --old-rev <指定提交>
 """
 from __future__ import annotations
 
@@ -94,7 +96,7 @@ def _load(source: str, names, ns: dict) -> dict:
     out = dict(ns)
     bodies = [b for b in (_extract(source, n, required=False) for n in names) if b]
     blob = "from __future__ import annotations\n" + "\n\n".join(bodies)
-    exec(compile(blob, "<extracted>", "exec"), out)  # noqa: S102
+    exec(compile(blob, "<extracted>", "exec"), out)
     return out
 
 
@@ -191,17 +193,31 @@ def _apply_relay_cmp(old, new, name, cond, plan):
     if not plan.applied:
         if p_new.notes:
             bad.append("applied=False 却加了 note：%r" % (p_new.notes,))
-    elif expect:
-        if len(p_new.notes) != 1:
-            bad.append("应有出局 note，实得 %d 条" % len(p_new.notes))
+    else:
+        # 🔴 2026-10-07 修正契约（原契约停在 0.6.23 之前 ⇒ 本工具一直报 3 条假失败）：
+        #   0.6.23 起，**注入本包自己的音频参考**时 `apply_relay` 会**多写一条说明 note**
+        #   （「本包注入的音频参考是**事后追加**的 ⇒ 文本侧没有 `<Audio j>` 标签 ⇒ prompt 引不到」）。
+        #   契约必须把它算进去，且**校验它的内容**（比原来的"只数条数"更严）。
+        want_ref_note = plan.audio_ref is not None
+        want = (1 if expect else 0) + (1 if want_ref_note else 0)
+        if len(p_new.notes) != want:
+            bad.append("note 条数不符：应 %d（%s出局 note%s），实得 %d：%r"
+                       % (want, "" if expect else "无",
+                          " + 音频参考说明" if want_ref_note else "",
+                          len(p_new.notes), p_new.notes))
         else:
-            m = re.search(r"\[([0-9,\s]*)\]", p_new.notes[0])
-            got = ([int(x) for x in m.group(1).split(",") if x.strip()]
-                   if m else None)
-            if got != expect:
-                bad.append("report 落点与契约不符：报 %s / 应 %s" % (got, expect))
-    elif p_new.notes:
-        bad.append("无锚出局却加了 note：%r" % (p_new.notes,))
+            if expect:
+                m = re.search(r"\[([0-9,\s]*)\]", p_new.notes[0])
+                got = ([int(x) for x in m.group(1).split(",") if x.strip()]
+                       if m else None)
+                if got != expect:
+                    bad.append("report 落点与契约不符：报 %s / 应 %s" % (got, expect))
+            if want_ref_note:
+                _ln = p_new.notes[-1]
+                for _kw in ("事后追加", "prompt 引不到"):
+                    if _kw not in _ln:
+                        bad.append("音频参考说明 note 少了对用户的承诺「%s」：%r"
+                                   % (_kw, _ln[:70]))
 
     # 别名：输出锚不得与 conditioning 或 plan.keyframes 共享引用。
     # ⚠ 只比 conditioning 会漏掉"新增锚不做副本"——那泄漏的是 plan 的引用。
@@ -271,7 +287,7 @@ def _grid_mutants(src):
 
 
 def _offsets_cases():
-    return [("step_offsets n=%d" % n, n) for n in list(range(0, 40)) + [57, 90, 124]]
+    return [("step_offsets n=%d" % n, n) for n in list(range(40)) + [57, 90, 124]]
 
 
 def _offsets_cmp(old, new, name, n):
@@ -367,6 +383,18 @@ def _targets(src_old, src_new):
               "audio_from_latent": CORE.audio_from_latent,
               "KEY_EXPORT_TAIL_AUDIO": CORE.KEY_EXPORT_TAIL_AUDIO,
               "Any": object, "Tuple": tuple, "List": list, "Optional": object}
+    # 🔴 2026-10-07 加：目标函数体里调用的**其它模块级名字**（如 `count_official_audio_refs`、
+    #    `AUDIO_REF_OFFICIAL_MAX`、`_voice_anchor_tail` …）也必须在命名空间里，否则
+    #    `exec` 出来的函数一调就 NameError。原来靠**手写清单**逐个列 —— 漏一个这个工具就
+    #    整个跑不起来，而它不在 CI 里 ⇒ 坏了很久没人知道（实测：拆包当天它已经跑不通，
+    #    而 `tools/README.md` 里还写着 137/0）。⇒ 改成**自动补齐**：把活的 `relay_core`
+    #    全部公开名字灌进来，抽出来的函数体再覆盖目标那几个。单文件时代"模块级全局"就是
+    #    这一整套，所以这样才等价。
+    #    ⚠️ 代价必须写明：若某个**辅助**函数在重写前后真的改了行为，本工具不会发现
+    #      （两侧都会调到"新的"那一份）。这是**刻意的取舍** —— 本工具只声明验证 3 个
+    #      目标函数；把辅助函数也纳入，属于另一个目标。
+    common = {**{_k: _v for _k, _v in vars(CORE).items() if not _k.startswith("__")},
+              **common}
 
     t = []
     t.append(("apply_relay",
@@ -401,12 +429,38 @@ def _run_target(label, old, new, cases, cmp_fn, verbose=True):
     return passed, failed
 
 
+def _last_rev_with_single_file() -> str:
+    """最近一个**仍带单文件 `relay_core.py`** 的提交。
+
+    🔴 为什么要它：本工具的 `old` 侧取 `git show <rev>:relay_core.py`。2026-10-07 拆包后，
+       单文件在**拆包的提交之后**就不存在了 ⇒ 默认 `HEAD` 会当场 `CalledProcessError`。
+       写死一个 sha 只会再烂一次，所以**每次现场问 git**：顺着 `git log -- relay_core.py`
+       走，取第一个 `git cat-file -e <rev>:relay_core.py` 成立的提交。
+    找不到（例如整个历史里都没有这个文件）⇒ 回退 `HEAD`，让原来的报错自己说话。
+    """
+    try:
+        revs = subprocess.check_output(
+            ["git", "log", "--format=%H", "--", "relay_core.py"],
+            cwd=REPO, stderr=subprocess.DEVNULL).decode().split()
+    except subprocess.CalledProcessError:
+        return "HEAD"
+    for rev in revs:
+        if subprocess.call(["git", "cat-file", "-e", "%s:relay_core.py" % rev],
+                           cwd=REPO, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL) == 0:
+            return rev
+    return "HEAD"
+
+
 def main() -> int:
     global _LATENT, torch, from_relay
     ap = argparse.ArgumentParser()
-    ap.add_argument("--old-rev", default="HEAD")
+    ap.add_argument("--old-rev", default=None,
+                    help="重写前的提交（默认：最近一个仍有单文件 relay_core.py 的提交）")
     ap.add_argument("--skip-selftest", action="store_true")
     args = ap.parse_args()
+    if not args.old_rev:
+        args.old_rev = _last_rev_with_single_file()
 
     import torch as _t
     torch = _t
@@ -423,8 +477,11 @@ def main() -> int:
 
     old_src = subprocess.check_output(
         ["git", "show", "%s:relay_core.py" % args.old_rev], cwd=REPO).decode("utf-8")
-    with io.open(os.path.join(REPO, "relay_core.py"), encoding="utf-8") as f:
-        new_src = f.read()
+    # 2026-10-07 拆包：工作树里已没有单文件 relay_core.py ⇒ "new" 侧 = 包内全文拼接。
+    # 本工具只按**函数名**定位重写前后的实现，与函数落在哪个文件无关 ⇒ 拼接即可。
+    _rc_dir = os.path.join(REPO, "relay_core")
+    new_src = "".join(io.open(os.path.join(_rc_dir, _f), encoding="utf-8").read()
+                      for _f in sorted(os.listdir(_rc_dir)) if _f.endswith(".py"))
 
     total_pass = total_fail = 0
     print("=" * 78)

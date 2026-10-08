@@ -431,9 +431,9 @@ def _ref_indices(i: int, n: int, mode: str) -> List[int]:
     if mode == "both":
         return [j for j in range(n) if j != i]
     if mode == "later":      # 更靠近当前 = 下标更小
-        return [j for j in range(0, i)]
+        return list(range(i))
     if mode == "earlier":    # 更远 = 下标更大
-        return [j for j in range(i + 1, n)]
+        return list(range(i + 1, n))
     raise ValueError("未知 consensus_mode: %r" % mode)
 
 

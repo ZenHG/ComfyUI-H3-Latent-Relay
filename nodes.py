@@ -112,12 +112,12 @@ def _node_errors(*keys):
         def wrapper(self, *args, **kwargs):
             try:
                 return fn(self, *args, **kwargs)
-            except Exception as exc:       # noqa: BLE001
+            except Exception as exc:
                 if _errctx_origin_is_self(exc):
                     raise                  # 约束 B：本节点自己的中文错误 → 原样放行
                 try:
                     bound = inspect.signature(fn).bind_partial(self, *args, **kwargs).arguments
-                except Exception:          # noqa: BLE001
+                except Exception:
                     bound = {}
                 # 段号：能取到就写「第 N 段」，取不到就明说没有 —— **不伪造**（本仓纪律）
                 stage = bound.get("stage_index")
@@ -230,7 +230,7 @@ def _pcm_ui(path: str):
         # 同时带上绝对路径：拼接方**优先用它**（相对路径在不同平台上分隔符/根目录都可能对不上）。
         return {"filename": os.path.basename(path), "subfolder": rel, "type": "output",
                 "abs_path": os.path.abspath(path)}
-    except Exception:      # noqa: BLE001
+    except Exception:
         return None
 
 
@@ -256,7 +256,7 @@ def _pcm_sidecar(audio, enabled: bool):
         return (_pcm_ui(path),
                 "\n           ♪ **PCM 边车**：%s（%.1f MB）—— 拼成片时直读它，"
                 "音频不再二次编码（代际 2 → 1）。" % (path, mb))
-    except Exception as exc:      # noqa: BLE001
+    except Exception as exc:
         return None, ("\n           ⚠ PCM 边车写入失败（**不影响本段产物**，拼成片会自动"
                       "退回 mp4 解码）：%r" % (exc,))
 
@@ -281,7 +281,6 @@ def _comfy_registry() -> dict:
     import os
     import sys
 
-    import nodes as _n
     root = os.path.normcase(os.path.abspath(str(getattr(folder_paths, "base_path", "") or "")))
     target = os.path.join(root, "nodes.py")
 
@@ -289,11 +288,24 @@ def _comfy_registry() -> dict:
         f = os.path.normcase(os.path.abspath(str(getattr(mod, "__file__", "") or "")))
         return f == target and getattr(mod, "NODE_CLASS_MAPPINGS", None) is not None
 
-    if _at_root(_n):
-        return _n.NODE_CLASS_MAPPINGS or {}
+    # 🔴 2026-10-07 改：**先扫已加载模块，再 `import nodes`**（原来反过来）。
+    #   原因：在线下手持 `sys.path` 上有**本包目录**的环境里，`import nodes` 会 bind 到
+    #   **我们自己这份同名 `nodes.py`** 并**重新 exec 一遍** —— 而它开头的
+    #   `from . import relay_core as CORE` 在没有父包时直接 **ImportError**。
+    #   实证：`tools/review_050.py` 校验示例图时求 `H3RelayLatentUpscale.INPUT_TYPES()`
+    #   ⇒ `_upscaler_cls() → _comfy_registry() → import nodes` ⇒ 整脚本崩在这里，
+    #   而它此前**只查一张图**（那张图里没有 Upscale）⇒ 这个坑一直没被踩到。
+    #   宿主里 `nodes` 必然已在 `sys.modules` ⇒ 先扫既更准（拿到的就是宿主那份），
+    #   又**不会**触发那次危险的重复 exec。
     for _name, mod in list(sys.modules.items()):
         if _at_root(mod):
             return mod.NODE_CLASS_MAPPINGS or {}
+    try:
+        import nodes as _n
+    except Exception:
+        _n = None
+    if _n is not None and _at_root(_n):
+        return _n.NODE_CLASS_MAPPINGS or {}
     raise RuntimeError(
         "取不到 ComfyUI 的节点注册表（ComfyUI 根的 nodes 模块没加载？）。\n"
         "    本节点要在 ComfyUI 进程内运行，不能脱离宿主单跑。")
@@ -1309,7 +1321,7 @@ class H3RelayChain:
         if str(run_id).strip():
             try:
                 _write_progress(run_id, int(stage_index), int(segments))
-            except Exception as err:                          # noqa: BLE001
+            except Exception as err:
                 # 记进度失败**不能**拖垮这一段的执行（磁盘满/权限问题都不该让片子跑不出来）。
                 print("[H3 Relay] ⚠ 写连跑进度失败（不影响本段执行）：%s" % err)
         block, total = CORE.pick_prompt_block(prompts, stage_index)
@@ -1613,11 +1625,11 @@ class H3RelayCopyBridge:
                     ref_anchor_latent = CORE.load_av_latent(_stage_path(run_id, a_idx))
                     print("[H3 Relay] 复合桥：自动读外观锚（第 %d 段）" % (a_idx + 1),
                           flush=True)
-                except FileNotFoundError:
+                except FileNotFoundError as e:
                     raise RuntimeError(
                         "ref_anchor_stage=%d 的落盘文件不存在：%s\n"
                         "先把锚段跑完，或把 ref_anchor_stage 改回 -1。"
-                        % (a_idx, _stage_path(run_id, a_idx)))
+                        % (a_idx, _stage_path(run_id, a_idx))) from e
             plan = CORE.plan_relay(
                 latent, context_latent,
                 trim_frames=int(context_frames),
@@ -1661,7 +1673,7 @@ class H3RelayCopyBridge:
             #   标签 ⇒ 模型无法对应谁是谁 ⇒ 开/关两臂音频余弦只有 0.0497 = 打乱生成）。
             # 🔴【2026-10-05 三处改造（前沿理论赋能）】每条的理由写在它落地的那一行附近：
             #   ① **同源不变式**：新参考 = `[历史素材…][上一段音频尾]` —— **必须以 pin 的来源结尾**。
-            #      旧口径只改 `audio_ref` 而不动 pin ⇒ 与 `relay_core.py:4008-4012` 自己写明的
+            #      旧口径只改 `audio_ref` 而不动 pin ⇒ 与 `relay_core/bridge.py::build_continue_latent` 自己写明的
             #      「两处读的都是"上段尾"、**只改一处会打架**」冲突 ⇒ 软条件进不去、只剩扰动。
             #   ② **默认只给缝上那个人一块**（`config.max_speakers`，默认 1）：本包的块没有
             #      `<Audio j>` 标签 ⇒ 一槽多身份 = 条件歧义（两轮实测都更糟）。其余人走官方 3 槽。
@@ -1678,11 +1690,11 @@ class H3RelayCopyBridge:
             # （旧写法是等 VA 给完再截断 ⇒ 必然砍掉尾部那一片、切点落在音节中）
             try:
                 _dst = int(CORE.audio_from_latent(latent).shape[-1])
-            except Exception:                                 # noqa: BLE001
+            except Exception:
                 _dst = None
             # 钉住前缀的音频步数（= pin 的来源长度）。参考块**必须保住**它的下限 ——
             # 否则硬约束（pin，钉进输出流头部）与软条件（ref）打架：
-            # `relay_core.py:4008-4012` 自己写着「两处读的都是"上段尾"，**只改一处会打架**」。
+            # `relay_core/bridge.py::build_continue_latent` 自己写着「两处读的都是"上段尾"，**只改一处会打架**」。
             _pin_steps = int(math.ceil(int(context_frames) / float(CORE.FPS) * CORE.AUDIO_HZ - 1e-9))
             _va_audio = None
             _va_notes = []
@@ -2293,10 +2305,10 @@ class H3RelayAudioSeam:
         """
         _raw_dir = os.path.dirname(_audio_stage_path(run_id, 0))
         paths = [os.path.join(_raw_dir, "audio_raw_%05d.safetensors" % i)
-                 for i in range(0, int(idx) + 1)]
-        _fallback = [_audio_stage_path(run_id, i) for i in range(0, int(idx) + 1)]
+                 for i in range(int(idx) + 1)]
+        _fallback = [_audio_stage_path(run_id, i) for i in range(int(idx) + 1)]
         paths = [p if os.path.isfile(p) else f        # raw 缺失回退裁后（前奏不可得，退化为无前奏）
-                 for p, f in zip(paths, _fallback)]
+                 for p, f in zip(paths, _fallback, strict=False)]
         miss = [i for i, p in enumerate(paths) if not os.path.isfile(p)]
         if miss:
             return None, "（joined 跳过：缺第 %s 段落盘音频）" % miss
@@ -2318,7 +2330,7 @@ class H3RelayAudioSeam:
                     rep += "\n           已落盘：%s" % jp
                 except Exception as _e:                                   # 落盘失败不断链
                     rep += "\n           ⚠ joined 落盘失败：%r" % (_e,)
-        except Exception as e:                                   # noqa: BLE001
+        except Exception as e:
             return None, "（joined 失败：%r）" % (e,)
         return j, rep
 
@@ -2424,7 +2436,7 @@ class H3RelayAudioSeam:
         if os.path.isfile(prev_path):
             try:
                 target = CORE.load_audio(prev_path)
-            except Exception as _e:                       # noqa: BLE001
+            except Exception as _e:
                 print("[H3 Relay] 音频缝：读上一段音频失败（%r）→ 电平目标退回床源尾部" % (_e,))
         out, rep = CORE.audio_seam_patch(audio, CORE.load_audio(bed_path),
                                          patch, float(tile_seconds or 0.0),

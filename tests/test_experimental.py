@@ -3,13 +3,13 @@
 # Copyright (c) 2026 ComfyUI-H3-Latent-Relay contributors
 # 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 
-"""🧪 实验层单测（relay_core.py §「实验层」的断言集合）——零 GPU、零模型、秒级
+"""🧪 实验层单测（`relay_core/metrics.py` §「实验层」的断言集合）——零 GPU、零模型、秒级
 
 跑法（在包目录下）：
     python tests/test_experimental.py
 
 覆盖调研文档 ``RESEARCH_seam_frontier.md`` 里四个**尚未投产**的手段
-（``E1``~``E5``，见 relay_core.py 的实验层注释）：
+（``E1``~``E5``，见 `relay_core/metrics.py` 的实验层注释）：
 
   E3 DTW 残留量   dtw_residual / head_repeat_dtw
   E4 漂移曲线     segment_appearance_stats / drift_curve
@@ -45,9 +45,9 @@ if not os.path.isdir(os.path.join(_COMFY, "comfy")):
 sys.path.insert(0, _COMFY)
 sys.path.insert(0, _KIT_DIR)
 
-import comfy.nested_tensor as NT  # noqa: E402
+import comfy.nested_tensor as NT
 
-import relay_core as CORE  # noqa: E402
+import relay_core as CORE
 
 PASS, FAIL = [], []
 
@@ -377,7 +377,7 @@ try:
 finally:
     try:
         _shutil.rmtree(_vdir)
-    except OSError:                                     # noqa: S110,BLE001
+    except OSError:
         pass
 
 # 🔴 契约：节点侧必须把 VA 的 notes 拼进 `report`（否则上面三条白测 —— 用户还是看不到）

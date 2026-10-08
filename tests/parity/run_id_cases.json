@@ -1,0 +1,526 @@
+{
+  "_doc": [
+    "run_id 同步语义的**跨层对账 fixture**（0.6.31 新增）。",
+    "前端 `web/relay_kit_sync.js` 与后端 `relay_core/plan.py` 是**两份实现**（规范 §二·D）。",
+    "两份实现逐条对账的机制 = **这份 fixture 只有一份期望值**，两侧各跑一遍、都要过。",
+    "⇒ 任何一侧改了语义而没改另一侧，这里立刻红（两侧都跑，没有谁能'偷偷改'）。",
+    "",
+    "字段名两侧不同（JS 用 runId / Python 用 run_id），故 fixture 用 JS 侧拼写，",
+    "Python 侧读取时自己映射 —— 映射本身也在这套测试里被断言（见 parity 用例 8）。",
+    "范围（scope）**故意不放进 fixture**：后端没有「画布位置」这回事，API 侧天然是全图；",
+    "范围判据（Chain 数量 ⇒ 全图 / 按框隔离）由 tests/test_prompt_dispatch.mjs 的 8.16/8.17 单独锁。",
+    "⑨⑩⑪ 是 2026-10-07 审核补的三条：显式 value 的强制覆盖 / 连线且值已等于 / value 的 strip。"
+  ],
+  "cases": [
+    {
+      "name": "① 全部一致 ⇒ 不改（reason=none）",
+      "members": [
+        {
+          "id": "958",
+          "runId": "demo",
+          "linked": false
+        },
+        {
+          "id": "961",
+          "runId": "demo",
+          "linked": false
+        },
+        {
+          "id": "902",
+          "runId": "demo",
+          "linked": false
+        }
+      ],
+      "value": null,
+      "origin": "961",
+      "expect": {
+        "verdict": {
+          "state": "ok",
+          "value": "demo",
+          "ids": [
+            "958",
+            "961",
+            "902"
+          ],
+          "empty": []
+        },
+        "plan": {
+          "targets": [],
+          "reason": "none",
+          "skipped": []
+        }
+      }
+    },
+    {
+      "name": "② 一空多值 ⇒ 补齐空的那格（reason=sync）",
+      "members": [
+        {
+          "id": "958",
+          "runId": "demo",
+          "linked": false
+        },
+        {
+          "id": "931",
+          "runId": "",
+          "linked": false
+        },
+        {
+          "id": "902",
+          "runId": "demo",
+          "linked": false
+        }
+      ],
+      "value": null,
+      "origin": "958",
+      "expect": {
+        "verdict": {
+          "state": "ok",
+          "value": "demo",
+          "ids": [
+            "958",
+            "902"
+          ],
+          "empty": [
+            "931"
+          ]
+        },
+        "plan": {
+          "targets": [
+            "931"
+          ],
+          "reason": "sync",
+          "skipped": []
+        }
+      }
+    },
+    {
+      "name": "③ 两个不同的非空值 ⇒ 冲突，不猜、不改",
+      "members": [
+        {
+          "id": "958",
+          "runId": "demo",
+          "linked": false
+        },
+        {
+          "id": "961",
+          "runId": "other",
+          "linked": false
+        }
+      ],
+      "value": null,
+      "origin": "958",
+      "expect": {
+        "verdict": {
+          "state": "conflict",
+          "value": "",
+          "ids": [],
+          "empty": [],
+          "values": [
+            "demo",
+            "other"
+          ],
+          "by_value": {
+            "demo": [
+              "958"
+            ],
+            "other": [
+              "961"
+            ]
+          }
+        },
+        "plan": null
+      }
+    },
+    {
+      "name": "④ 全空 ⇒ empty（不给方向）",
+      "members": [
+        {
+          "id": "958",
+          "runId": "",
+          "linked": false
+        },
+        {
+          "id": "961",
+          "runId": "",
+          "linked": false
+        }
+      ],
+      "value": null,
+      "origin": null,
+      "expect": {
+        "verdict": {
+          "state": "empty",
+          "value": "",
+          "ids": [],
+          "empty": [
+            "958",
+            "961"
+          ]
+        },
+        "plan": null
+      }
+    },
+    {
+      "name": "⑤ 被连线接管的格子 ⇒ 只 skip、绝不写（写了也不生效 = 假同步）",
+      "members": [
+        {
+          "id": "958",
+          "runId": "demo",
+          "linked": false
+        },
+        {
+          "id": "931",
+          "runId": "",
+          "linked": true
+        },
+        {
+          "id": "902",
+          "runId": "demo",
+          "linked": false
+        },
+        {
+          "id": "960",
+          "runId": "",
+          "linked": false
+        }
+      ],
+      "value": null,
+      "origin": "958",
+      "expect": {
+        "verdict": {
+          "state": "ok",
+          "value": "demo",
+          "ids": [
+            "958",
+            "902"
+          ],
+          "empty": [
+            "931",
+            "960"
+          ]
+        },
+        "plan": {
+          "targets": [
+            "960"
+          ],
+          "reason": "sync",
+          "skipped": [
+            "931"
+          ]
+        }
+      }
+    },
+    {
+      "name": "⑥ 目标全是连线接管 ⇒ reason=linked（无处可写，要说清）",
+      "members": [
+        {
+          "id": "958",
+          "runId": "demo",
+          "linked": false
+        },
+        {
+          "id": "931",
+          "runId": "",
+          "linked": true
+        }
+      ],
+      "value": null,
+      "origin": "958",
+      "expect": {
+        "verdict": {
+          "state": "ok",
+          "value": "demo",
+          "ids": [
+            "958"
+          ],
+          "empty": [
+            "931"
+          ]
+        },
+        "plan": {
+          "targets": [],
+          "reason": "linked",
+          "skipped": [
+            "931"
+          ]
+        }
+      }
+    },
+    {
+      "name": "⑦ 空值不扩散（用户清空一格 ≠ 想清空全组）",
+      "members": [
+        {
+          "id": "958",
+          "runId": "demo",
+          "linked": false
+        },
+        {
+          "id": "902",
+          "runId": "demo",
+          "linked": false
+        }
+      ],
+      "value": "",
+      "origin": "958",
+      "expect": {
+        "verdict": {
+          "state": "ok",
+          "value": "demo",
+          "ids": [
+            "958",
+            "902"
+          ],
+          "empty": []
+        },
+        "plan": {
+          "targets": [],
+          "reason": "empty",
+          "skipped": []
+        }
+      }
+    },
+    {
+      "name": "⑧ 数字 id 与字符串 id 混用 ⇒ 一律按字符串比（前端 id 是字符串）",
+      "members": [
+        {
+          "id": 902,
+          "runId": "demo",
+          "linked": false
+        },
+        {
+          "id": "931",
+          "runId": "",
+          "linked": false
+        }
+      ],
+      "value": null,
+      "origin": 902,
+      "expect": {
+        "verdict": {
+          "state": "ok",
+          "value": "demo",
+          "ids": [
+            "902"
+          ],
+          "empty": [
+            "931"
+          ]
+        },
+        "plan": {
+          "targets": [
+            "931"
+          ],
+          "reason": "sync",
+          "skipped": []
+        }
+      }
+    },
+    {
+      "name": "⑨ 冲突 + **显式** value ⇒ 用户的强制覆盖（不是「不猜」那条路）",
+      "members": [
+        {
+          "id": "958",
+          "runId": "demo",
+          "linked": false
+        },
+        {
+          "id": "961",
+          "runId": "other",
+          "linked": false
+        }
+      ],
+      "value": "myFilm",
+      "origin": "958",
+      "expect": {
+        "verdict": {
+          "state": "conflict",
+          "value": "",
+          "ids": [],
+          "empty": [],
+          "values": [
+            "demo",
+            "other"
+          ]
+        },
+        "plan": {
+          "targets": [
+            "961"
+          ],
+          "reason": "sync",
+          "skipped": []
+        }
+      }
+    },
+    {
+      "name": "⑩ 连线接管且**值已经等于**目标 ⇒ 既不写、也不进 skipped（不是「要改但改不了」）",
+      "members": [
+        {
+          "id": "958",
+          "runId": "demo",
+          "linked": false
+        },
+        {
+          "id": "931",
+          "runId": "demo",
+          "linked": true
+        }
+      ],
+      "value": null,
+      "origin": "958",
+      "expect": {
+        "verdict": {
+          "state": "ok",
+          "value": "demo",
+          "ids": [
+            "958",
+            "931"
+          ],
+          "empty": []
+        },
+        "plan": {
+          "targets": [],
+          "reason": "none",
+          "skipped": []
+        }
+      }
+    },
+    {
+      "name": "⑪ value 带前后空格 ⇒ strip 后广播（别把空格播出去）",
+      "members": [
+        {
+          "id": "958",
+          "runId": "",
+          "linked": false
+        },
+        {
+          "id": "902",
+          "runId": "",
+          "linked": false
+        }
+      ],
+      "value": "  myFilm  ",
+      "origin": null,
+      "expect": {
+        "verdict": {
+          "state": "empty",
+          "value": "",
+          "ids": [],
+          "empty": [
+            "958",
+            "902"
+          ]
+        },
+        "plan": {
+          "targets": [
+            "958",
+            "902"
+          ],
+          "reason": "sync",
+          "skipped": []
+        }
+      }
+    }
+  ],
+  "collect": [
+    {
+      "name": "C1 只收六类带 run_id 的节点、其余忽略；连线形态标记 linked",
+      "prompt": {
+        "958": {
+          "class_type": "H3RelayChain",
+          "inputs": {
+            "run_id": [
+              "999",
+              0
+            ]
+          }
+        },
+        "902": {
+          "class_type": "H3RelayLatentSave",
+          "inputs": {
+            "run_id": "demo"
+          }
+        },
+        "961": {
+          "class_type": "H3RelayCopyBridge",
+          "inputs": {
+            "run_id": "  demo  "
+          }
+        },
+        "931": {
+          "class_type": "H3RelayAudioSeam",
+          "inputs": {}
+        },
+        "957": {
+          "class_type": "H3RelayTrimAV",
+          "inputs": {
+            "run_id": 12345
+          }
+        },
+        "960": {
+          "class_type": "H3RelayLatentLoad",
+          "inputs": {
+            "run_id": "demo"
+          }
+        },
+        "956": {
+          "class_type": "H3RelayLatentUpscale",
+          "inputs": {
+            "run_id": "should-be-ignored"
+          }
+        },
+        "1013": {
+          "class_type": "H3RelayPost",
+          "inputs": {
+            "run_id": "ignored-too"
+          }
+        },
+        "129": {
+          "class_type": "VAEDecode",
+          "inputs": {}
+        },
+        "902b": {
+          "class_type": "SaveVideo",
+          "inputs": {}
+        }
+      },
+      "expect": [
+        {
+          "id": "958",
+          "type": "H3RelayChain",
+          "run_id": "",
+          "linked": true
+        },
+        {
+          "id": "902",
+          "type": "H3RelayLatentSave",
+          "run_id": "demo",
+          "linked": false
+        },
+        {
+          "id": "961",
+          "type": "H3RelayCopyBridge",
+          "run_id": "demo",
+          "linked": false
+        },
+        {
+          "id": "931",
+          "type": "H3RelayAudioSeam",
+          "run_id": "",
+          "linked": false
+        },
+        {
+          "id": "957",
+          "type": "H3RelayTrimAV",
+          "run_id": "12345",
+          "linked": false
+        },
+        {
+          "id": "960",
+          "type": "H3RelayLatentLoad",
+          "run_id": "demo",
+          "linked": false
+        }
+      ]
+    }
+  ]
+}

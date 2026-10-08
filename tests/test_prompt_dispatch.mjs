@@ -8,8 +8,9 @@
 // 覆盖两组纯函数（都在 `web/`，前端与单测共用同一份）：
 //   · `relay_kit_prompt.js` —— 词块分块 / 按段号收集段记录
 //   · `relay_kit_sync.js`   —— run_id 跨节点同步（三态裁决 / 广播规划 / 表 ↔ nodes.py 对账）
-// 另有两组**静态扫描**（`chain.js` 依赖浏览器，跑不了单测 ⇒ 用扫描兜住静默失效）：
-//   阶段表 ↔ 相位串、会提交的按钮是否都过 run_id 闸。
+//   · `chain.js`            —— 段号推进表 `STAGE_TYPES` ↔ nodes.py 对账（静态扫源码）
+// 另有三组**静态扫描**（`chain.js` 依赖浏览器，跑不了单测 ⇒ 用扫描兜住静默失效）：
+//   阶段表 ↔ 相位串、会提交的按钮是否都过 run_id 闸、**STAGE_TYPES ↔ nodes.py 双向对账（8.21）**。
 // 对账口径写在 tests/test_relay_core.py 的第 26 组之外 —— 这组只跑 JS，不占 GPU、不进 Python 计数。
 
 import { readFileSync } from "node:fs";
@@ -214,23 +215,67 @@ check("8.20 `resolveRunId` 报出的 id 也一律 `String()` 归一（ids / empt
     && JSON.stringify(resolveRunId(M([961, "a"], ["902", "b"])).byValue.get("a")) === '["961"]');
 
 // —— 静态对账：表（手写）↔ nodes.py（真相源）
-{
-    const pyPath = fileURLToPath(new URL("../nodes.py", import.meta.url));
-    const src = readFileSync(pyPath, "utf-8");
-    const declared = [];
+//
+// 有两张这样的表：`relay_kit_sync.js` 的 `RUN_ID_TYPES`（8.12）与 `chain.js` 的 `STAGE_TYPES`（8.21）。
+// 两者都要与 nodes.py **双向**对账：少一类 = 那类节点**永远不跟随**（静默失效）；多一类 = 表里
+// 有个 nodes.py 里根本不存在的类型。⚠️ 扫描只有**一份实现**（下面两个小工具）—— 同一口径各写
+// 一遍就是本仓反复吃过的"同一条规则多处实现、判定会打架"。
+const pySrc = readFileSync(fileURLToPath(new URL("../nodes.py", import.meta.url)), "utf-8");
+
+/** nodes.py 里**声明了某个 widget**（缩进后紧跟 `"<key>": (`）的节点类名，按出现顺序。 */
+function classesDeclaringWidget(src, key) {
+    const out = [];
     let cur = null;
     for (const line of src.split(/\r?\n/)) {
         const m = /^class (\w+)/.exec(line);
         if (m) { cur = m[1]; continue; }
-        // 只认**widget 声明行**（缩进后紧跟 `"run_id": (`）：函数默认参数 `run_id=""` 不算
-        if (cur && /^\s+"run_id":\s*\(/.test(line) && !declared.includes(cur)) declared.push(cur);
+        // 只认**widget 声明行**；函数默认参数（`run_id=""` / `stage_index=0`）不算
+        if (cur && new RegExp(`^\\s+"${key}":\\s*\\(`).test(line) && !out.includes(cur)) out.push(cur);
     }
+    return out;
+}
+
+/** 从源码里抽一张 `const <name> = [ { type: "…" } ];` 表的类型名；读不到返回 `null`。 */
+function tableTypes(src, varName) {
+    const m = new RegExp(`const ${varName} = \\[([\\s\\S]*?)\\n\\];`).exec(src);
+    if (!m) return null;
+    return [...m[1].matchAll(/\{\s*type:\s*"(\w+)"/g)].map((x) => x[1]);
+}
+
+{
+    const declared = classesDeclaringWidget(pySrc, "run_id");
     const inTable = RUN_ID_TYPES.map((s) => s.type);
     const missing = declared.filter((c) => !inTable.includes(c));
     const extra = inTable.filter((c) => !declared.includes(c));
     check(`8.12 表 ↔ nodes.py 双向对账（nodes.py 声明了 ${declared.length} 个，表里 ${inTable.length} 个）`,
         declared.length > 0 && missing.length === 0 && extra.length === 0,
         `nodes.py 有而表里没有：${missing.join("/") || "无"} ｜ 表里有而 nodes.py 没有：${extra.join("/") || "无"}`);
+}
+
+// —— 静态对账：`STAGE_TYPES`（`chain.js` 里手写的表）↔ nodes.py（8.21，2026-10-07 新增）
+//
+// 🔴 为什么必须补这条：2026-09-30 的真实事故**就出在这张表** —— 手写清单漏了音频缝 ⇒
+//   连跑第 2 段时音频缝仍以 0 号自居、把第 1 段的床文件覆盖成第 2 段的 ⇒ **成片音画错段**。
+//   当时的处置是把"手写三处"改成表驱动，**但没有加机检** ⇒ 下次新增带 `stage_index` 的节点
+//   仍会静默漏（本仓 §七-19 记过这一条）。`chain.js` 依赖浏览器（`import { app } from
+//   "../../scripts/app.js"`）⇒ 跑不了单测，只能**静态扫源码**（与下面那条按钮闸同法）。
+//
+// 不变式：`{nodes.py 里声明了 stage_index 的类}` == `{H3RelayChain}` ∪ `STAGE_TYPES`。
+//   Chain 自己**不进表** —— 它由 `setStageAll()` 的 `setStage(chainNode, v)` 直接推进。
+{
+    const CHAIN_SELF = "H3RelayChain";
+    const chainSrc = readFileSync(
+        fileURLToPath(new URL("../web/relay_kit_chain.js", import.meta.url)), "utf-8");
+    const declared = classesDeclaringWidget(pySrc, "stage_index");
+    const inTable = tableTypes(chainSrc, "STAGE_TYPES");
+    const expect = declared.filter((c) => c !== CHAIN_SELF);
+    const missing = expect.filter((c) => !(inTable || []).includes(c));
+    const extra = (inTable || []).filter((c) => !expect.includes(c));
+    check(`8.21 STAGE_TYPES ↔ nodes.py 双向对账（nodes.py 声明 ${declared.length} 处，去掉 Chain 自己应有 ${expect.length} 类，表里 ${inTable === null ? "读不到" : inTable.length} 类）`,
+        declared.length > 0 && inTable !== null && missing.length === 0 && extra.length === 0,
+        inTable === null
+            ? "读不到 `const STAGE_TYPES = [ … ];`（改名了？改了就要同步本闸）"
+            : `nodes.py 有而表里没有：${missing.join("/") || "无"} ｜ 表里有而 nodes.py 没有：${extra.join("/") || "无"}`);
 }
 
 // —— 静态闸：**会提交**的按钮必须都过 `runIdPreflight`
@@ -254,8 +299,21 @@ check("8.20 `resolveRunId` 报出的 id 也一律 `String()` 归一（ids / empt
     check(`8.13 每个「会提交」的按钮都过了 run_id 闸（白名单式：新按钮默认必须有闸；共 ${labels.length} 个按钮）`,
         labels.length >= 6 && bad.length === 0,
         bad.length ? "没闸：" + bad.join("、") : labels.join("、"));
-    check("8.14 挂钩入口在（`nodeCreated` 里给带 run_id 的节点钩回调）",
-        /nodeCreated\s*\(node\)\s*\{[\s\S]{0,400}hookRunIdWidget/.test(chainSrc));
+    // 🔴 2026-10-07 实测修（这条原来锁的是**形式**，而形式在、行为坏）：
+    //   原文断言「`nodeCreated` 的函数体里直接出现 `hookRunIdWidget`」——而本机前端
+    //   **从不调用扩展的 `nodeCreated`**（前端 bundle 里 grep 不到任何 `.nodeCreated` 分发点），
+    //   ⇒ 钩子从来没挂上过，**改任一格 run_id 都不广播，且完全静默**。
+    //   现在挂钩入口是 `scheduleRunIdHook()`，由 **两条**路径调用（`nodeCreated` 兼容旧前端，
+    //   `beforeRegisterNodeDef` + prototype.onNodeCreated 是本版前端真正会走的那条）。
+    //   ⇒ 断言也改成锁「两条入口都在 + 挂钩函数会重试到挂上为止」，
+    //     另加一条：**`beforeRegisterNodeDef` 里必须给六类都打了 onNodeCreated 补丁**。
+    check("8.14 挂钩入口在（`nodeCreated` 兼容旧前端 + `beforeRegisterNodeDef` 走 prototype 补丁）",
+        /nodeCreated\s*\(node\)\s*\{[\s\S]{0,400}scheduleRunIdHook/.test(chainSrc)
+        && /function\s+scheduleRunIdHook\s*\(/.test(chainSrc)
+        && /scheduleRunIdHook\s*\(this\)/.test(chainSrc)
+        && /beforeRegisterNodeDef[\s\S]{0,1200}prototype\.onNodeCreated\s*=\s*function/.test(chainSrc));
+    check("8.15 挂钩会重试到挂上为止（不是一拍就放弃 —— widgets 比 onNodeCreated 晚建）",
+        /tries\s*>=\s*12/.test(chainSrc) && /setTimeout\(retry,\s*500\)/.test(chainSrc));
 }
 
 // ---------------------------------------------------------------- 9. 自引用：断言数只准有一个真相源
@@ -263,7 +321,11 @@ check("8.20 `resolveRunId` 报出的 id 也一律 `String()` 归一（ids / empt
 //   `LOCAL-维护规范` 的 §六 门槛表漂了 7 天）。`ci.yml` 与 `docs/08` 都要给用户写"期望 N/0"，
 //   而 N 的真正来源是**这份文件实跑出来的数** ⇒ 让它自引用：谁改了测试而没同步那两处，这里就红。
 //   （同款做法见 `tools/review_050.py` 的 H3g 自引用机检。）
-const EXPECTED_CHECKS = 41;   // 含本行这条自检自己
+const EXPECTED_CHECKS = 43;   // 含本行这条自检自己
+// ↑ 2026-10-07：42 → 43（8.14 改成锁两条入口 + 新增 8.15「挂钩会重试到挂上为止」）。
+//   前一条：41 → 42（新增 8.21 STAGE_TYPES ↔ nodes.py 双向对账）。
+//   🔴 这个常量就是「N/0」的**唯一真相源** —— ci.yml / docs/08 里写的那两个 42 得跟着它走，
+//      而 9.1 会把两边对上；改了测试忘了改它们，这里当场红。
 console.log("");
 console.log("[9] 断言数自引用（ci.yml / docs/08 里写的「期望 N/0」必须等于本文件实跑数）");
 {

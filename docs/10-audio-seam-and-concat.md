@@ -380,7 +380,11 @@ for k in range(SEGMENTS):
 
 **拼接的三条非 UI 路径**（都走同一份核心代码 `relay_core.assemble_mp4_segments`，行为完全一致）：
 
-① **命令行**（最省事；用装了 torch+av 的 python，通常就是 ComfyUI 的解释器）：
+🔴 **先看这一条**：① 的 CLI 脚本住在 `tools/` 里，而 `tools/` **不随安装包分发**
+（Comfy Registry / Manager 装到的包里没有它，`.comfyignore` 排掉了）⇒ **只有 `git clone`
+下来的人能用 ①**。用安装包的用户请走 ② 或 ③ —— 它们**在包内**，不需要任何额外文件。
+
+① **命令行**（最省事；⚠️ **仅 `git clone` 的仓库里有**）：
 
 ```bash
 python tools/concat_segments.py s1.mp4 s2.mp4 s3.mp4 -o film.mp4 --audio aac256

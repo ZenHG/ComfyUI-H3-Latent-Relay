@@ -37,8 +37,8 @@ if not _COMFY or not os.path.isdir(_COMFY):
 sys.path.insert(0, _COMFY)
 sys.path.insert(0, KIT)
 
-import torch  # noqa: E402
-import comfy.nested_tensor as NT  # noqa: E402
+import torch
+import comfy.nested_tensor as NT
 
 # 目录名含连字符，不能直接当包名 → 伪造包壳再按文件加载（与 review_050 同法）
 _pkg = types.ModuleType("h3latentrelay")
@@ -50,7 +50,7 @@ N = importlib.util.module_from_spec(_spec)
 sys.modules["h3latentrelay.nodes"] = N
 _spec.loader.exec_module(N)
 
-import relay_core as CORE  # noqa: E402
+import relay_core as CORE
 
 RUN = "_smoke_nodes"
 PASS, FAIL = [], []

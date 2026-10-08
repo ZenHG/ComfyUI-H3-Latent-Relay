@@ -10,10 +10,19 @@
 ```bash
 python tools/release.py            # 预演（本地前置 + 改动面，不推不发）
 python tools/release.py --go       # 真发布：push → 等 CI 绿 → GitHub Release → registry publish → 交叉验证
-python tools/release.py --verify-only   # 只回答「两边现在同步吗」（纯只读）
+python tools/release.py --verify-only   # 只回答「两边现在同步吗」（纯只读，**不跑 ① 前置**）
 python tools/release.py --release-only  # 只补建 GitHub Release（幂等；不 push、不发 registry）
+python tools/release.py --go --skip-ci-wait   # 🔴 跳过「等 CI 绿」那一步（**默认不跳**）
+python tools/release.py --set-token     # 轮换 registry PAT（从 stdin 读，不发布；见 §5）
 ```
 
+> 🔴 **`--verify-only` 与「预演」不是一回事**：前者**只跑 ⑥ 交叉验证**（纯只读），
+> **不跑 ① 前置**（干净工作树 / 版本四处 / `review_050` / `en_sync`）。
+> 想看前置预演，**不带任何参数**跑 `python tools/release.py`。
+>
+> 🔴 **`--skip-ci-wait` 是逃生门，不是常规路径**：跳过它 = **在没验证过的提交上发 registry**，
+> 而 registry 的 changelog 发出去就改不回来（见 §6）。只在 CI 本身故障且你**另行确认过门槛全绿**时才用。
+>
 > `--release-only` 为什么存在：Release **可补建**（正文可改、可删可重建），registry 的 changelog **不可**。
 > ⇒ 补 Release 时**绝不能**顺带再发一次 registry（同版本会被拒，白把流程弄红）。
 

@@ -19,15 +19,24 @@
 所以补这一条。它必须在**独立进程**里跑、且**不预设任何环境变量**（同进程里
 `test_v3_schema` 已经把环境变量写死了）。
 
-判据（三条，全过才退出码 0）：
+判据（五条，全过才退出码 0）：
   1. `NODE_CLASS_MAPPINGS` 是 **None** —— 宿主加载器（ComfyUI/nodes.py:2295-2337）的判据含
      `is not None`，为 None 才会落到 `elif comfy_entrypoint` 分支；
   2. `comfy_entrypoint` **存在且可调用**；
-  3. `WEB_DIRECTORY` 仍在（前端 JS 靠它挂载，V3 出口下宿主照样处理）。
+  3. `WEB_DIRECTORY` 仍在（前端 JS 靠它挂载，V3 出口下宿主照样处理）；
+  4. `NODE_API_DEFAULT == "v3"`（源码里的默认值这个**事实**，不是"本次跑中的值"）；
+  5. 🔴 **V3 出口实际注册的节点 id 集合 == `nodes.py` 的 `NODE_CLASS_MAPPINGS` 键集合**
+     （仅容忍 `H3RelayLatentUpscale` 因**它自己的** `INPUT_TYPES()` 抛而被逐节点容错跳过）。
+
+     ⚠️ 第 5 条是 2026-10-07 补的。原来只有前四条 ⇒ 「**V3 注册了 0 个 / 注册错节点**」
+     照样 **4/4 全绿**（本条记在 `LOCAL-维护规范与已知缺陷.md` §七-19）。当时的说法是
+     "由 `test_v3_schema` 的 2.1/2.2 兜底" —— 但那个测试**不在这条链上**，而且它自己
+     也只看"数目对不对"。**判据必须落在同一个进程里**，否则又是一处"看起来有人管"。
 
 跑法：
     COMFYUI_PATH=<ComfyUI 根> python tools/assert_default_exit.py
 """
+import asyncio
 import importlib.util
 import os
 import sys
@@ -119,6 +128,54 @@ def main():
     if not ok3:
         fails.append("WEB_DIRECTORY")
 
+    # —— ③ V3 出口**实际注册了哪些节点**（2026-10-07 加，判据见文件头第 5 条） ——
+    # 🔴 为什么非加不可：前四条全绿**也**兼容"V3 注册了 0 个节点"或"注册了别的名字"。
+    #    缺的这一条正是「无断言即未验收」的现场（§七-19）。
+    # `nodes.py` 离线加载：本文件**刻意不把 _KIT 插进 sys.path**，所以借 fake 包的
+    # submodule_search_locations 走 `h3latentrelay_default.nodes`（相对导入要靠它）。
+    v1_ids, v3_ids, why = set(), set(), ""
+    nmod = None
+    try:
+        _nspec = importlib.util.spec_from_file_location(
+            "h3latentrelay_default.nodes", os.path.join(_KIT, "nodes.py"))
+        nmod = importlib.util.module_from_spec(_nspec)
+        sys.modules["h3latentrelay_default.nodes"] = nmod
+        _nspec.loader.exec_module(nmod)
+        v1_ids = set(nmod.NODE_CLASS_MAPPINGS)
+    except Exception as e:
+        why = "读不到本包 nodes.py（%s: %s）" % (type(e).__name__, e)
+    try:
+        ext = asyncio.run(ep()) if asyncio.iscoroutinefunction(ep) else ep()
+        for _n in asyncio.run(ext.get_node_list()):
+            _s = _n.define_schema() if hasattr(_n, "define_schema") else _n.GET_SCHEMA()
+            v3_ids.add(_s.node_id)
+    except Exception as e:
+        why = "取不到 V3 的 get_node_list()（%s: %s）" % (type(e).__name__, e)
+    # 唯一容忍项：`H3RelayLatentUpscale` 的 `INPUT_TYPES()` 会去问宿主注册表 ⇒ 某些环境抛，
+    # V3 外壳**逐节点容错**跳过它（与 `tests/test_v3_schema.py` 的 2.1/2.2 **同一判据来源**：
+    # 问节点自己，而不是猜"宿主 nodes 能不能 import" —— 那两者在 CI 上会分叉）。
+    up_ok, up_why = False, ""
+    if nmod is not None and "H3RelayLatentUpscale" in v1_ids:
+        try:
+            nmod.NODE_CLASS_MAPPINGS["H3RelayLatentUpscale"].INPUT_TYPES()
+            up_ok = True
+        except Exception as e:
+            up_why = "%s: %s" % (type(e).__name__, e)
+    _missing = sorted(v1_ids - v3_ids)
+    _extra = sorted(v3_ids - v1_ids)
+    ok4 = bool(not why and not _extra and (not _missing
+                                           or (_missing == ["H3RelayLatentUpscale"] and not up_ok)))
+    print("  [%s] V3 get_node_list() 注册集合 == nodes.py 的 %d 个键%s"
+          % ("OK" if ok4 else "FAIL",
+             len(v1_ids), "（Upscale 因自身 INPUT_TYPES() 抛而跳过）" if _missing else ""))
+    print("         → V3 注册 %d 个；多出 %s ／ 少了 %s%s"
+          % (len(v3_ids), _extra or "无", _missing or "无",
+             ("；%s" % up_why) if (up_why and not up_ok) else ""))
+    if why:
+        print("         → %s" % why)
+    if not ok4:
+        fails.append("V3 注册集合")
+
     print()
     if fails:
         if fell_back:
@@ -132,7 +189,7 @@ def main():
         else:
             print("❌ 默认出口不是 V3（缺 %s）。检查 __init__.py 的 NODE_API_DEFAULT。" % "、".join(fails))
         return 1
-    print("✅ 默认出口 = V3（4/4：契约 1 + 行为 3）")
+    print("✅ 默认出口 = V3（5/5：契约 2 + 行为 3）")
     return 0
 
 

@@ -40,7 +40,7 @@ os.environ["H3RELAY_NODE_API"] = "v3"          # 强制走 V3 出口（必须在
 # 手法与 tests/test_relay_core.py 的 26.15 一致：本包 __init__.py 导入时会注册
 # /h3relay/concat 路由，需要 PromptServer.instance.routes —— 真实环境由 main.py 创建，
 # 离线环境没有 ⇒ 不 stub 就会在导入本包时炸。
-import types as _types                                 # noqa: E402
+import types as _types
 
 
 class _Routes:
@@ -79,9 +79,9 @@ sys.modules["server"] = _srvmod
 # 拉不到也不假红 —— 见 2.1/2.2 的判据（V3 的 entrypoint 已做逐节点容错，只丢那一个）。
 _HOST_NODES_IMPORT_OK = False
 try:
-    import nodes as _host_nodes                        # noqa: E402
+    import nodes as _host_nodes
     _HOST_NODES_IMPORT_OK = getattr(_host_nodes, "NODE_CLASS_MAPPINGS", None) is not None
-except Exception as _e:                                # noqa: BLE001
+except Exception as _e:
     # 🔴 这句话以前写的是"⇒ H3RelayLatentUpscale 的 schema 会被跳过" —— **是假的**（2026-09-30 实测）：
     #    宿主 import 抛的是 **RuntimeError**（如 CI 无 NVIDIA 驱动）时，`_upscaler_module()`
     #    **按设计吞掉 RuntimeError** ⇒ INPUT_TYPES 照样成功 ⇒ 该节点**在场**。
@@ -122,45 +122,41 @@ print("[2] 扩展与节点清单")
 _ep = KIT.comfy_entrypoint
 _ext = asyncio.run(_ep()) if asyncio.iscoroutinefunction(_ep) else _ep()
 V3_NODES = asyncio.run(_ext.get_node_list())
-# 🔴 为什么是 **8 或 7**（2026-09-25 首测 / **2026-09-30 修正机制**，别再猜）：
+# 🔴 节点数为什么**只有一个值**（2026-09-25 首测 / 2026-09-30 修正机制 / **2026-10-07 收敛**）：
 #
 #   `H3RelayLatentUpscale.INPUT_TYPES()` 要 `_upscale_model_names()` → `_upscaler_module()`
-#   → `_upscaler_cls()` → `_comfy_registry()`，而后者**第一步就 `import nodes`**。
-#   分岔点**不是"宿主 nodes 能不能 import"，而是那个异常**是什么类型**：
-#
-#   · 宿主注册表**拿得到**（`import nodes` 成功）⇒ 注册表里没有上游节点 ⇒ `_upscaler_cls()` 抛
+#   → `_upscaler_cls()` → `_comfy_registry()`（= 去**宿主**节点注册表里找上游包）：
+#   · 注册表**拿得到**（宿主 `nodes` 已加载）⇒ 里面没有上游节点 ⇒ `_upscaler_cls()` 抛
 #     **RuntimeError** ⇒ `_upscaler_module()` **捕获它**（它只 `except RuntimeError`）
 #     ⇒ 退回 `folder_paths.get_filename_list("latent_upscale_models")`
-#     （**宿主自带注册该目录**，`folder_paths.py:43`）⇒ 正常返回（最多给一个占位串）
-#     ⇒ INPUT_TYPES 不抛 ⇒ **8 节点 / 116 input / 70 项**。
-#   · `import nodes` 抛 **ImportError**（`sys.modules["nodes"] = None` 这种硬挡）
-#     ⇒ 类型不是 RuntimeError ⇒ `_upscaler_module()` **不吞** ⇒ 异常穿透 ⇒ INPUT_TYPES 抛
-#     ⇒ V3 entrypoint 的逐节点容错跳过它 ⇒ **7 节点 / 103 input / 63 项**。
-#   · 🔴 `import nodes` 抛 **RuntimeError**（**CI 就是这种**：宿主 import 链里
-#     `torch.cuda` 报 `Found no NVIDIA driver on your system`）⇒ **被吞** ⇒
-#     INPUT_TYPES 照样成功 ⇒ **8 节点 / 116 input / 70 项**。
+#     （**宿主自带注册该目录**，`folder_paths.py:43`）⇒ 正常返回 ⇒ INPUT_TYPES 不抛。
+#   · 注册表**拿不到**（宿主 `nodes` 导不进来 / 被本包目录遮成影子模块）⇒ 同样收敛成
+#     **RuntimeError** ⇒ 同样被吞 ⇒ **节点照样在场**。
+#   ⇒ **两条路都是 8 节点 / 122 input / 72 项**（数字会随加参数变，别再往这里抄）。
 #
-#   ⇒ 所以"Upscale 在不在"**只由它自己的 INPUT_TYPES() 回答**（2.1 就是这么判的）；
-#     用"宿主 nodes 能不能 import"去推会得到**相反的结论**（2026-09-30 CI 实测：
-#     探针说"不可用 ⇒ 期望 7"、实际 8 ⇒ 假红，而本地 70/0 复现不了）。
-#   ⇒ 两种环境的数字**都合法、都要在文档里声明**：
-#     ① 能拿到宿主注册表（含 import 抛 RuntimeError 被吞）：**8 / 116 / 70**
-#     ② `sys.modules["nodes"] = None` 硬挡：**7 / 103 / 63**
+#   🔴 2026-10-07 之前不是这样：`_comfy_registry()` 里的 `import nodes` 若抛 **ImportError**
+#     会**穿透**出去（`_upscaler_module()` 只吞 RuntimeError）⇒ INPUT_TYPES 抛 ⇒ 本文件会
+#     打印"它会被逐节点容错跳过" ⇒ **7 节点 / 63 项**。那个"第三档"只在
+#     `sys.modules["nodes"] = None` 这种**人工硬挡**下出现 —— 而 **CI 抛的是 RuntimeError、
+#     被吞掉 ⇒ CI 一直是 8 节点**。⇒ 旧文档把一个人造态写成了"CI 的环境"，那是错的。
+#     修法在 `nodes.py::_comfy_registry`（先扫 `sys.modules`；再 `import nodes` 且兜住任何异常
+#     ⇒ 失败一律收敛成 RuntimeError）⇒ **这一档不再可达**。
 #
-#   ⚠️ **别用"只把上游节点从注册表里摘掉"来模拟 ②** —— 那复现的是「装了宿主、没装上游包」，
-#      那种情况**仍然是 8 节点**。正确复现法：`sys.modules["nodes"] = None` 后跑本文件
-#      （工具版：`python tools/ci_env_repro.py tests/test_v3_schema.py`）。
+#   ⚠️ **别用"只把上游节点从注册表里摘掉"来模拟"没有注册表"** —— 那复现的是
+#      「装了宿主、没装上游包」，那种情况**仍然是 8 节点**。复现"没有宿主注册表"：
+#      `sys.modules["nodes"] = None` 后跑本文件
+#      （工具版：`python tools/ci_env_repro.py tests/test_v3_schema.py`）⇒ **同样 8 节点**。
 # 🔴 判据必须与被测对象**同源**（2026-09-30 修，CI 实测踩到）：
 #    "Upscale 在不在"只取决于**它自己的 `INPUT_TYPES()` 会不会抛** ——
-#    不是"宿主 nodes 能不能 import"。两者在 CI 上恰好**分叉**：
+#    不是"宿主 nodes 能不能 import"。两者曾恰好**分叉**：
 #      · 宿主 import 抛 **RuntimeError**（无 NVIDIA 驱动）⇒ 探针说"不可用"；
 #      · 而 `_upscaler_module()` **按设计吞掉 RuntimeError** ⇒ INPUT_TYPES 成功 ⇒ 节点在场。
-#    用探针去**推**节点数 ⇒ 期望 7、实际 8 ⇒ **假红**（本地 70/0 也复现不了）。
-#    现在直接问节点自己；节点数也不再写死 8/7（加节点时不用回来改这里）。
+#    用探针去**推**节点数 ⇒ 期望 7、实际 8 ⇒ **假红**。
+#    现在直接问节点自己；节点数也不写死（加节点时不用回来改这里）。
 try:
     V1.NODE_CLASS_MAPPINGS["H3RelayLatentUpscale"].INPUT_TYPES()
     _UPSCALE_OK = True
-except Exception as _e:                                # noqa: BLE001
+except Exception as _e:
     _UPSCALE_OK = False
     print("  提示：H3RelayLatentUpscale.INPUT_TYPES() 抛了（%s: %s）⇒ 它会被逐节点容错跳过。"
           % (type(_e).__name__, _e))
@@ -184,6 +180,12 @@ check("2.2 node_id 集合 == V1 键集合（仅允许 Upscale 因自己的 INPUT
 print()
 print("[3] 逐字段对齐（顺序错 = 用户参数静默错位）")
 _N_TOTAL, _N_INPUT, _N_DECL = 0, 0, 0
+# 🔴 2026-10-07 加：把"V3 未承载的 option 键"与"V1 用到的全部 option 键"**记下来**，
+#   交给第 [8] 节判红。原先 `_ok not in _d` 是**裸 continue** ⇒ 将来给某个参数加一个
+#   `v3/_compat._OPTS` 没有映射的 option 键时，这里静默跳过、三条测试全绿，
+#   而 V3 出口**悄悄少了那个选项**（老图参数错位）。
+_USED_OPTS = set()
+_NOT_CARRIED = []
 for _name in sorted(V1.NODE_CLASS_MAPPINGS):
     if _name not in V3_BY_ID:
         continue
@@ -218,12 +220,16 @@ for _name in sorted(V1.NODE_CLASS_MAPPINGS):
         if not isinstance(_t, list):
             try:
                 _d = _obj.as_dict()
-            except Exception as _e:                    # noqa: BLE001
+            except Exception as _e:
                 _bad.append("%s.as_dict 失败(%s)" % (_k, _e))
                 continue
             for _ok, _ov in _v1opts.items():
+                _USED_OPTS.add(_ok)
                 if _ok not in _d:
-                    continue                               # V3 未承载该键（如 display）⇒ 交给下面单列
+                    # 🔴 原来这里是裸 `continue`（只写了一句注释"交给下面单列"，而**下面并没有单列**）
+                    #   ⇒ 键被 V3 丢掉时**不报红**。现在记进 `_NOT_CARRIED`，由第 [8] 节判。
+                    _NOT_CARRIED.append((_name, _k, _ok))
+                    continue
                 if _d[_ok] != _ov:
                     _bad.append("%s.%s: V1=%r V3=%r" % (_k, _ok, _ov, _d[_ok]))
         else:
@@ -263,7 +269,7 @@ check("4.2 外壳未覆盖 V1 的方法名（业务逻辑仍在 nodes.py）",
 
 print()
 print("[5] ui 回显形状（拼接路由靠 history.outputs[node_id]['h3relay_pcm'] 取 PCM 边车）")
-from h3latentrelay.v3 import _compat as C                  # noqa: E402
+from h3latentrelay.v3 import _compat as C
 _ui_out = C.node_output({"ui": {C.V1.CORE.PCM_UI_KEY: [{"filename": "x", "subfolder": "s", "type": "output"}]},
                          "result": ("a", "b")})
 check("5.1 V1 的 {'ui','result'} → io.NodeOutput(*result, ui={...})",
@@ -280,7 +286,7 @@ print("[6] 加载摘要 / health 用的节点清单（`__init__._node_names`）"
 #   因为两套清单 1:1、退回去算出来还是 8 个、名字也对（**结果正确 ≠ 代码正确**）。
 #   判据 = **顺序**：V3 分支给 NODES 序（Upscale→Save→Load→TrimAV→…），V1 兜底给**字典序**。
 #   两者一致 ⇒ 才说明真走了 V3 分支，而不是"碰巧算对了"。
-from h3latentrelay.v3.nodes_v3 import NODES as _V3_NODES_SRC        # noqa: E402
+from h3latentrelay.v3.nodes_v3 import NODES as _V3_NODES_SRC
 _expect_order = [c.__name__ for c in _V3_NODES_SRC]
 _got_order = KIT._node_names()
 check("6.1 `_node_names()` 真走 V3 分支（判据 = 返回 **NODES 序**，而非 V1 兜底的**字典序**）",
@@ -306,6 +312,38 @@ check("7.2 逐项比对的 input 数 == V1 声明的 input 数（缺失必须报
       "V3 比对 %d ／ V1 声明 %d" % (_N_INPUT, _N_DECL))
 
 print()
+print("[8] option 键的对账（V1 用到的键必须被 V3 承载，否则**静默丢该选项**）")
+# 🔴 2026-10-07 新增（外部审核发现，见 `LOCAL-维护规范与已知缺陷.md` §七-20）。
+#   病：`v3/_compat._kwargs_of()` 只搬 `_OPTS` 里列出的键，**其余静默丢**；而 [3] 的判据是
+#   "单向包含"，键不在 V3 的 `as_dict()` 里时 `continue` ⇒ **不报红**。
+#   ⇒ 给某个参数加一个 `_OPTS` 没映射的 option 键 = V3 出口悄悄少一个选项（老图参数错位），
+#     而当时全套测试仍然绿。现在两层判据，**任一层命中就报红**：
+#     ① 静态覆盖：`nodes.py` 用到的每个 option 键都在 `_OPTS` 里（或在下表的例外里）；
+#     ② 运行期兜底：[3] 里"V3 未承载"而跳过的键，也必须落在同一份例外表里。
+_FROM_COMPAT = None
+try:
+    from h3latentrelay.v3 import _compat as _C
+    _FROM_COMPAT = set(_C._OPTS)
+except Exception as _e:
+    print("  ⚠ 取不到 `v3/_compat._OPTS`（%s: %s）⇒ 本节点无法对账" % (type(_e).__name__, _e))
+
+# V3 的 `io.*.Input` **本来就不承载**的 V1 option 键。⚠️ 白名单必须**逐项写明理由** ——
+# 否则它迟早变成"新增键时顺手往里塞"的垃圾桶，而那样就没人会去补映射了。
+_V3_NO_CARRY = {
+    # V1 的 `display` 是给前端看的展示提示（如 "hidden"），V3 的 io.Input 没有对应字段。
+    # 当前 `nodes.py` **没有使用**它；一旦真用上，说明有参数靠它改前端行为 ⇒ 那时必须回来补映射。
+    "display": "V3 的 io.Input 无对应字段（当前未使用；一旦使用要回来补映射）",
+}
+_leak = sorted(_USED_OPTS - (_FROM_COMPAT or set()) - set(_V3_NO_CARRY))
+check("8.1 nodes.py 用到的 option 键都被 `v3/_compat._OPTS` 承载（用了 %d 个键）"
+      % len(_USED_OPTS), _FROM_COMPAT is not None and not _leak,
+      "未映射=%s" % _leak)
+_bad_nc = sorted({_ok for _n, _k, _ok in _NOT_CARRIED} - set(_V3_NO_CARRY))
+check("8.2 [3] 里「V3 未承载」而跳过的键都在上面的例外表里（跳过 %d 处）"
+      % len(_NOT_CARRIED), not _bad_nc,
+      "跳出例外表=%s ｜ 明细=%s" % (_bad_nc, _NOT_CARRIED[:4]))
+
+print()
 print("=" * 78)
 print("结果：通过 %d / 失败 %d   （节点 %d 个，逐项比对的 input %d 个）"
       % (len(PASS), len(FAIL), len(V3_BY_ID), _N_INPUT))
@@ -314,4 +352,10 @@ if FAIL:
     print("失败项：")
     for f in FAIL:
         print("  · " + f)
-sys.exit(1 if FAIL else 0)
+# 脚本式退出码：失败 1 / 成功 0。
+# ⚠️ 在 pytest 下必须**跳过**退出：模块级 `SystemExit` 会让 `pytest tests/` 报
+#    `INTERNALERROR` 整个崩掉（连全绿都崩）—— 2026-10-07 实测：
+#    `test_relay_core.py` / `test_experimental.py` 早已加了这个保护，**本文件漏了**
+#    ⇒ `pytest tests/` 一直是坏的，只是没人这么跑过。
+if "pytest" not in sys.modules:
+    sys.exit(1 if FAIL else 0)

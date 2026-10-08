@@ -1,4 +1,4 @@
-# 离线自测：28 组断言明细与工具清单
+# 离线自测：分组断言明细与工具清单
 
 > 本文件由 README（0.6.0 梳理）拆出。主 README 只留命令与结论。
 > 📐 **槽位记号**：`[N]` = 0 起算。
@@ -12,7 +12,15 @@ python tests/test_relay_core.py
 脚本会自动上溯定位 ComfyUI 根目录；装在别处时用
 `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`。也支持 `pytest tests/`。
 
-**512 项断言，零 GPU、不加载模型**，覆盖三十一个方面：
+⚠️ **`pytest tests/` 与逐脚本跑**（2026-10-07 实测）：三条跑法现在**结果一致**。此前不一致 —— `pytest` 把三个脚本式测试跑在**同一个进程**里，而 `test_relay_core` / `test_experimental` 会把**本包目录**插进 `sys.path`（它们要离线加载 `nodes.py`）⇒ 之后 `test_v3_schema` 的 `import nodes` 会绑到**我们自己那份**（影子模块）⇒ 一度落到 **63/0 · 7 节点**。**根因已修**（`nodes.py::_comfy_registry` 不再让 ImportError 穿透 —— 见「V3 逐字段一致」一节），影子模块**不再影响节点是否在场**，所以现在 `pytest tests/` 直接给出 `72/0 · 8 节点`。
+
+**断言主体按组分片**在 `tests/cases/`（7 个 `_g*.py`）。`tests/test_relay_core.py` 只留文件头 /
+定位 / `check()` / **分片执行** / 汇总。分片用 `exec(compile(src, path, "exec"), globals())`
+**顺序执行到同一个命名空间** —— 与拆分前的单文件扁平脚本**同一 globals、同一顺序**，所以
+跨组共享的夹具变量照旧可见。⚠️ 分片文件名以 `_` 开头 ⇒ `pytest tests/` **不会**单独收集它们
+（否则每条断言会跑两遍）。
+
+**563 项断言，零 GPU、不加载模型**，覆盖三十四个方面：
 
 ### 计数与声明的纪律（原 README §8 的两条注，随瘦身搬入）
 
@@ -21,7 +29,7 @@ python tests/test_relay_core.py
   **其余一律写「失败 0」** —— 写死数字**必然漂移**（2026-09-25 实测：同一个数字在四处声明，
   只有一处有机检，另外两处漂了很久没人发现）。
 - ⚠️ **写更正说明时别复述旧的错误数字** —— 那会污染上面这些机检的正则。
-- 本文这行的「512 项断言 / 三十一个方面」+ 下面表格的 `| 21 |` 行由 **H3c** 机检（2026-09-30 起，
+- 本文这行的「563 项断言 / 三十四个方面」+ 下面表格的 `| 21 |` 行由 **H3c** 机检（2026-09-30 起，
   README 瘦身后判据从 README 移到本文件）。
 
 | 组 | 覆盖 |
@@ -59,12 +67,14 @@ python tests/test_relay_core.py
 
 | 31 | **音频参考额度（0.6.22）**：官方 `ref_audios` 3 槽 vs 本包**恒占 1 个**（声锚 / 上一段尾窗，二选一）⇒ 3+1=4 时 **report 必须点名超上限**（不许静默）；2+1=3 提示「正好用满」；`kind="video"` 的外观锚**不占音频额度**；无官方块 ⇒ 0 且不报警。**（0.6.23 追加 31.5–31.8）**：本包追加的块必须写明「**文本侧没有 `<Audio j>` 标签 ⇒ prompt 引不到它**」+ 它在 DiT 侧的**序号 = 官方数+1**（差一就是**指错位置**）+ 写明「一段多人的正路」（官方槽 / 编号按**已接线顺序** / `TrimAudioDuration` 裁窗）；🔴 **首段不注入 ⇒ 这些行一条都不许出现**（没动就不报） |
 
+| 33 | **拆包契约（2026-10-07）**：`relay_core` 的**包身份**（有 `__path__`、入口 = `__init__.py`）+ `__init__.py` **全量再导出**（`__all__` 里每个名字都能从包上取到、无重名）+ 🔴 **猴子补丁转发**（`relay_core.X = v` 必须写到**所有**持有 X 的子模块）：`_HOLDERS` 对**全部**导出名逐个与「真实持有者集合」对账；**跨模块副本**（`FPS` 有 4 个持有者）与**单属主**（`SETTLE_REPEAT_PATH`）各一条；外加一条**真生效**断言（改 `GUIDE_RUNS` ⇒ `snap_guide_run(35)` 由 22 变 5）。⚠️ 只转发「属主」时这一组会红（已做**变异测试**验证它不是假绿） |
+| 34 | **`run_id` 跨节点同步（2026-10-07，0.6.31）**：API / 脚本侧实现 `collect_run_ids` / `resolve_run_id` / `plan_run_id_sync` / `sync_run_id`；🔴 **跨层对账**（与前端 `web/relay_kit_sync.js` 是同一套语义的两份实现 ⇒ 共用 `tests/parity/run_id_cases.json` 一份 fixture，两侧都要过）；改写**不丢**同节点其它 input 键、**不就地**改调用方的 prompt；全空时给显式 `value` 能救回；已一致时**幂等**（不复制对象）；四个名字在 `relay_core` 顶层可取且在 `__all__` 里 |
 | 32 | **音频参考窗自动定长（0.6.25）**：`audio_ref_seconds=0` ⇒ **自动**（从上一段尾部往前累计够 2 秒**有声**内容，上限 6 秒）⇒ **一个参考槽里装多人音色**（额度不变）；🔴 **判据必须用一阶差分**（真实路径是 **VAE latent**，已归一化 ⇒ 用 RMS 判恒得「有声格 = 0」）；🔴 **阈值取 P99 而非 P50 / max**（四组横评：`P50×2` 被静音差分尾巴压低 ⇒ 窗从真值 2.00 漂到 **6.69 s**；`max×0.05` 被**一个离群脉冲**顶死 ⇒ 有声格 **215 → 2**；Otsu 抓太紧 ⇒ 只有 `P99×0.20` 全场景不崩）；判据**全是相对量**（整体降 −40 dBFS 窗长不变）；**静默段加长 8 倍窗长不变**、**注入离群脉冲窗长不变**（32.3 / 32.4 两条 🔴 回归）；退化全部可观测：静默 / 峰值<1e-6 / **NaN·Inf fail-closed** / **空音频不抛**（`reshape(-1,0)` 会炸链）/ 封顶点名；优先级：`audio_ref_seconds` > `audio_frames` > 自动（32.12–32.15）；接了声锚 ⇒ 自动**不介入**且 report 点名 |
 
 ## 前端纯函数的单测（node 跑、零依赖）
 
 ```bash
-node tests/test_prompt_dispatch.mjs      # 期望 41/0
+node tests/test_prompt_dispatch.mjs      # 期望 43/0
 node tests/test_audio_ref_budget.mjs     # 期望 45/0
 node tests/test_i18n.mjs                 # 期望 33/0
 ```
@@ -109,38 +119,44 @@ node tests/test_i18n.mjs                 # 期望 33/0
 ## V3 外壳与默认出口（零 GPU、秒级）
 
 ```bash
-COMFYUI_PATH=<根> python tests/test_v3_schema.py        # 能拿到宿主注册表 70/0（8 节点 / 122 个 input）；硬挡 63/0（7 节点 / 109 input）
-COMFYUI_PATH=<根> python tools/assert_default_exit.py   # 期望 4/4
+COMFYUI_PATH=<根> python tests/test_v3_schema.py        # 期望 72/0（8 节点 / 122 个 input；有没有宿主注册表都是这一档）
+COMFYUI_PATH=<根> python tools/assert_default_exit.py   # 期望 5/5
 ```
 
 `test_v3_schema.py` 验的是 **V3 与 V1 的逐字段一致**：节点 id 序列与顺序 / 取值 / `optional` /
 Combo `options` **全序** / outputs 路数与显示名 / `is_output_node` / 显示名 / category。
 为什么必须机检：老工作流的 `widgets_values` 是**按位置**存的，参数表错一位就是**用户参数静默错位**。
 
-> 🔴 **为什么会有两个数**（2026-09-25 首测 / **2026-09-30 修正机制**）：差的那一个节点是
-> `H3RelayLatentUpscale`，它的 `INPUT_TYPES()` 会走到 `_comfy_registry()`，而后者**第一步就
-> `import nodes`**。**分岔点不是"宿主 nodes 能不能 import"，而是那个异常是什么类型**：
-> · 拿到宿主注册表（`import nodes` 成功）⇒ 上游不在注册表 ⇒ `_upscaler_cls()` 抛 **RuntimeError**
->   ⇒ `_upscaler_module()` **捕获它**（**只** `except RuntimeError`）⇒ 退回 `get_filename_list`
->   （宿主自带注册 `latent_upscale_models`）⇒ 不抛 ⇒ **8 节点 / 122 input / 70 项**。
-> · `import nodes` 抛 **ImportError**（`sys.modules["nodes"] = None` 这种硬挡）⇒ 类型不是
->   RuntimeError ⇒ **不吞** ⇒ 穿透 ⇒ INPUT_TYPES 抛 ⇒ 逐节点容错跳过它
->   ⇒ **7 节点 / 109 input / 63 项**。**这是设计内的降级，不是失败。**
-> · 🔴 `import nodes` 抛 **RuntimeError**（**CI 就是这种**：宿主 import 链里 `torch.cuda` 报
->   `Found no NVIDIA driver on your system`）⇒ **被吞** ⇒ INPUT_TYPES 成功
->   ⇒ **8 节点 / 122 input / 70 项**（CI 的直跑与"本机"是同一档）。
+> 🔴 **为什么现在只有一个数**（2026-09-25 首测 / 2026-09-30 修正机制 / **2026-10-07 收敛**）：
+> 差的那一个节点是 `H3RelayLatentUpscale`，它的 `INPUT_TYPES()` 要问 `_comfy_registry()` 拿
+> **宿主**节点注册表，去里面找上游包（作者的 MinimaxH3LatentUpscaler3D）：
+> · 注册表**拿得到** ⇒ 上游不在里面 ⇒ `_upscaler_cls()` 抛 **RuntimeError**
+>   ⇒ `_upscaler_module()` **捕获它**（按设计）⇒ 退回 `get_filename_list`
+>   （宿主自带注册 `latent_upscale_models`）⇒ 不抛。
+> · 注册表**拿不到**（宿主 `nodes` 导不进来 / 被本包目录遮成影子模块）⇒ 同样收敛成
+>   **RuntimeError** ⇒ 同样被吞 ⇒ **它照样在场**。
+> ⇒ 两种环境**都是 8 节点 / 122 input / 72 项**，所以现在**只有一个数**。
 >
-> ⇒ 判据由**节点自己的 `INPUT_TYPES()`** 回答（测试的 `2.1`），**不是**由"宿主 nodes 能不能
->   import"去推 —— 后者在 CI 上会得出**相反**的结论（2026-09-30 实测：探针说"期望 7"、实际 8
->   ⇒ 假红，而本地 70/0 复现不了）。
-> ⚠️ **别用"只把上游节点从注册表摘掉"来模拟第二档** —— 那复现的是「装了宿主、没装上游包」，
-> 那种情况**仍是 8 节点**。正确复现第二档：`sys.modules["nodes"] = None` 后跑该测试
-> （工具版 `tools/ci_env_repro.py`）。
+> 🔴 2026-10-07 之前不是这样：`_comfy_registry()` 里的 `import nodes` 若抛 **ImportError** 会
+>   **穿透**出去（`_upscaler_module()` 只 `except RuntimeError`）⇒ INPUT_TYPES 抛 ⇒ V3 外壳的
+>   逐节点容错**静默跳过该节点** ⇒ **7 节点 / 63 项**。那个"第三档"只在
+>   `sys.modules["nodes"] = None` 这种**人工硬挡**下出现 ⇒ `tools/ci_env_repro.py` 复现出来的
+>   **从来不是 CI 真正进入的状态**（CI 抛的是 RuntimeError、被吞 ⇒ 8 节点）。
+>   **旧文档把一个人造态写成了"CI 的环境"，那是错的** —— 已修 `nodes.py::_comfy_registry`
+>   （**先扫 `sys.modules`**，再 `import nodes` 且兜住任何异常 ⇒ 失败一律收敛成 RuntimeError）。
+>
+> ⇒ 判据仍由**节点自己的 `INPUT_TYPES()`** 回答（测试的 `2.1`），**不是**由"宿主 nodes 能不能
+>   import"去推 —— 后者会给出**相反**的结论（2026-09-30 实测：探针说"期望 7"、实际 8 ⇒ 假红）。
+> ⚠️ **别用"只把上游节点从注册表摘掉"来模拟"没有注册表"** —— 那复现的是「装了宿主、没装上游包」，
+> 那种情况**仍是 8 节点**。复现"没有宿主注册表"：`sys.modules["nodes"] = None` 后跑该测试
+> （工具版 `tools/ci_env_repro.py`）⇒ **同样 72/0 · 8 节点**。
 > 这组数字已由 `tools/review_050.py` 的 **H3h** 机检（语义 = 「当前环境的真值必须出现在
-> 声明集合里」，并限制每个数最多两种取值）。
+> 声明集合里」）。
 
-`assert_default_exit.py` 锁的是**"默认出口 = V3"这件事本身**（4 条：**契约层 1 条** =
-`NODE_API_DEFAULT == "v3"`，与环境无关；**行为层 3 条** = `NODE_CLASS_MAPPINGS is None` /
+`assert_default_exit.py` 锁的是**"默认出口 = V3"这件事本身**（5 条：**契约层 2 条** =
+`NODE_API_DEFAULT == "v3"`（源码里的默认值这个*事实*）+ **V3 `get_node_list()` 注册的节点集合
+== `nodes.py` 的键集合**（差的那个 = `H3RelayLatentUpscale` 因自身 `INPUT_TYPES()` 抛而跳过）；
+**行为层 3 条** = `NODE_CLASS_MAPPINGS is None` /
 `comfy_entrypoint` 可调用 / `WEB_DIRECTORY` 在）。它必须**单跑一个进程**且**不设任何环境变量**
 —— `test_v3_schema.py` 会把 `H3RELAY_NODE_API` 写死成 `v3`，同进程里验不出"默认"。
 
@@ -157,18 +173,19 @@ Combo `options` **全序** / outputs 路数与显示名 / `is_output_node` / 显
 
 | 工具 | 判什么 | 期望 |
 |---|---|---|
-| `tools/review_050.py` | 文档—代码一致性（节点清单 / 参数表 / 断言数 / 版本号 / 示例图槽位 / **三条铁律** / **L13 英文文档同步闸** / **H3j smoke 期望值** / **H3k registry 元数据** / **H3l 发布规范在位** / **H3m 无凭据字面量** / **H3n i18n 词表完整性** / **H3p i18n 悬浮提示双语完整性** / **H3q JS 逗号表达式** / **H3r i18n 防覆盖兜底** / **H3s link 端点字段两代兼容** / **H3t 官方语言入口** / **H3o 文档悬空引用**） | **104/0** |
+| `tools/review_050.py` | 文档—代码一致性（节点清单 / 参数表 / 断言数 / 版本号 / **全部示例图**槽位（I1-I4：槽位 / 节点数 / widget 标记） / **三条铁律** / **L13 英文文档同步闸** / **H3j smoke 期望值** / **H3k registry 元数据** / **H3l 发布规范在位** / **H3m 无凭据字面量** / **H3n i18n 词表完整性** / **H3p i18n 悬浮提示双语完整性** / **H3q JS 逗号表达式** / **H3r i18n 防覆盖兜底** / **H3s link 端点字段两代兼容** / **H3t 官方语言入口** / **H3o 文档悬空引用** / **H3u registry 包文件数真值** / **H3v tools 脚本数真值** / **H3w 未跟踪文件** /  **H3x `setdefault` 到 `PYTHONPATH`** / **H3y tools 脚本登记** / **H3z release.py flag 齐全** / **H4a Python 子进程显式 env** / **H4b 判据表自检** / **H4c 台账一致** / **H4d JS 期望数真值** / **H4e dist 白名单真值**） | **116/0** |
 | `tools/smoke_nodes.py` | 节点层功能冒烟（续接七件真跑一遍；🔍 放大节点要上游权重，不在冒烟内） | **16/0** |
-| `tools/assert_default_exit.py` | 默认出口 = V3（契约 1 + 行为 3） | **4/4** |
+| `tools/assert_default_exit.py` | 默认出口 = V3（契约 2 + 行为 3；含 **V3 实际注册的节点集合**） | **5/5** |
 | `tools/sync_deploy_check.py` | 部署副本与指定提交的提交态一致 | 全 `OK` |
-| `tools/ci_env_repro.py` | 在本机**复现 CI 环境**跑任意校验脚本（CI 里宿主 `nodes` 导不进来 ⇒ 两套环境期望数不同） | 直传被跑脚本退出码 |
+| `tools/ci_env_repro.py` | 在本机**造出「没有宿主注册表」那条路径**跑任意校验脚本（⚠️ 2026-10-07 起它造的这条路数字与直跑**相同** —— 那个「7 节点」是它自己造出来的**人造态**、已根修；但**数字相同 ≠ 路径相同**，仍值得跑） | 直传被跑脚本退出码 |
 | `tools/en_sync.py` | **英文文档同步闸**（中文 = 源、`*_EN.md` = 派生物，节级 hash） | 退出码 `0` |
 | `tools/release.py` | **两个渠道成对发布 + 交叉验证**（GitHub push → 等 CI 绿 → registry publish → 回头查两边是不是这一版）。规范正文 = [`RELEASING.md`](../RELEASING.md) | 退出码 `0`（`--verify-only` 只读） |
+| `tools/user_smoke.py` | **外部开源用户视角冒烟**（2026-10-07 新增）：按 `git ls-files` 复制一份**干净副本**（= 别人 `git clone` 下来的那份）⇒ 断言 ① 默认出口 V3 与 `H3RELAY_NODE_API=v1` **注册同一批节点**（铁律一的机器版）② 每个节点 `INPUT_TYPES()` 可求值 ③ `WEB_DIRECTORY` 在副本内、前端 JS 全在 ④ **没有任何模块来自副本之外**；再从 `dist/` **真跑一次节点方法**（不只 import）。⚠️ 为什么必须有：其余自检全在**原仓里**跑 ⇒ 证明不了 clone 出来的那份**自足** | **10/0** |
 | `tools/voice_bank.py` | **声库采集器**（不是自检）：从已渲染段采集某角色的声锚，喂 Copy Bridge 的 `voice_anchor`。可选 ASR 台词守卫（装了 funasr 才启用，没装回退能量法） | 人工判读（`OK` / `跳过`） |
 
 CI（`.github/workflows/ci.yml`）按顺序跑：**ruff 静态检查 → 回归五件套（`test_relay_core` · `review_050` ·
 `smoke_nodes` · `test_experimental` · `check_ui_workflow`）→ 默认出口断言 → V3 逐字段一致 → JS 词分发 →
-构建分发集（`make_minimal_bundle.py --zip`，含 en_sync 前置闸）**，任一步失败即红。
+构建分发集（`make_minimal_bundle.py --zip`，含 en_sync 前置闸）→ **外部用户视角冒烟（`user_smoke.py`：干净副本 + `dist/` 真跑）**，任一步失败即红。
 `en-sync` 不单列 CI 步骤 —— 它由 `review_050` 的 **L13** 覆盖。
 ⚠️ **已知覆盖缺口**：只跑 Python **3.11**（而 `requires-python = ">=3.10"`）；
 宿主依赖不固定版本 ⇒ 上游漂移会造噪声红。详见 `ci.yml` 头部的缺口清单。
@@ -201,12 +218,12 @@ CI（`.github/workflows/ci.yml`）按顺序跑：**ruff 静态检查 → 回归�
 python tools/make_minimal_bundle.py --zip     # → dist/ComfyUI-H3-Latent-Relay(.zip)
 ```
 
-**24 文件 / 796 KB**（zip 263 KB），只带：
+**42 文件 / 1260 KB**（zip 446 KB），只带：
 
 | 组 | 文件 |
 |---|---|
-| 运行必需（12） | `__init__.py` · `relay_core.py` · `nodes.py` · `layout_contract.py` · `v3/`×4 · `exp/history_anchor_v2/`×3 |
-| 前端（2） | `web/relay_kit_chain.js` · `web/relay_kit_prompt.js` |
+| 运行必需（25） | `__init__.py` · `relay_core/`×11 · `nodes.py` · `layout_contract.py` · `v3/`×4 · `exp/__init__.py` · `exp/history_anchor_v2/`×3 · `exp/voice_accum/`×3 |
+| 前端（7） | `web/` 下的 7 个 JS（连跑 / 词分发 / 声锚 / i18n×2 / 同步） |
 | 示例（3） | `examples/` 的两个工作流 + 其 README |
 | 元数据/法律/必读（7） | `requirements.txt` · `pyproject.toml` · `LICENSE` · `licenses/Apache-2.0.txt` · `THIRD-PARTY-NOTICES.md` · `README.md` · `README_EN.md` |
 

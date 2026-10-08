@@ -95,7 +95,7 @@ def try_object_info(api: str):
     """取服务端 schema；取不到**不算致命**（还有本地定义可用）。返回 (oi or None, 错误文本)。"""
     try:
         return load_object_info(api), ""
-    except Exception as e:                                    # noqa: BLE001
+    except Exception as e:
         return None, repr(e)
 
 
@@ -141,14 +141,14 @@ def local_pack_defs(comfyui_root: str = "") -> dict:
         mod = importlib.util.module_from_spec(spec)
         sys.modules["h3latentrelay_local_check.nodes"] = mod
         spec.loader.exec_module(mod)
-    except Exception as e:                                    # noqa: BLE001
+    except Exception as e:
         print("  ⚠ 读不到本包本地定义（%r）⇒ 本包节点将退回服务端 schema。" % (e,))
         return {}
     out, skipped = {}, []
     for name, cls in mod.NODE_CLASS_MAPPINGS.items():
         try:
             it = cls.INPUT_TYPES()
-        except Exception as e:                                    # noqa: BLE001
+        except Exception as e:
             # 🔴 2026-09-30 加：**逐节点容错 + 明说跳过**（不是静默）。
             #   实证（CI 首跑本工具）：`🔍 H3 Relay · Latent Upscale` 的 INPUT_TYPES 会走宿主注册表
             #   ⇒ 宿主 `comfy.model_management` 在 GPU 探测上抛
@@ -402,11 +402,15 @@ def relay_core_mod():
     mod = sys.modules.get("h3latentrelay_local_check.relay_core")
     if mod is None:
         try:
+            # 2026-10-07 拆包：relay_core 由单文件变成包 ⇒ 按**包**加载
+            # （带 submodule_search_locations，否则 `from ._grid import …` 解析不了）。
+            _rc = os.path.join(pack_root(), "relay_core")
             spec = importlib.util.spec_from_file_location(
-                "h3relay_core_toolcheck", os.path.join(pack_root(), "relay_core.py"))
+                "h3relay_core_toolcheck", os.path.join(_rc, "__init__.py"),
+                submodule_search_locations=[_rc])
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
-        except Exception:                                     # noqa: BLE001
+        except Exception:
             mod = None
     _RELAY_CORE_CACHE.append(mod)
     return mod
@@ -446,7 +450,7 @@ def upstream_prompts(wf, node, oi):
     if not isinstance(vals, list):
         return None, up.get("id")
     defn = (oi or {}).get(up.get("type"))
-    named = dict(zip(frontend_slots(defn), vals)) if defn else {}
+    named = dict(zip(frontend_slots(defn), vals, strict=False)) if defn else {}
     for k in ("positive", "prompt", "text", "string"):     # 与前端 upstreamText 同优先级
         v = named.get(k)
         if isinstance(v, str) and v.strip():
@@ -473,7 +477,7 @@ def check_chain_prompts(wf, oi):
     has_save = any(any(t in str(n.get("type") or "") for t in VIDEO_SAVE_LIKE) for n in nodes)
     out = []
     for n in chains:
-        v = dict(zip(slots, n["widgets_values"]))
+        v = dict(zip(slots, n["widgets_values"], strict=False))
         seg = v.get("segments")
         seg = int(seg) if isinstance(seg, (int, float)) and not isinstance(seg, bool) else 0
         # 🔴 有连线一律读上游（与前端 `readPrompts()` 同口径）—— 只读本机会**假红**
@@ -534,7 +538,7 @@ def check_file(path: str, oi: dict, verbose: bool = True) -> int:
                              "（前端会全部回落到默认值）"
                              % (n["id"], n["type"], len(exp)))
             continue
-        for k, v in zip(exp, wv):
+        for k, v in zip(exp, wv, strict=False):
             msg, hard = check_value(defn, k, v)
             if msg:
                 (problems if hard else warns).append("node %s %s: %s" % (n["id"], n["type"], msg))

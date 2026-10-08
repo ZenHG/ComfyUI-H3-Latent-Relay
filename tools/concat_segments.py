@@ -58,7 +58,7 @@ def main(argv=None) -> int:
 
     try:
         from relay_core import assemble_mp4_segments
-    except Exception as exc:                      # noqa: BLE001
+    except Exception as exc:
         print("读不到本包核心（relay_core）：%r\n"
               "    ⇒ 请用**装了 torch 与 av 的 python** 跑本工具，例如 ComfyUI 的解释器：\n"
               "       <ComfyUI>/python_embeded/python.exe tools/concat_segments.py …\n"
@@ -71,7 +71,7 @@ def main(argv=None) -> int:
         rep = assemble_mp4_segments([str(p) for p in a.segments], a.out,
                                     audio_codec=codec, audio_bitrate=bitrate,
                                     crf=a.crf, pcm_paths=a.pcm, on_log=print)
-    except Exception as exc:                      # noqa: BLE001
+    except Exception as exc:
         # 交给调用方的必须是**看得懂的一句话**，不是 av/PyAV 的堆栈
         # （最常见 = 段文件路径写错 / 某段还是写一半的文件）。
         print("🔴 拼接过程抛错（%s）：%s\n"

@@ -18,6 +18,83 @@
 
 ---
 
+## 0.6.31 — 2026-10-07
+
+🔴 **修两个一直坏着的按钮；`run_id` 改成"任意位置都同步"，并且 API 侧也有了。**
+
+**① 连跑与 Run 两个按钮从 0.6.12 起就是坏的** —— 点下去只报「内部出错」。
+另外五个按钮（Approve / 续跑 / Stop / 拼成一条 / Reset）一直正常。
+**② `run_id` 的"改一处、其它自动跟着变"从来没生效过**（0.6.19 引入），
+而且**失败无声** ⇒ 音频缝与桥的名字不一致时，床源会去**别的目录**找音频。
+
+**改动**：① 同步范围改成「图上只有一条连跑节点 ⇒ **全图同步**」，节点摆在哪都行；
+只有一张图里画了**多条**连跑节点（＝一部图放两部片子）才按分组框隔离。
+② 后端补上同一套语义：新函数 `relay_core.sync_run_id` 与新接口 `POST /h3relay/runid`，
+**跑批脚本不用再手改六处**。③ 新增一条浏览器冒烟门，专盯"后端全绿但按钮不能用"这类静默失效。
+
+**升级动作**：**刷新一次浏览器**即可（前端脚本即时加载）。跑批脚本可选用
+`POST /h3relay/runid` 先自检一遍 `run_id` 是否一致。
+
+<!-- EN -->
+
+🔴 **Two buttons that have been broken since 0.6.12 are fixed; `run_id` now syncs from anywhere, and the API gets it too.**
+
+**1. The auto-run and single-run buttons have been broken since 0.6.12** — clicking them only reported an
+internal error. The other five buttons (approve, resume, stop, assemble-into-one, reset) always worked.
+**2. The "edit once, the rest follow" `run_id` sync never actually worked** (added in 0.6.19) and it failed
+**silently**, so when the audio seam's `run_id` disagreed with the bridge, the bed sound was looked up in the
+wrong folder.
+
+**What changed**: (1) the sync scope is now "a single chain node on the graph means sync across the whole
+graph", so node positions no longer matter; grouping only applies when one graph deliberately holds several
+films. (2) The back end gained the same semantics: a new `relay_core.sync_run_id` helper plus a new
+`POST /h3relay/runid` route, so **batch scripts no longer edit six fields by hand**. (3) Added a
+browser-level smoke gate that targets exactly the failure mode where "the back end is green but the buttons
+do not work".
+
+**Action required**: **just reload your browser** (front-end scripts load on refresh). Batch scripts may
+optionally call `POST /h3relay/runid` to check that every `run_id` agrees before submitting.
+
+
+## 0.6.30 — 2026-10-07
+
+**纯内部重构：核心代码从单文件拆成一个包 —— 行为逐位不变，你什么都不用改。**
+
+`relay_core` 原本是一个 5482 行、23 万字符的单文件；现在拆成 `relay_core/` 包（11 个文件：
+时序网格 / latent 存取 / 续接计划 / 音频缝 / 接缝检测 / 拷贝桥 / 只读观测 / 拼接成片 / 分块放大 /
+词分发）。**对使用者的接口一个都没变**：`relay_core` 仍是同一个导入名，所有函数与常量照旧可用
+（包里的 `__init__.py` **全量再导出**）；节点、连线、参数、图 JSON 一律不动。
+
+**唯一看得到的变化在下载件上**：最小分发集从 24 个文件变成 42 个（多出来的都是包内的子模块，
+单个文件都变小了，合计体积基本不变）。
+
+离线断言全部照旧通过，并且已**逐个符号**比对确认代码**逐字搬运、未改一行算式**。
+
+**升级动作**：**无需任何动作**。图 / 连线 / 参数都不用改；脚本里的 `from relay_core import …` 照旧。
+
+<!-- EN -->
+
+**A purely internal refactor: the core is now a package instead of one file — behaviour is unchanged,
+bit for bit.**
+
+`relay_core` used to be a single 5,482-line file. It is now the `relay_core/` package (11 files: timing
+grid, latent I/O, relay planning, audio seam, seam detection, copy bridge, read-only observations,
+concatenation, chunked upscaling, prompt dispatch). **Nothing about the interface changes**: `relay_core`
+is still the same import name and every function and constant remains available (the package's
+`__init__.py` re-exports all of them), so nodes, links, parameters and workflow JSON are untouched.
+
+The only visible difference is in the download: the minimal distribution set grows from 24 files to 42
+(the extra entries are the submodules, each smaller than the old file, and total size is roughly
+unchanged).
+
+The offline assertions all still pass, and every symbol was compared one by one to confirm the code was
+moved verbatim with no expression changed.
+
+**Action required**: **none**. Workflows, links and parameters are unaffected; any
+`from relay_core import …` in your scripts keeps working.
+
+---
+
 ## 0.6.29 — 2026-10-06
 
 **节点上的中/EN 按钮改成跟随官方语言设置；顺手修掉一个把「改了没生效」拖了整整一轮的坑。**

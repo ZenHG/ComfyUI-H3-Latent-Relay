@@ -1,4 +1,4 @@
-# Offline self-test: 28 assertion groups in detail and tool inventory
+# Offline self-test: assertion-group detail and tool inventory
 
 <!-- EN-SYNC src=docs/08-testing.md stamped=2026-10-05 mode=see tools/en_sync.json -->
 
@@ -17,7 +17,23 @@ python tests/test_relay_core.py
 The script locates the ComfyUI root by walking up automatically; if it is installed elsewhere use
 `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py`. `pytest tests/` is also supported.
 
-**512 assertions, zero GPU, no model loading**, covering thirty-one aspects:
+⚠️ **`pytest tests/` vs running the scripts one by one** (measured 2026-10-07): the three ways now give
+**identical results**. They used to differ — `pytest` runs these three script-style tests in **the same
+process**, and both `test_relay_core` and `test_experimental` insert **this pack's own directory** into
+`sys.path` (they load `nodes.py` offline) ⇒ a later `test_v3_schema` resolved its `import nodes` to
+**our own copy** (a shadow module) ⇒ it once landed in **63/0 · 7 nodes**. **The root cause is fixed**
+(`nodes.py::_comfy_registry` no longer lets an ImportError escape — see the "V3 field-by-field parity"
+section), so the shadow module **no longer affects whether a node is present** and `pytest tests/` now
+directly reports `72/0 · 8 nodes`.
+
+**The assertion body is split by group** into `tests/cases/` (seven `_g*.py` files).
+`tests/test_relay_core.py` keeps only the file header / root discovery / `check()` / **case execution** /
+summary. The cases are run with `exec(compile(src, path, "exec"), globals())` **in order into the same
+namespace** — the same globals and the same order as the single-file flat script before the split, so
+fixtures shared across groups remain visible. ⚠️ Case file names start with `_`, so `pytest tests/`
+does **not** collect them separately (otherwise every assertion would run twice).
+
+**518 assertions, zero GPU, no model loading**, covering thirty-three aspects:
 
 ### Counting and declaration discipline (the two notes from former README §8, moved in with the slimming)
 
@@ -28,7 +44,7 @@ The script locates the ComfyUI root by walking up automatically; if it is instal
   the other two drifted for a long time unnoticed).
 - ⚠️ **When writing a correction note, do not restate the old wrong number** — that pollutes the regexes
   of the machine checks above.
-- This file's line "512 assertions / thirty-one aspects" + the `| 21 |` row of the table below are
+- This file's line "518 assertions / thirty-three aspects" + the `| 21 |` row of the table below are
   machine-checked by **H3c** (since 2026-09-30; after the README slimming the criterion moved from the
   README to this file).
 
@@ -67,12 +83,14 @@ The script locates the ComfyUI root by walking up automatically; if it is instal
 
 | 31 | **Audio-reference budget (0.6.22)**: the official `ref_audios` 3 slots vs this pack **always occupying 1** (voice anchor / the previous segment's tail window, either-or) ⇒ at 3+1=4 the **report must name the over-limit** (it must never be silent about it); 2+1=3 hints "exactly full"; a `kind="video"` appearance anchor **does not consume the audio budget**; no official block ⇒ 0 and no warning. **(0.6.23 adds 31.5–31.8)**: the block this pack appends must state "**the text side has no `<Audio j>` tag ⇒ the prompt cannot reference it**" + its DiT-side **ordinal = official count + 1** (off by one means **pointing at the wrong place**) + state "the proper route for several people in one segment" (official slots / numbering by **wired order** / `TrimAudioDuration` window trimming); 🔴 **not injected for segment 1 ⇒ none of these lines may appear** (nothing done, nothing reported) |
 
+| 33 | **Split contract (2026-10-07)**: `relay_core`'s **package identity** (it has `__path__`, its entry point is `__init__.py`) + the **full re-export** in `__init__.py` (every name in `__all__` is reachable from the package, no duplicates) + 🔴 **monkey-patch forwarding** (`relay_core.X = v` must be written to **every** submodule holding X): `_HOLDERS` is reconciled name by name against the real holder set for **all** exported names; one case for a **cross-module copy** (`FPS` has 4 holders) and one for a **single owner** (`SETTLE_REPEAT_PATH`); plus a **really-takes-effect** assertion (changing `GUIDE_RUNS` makes `snap_guide_run(35)` go from 22 to 5). ⚠️ With owner-only forwarding this group goes red (verified by a **mutation test**, so it is not a false green) |
+| 34 | **`run_id` cross-node sync (2026-10-07, 0.6.31)**: the API / script-side implementation `collect_run_ids` / `resolve_run_id` / `plan_run_id_sync` / `sync_run_id`; 🔴 **cross-layer parity** (it is the same semantics as the front-end `web/relay_kit_sync.js`, i.e. two implementations ⇒ they share the single fixture `tests/parity/run_id_cases.json` and both sides must pass); rewriting does **not** drop the node's other input keys and does **not** mutate the caller's prompt in place; an explicit `value` rescues the all-empty case; already-consistent input is **idempotent** (no dict copy); all four names are reachable on the `relay_core` top level and listed in `__all__` |
 | 32 | **Automatic audio-reference window sizing (0.6.25)**: `audio_ref_seconds=0` ⇒ **automatic** (accumulate 2 seconds of **voiced** content walking back from the previous segment's tail, cap 6 seconds) ⇒ **several speakers' timbre in one reference slot** (budget unchanged); 🔴 **the criterion must use the first difference** (the real path is a **VAE latent**, already normalized ⇒ judging by RMS always yields "voiced cells = 0"); 🔴 **the threshold takes P99, not P50 / max** (four-way comparison: `P50×2` is pulled down by the silent difference tail ⇒ the window drifts from the true 2.00 to **6.69 s**; `max×0.05` is pinned by **a single outlier pulse** ⇒ voiced cells **215 → 2**; Otsu grips too tight ⇒ only `P99×0.20` holds across all scenarios); the criteria are **all relative** (lowering everything by −40 dBFS leaves the window length unchanged); **lengthening a silent segment 8× leaves the window unchanged**, **injecting an outlier pulse leaves the window unchanged** (two 🔴 regressions 32.3 / 32.4); every degradation is observable: silence / peak<1e-6 / **NaN·Inf fail-closed** / **empty audio does not throw** (`reshape(-1,0)` would break the chain) / a cap point named; priority: `audio_ref_seconds` > `audio_frames` > automatic (32.12–32.15); with a voice anchor wired ⇒ automatic **does not intervene** and the report names it |
 
 ## Unit tests for front-end pure functions (run by node, zero dependencies)
 
 ```bash
-node tests/test_prompt_dispatch.mjs      # expected 41/0
+node tests/test_prompt_dispatch.mjs      # expected 43/0
 node tests/test_audio_ref_budget.mjs     # expected 45/0
 node tests/test_i18n.mjs                 # expected 33/0
 ```
@@ -136,8 +154,8 @@ failure):
 ## V3 shell and default exit (zero GPU, seconds)
 
 ```bash
-COMFYUI_PATH=<root> python tests/test_v3_schema.py      # host registry available 70/0 (8 nodes / 122 inputs); hard-blocked 63/0 (7 nodes / 109 inputs)
-COMFYUI_PATH=<root> python tools/assert_default_exit.py  # expected 4/4
+COMFYUI_PATH=<root> python tests/test_v3_schema.py      # expected 72/0 (8 nodes / 122 inputs; same tier with or without the host registry)
+COMFYUI_PATH=<root> python tools/assert_default_exit.py  # expected 5/5
 ```
 
 `test_v3_schema.py` verifies **V3 and V1 are field-by-field identical**: node id sequence and order /
@@ -146,35 +164,41 @@ values / `optional` / the **total order** of Combo `options` / output count and 
 Why a machine check is mandatory: an old workflow's `widgets_values` are stored **by position**, so one
 wrong slot in the parameter table means **the user's parameters are silently shifted**.
 
-> 🔴 **Why there are two numbers** (first measured 2026-09-25 / **mechanism corrected 2026-09-30**): the
-> one differing node is `H3RelayLatentUpscale`, whose `INPUT_TYPES()` reaches `_comfy_registry()`, and the
-> latter **does `import nodes` as its first step**. **The fork point is not "can the host nodes be
-> imported", but what type that exception is**:
-> · The host registry is obtained (`import nodes` succeeds) ⇒ upstream is not in the registry ⇒
->   `_upscaler_cls()` raises **RuntimeError** ⇒ `_upscaler_module()` **catches it** (**only** `except
->   RuntimeError`) ⇒ falls back to `get_filename_list` (the host registers `latent_upscale_models`
->   itself) ⇒ does not raise ⇒ **8 nodes / 122 input / 70 items**.
-> · `import nodes` raises **ImportError** (the hard block `sys.modules["nodes"] = None`) ⇒ the type is not
->   RuntimeError ⇒ **not swallowed** ⇒ propagates ⇒ INPUT_TYPES raises ⇒ the per-node fault tolerance
->   skips it ⇒ **7 nodes / 109 input / 63 items**. **This is an in-design degradation, not a failure.**
-> · 🔴 `import nodes` raises **RuntimeError** (**this is CI's case**: in the host import chain
->   `torch.cuda` reports `Found no NVIDIA driver on your system`) ⇒ **swallowed** ⇒ INPUT_TYPES succeeds
->   ⇒ **8 nodes / 122 input / 70 items** (CI's direct run is the same tier as "local").
+> 🔴 **Why there is now only one number** (first measured 2026-09-25 / mechanism corrected 2026-09-30 /
+> **converged 2026-10-07**): the one differing node is `H3RelayLatentUpscale`, whose `INPUT_TYPES()` asks
+> `_comfy_registry()` for the **host** node registry so it can look up the upstream pack (the author's
+> MinimaxH3LatentUpscaler3D):
+> · Registry **obtainable** ⇒ upstream is not in it ⇒ `_upscaler_cls()` raises **RuntimeError**
+>   ⇒ `_upscaler_module()` **catches it** (by design) ⇒ falls back to `get_filename_list`
+>   (the host registers `latent_upscale_models` itself) ⇒ does not raise.
+> · Registry **unobtainable** (host `nodes` cannot be imported / is shadowed by this pack's own directory)
+>   ⇒ it likewise converges to **RuntimeError** ⇒ likewise swallowed ⇒ **the node is still present**.
+> ⇒ Both environments are **8 nodes / 122 input / 72 items**, hence **one number**.
 >
-> ⇒ The criterion is answered by **the node's own `INPUT_TYPES()`** (the test's `2.1`), **not** inferred
->   from "can the host nodes be imported" — the latter reaches the **opposite** conclusion on CI
->   (measured 2026-09-30: the probe said "expect 7", the actual was 8 ⇒ a false red, and locally 70/0
->   could not reproduce it).
-> ⚠️ **Do not simulate the second tier by "just removing the upstream node from the registry"** — that
->   reproduces "host installed, upstream pack not installed", which **is still 8 nodes**. To correctly
->   reproduce the second tier: set `sys.modules["nodes"] = None` then run the test (tool version
->   `tools/ci_env_repro.py`).
+> 🔴 It was not like this before 2026-10-07: if the `import nodes` inside `_comfy_registry()` raised
+>   **ImportError** it would **propagate** (`_upscaler_module()` only catches `RuntimeError`) ⇒
+>   INPUT_TYPES raised ⇒ the V3 shell's per-node fault tolerance **silently skipped that node** ⇒
+>   **7 nodes / 63 items**. That "third state" only occurred under the **artificial hard block**
+>   `sys.modules["nodes"] = None` ⇒ what `tools/ci_env_repro.py` reproduced was **never the state CI
+>   actually enters** (CI raises RuntimeError, which is swallowed ⇒ 8 nodes).
+>   **The old docs wrote an artificial state up as "CI's environment", which was wrong** — fixed in
+>   `nodes.py::_comfy_registry` (**scan `sys.modules` first**, then `import nodes` with every exception
+>   caught ⇒ all failures converge to RuntimeError, the one this function declares).
+>
+> ⇒ The criterion is still answered by **the node's own `INPUT_TYPES()`** (the test's `2.1`), **not**
+>   inferred from "can the host nodes be imported" — the latter reaches the **opposite** conclusion
+>   (measured 2026-09-30: the probe said "expect 7", the actual was 8 ⇒ a false red).
+> ⚠️ **Do not simulate "no registry" by "just removing the upstream node from the registry"** — that
+>   reproduces "host installed, upstream pack not installed", which **is still 8 nodes**. To reproduce
+>   "no host registry": set `sys.modules["nodes"] = None` then run the test (tool version
+>   `tools/ci_env_repro.py`) ⇒ **also 72/0 · 8 nodes**.
 > This set of numbers is machine-checked by `tools/review_050.py`'s **H3h** (semantics = "the current
-> environment's true value must appear in the declared set", and each number is limited to at most two
-> values).
+> environment's true value must appear in the declared set").
 
-`assert_default_exit.py` locks **"the default exit = V3" itself** (4 items: **1 contract item** =
-`NODE_API_DEFAULT == "v3"`, environment-independent; **3 behaviour items** = `NODE_CLASS_MAPPINGS is None` /
+`assert_default_exit.py` locks **"the default exit = V3" itself** (5 items: **2 contract items** =
+`NODE_API_DEFAULT == "v3"` (the *fact* of the source default) + **the node set registered by V3's
+`get_node_list()` == the keys of `nodes.py`** (the only tolerated miss = `H3RelayLatentUpscale` skipped
+because its own `INPUT_TYPES()` raised); **3 behaviour items** = `NODE_CLASS_MAPPINGS is None` /
 `comfy_entrypoint` callable / `WEB_DIRECTORY` present). It must **run alone in one process** and **with no
 environment variables set** — `test_v3_schema.py` hard-codes `H3RELAY_NODE_API` to `v3`, so in the same
 process "default" cannot be verified.
@@ -195,19 +219,20 @@ real problem on its very first run** (in CI the V3 exit actually could not load)
 
 | Tool | What it judges | Expected |
 |---|---|---|
-| `tools/review_050.py` | doc–code consistency (node list / parameter table / assertion count / version / example-graph slots / **the three iron rules** / **the L13 English-doc sync gate** / **the H3j smoke expected values** / **H3k registry metadata** / **H3l release policy present** / **H3m no credential literals** / **H3n i18n word-table completeness** / **H3p bilingual tooltip completeness** / **H3q JS comma expression** / **H3r i18n anti-overwrite guard** / **H3s link endpoint field compat** / **H3t official locale entry** / **H3o dangling doc references**) | **104/0** |
+| `tools/review_050.py` | doc–code consistency (node list / parameter table / assertion count / version / **all** example-graph slots (I1-I4: slots / node counts / widget markers) / **the three iron rules** / **the L13 English-doc sync gate** / **the H3j smoke expected values** / **H3k registry metadata** / **H3l release policy present** / **H3m no credential literals** / **H3n i18n word-table completeness** / **H3p bilingual tooltip completeness** / **H3q JS comma expression** / **H3r i18n anti-overwrite guard** / **H3s link endpoint field compat** / **H3t official locale entry** / **H3o dangling doc references** / **H3u registry package file count (true value)** / **H3v tools script count (true value)** / **H3w untracked files** /  **H3x `setdefault` to `PYTHONPATH`** / **H3y tools script registry** / **H3z release.py flags complete** / **H4a explicit env for Python children** / **H4b criterion-table self-check** / **H4c ledger consistency** / **H4d JS expected values (true value)** / **H4e dist whitelist (true value)**) | **116/0** |
 | `tools/smoke_nodes.py` | node-layer functional smoke test (the seven continuation items really run once; 🔍 the upscale node needs upstream weights and is not in the smoke test) | **16/0** |
-| `tools/assert_default_exit.py` | default exit = V3 (contract 1 + behaviour 3) | **4/4** |
+| `tools/assert_default_exit.py` | default exit = V3 (contract 2 + behaviour 3; includes **the node set V3 actually registers**) | **5/5** |
 | `tools/sync_deploy_check.py` | the deployed copy matches the commit state of the given commit | all `OK` |
-| `tools/ci_env_repro.py` | **reproduce the CI environment** locally to run any validation script (in CI the host `nodes` cannot be imported ⇒ the two environments have different expected counts) | passes through the run script's exit code |
+| `tools/ci_env_repro.py` | **fabricate the "no host registry" path** locally to run any validation script (`sys.modules["nodes"] = None`). ⚠️ since 2026-10-07 that path yields the **same** counts as a direct run — the "7 nodes" figure was an **artificial state this very tool created** (root-fixed); **same counts ≠ same path**, so it is still worth running | passes through the run script's exit code |
 | `tools/en_sync.py` | **English-doc sync gate** (Chinese = source, `*_EN.md` = derived artifact, section-level hash) | exit code `0` |
 | `tools/release.py` | **publish to both channels as a pair + cross-validate** (GitHub push → wait for CI green → registry publish → check back that both are this version). Policy text = [`RELEASING.md`](../RELEASING.md) | exit code `0` (`--verify-only` is read-only) |
+| `tools/user_smoke.py` | **external open-source user's view smoke test** (added 2026-10-07): copies a **clean clone** per `git ls-files` (exactly what someone gets from `git clone`) ⇒ asserts ① the default V3 exit and `H3RELAY_NODE_API=v1` **register the same set of nodes** (the machine form of iron rule 1) ② every node's `INPUT_TYPES()` evaluates ③ `WEB_DIRECTORY` lives inside the clone and every front-end JS is present ④ **no module comes from outside the clone**; then it **really runs one node method** from `dist/` (not just an import). ⚠️ Why it is required: every other self-check runs **inside the source repo** ⇒ none of them can prove that a clone is self-sufficient | **10/0** |
 | `tools/voice_bank.py` | **voice-bank collector** (not a self-check): collect a character's voice anchor from already-rendered segments, feed it to Copy Bridge's `voice_anchor`. Optional ASR dialogue guard (enabled only when funasr is installed, otherwise falls back to the energy method) | manual reading (`OK` / `跳过`) |
 
 CI (`.github/workflows/ci.yml`) runs in order: **ruff static check → the regression five (`test_relay_core` ·
 `review_050` · `smoke_nodes` · `test_experimental` · `check_ui_workflow`) → the default-exit assertion →
 V3 field-by-field parity → JS prompt dispatch → build the distribution set
-(`make_minimal_bundle.py --zip`, including the en_sync pre-gate)**, and any failing step turns it red.
+(`make_minimal_bundle.py --zip`, including the en_sync pre-gate) → **the external-user-view smoke test (`user_smoke.py`: clean clone + a real run from `dist/`)**, and any failing step turns it red.
 `en-sync` is not a separate CI step — it is covered by `review_050`'s **L13**.
 ⚠️ **Known coverage gaps**: only Python **3.11** is run (while `requires-python = ">=3.10"`); host
 dependencies are not pinned ⇒ upstream drift creates noise-red. See the gap list at the head of `ci.yml`.
@@ -243,12 +268,12 @@ section = red); ③ **fail-closed** (a missing/broken manifest ⇒ exit code 2, 
 python tools/make_minimal_bundle.py --zip     # → dist/ComfyUI-H3-Latent-Relay(.zip)
 ```
 
-**24 files / 796 KB** (zip 263 KB), carrying only:
+**42 files / 1260 KB** (zip 446 KB), carrying only:
 
 | Group | Files |
 |---|---|
-| Runtime-required (12) | `__init__.py` · `relay_core.py` · `nodes.py` · `layout_contract.py` · `v3/`×4 · `exp/history_anchor_v2/`×3 |
-| Front end (2) | `web/relay_kit_chain.js` · `web/relay_kit_prompt.js` |
+| Runtime-required (25) | `__init__.py` · `relay_core/` (11 files) · `nodes.py` · `layout_contract.py` · `v3/` (4 files) · `exp/__init__.py` · `exp/history_anchor_v2/` (3 files) · `exp/voice_accum/` (3 files) |
+| Front end (7) | The seven JS files under `web/` (chain / prompt dispatch / voice anchor / i18n ×2 / sync) |
 | Examples (3) | `examples/`'s two workflows + their README |
 | Metadata/legal/must-read (7) | `requirements.txt` · `pyproject.toml` · `LICENSE` · `licenses/Apache-2.0.txt` · `THIRD-PARTY-NOTICES.md` · `README.md` · `README_EN.md` |
 

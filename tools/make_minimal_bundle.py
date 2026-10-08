@@ -7,7 +7,7 @@
 
 ## 为什么要有它
 
-本仓是**开发者仓**：`docs/`（10 篇，每篇均有英文版 `*_EN.md`）· `tests/`（4 套）· `tools/`（10 个）· `.github/`（CI 与模板）
+本仓是**开发者仓**：`docs/`（10 篇，每篇均有英文版 `*_EN.md`）· `tests/`（离线自测）· `tools/`（14 个）· `.github/`（CI 与模板）
 加起来比运行期代码还多。想让用户 git clone 一份干净的，或者想打 zip 发给别人时，
 手挑文件容易**漏**（漏一个 `.py` 就是 `ImportError`，且往往是别人先发现）。
 
@@ -52,8 +52,20 @@ DEFAULT_OUT = os.path.join(KIT, "dist", "ComfyUI-H3-Latent-Relay")
 MANIFEST_RUNTIME = [
     # 包入口：注册 /h3relay/concat 路由 + 选出口（V1/V3）
     "__init__.py",
-    # 业务内核（两文件占全包 96% 的体积，是唯一真相源）
-    "relay_core.py",
+    # 业务内核（`relay_core/` 包 + nodes.py 占全包 96% 的体积，是唯一真相源）
+    # 2026-10-07 拆包：单文件 relay_core.py → relay_core/ 包；对外仍叫 `relay_core`
+    # （`__init__.py` 全量再导出），所以 `from . import relay_core as CORE` 一行不用改。
+    "relay_core/__init__.py",
+    "relay_core/_grid.py",
+    "relay_core/latent.py",
+    "relay_core/audio.py",
+    "relay_core/plan.py",
+    "relay_core/seam.py",
+    "relay_core/bridge.py",
+    "relay_core/metrics.py",
+    "relay_core/concat.py",
+    "relay_core/upscale.py",
+    "relay_core/prompt.py",
     "nodes.py",
     # nodes.py 直接 import 的契约模块
     "layout_contract.py",
@@ -125,10 +137,11 @@ MANIFEST = MANIFEST_RUNTIME + MANIFEST_FRONTEND + MANIFEST_EXAMPLES + MANIFEST_M
 EXCLUDED_NOTE = {
     "docs/": "10 篇深度文档（机制/参数/采样链/画布/排障/出词/Chain/测试/观测/音频；每篇均有英文版 *_EN.md）"
              "——开发与排查用，非运行必需",
-    "tests/": "4 套离线自测 ——开发用（**项数不在此复述**，见 tools/README.md 与 ci.yml）",
-    "tools/": "10 个自检/取证/CLI ——开发用（含本脚本自身）",
+    "tests/": "离线自测 ——开发用（**项数不在此复述**，见 tools/README.md 与 ci.yml）",
+    "tools/": "14 个自检/取证/CLI ——开发用（含本脚本自身）",
     ".github/": "CI 工作流与 issue 模板",
     "CHANGES.md": "版本流水（历史，含旧机路径，已豁免开源卫生扫描）",
+    "RELEASING.md": "发布规范正文（两个渠道的流程与格式规则）——开发件，非运行必需",
     "RELEASE-NOTES.md": "用户可见的发布说明（双语；registry changelog / GitHub Release 取它）"
                         "——升级前看一眼，但非运行必需",
     "CONTRIBUTING.md": "贡献者指南",
@@ -242,7 +255,7 @@ def verify_manifest():
             ["git", "-C", KIT, "ls-files", "web/"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
         ).stdout.split() if f.endswith(".js")]
-    except Exception as exc:                          # noqa: BLE001 —— git 不可用要说清，不能当过
+    except Exception as exc:  # git 不可用要说清，不能当过
         print("   [FAIL] 跑不了 git ls-files（%s）⇒ 前端完整性**未校验**" % type(exc).__name__)
         return False
     declared_js = set(MANIFEST_FRONTEND)
@@ -442,9 +455,11 @@ def preflight_en_sync():
     """打包前跑英文文档同步闸：英文过期 ⇒ **不出包**（否则发行物里的 EN 是旧版）。"""
     print()
     print("⓪ 英文文档同步闸（tools/en_sync.py）")
+    # ⚠️ 显式给 `env=`（机检 **H4a**：跑 Python 的子进程必须显式声明环境，不许默认继承调用者）。
+    #    `en_sync.py` 只读文件、不需要 ComfyUI ⇒ 传当前环境即可，**别编一个本模块没有的常量**。
     r = subprocess.run([sys.executable, os.path.join(KIT, "tools", "en_sync.py")],
                        capture_output=True, text=True, encoding="utf-8", errors="ignore",
-                       cwd=KIT)
+                       cwd=KIT, env=dict(os.environ))
     tail = (r.stdout or "").strip().splitlines()
     print("   [%s] %s" % ("OK" if r.returncode == 0 else "FAIL",
                           tail[-1] if tail else "（无输出）"))

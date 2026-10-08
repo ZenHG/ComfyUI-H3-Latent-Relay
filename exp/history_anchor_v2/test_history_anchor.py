@@ -24,7 +24,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _KIT_DIR = os.path.dirname(os.path.dirname(_HERE))
 sys.path.insert(0, _HERE)
 
-import history_anchor as HA  # noqa: E402
+import history_anchor as HA
 
 PASS, FAIL = [], []
 
@@ -37,7 +37,7 @@ def check(name, cond, detail=""):
 def expect_raise(name, fn, needle=""):
     try:
         fn()
-    except Exception as e:                                   # noqa: BLE001
+    except Exception as e:
         ok = (needle in str(e)) if needle else True
         check(name, ok, "→ %s: %s" % (type(e).__name__, str(e).splitlines()[0][:100]))
         return
@@ -231,7 +231,7 @@ check("T11.1 两次调用选中的 (段,token) 相同",
       [(r["_exp_level"], r["_exp_token"]) for r in r1]
       == [(r["_exp_level"], r["_exp_token"]) for r in r2])
 check("T11.2 latent 逐位相同",
-      all(torch.equal(x["latent"], y["latent"]) for x, y in zip(r1, r2)))
+      all(torch.equal(x["latent"], y["latent"]) for x, y in zip(r1, r2, strict=False)))
 
 # ---------------------------------------------------------------- T12 参数校验
 print("\n[T12] 非法参数一律 raise（不静默降级）")
@@ -325,7 +325,7 @@ print("\n[T18] precheck 闸自测（《规范》§3.2「闸必须有自测」）
 try:
     from safetensors.torch import save_file
     _HAS_ST = True
-except Exception:                                  # noqa: BLE001
+except Exception:
     _HAS_ST = False
 if not _HAS_ST:
     print("  [SKIP] 无 safetensors，跳过（不算失败）")

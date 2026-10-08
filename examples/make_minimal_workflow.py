@@ -412,7 +412,7 @@ def validate(g, oi):
 
     byid = {n["id"]: n for n in g.nodes}
     want_out = {}     # (node_id, slot) -> set(link ids)
-    for lid, fn, fs, tn, ts, ty in g.links:
+    for lid, fn, fs, tn, ts, _ty in g.links:
         if fn not in byid or tn not in byid:
             bad.append("连线 #%s 端点了不存在的节点" % lid)
             continue
@@ -651,7 +651,7 @@ def main():
     try:
         oi = json.loads(urllib.request.urlopen(api + "/object_info", timeout=180).read().decode("utf-8"))
     except Exception as e:
-        raise SystemExit("[FAIL] 取不到 object_info：%r\n       请先启动 ComfyUI（python main.py）。" % (e,))
+        raise SystemExit("[FAIL] 取不到 object_info：%r\n       请先启动 ComfyUI（python main.py）。" % (e,)) from e
 
     # 本包节点用**本地定义**覆盖服务端（服务端没重启也不影响生成正确性）
     _local, _stale = merge_kit_defs(oi)

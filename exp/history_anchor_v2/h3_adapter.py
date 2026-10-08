@@ -50,7 +50,7 @@ def load_config(path: str) -> Optional[dict]:
     try:
         with open(path, encoding="utf-8") as fh:
             raw = json.load(fh)
-    except Exception as exc:                                   # noqa: BLE001
+    except Exception as exc:
         raise RuntimeError("E1'（TIHA）配置读取失败：%s ⇒ %s" % (path, exc)) from exc
     if not isinstance(raw, dict):
         raise RuntimeError(
@@ -131,7 +131,7 @@ def build_refs(
         p = stage_path_fn(run_id, i)
         try:
             hist.append(video_fn(load_fn(p)))
-        except Exception as exc:                    # noqa: BLE001
+        except Exception as exc:
             raise RuntimeError(
                 "E1'（TIHA）读历史段 stage%d 失败：%s ⇒ %s（文件可能半写/损坏；"
                 "删掉该段重跑，或把 depth 调小以避开这一段）"

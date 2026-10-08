@@ -46,8 +46,8 @@ def ck(name, cond, detail=""):
     print("  [%s] %s%s" % ("OK" if cond else "FAIL", name, ("  " + detail) if detail else ""))
 
 
-import importlib.util  # noqa: E402
-import types  # noqa: E402
+import importlib.util
+import types
 
 # 目录名含连字符，不能直接当包名 → 伪造一个包壳再按文件加载 nodes.py（与单测同法）
 _pkg = types.ModuleType("h3latentrelay")
@@ -59,7 +59,7 @@ N = importlib.util.module_from_spec(_spec)
 sys.modules["h3latentrelay.nodes"] = N
 _spec.loader.exec_module(N)
 
-import relay_core as CORE  # noqa: E402
+import relay_core as CORE
 
 print("=" * 78)
 print("A. 节点清单三处一致")
@@ -153,7 +153,7 @@ _ok_d = True
 for k, v in N.H3RelayCopyBridge.INPUT_TYPES()["optional"].items():
     if not isinstance(v, tuple) or not isinstance(v[1], dict) or "default" not in v[1]:
         continue
-    if k in _LEGACY_NEUTRAL or k.startswith("blend_") or k.startswith("window_"):
+    if k in _LEGACY_NEUTRAL or k.startswith(("blend_", "window_")):
         continue                      # 既有项 / 仅 blend 模式生效 / 仅 window 模式生效
     if k.startswith("exp_"):
         continue                      # 🧪 实验档：整族默认全关（其专属参数仅在该实验打开时生效，
@@ -217,7 +217,7 @@ print()
 print("=" * 78)
 print("F. 新函数可调用 + 边界安全")
 print("=" * 78)
-import torch  # noqa: E402
+import torch
 ck("F1 scan_head_repeat 存在且签名对",
    len(CORE.scan_head_repeat(torch.rand(40, 8, 8, 3), 22)) == 3)
 ck("F2 match_prev_stats 存在且签名对",
@@ -235,17 +235,28 @@ ck("G1 契约缓存降级不缓存（#9 仍在）",
    "not cache" in open(os.path.join(KIT, "layout_contract.py"), encoding="utf-8").read()
    or "不写" in open(os.path.join(KIT, "layout_contract.py"), encoding="utf-8").read())
 ck("G2 TrimAV fps 服务端校验（#10 仍在）", "fps" in _src and "有限正数" in _src)
+def _core_text():
+    """`relay_core/` 包的**全文**（2026-10-07 拆包：单文件 relay_core.py 已变成 11 个文件）。
+
+    G3/G4 这两条断言查的是"某个字符串还在不在算法层里"，与它落在哪个子模块无关
+    ⇒ 拼起来查，判据不变。
+    """
+    _d = os.path.join(KIT, "relay_core")
+    return "".join(open(os.path.join(_d, _f), encoding="utf-8").read()
+                   for _f in sorted(os.listdir(_d)) if _f.endswith(".py"))
+
+
 ck("G3 noise_mask 与 latent 同设备（#8 仍在）",
-   "device=tv.device" in open(os.path.join(KIT, "relay_core.py"), encoding="utf-8").read())
+   "device=tv.device" in _core_text())
 ck("G4 原子写（#12 仍在）",
-   "os.replace" in open(os.path.join(KIT, "relay_core.py"), encoding="utf-8").read())
+   "os.replace" in _core_text())
 ck("G5 run_id 清洗（#11 仍在）", "_sanitize" in _src or "非法字符" in _src)
 
 print()
 print("=" * 78)
 print("H. 文档同步清单（v0.4.2 计划「四、文档修正」列的六项，逐项核）")
 print("=" * 78)
-import re as _re  # noqa: E402
+import re as _re
 
 # H1 版本号四处一致
 # 🔴 2026-09-27 扩到四处：此前只查三处，**README 首部的「| 版本 |」行不在覆盖内** ⇒
@@ -288,7 +299,7 @@ def _zh(n):
     return _CN[n // 10] + "十" + (_CN[n % 10] if n % 10 else "")
 
 
-import subprocess  # noqa: E402
+import subprocess
 _tst = open(os.path.join(KIT, "tests", "test_relay_core.py"), encoding="utf-8").read()
 _r = subprocess.run([sys.executable, os.path.join(KIT, "tests", "test_relay_core.py")],
                     capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -318,7 +329,7 @@ ck("H3b CONTRIBUTING 的方面数/断言数 == 实跑真值",
    and int(_m_assert.group(1)) == _n_assert,
    "期望 %s 个方面 / %d 项断言" % (_zh(_n_ngroups), _n_assert))
 
-# 「离线自测」的计数与 28 组明细表**已随 README 瘦身搬到 docs/08**（2026-09-30 重构）：
+# 「离线自测」的计数与分组明细表**已随 README 瘦身搬到 docs/08**（2026-09-30 重构）：
 #   机检跟着**内容**走 —— README 只留命令与指针，分组表的真相源是 docs/08。
 #   ⚠️ 别改回读 README：那会让"README 保持薄"这件事每次都把闸弄红（重构时踩过）。
 _d08 = open(os.path.join(KIT, "docs", "08-testing.md"), encoding="utf-8").read()
@@ -344,7 +355,7 @@ ck("H3d nodes.py 模块头注释的节点数 == 注册数",
 #   Linux CI 必然假红（2026-09-22 实测：26.33 把期望值写成作者机器的输出目录）。
 #   CHANGES.md 是历史流水（当时确实发生在某台机器上），豁免。
 #   ⚠ 判据本身用拼串构造，免得这个文件因为"写着要禁的字面量"而被自己抓到。
-import subprocess as _sp  # noqa: E402
+import subprocess as _sp
 _files = (_sp.run(["git", "-C", KIT, "ls-files"], capture_output=True, text=True,
                   encoding="utf-8", errors="ignore").stdout or "").split()
 _EXT = {"py", "js", "mjs", "md", "json", "yml", "yaml", "txt"}
@@ -438,41 +449,65 @@ def _widget_slots(cls):
     return out
 
 
-_wf = json.load(open(os.path.join(KIT, "examples", "minimal_relay_official.json"),
-                     encoding="utf-8"))
+# 🔴 2026-10-07 改：原来**只查一张图**（`examples/minimal_relay_official.json`）。
+#   后果：另一张官方示例 `examples/fullflow_second_pass_latent_upscale_ui.json` **无人守** ——
+#   `declick_*` / `audio_ref_seconds` 加进 schema 后它没跟着更新：N931 / N961 少了
+#   4 + 1 个 `widget` 标记与对应取值，**而 CI 一直绿**（实测：改成查全部 examples ⇒ 当场 2 条红，
+#   修完才回绿）。⇒ 改为扫 `examples/` 下**全部** `*.json`；并把「覆盖了几张图」打出来 ——
+#   覆盖数变小本身就该被看见（"只守一张图"正是这次漏洞的成因）。
+_EX_FILES = sorted(f for f in os.listdir(os.path.join(KIT, "examples"))
+                   if f.endswith(".json"))
+_EX = [(f, json.load(open(os.path.join(KIT, "examples", f), encoding="utf-8")))
+       for f in _EX_FILES]
+print("      覆盖示例图 %d 张：%s" % (len(_EX), "、".join(_EX_FILES)))
+
 _unknown, _mismatch, _map = [], [], []
-for n in _wf["nodes"]:
-    t = n["type"]
-    cls = getattr(N, t, None)
-    if cls is None:
-        continue                          # 非本包节点（官方 UNETLoader 等）
-    slots = _widget_slots(cls)
-    wv = n.get("widgets_values") or []
-    # ⚠ 断言口径：ComfyUI **允许** widgets_values **短于** widget 列表（缺的用默认值补），
-    #   只有**多出来**、或**中段错位**才是问题。第一版按「必须等长」判 ⇒ 假阳性。
-    if len(wv) > len(slots):
-        _mismatch.append((t, len(wv), len(slots), slots))
-    _map.append((t, list(zip(slots, wv))))
-    # 顺带做范围/候选校验：能查出"整体前移一格"这类静默错位
-    for i, (name, val) in enumerate(zip(slots, wv)):
-        it = cls.INPUT_TYPES()
-        spec = (it.get("required") or {}).get(name) or (it.get("optional") or {}).get(name)
-        if not (isinstance(spec, tuple) and isinstance(spec[1], dict)):
-            continue
-        cfg = spec[1]
-        if isinstance(spec[0], (list, tuple)) and val not in spec[0]:
-            _unknown.append("%s.%s=%r 不在候选项 %s" % (t, name, val, spec[0]))
-        if isinstance(val, (int, float)) and not isinstance(val, bool):
-            lo, hi = cfg.get("min"), cfg.get("max")
-            if lo is not None and val < lo:
-                _unknown.append("%s.%s=%s < min %s" % (t, name, val, lo))
-            if hi is not None and val > hi:
-                _unknown.append("%s.%s=%s > max %s" % (t, name, val, hi))
+for _fn, _wf in _EX:
+    for n in _wf["nodes"]:
+        t = n["type"]
+        cls = getattr(N, t, None)
+        if cls is None:
+            continue                      # 非本包节点（官方 UNETLoader 等）
+        slots = _widget_slots(cls)
+        wv = n.get("widgets_values") or []
+        # ⚠ 断言口径：ComfyUI **允许** widgets_values **短于** widget 列表（缺的用默认值补），
+        #   只有**多出来**、或**中段错位**才是问题。第一版按「必须等长」判 ⇒ 假阳性。
+        # 🔴 2026-10-07 补：**多出来**里还有一类是合法的 —— 前端 `addDOMWidget` 注册的自定义
+        #   widget（本包 Chain 的 7 个按钮、第三方包的预览条…）会被追加在 `widgets_values` 尾部，
+        #   后端 schema 里根本没有同名输入。判据 = 尾部名字取不到（`widgets_values_named` 里的
+        #   键序），**且**这些名字不在后端 schema 的输入集合里。这与
+        #   `tools/check_ui_workflow.py` 的同类判据**同一条原则**（那边更早修过）。
+        #   踩坑记录：Chain 节点**只出现在 fullflow 那张图里**，而本检查原来只查 minimal
+        #   ⇒ 这条假阳性被埋了两轮（先躲过"只查一张图"，再躲过"那张图里没 Chain"）。
+        if len(wv) > len(slots):
+            _nm = n.get("widgets_values_named")
+            _tail = list(_nm.keys())[len(slots):] if isinstance(_nm, dict) else []
+            _it = cls.INPUT_TYPES()
+            _backend = set(_it.get("required") or {}) | set(_it.get("optional") or {})
+            if not (_tail and all(t not in _backend for t in _tail)):
+                _mismatch.append((_fn, t, n.get("id"), len(wv), len(slots)))
+        _map.append((_fn, t, n.get("id"), list(zip(slots, wv, strict=False))))
+        # 顺带做范围/候选校验：能查出"整体前移一格"这类静默错位
+        for _i, (name, val) in enumerate(zip(slots, wv, strict=False)):
+            it = cls.INPUT_TYPES()
+            spec = (it.get("required") or {}).get(name) or (it.get("optional") or {}).get(name)
+            if not (isinstance(spec, tuple) and isinstance(spec[1], dict)):
+                continue
+            cfg = spec[1]
+            if isinstance(spec[0], (list, tuple)) and val not in spec[0]:
+                _unknown.append("%s %s.%s=%r 不在候选项 %s" % (_fn, t, name, val, spec[0]))
+            if isinstance(val, (int, float)) and not isinstance(val, bool):
+                lo, hi = cfg.get("min"), cfg.get("max")
+                if lo is not None and val < lo:
+                    _unknown.append("%s %s.%s=%s < min %s" % (_fn, t, name, val, lo))
+                if hi is not None and val > hi:
+                    _unknown.append("%s %s.%s=%s > max %s" % (_fn, t, name, val, hi))
 
 ck("I1 示例图 widgets_values **未超出** schema 槽位数（短数组合法）", not _mismatch,
-   "超长=%s" % [(a, b, c) for a, b, c, _ in _mismatch])
-for _t, _pairs in _map:
-    print("      %s：%s" % (_t, ", ".join("%s=%r" % kv for kv in _pairs[:5])))
+   "超长=%s" % _mismatch[:3])
+for _fn, _t, _nid, _pairs in _map:
+    print("      %s / %s#%s：%s" % (_fn.split("_")[0], _t, _nid,
+                                   ", ".join("%s=%r" % kv for kv in _pairs[:5])))
 ck("I2 取值都在候选/范围内（错位会在这里露出来）", not _unknown,
    "异常=%s" % _unknown[:4])
 
@@ -484,17 +519,38 @@ ck("I2 取值都在候选/范围内（错位会在这里露出来）", not _unkn
 #   历史事故：`examples/make_minimal_workflow.py` 的 `_ty()` 只认 list，
 #   而「本地定义」的 schema 是 tuple ⇒ 本包节点全部丢标记。
 _mark = []
-for n in _wf["nodes"]:
-    _t = n["type"]
-    _cls = getattr(N, _t, None)
-    if _cls is None:
-        continue
-    _want = [s for s in _widget_slots(_cls) if s != "<control_after_generate>"]
-    _got = [i.get("name") for i in (n.get("inputs") or []) if i.get("widget")]
-    if _got[:len(_want)] != _want:
-        _mark.append("%s: 文件=%s 期望=%s" % (_t, _got or "（无）", _want))
-ck("I3 示例图 widget 输入带 `widget` 标记（缺标记会被前端渲染成空插槽）",
+for _fn, _wf in _EX:
+    for n in _wf["nodes"]:
+        _t = n["type"]
+        _cls = getattr(N, _t, None)
+        if _cls is None:
+            continue
+        _want = [s for s in _widget_slots(_cls) if s != "<control_after_generate>"]
+        _got = [i.get("name") for i in (n.get("inputs") or []) if i.get("widget")]
+        if _got[:len(_want)] != _want:
+            _mark.append("%s N%s %s: 文件=%s 期望=%s"
+                         % (_fn, n.get("id"), _t, _got or "（无）", _want))
+ck("I3 **全部**示例图的 widget 输入带 `widget` 标记（缺标记会被前端渲染成空插槽）",
    not _mark, "不符=%s" % _mark[:2])
+
+# 🔴 I4（2026-10-07 新增）：`examples/README.md` 的「N 节点」必须等于 JSON 的实际节点数，
+#   且每张 `examples/*.json` 都要在表里出现。
+#   理由：那个数字**无任何机检**，而它正是外部用户判断"这张图多大"的依据；
+#   而示例图是**手工维护**的 ⇒ 加减节点后数字最容易停下不动（本仓已吃过同类的亏）。
+_claim = {}
+for _m in re.finditer(r"^\|\s*`([A-Za-z0-9_.\-]+\.json)`\s*\|[^|]*\|\s*(\d+)\s*节点\s*\|",
+                      open(os.path.join(KIT, "examples", "README.md"),
+                           encoding="utf-8").read(), re.M):
+    _claim[_m.group(1)] = int(_m.group(2))
+_bad_cnt = []
+for _fn, _wf in _EX:
+    if _fn not in _claim:
+        _bad_cnt.append("%s 未列入 examples/README.md 的节点表" % _fn)
+    elif _claim[_fn] != len(_wf.get("nodes") or []):
+        _bad_cnt.append("%s：README 写 %d 节点 / 实际 %d"
+                        % (_fn, _claim[_fn], len(_wf.get("nodes") or [])))
+ck("I4 examples/README.md 的「N 节点」与 JSON 实际一致（且每张图都在表里）",
+   not _bad_cnt, "不符=%s" % _bad_cnt[:3])
 
 print()
 print("=" * 78)
@@ -751,7 +807,7 @@ def _minq(curve, prime):
 _rq, _lq = _minq("qsin", _pq)
 _rt, _ = _minq("tri", _pq)
 _rn, _ = _minq("qsin", 0)
-import math as _m                                                   # noqa: E402
+import math as _m
 ck("K14 等功率(qsin) 交叉窗最静点 > 线性(tri) ｜ 长度守恒",
    _rq > _rt and 20 * _m.log10(_rq / max(_rt, 1e-12)) >= 1.5
    and int(_lq.shape[-1]) == 2 * _keepq - _Xq,
@@ -841,8 +897,8 @@ ck("K9 advanced 标记方向正确（主旋钮留在画布上、细分与护栏�
 print("=" * 78)
 print("L. 音频缝节点（0.5.0 新增：音频域必须由**节点**实现，不靠组装层 ffmpeg）")
 print("=" * 78)
-import shutil as _sh                                                     # noqa: E402
-import tempfile as _tf                                                   # noqa: E402
+import shutil as _sh
+import tempfile as _tf
 
 _it_l = N.H3RelayAudioSeam.INPUT_TYPES()
 _ol = _it_l["optional"]
@@ -960,10 +1016,16 @@ ck("L12 docs/10 §7.2 判据能力边界与兜底措施在位（能量型边界 
 # H3h V3 机检的「节点数 / input 数 / 项数」在 4 个文件里的一致（2026-09-25 新增）
 # ============================================================================
 # 🔴 为什么现在才能加：过去 CI 与本机被当成"节点数不同"（一处数字表达不了两种环境）
-#   ⇒ 只能人工维持 ⇒ 实测漂成一组偏小的数字（真值是 8 节点 / 112 个 input）。
+#   ⇒ 只能人工维持 ⇒ 实测漂成一组偏小的数字（真值是 8 节点 / 122 个 input）。
 #   实测那个前提**是错的**：宿主 ComfyUI 自带注册 `latent_upscale_models`（`folder_paths.py:43`）
 #   ⇒ `H3RelayLatentUpscale.INPUT_TYPES()` 永不抛错 ⇒ 永不被 V3 entrypoint 的逐节点容错跳过
 #   ⇒ 两边恒等 ⇒ 这组数字终于可机检。
+# 🔴 2026-10-07 再补一刀：**"7 节点 / 109 input"那一档已经不存在了**。
+#   它原来只在 `sys.modules["nodes"] = None` 这种**人工硬挡**下出现（`import nodes` 抛
+#   ImportError ⇒ 穿透 ⇒ INPUT_TYPES 抛 ⇒ 逐节点容错跳过 Upscale）—— 而 CI 抛的是 RuntimeError、
+#   被 `_upscaler_module()` 吞掉 ⇒ CI 一直是 8 节点。⇒ 旧文档把一个人造态写成了"CI 的环境"。
+#   根因已在 `nodes.py::_comfy_registry` 修掉（先扫 sys.modules；再 import 且兜住任何异常）
+#   ⇒ 现在**两条路都吐 8 节点 / 122 input / 72 项**，`(7, *)` 那些合法配对随之作废。
 # ⚠️ 正则刻意收窄，避免误伤：
 #   · 节点数**只在"同一行还有 input"时**才认（README 里"3 节点/18 节点/45 节点"是别的意思）
 #   · 更正说明里**不许复述旧数字**（历史留在 CHANGES.md 与本地审核文档里）
@@ -977,11 +1039,13 @@ def _run_v3(ci_env: bool):
 
     🔴 ``ci_env=True`` 时把 ``sys.modules["nodes"] = None`` **写进子进程**（不是父进程）。
 
-    为什么必须写进子进程（2026-09-29 实测）：本包判据分**两套环境** ——
-    本机 8 节点 / CI 7 节点（CI 里宿主 `nodes` 导不进来 ⇒ `H3RelayLatentUpscale` 缺席）。
-    而 ``sys.modules`` **不跨进程**：父进程设了它，子进程看不到。
-    于是"本地复现 CI"会变成一句空话 —— 本地只验了本机那一半，
-    **CI 红（`节点数真值 7 不在声明 [8, 9] 里`）本地永远发现不了**。
+    为什么必须写进子进程（2026-09-29 实测）：这条判据要覆盖**两条代码路径**，而
+    ``sys.modules`` **不跨进程** —— 父进程设了它，子进程看不到；于是"本地复现"会变成空话，
+    只在另一条路径上才出现的问题**本地永远发现不了**（2026-09-29 就是这么红的：
+    `节点数真值 7 不在声明 [8, 9] 里`）。
+    ⚠️ 2026-10-07 起两条路径**数字相同**（8 节点 / 122 input / 72 项）—— 因为
+    `_comfy_registry()` 的 ImportError 穿透已堵掉，"7 节点"那一档不再存在。
+    本函数**照旧两边都跑**：数字相同不代表**路径**相同，而路径才是会各自腐烂的东西。
     """
     _script = os.path.join(KIT, "tests", "test_v3_schema.py")
     if ci_env:
@@ -1010,7 +1074,7 @@ for _nm, _r in _v3_envs:
             print("            %s" % _fl)
     else:
         print("      实跑（%-4s）：**抓不到终态行**（脚本可能崩了）" % _nm)
-# H3h 的"脚本至少能跑"用本机那次判（CI 那次在无宿主环境下本来就少一个节点）
+# H3h 的"脚本至少能跑"用本机那次判（另一条路径另有一次独立判定）
 _v3_pass = _v3_envs[0][1][0] if _v3_envs[0][1] else -1
 
 # ⚠️ **语义是「当前环境的真值 ∈ 文档声明集合」**，不是「所有声明都等于真值」——
@@ -1069,24 +1133,19 @@ for _nm, _st in (("input", _decl_in), ("节点数", _decl_nd), ("项数", _decl_
 #      常量两侧覆盖法：本机跑验到 (8,116) 与 (7,103)，CI 跑验到 (7,103)；两者合起来覆盖全部两项。
 #   ⚠️ 只扫 `_v3_docs`（4 个声明文件）：`exp/`、`LOCAL-*.md`、tests 注释里的是**历史数字**，
 #      它们本来就该保持旧值（改它们反而抹掉历史），不纳入。
-_V3_LEGIT_PAIRS = [(7, 103), (8, 116), (7, 104), (8, 117),
-                   (7, 106), (8, 119), (7, 107), (8, 120),
-                   (7, 108), (8, 121),
-                   (7, 109), (8, 122)]    # (节点数, input 数)：CI 环境 / 本机环境
-# ↑ 2026-10-02 追加 (7,104)/(8,117)：CopyBridge 加可选输入 voice_anchor（声锚）后 +1 input。
-# ↑ 2026-10-04 追加 (7,106)/(8,119)/(7,107)/(8,120)：音频缝加 declick_ratio / declick_quiet_dbfs /
-#   cut_head_frames 三个可选输入后 +3 input（由上一对各自 +3 得到）。
-# ↑ 2026-10-04 追加 (7,108)/(8,121)：再给音频缝加 `declick_max_len_ms`（「多宽算一声」，
-#   用户可调：孤立瞬态实测 8ms，旧值写死 2ms 会漏治）后 **+1 input**（由上一对各自 +1 得到）。
-# ↑ 2026-10-04 追加 (7,109)/(8,122)：复合桥加 `audio_ref_seconds`（音频参考窗秒数，
-#   `0` = 自动）后 **+1 input**（由上一对各自 +1 得到）。
-#   旧对仍合法 —— ci.yml/README/__init__ 的声明数字由另一批在飞改动维护（当时未刷新）。
+_V3_LEGIT_PAIRS = [(8, 122)]            # (节点数, input 数) —— 2026-10-07 收敛成一个
+# 🔴 以前这里是**成对**的（每个数字两档：(7, N) / (8, N+1)），因为当时认为"CI 少一个节点"。
+#   2026-10-07 查明那一档是人造态、且已根修 ⇒ **`(7, *)` 全部删掉**。
+#   为什么必须删：留着它 = 允许文档里写一个**现在不可能出现**的配对，
+#   而那正是本仓反复记的"手写清单会烂"（一个不再发生的旧值被当成合法值放行）。
+# 历史对（留档，别再往这里加）：(7,103)/(8,116) → +(8,117)/(7,104) → +(7,106)/(8,119) →
+#   +(7,107)/(8,120) → +(7,108)/(8,121) → +(7,109)/(8,122)。
 for _fn, _txt in _v3_docs.items():
     for _ln in _txt.splitlines():
         _nds = [int(_v) for _v in _re.findall(r"(\d+)\s*个?\s*节点", _ln)]
         _ins = [int(_v) for _v in _re.findall(r"(\d+)\s*个?\s*input", _ln)]
         if _nds and len(_nds) == len(_ins):
-            for _a, _b in zip(_nds, _ins):
+            for _a, _b in zip(_nds, _ins, strict=False):
                 if (_a, _b) not in _V3_LEGIT_PAIRS:
                     _bad_v3.append("%s：%d 节点 / %d input 不是合法配对（合法 %s）"
                                    % (_fn, _a, _b, _V3_LEGIT_PAIRS))
@@ -1140,7 +1199,8 @@ ck("H3i `assert_default_exit` 的期望数在 ci.yml·docs/08·tools/README 与�
 #   ① 单一源；② 源里新增的节**默认必须译**（未登记 = 红，要跳译得 `--omit` 写理由）；
 #   ③ fail-closed：清单缺/坏 ⇒ 退出码 **2**，绝不返回 0。
 _es = _sp.run([sys.executable, os.path.join(KIT, "tools", "en_sync.py")],
-              capture_output=True, text=True, encoding="utf-8", errors="ignore", cwd=KIT)
+              capture_output=True, text=True, encoding="utf-8", errors="ignore", cwd=KIT,
+              env=dict(os.environ, COMFYUI_PATH=COMFY))
 ck("L13 英文文档同步闸：`*_EN.md` 与中文源节级一致（en_sync.py；不一致=1，闸失效=2）",
    _es.returncode == 0, "退出码=%d" % _es.returncode)
 if _es.returncode != 0:
@@ -1347,8 +1407,8 @@ elif _v_py is None:
 else:
     sys.path.insert(0, os.path.join(KIT, "tools"))
     try:
-        import release as _rel                     # noqa: PLC0415 - 复用发布器的校验器
-    except Exception as _e:                        # noqa: BLE001
+        import release as _rel  # 复用发布器的校验器
+    except Exception as _e:
         _bad_rel.append("导入 tools/release.py 失败（发布说明的校验器在它里面）：%s" % _e)
     else:
         try:
@@ -1438,7 +1498,7 @@ def _static_schema_keys(cls_name):
             for _ret in ast.walk(_fn):
                 if not (isinstance(_ret, ast.Return) and isinstance(_ret.value, ast.Dict)):
                     continue
-                for _k, _v in zip(_ret.value.keys, _ret.value.values):
+                for _k, _v in zip(_ret.value.keys, _ret.value.values, strict=False):
                     if not (isinstance(_k, ast.Constant) and _k.value in ("required", "optional")):
                         continue
                     if not isinstance(_v, ast.Dict):
@@ -1485,7 +1545,7 @@ for _cls in sorted(_reg):
         for _kind in ("required", "optional"):
             _keys |= set(_it.get(_kind) or {})
         _outs = set(getattr(_inst, "RETURN_NAMES", None) or ())
-    except Exception as _exc:                        # noqa: BLE001 —— 宿主注册表不可用
+    except Exception as _exc:  # 宿主注册表不可用
         _keys = _static_schema_keys(_cls)
         _outs = _static_return_names(_cls)
         _skip.append("%s（%s ⇒ schema 改从源码 AST 取%s）"
@@ -1532,7 +1592,7 @@ for _cls in sorted(_reg):
         _it = _inst.INPUT_TYPES()
         for _kind in ("required", "optional"):
             _keys |= set(_it.get(_kind) or {})
-    except Exception as _exc:                        # noqa: BLE001 —— 宿主注册表不可用
+    except Exception as _exc:  # 宿主注册表不可用
         _keys = _static_schema_keys(_cls)
     for _k in sorted(_keys):
         if "%s.%s" % (_cls, _k) not in _i18n_tips:
@@ -1550,7 +1610,7 @@ for _cls in sorted(_reg):
         _it = N.NODE_CLASS_MAPPINGS[_cls]().INPUT_TYPES()
         for _kind in ("required", "optional"):
             _keys |= set(_it.get(_kind) or {})
-    except Exception:                                # noqa: BLE001
+    except Exception:
         _keys = _static_schema_keys(_cls)
     for _k in _keys:
         _all_used.add("%s.%s" % (_cls, _k))
@@ -1804,6 +1864,321 @@ for _sec_i, _sec_msg in enumerate(_sec_msgs):
 print("      扫了受控文件 + %d 条提交信息（CI 里可能只有 1 条：checkout depth=1）" % len(_sec_shas))
 ck("H3m 仓库内无凭据字面量（受控文件内容 + 最近 N 条提交信息；命中只报位置、绝不打印值）",
    not _bad_sec, "%d 处：%s" % (len(_bad_sec), _bad_sec[:6]))
+
+# ============================================================================
+# H3u / H3v：**真值判据**（2026-10-08 新增）
+# ============================================================================
+# 🔴 为什么新增这一类 —— 它暴露了本文件此前的一整类盲区：
+#   H3b–H3j 全是「**同一个数字在多处声明 ⇒ 核各处相等**」= **一致性判据**。
+#   而**只声明一次**的数字（`.comfyignore` 的「registry 包 = N 文件」、README 的
+#   「N 个脚本」、CONTRIBUTING 标题的「N 个坑」）**没有第二处可比** ⇒ 按一致性设计的
+#   判据无从下手 ⇒ 它们**永远拦不住漂移**。实测 2026-10-08：README 写「十五个脚本」
+#   而括号里只数出 14，自相矛盾且无人发现；`.comfyignore` 的 48 从未被核过。
+#   ⇒ **真值判据**：从被测对象**真算一遍**，再与声明比。这才是这两条该有的形态。
+import fnmatch as _fnm
+
+_tracked = (subprocess.run(["git", "-C", KIT, "ls-files"], capture_output=True,
+                           text=True, encoding="utf-8", errors="replace").stdout or "").split()
+
+# —— H3u：`.comfyignore` 声明的包文件数 vs 真算 ——
+# 为什么能纯标准库算准：该文件只用「整目录（以 `/` 结尾）」「单文件」「根级通配」三种形态，
+#   **无 `!` 取反、无 `**`**。实测与 `pathspec`（真 gitignore 语义）**逐文件一致**。
+# ⚠️ fail-closed：一旦出现取反 / 双星，本判据**立刻报红**（不许静默按错语义算）。
+_ci_txt = open(os.path.join(KIT, ".comfyignore"), encoding="utf-8").read()
+_ci_pats = [ln.strip() for ln in _ci_txt.splitlines()
+            if ln.strip() and not ln.lstrip().startswith("#")]
+_bad_ci = []
+
+
+def _ci_ignored(rel):
+    """gitignore 语义的简化实现（只覆盖本仓用到的三种形态）。"""
+    for _q in _ci_pats:
+        if _q.endswith("/"):
+            _d = _q[:-1]
+            if rel == _d or rel.startswith(_d + "/"):
+                return _q
+        elif "/" not in _q:
+            if _fnm.fnmatch(os.path.basename(rel), _q):   # 无斜杠 ⇒ 匹配任意层的同名文件
+                return _q
+        elif _fnm.fnmatch(rel, _q):
+            return _q
+    return None
+
+
+for _p in _ci_pats:
+    if _p.startswith("!") or "**" in _p:
+        _bad_ci.append("出现本判据不支持的形态 %r（取反 / 双星）⇒ 先扩判据再发布" % _p)
+if not _bad_ci:
+    _pkg_n = len([_f for _f in _tracked if not _ci_ignored(_f)])
+    _m_ci = _re.search(r"registry 包 = (\d+) 文件", _ci_txt)
+    if not _m_ci:
+        _bad_ci.append("`.comfyignore` 里找不到「registry 包 = N 文件」的声明（本判据要求它必须声明）")
+    elif int(_m_ci.group(1)) != _pkg_n:
+        _bad_ci.append("声明 %s 文件，**实算 %d 文件**" % (_m_ci.group(1), _pkg_n))
+    print("      `.comfyignore`：跟踪 %d → registry 包 **%d 文件**（纯标准库复算）"
+          % (len(_tracked), _pkg_n))
+ck("H3u `.comfyignore` 声明的 registry 包文件数 == **纯标准库真算**（整目录 + 单文件 + 根级通配；"
+   "出现取反/双星即红，fail-closed）",
+   not _bad_ci, "%d 处：%s" % (len(_bad_ci), _bad_ci[:4]))
+
+# —— H3v：文档里的「N 个脚本」vs `tools/` 实际脚本数 ——
+# ⚠️ 数字必须写**阿拉伯数字**（`15 个脚本`）。第一版文档写的是中文数字「十五个脚本」，
+#   而本判据的正则是 `(\d+) 个脚本` ⇒ **一条都匹配不到 ⇒ 空转通过**（2026-10-08 变异测试抓到）。
+#   ⇒ 凡被本判据盯的数字，一律用阿拉伯数字；中文数字 = 判据静默失效。
+_tool_n = len([_f for _f in os.listdir(os.path.join(KIT, "tools"))
+               if _f.endswith((".py", ".cjs"))])
+_bad_tn = []
+for _fn, _txt in _doc_txt.items():
+    for _ln in _txt.splitlines():
+        for _val in _re.findall(r"(\d+) 个脚本", _ln):
+            if int(_val) != _tool_n:
+                _bad_tn.append("%s: 声明 %s 个（应 %d 个）" % (_fn, _val, _tool_n))
+print("      `tools/` 顶层脚本实算 = **%d**（`*.py` + `*.cjs`）" % _tool_n)
+ck("H3v 文档里「N 个脚本」== `tools/` 顶层 `*.py` + `*.cjs` 的**实际个数**",
+   not _bad_tn and _tool_n > 0, "%d 处：%s" % (len(_bad_tn), _bad_tn[:4]))
+
+# ============================================================================
+# H3w 未跟踪文件 = 本文件扫不到（2026-10-08 新增）
+# ============================================================================
+# 🔴 本文件（含 H3e / H3o / H3m）的**取样面 = `git ls-files`**（受控文件）。
+#   **未跟踪的新文件不在范围内** ⇒ 本地全绿、CI 当场红（CI 的 checkout 里它们已被跟踪）。
+#   实测（2026-09-28，前置闸已存在于 `h3relay_check_all.py`）：`exp/**` 四个新文件带本机
+#   路径，本地全绿、CI 报 H3e 失败 1。
+#   ⇒ 本地跑之前**先把新文件 `git add`**（`git add -N` 也行）。
+#   显式放行：`H3RELAY_ALLOW_UNTRACKED=1`（知道自己在做什么时才用）。
+_UNTRACK_EXT = {"py", "js", "mjs", "cjs", "md", "json", "yml", "yaml", "txt"}
+_unt = []
+if os.environ.get("H3RELAY_ALLOW_UNTRACKED") != "1":
+    _por = (subprocess.run(["git", "-C", KIT, "status", "--porcelain", "-z"],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace").stdout or "")
+    for _rec in _por.split("\x00"):
+        if _rec.startswith("?? ") and _rec[3:].rsplit(".", 1)[-1].lower() in _UNTRACK_EXT:
+            _unt.append(_rec[3:])
+if _unt:
+    print("      ⚠️ 未跟踪且属受检类型（本文件扫不到它们）：%s" % (_unt[:6],))
+ck("H3w 无未跟踪的受检类型文件（取样面 = `git ls-files` ⇒ 未跟踪 = 扫不到 = **本地绿 CI 红**；"
+   "先 `git add` 再跑，或显式设 H3RELAY_ALLOW_UNTRACKED=1）",
+   not _unt, "%d 个：%s" % (len(_unt), _unt[:6]))
+
+# ============================================================================
+# H3x 子进程 env 的「静默 no-op」写法（2026-10-08 新增）
+# ============================================================================
+# 🔴 实测事故（2026-10-07）：`tools/user_smoke.py` 构造子进程环境时用 `setdefault` 到
+#   `PYTHONPATH`。**调用者已经设了该变量时它是静默 no-op** ⇒ 子进程 import 不到
+#   `folder_paths`，而报错指向本包（看着像仓库坏了）。CI 的 workflow 恰好把它设成宿主根
+#   ⇒ **CI 绿、本机红**；本机默认带一个 `PYTHONPATH` ⇒ 这个 bug **只在本地复现**。
+#   ⇒ 同类写法一律禁止：要么**显式前置拼接**，要么**显式覆盖**。
+# ⚠️ 判据本身用**拼串**构造，免得本文件因为"写着要禁的字面量"而被自己抓到（同 H3e 的做法）。
+_NOOP_RE = _re.compile("setdefault" + r"\(\s*[\"']" + "PYTHONPATH")
+_noop = []
+for _f in _tracked:
+    if not _f.endswith(".py"):
+        continue
+    try:
+        _t = open(os.path.join(KIT, _f.replace("/", os.sep)), encoding="utf-8",
+                  errors="ignore").read()
+    except OSError:
+        continue
+    for _ln, _line in enumerate(_t.splitlines(), 1):
+        if _NOOP_RE.search(_line):
+            _noop.append("%s:%d" % (_f, _ln))
+ck("H3x 无「`setdefault` 到 `PYTHONPATH`」（调用者已设时**静默 no-op** ⇒ CI 绿本地红；"
+   "要么显式前置拼接、要么显式覆盖）",
+   not _noop, "%d 处：%s" % (len(_noop), _noop[:4]))
+
+# ============================================================================
+# H3y / H3z：**工具 ↔ 文档**（2026-10-08 新增）
+# ============================================================================
+# 🔴 为什么需要 —— 补「判据只覆盖**文字↔代码**」这个缺口：
+#   H3o 只查「链接指向的文件存在」，**不查描述对不对**；也没有任何判据检查
+#   「新加的工具登记了没有」「工具的参数在规范里写了没有」。
+#   这两条都能**从被测对象真算**，不需要人读语义。
+_tool_files = sorted(_f for _f in os.listdir(os.path.join(KIT, "tools"))
+                     if _f.endswith((".py", ".cjs")))
+_tools_rd = open(os.path.join(KIT, "tools", "README.md"), encoding="utf-8").read()
+_bad_reg2 = [_f for _f in _tool_files if _f not in _tools_rd]
+print("      `tools/` 脚本 %d 个 ｜ `tools/README.md` 未登记的：%s"
+      % (len(_tool_files), _bad_reg2 or "无"))
+ck("H3y `tools/` 顶层每个脚本都在 `tools/README.md` 里登记过（新加工具不登记 = 没人知道它存在）",
+   not _bad_reg2 and len(_tool_files) > 0, "%d 个：%s" % (len(_bad_reg2), _bad_reg2[:4]))
+
+# —— H3z：`release.py` 的每个 `--flag` 都要在 `RELEASING.md` 里出现 ——
+# 为什么单挑发布器：它的 flag **语义容易误解、后果不可逆** ——
+#   `--verify-only` 只跑 ⑥ 交叉验证、**不跑 ① 前置**；`--skip-ci-wait` 直接跳过 CI 闸。
+#   实测 2026-10-08：`--skip-ci-wait` 当时**没写进 `RELEASING.md`** —— 本条当场就抓到了。
+_rel_src = open(os.path.join(KIT, "tools", "release.py"), encoding="utf-8").read()
+_rel_flags = sorted(set(_re.findall(r'add_argument\("(--[a-z][a-z0-9\-]*)"', _rel_src)))
+_rel_doc = open(os.path.join(KIT, "RELEASING.md"), encoding="utf-8").read()
+_bad_flag = [_f for _f in _rel_flags if _f not in _rel_doc]
+print("      `release.py` flags %d 个 ｜ `RELEASING.md` 未提及的：%s"
+      % (len(_rel_flags), _bad_flag or "无"))
+ck("H3z `tools/release.py` 的每个 `--flag` 都在 `RELEASING.md` 里被写到（发布器语义易误解、后果不可逆）",
+   not _bad_flag and len(_rel_flags) > 0, "%d 个：%s" % (len(_bad_flag), _bad_flag[:4]))
+
+# ============================================================================
+# H4a 跑 Python 的子进程必须**显式**给 `env=`（2026-10-08 新增）
+# ============================================================================
+# 🔴 为什么需要：`tools/user_smoke.py` 2026-10-07 的 bug —— 子进程环境靠**调用者的**
+#   `PYTHONPATH`，CI 恰好设了、本机没设 ⇒ **CI 绿、本机红**。
+#   ⇒ 凡跑 Python 子进程的调用，**必须显式写 `env=`**（哪怕只是 `dict(os.environ)`）：
+#     它逼作者**想过**环境这件事，而不是默认继承。
+#   ⚠️ 只覆盖「第一个参数是 `sys.executable` / `PY` / `_PY`」的调用 —— 跑 git / ffmpeg
+#      的子进程继承环境是对的，不在此列。
+#   🔴 **判据按"调用形状"认，不按模块别名认**（2026-10-08 变异测试抓到第一版漏洞）：
+#      第一版只认 `subprocess.*` / `_sp.*` 两个名字 ⇒ **换个别名就绕过了**。
+#      现在只认形状：「第一个实参是列表、其首元素是 `<任意>.executable` 或 `PY` / `_PY`」。
+#   🔴 **能力边界（诚实写清）**：它是**启发式**，不是证明。
+#      · 参数绑到变量（`args = [sys.executable, …]; subprocess.run(args)`）⇒ 看不到；
+#      · 把 `executable` 也包一层（`f().executable` 之外的写法）⇒ 看不到。
+#      ⇒ 它挡的是**常见写法**；**故意规避它是有可能的**，但故意规避不是真实错误。
+#        真实错误（像 2026-10-07 那次）是"**根本没想过环境**"，那种写法它抓得到。
+import ast as _ast
+
+_bad_env = []
+_py_child = 0
+for _f in _tool_files:
+    if not _f.endswith(".py"):
+        continue
+    try:
+        _tree = _ast.parse(open(os.path.join(KIT, "tools", _f), encoding="utf-8").read())
+    except SyntaxError as _e:
+        _bad_env.append("%s 语法错误：%s" % (_f, _e))
+        continue
+    for _node in _ast.walk(_tree):
+        if not (isinstance(_node, _ast.Call) and isinstance(_node.func, _ast.Attribute)
+                and _node.func.attr in ("run", "Popen", "check_output", "check_call")):
+            continue
+        if not _node.args or not isinstance(_node.args[0], _ast.List) or not _node.args[0].elts:
+            continue
+        _first = _node.args[0].elts[0]
+        _is_py = ((isinstance(_first, _ast.Attribute) and _first.attr == "executable")
+                  or (isinstance(_first, _ast.Name) and _first.id in ("PY", "_PY")))
+        if _is_py:
+            _py_child += 1
+            if not any(_k.arg == "env" for _k in _node.keywords):
+                _bad_env.append("%s:%d" % (_f, _node.lineno))
+print("      跑 Python 的子进程 %d 处 ｜ 未显式给 `env=` 的：%s" % (_py_child, _bad_env or "无"))
+ck("H4a 跑 Python 的子进程都**显式**给了 `env=`（靠调用者环境 = 静默失效 ⇒ CI 绿本机红）",
+   not _bad_env and _py_child > 0, "%d 处：%s" % (len(_bad_env), _bad_env[:4]))
+
+# ============================================================================
+# H4b `review_050.py` 自身的**判据表自检**（2026-10-08 新增）
+# ============================================================================
+# 🔴 为什么需要 —— 「判据强弱也是被测对象」这句话此前**只有 H3g 一条**在落实（它只核总数）。
+#   本检查补两条可机械化的强度判据：
+#     ① `ck()` 的 cond **不许是字面量 `True`** —— 恒真 = 判据失效。
+#        （字面量 `False` 是**合法**的：那是"走到这一支就直接判失败"的正常写法，
+#          例：类体找不到时。所以只禁 `True`。）
+#     ② `ck()` 的名字**不许重复** —— 重复 = 两条判据混成一条，报错时定位不到。
+#   🔴 **能力边界**：它只能挡「字面恒真」，**挡不住「语义偏弱」** —— H3h 曾只查
+#      「值在不在集合里」而不查 (节点数, input 数) **配对**，那种弱**只能靠人发现**。
+#      别把这条当全覆盖。
+_ck_tree = _ast.parse(open(os.path.join(KIT, "tools", "review_050.py"), encoding="utf-8").read())
+_ck_names, _ck_true = [], []
+for _node in _ast.walk(_ck_tree):
+    if not (isinstance(_node, _ast.Call) and getattr(_node.func, "id", "") == "ck"):
+        continue
+    if len(_node.args) >= 2 and isinstance(_node.args[1], _ast.Constant) \
+            and _node.args[1].value is True:
+        _ck_true.append(_node.lineno)
+    if _node.args and isinstance(_node.args[0], _ast.Constant):
+        _ck_names.append(_node.args[0].value)
+_ck_dup = sorted({_n for _n in _ck_names if _ck_names.count(_n) > 1})
+print("      `review_050.py` 具名 `ck()` %d 条 ｜ cond 恒真 %d 处 ｜ 重名 %s"
+      % (len(_ck_names), len(_ck_true), _ck_dup or "无"))
+ck("H4b `review_050.py` 自身判据表自检（cond 不许恒真 / 名字不许重复；"
+   "**语义偏弱挡不住**，只能靠人）",
+   not _ck_true and not _ck_dup and len(_ck_names) > 0,
+   "恒真 %s ｜ 重名 %s" % (_ck_true[:4], _ck_dup[:4]))
+
+# ============================================================================
+# H4c 判据台账一致（2026-10-08 新增）
+# ============================================================================
+# 🔴 为什么需要：机检从 19 条长到 100+ 条，而**没有任何一处回答「我们到底有哪些判据」**。
+#   后果实测：JS 测试的 4 个期望数**从来没被任何判据盯过** ⇒ `ci.yml` 头注释写 `22/0`、
+#   执行行写 `29/0`、真值 `29/0` —— **同文件自相矛盾而无人发现**。
+#   台账 = `tools/checks_ledger.py`（编号 / 类别 / 盯的口径 / 变异测试 / 读的环境量），
+#   它 `--check` 时核「台账 ↔ 本文件编号**双向一致**」⇒ **新加判据不登记 = 红**。
+_led = subprocess.run([sys.executable, os.path.join(KIT, "tools", "checks_ledger.py"),
+                       "--check"], capture_output=True, text=True, encoding="utf-8",
+                      errors="replace", cwd=KIT, env=dict(os.environ, COMFYUI_PATH=COMFY))
+_led_tail = ((_led.stdout or "") + (_led.stderr or "")).strip().splitlines()
+ck("H4c 判据台账（`tools/checks_ledger.py`）与本文件编号**双向一致**，且 `tools/CHECKS.md` 未过期",
+   _led.returncode == 0,
+   (_led_tail[0][:150] if (_led.returncode == 0 and _led_tail) else ""))
+if _led.returncode != 0:
+    for _ln in _led_tail[-6:]:
+        print("        " + _ln)
+
+# ============================================================================
+# H4d JS 测试期望数（2026-10-08 新增）—— 真值判据
+# ============================================================================
+# 🔴 为什么需要：这 4 个数字此前**零机检**，实测**已经漂了**（`ci.yml` 头注释 `22/0`
+#   vs 执行行 `29/0`）。判据 = **真跑** 4 个 `.mjs`，核 `_doc_txt` 里凡提到该文件名的行的
+#   `N/0` == 实跑。⚠️ **fail-closed**：找不到 `node` ⇒ **红**（那一档没跑 ≠ 通过）。
+import shutil as _sh
+
+_node_bin = _sh.which("node") or _sh.which("node.exe")
+_bad_js = []
+_js_rows = []
+if _node_bin is None:
+    _bad_js.append("找不到 `node` ⇒ JS 那一档**没跑**（fail-closed：不许静默跳过）")
+else:
+    for _rel in ("tests/test_prompt_dispatch.mjs", "tests/test_run_id_parity.mjs",
+                 "tests/test_audio_ref_budget.mjs", "tests/test_i18n.mjs"):
+        _r = subprocess.run([_node_bin, _rel], capture_output=True, text=True,
+                            encoding="utf-8", errors="replace", cwd=KIT)
+        _m = _re.search(r"通过\s*(\d+)\s*/\s*失败\s*(\d+)", _r.stdout or "")
+        _ok, _ng = (int(_m.group(1)), int(_m.group(2))) if _m else (-1, -1)
+        _js_rows.append("%s=%d/%d" % (os.path.basename(_rel), _ok, _ng))
+        if _ng != 0 or _ok < 0:
+            _bad_js.append("%s 实跑未通过（%d/%d）" % (_rel, _ok, _ng))
+        for _fn, _txt in _doc_txt.items():
+            for _ln in _txt.splitlines():
+                if os.path.basename(_rel) in _ln:
+                    for _v in _re.findall(r"(\d+)/0", _ln):
+                        if int(_v) != _ok:
+                            _bad_js.append("%s: %s/0（应 %d/0）" % (_fn, _v, _ok))
+print("      JS 实跑：%s" % " ｜ ".join(_js_rows))
+ck("H4d JS 测试（4 个 `.mjs`）的期望数在 ci.yml·docs/08 与**实跑**一致（此前零机检，已漂过）",
+   not _bad_js and bool(_js_rows), "%d 处：%s" % (len(_bad_js), _bad_js[:4]))
+
+# ============================================================================
+# H4e dist 白名单文件数（2026-10-08 新增）—— 真值判据
+# ============================================================================
+# 文档两处声明「42 文件」（`docs/08` · `tools/README`），此前**零机检**。
+# 判据 = `make_minimal_bundle.py` 的 `MANIFEST_*` 各段长度之和 == 声明值；
+#   `dist/` 在时**再核实际文件数**（那是更强的真值）。
+# ⚠️ 声明必须写成 `N 文件 /`（带斜杠）—— 否则会被同段的「运行期 25 文件」这类
+#   **叙述数字**污染判据。这条写作纪律写在 `tools/CHECKS.md` 的口径表里。
+_mb_tree = _ast.parse(open(os.path.join(KIT, "tools", "make_minimal_bundle.py"),
+                           encoding="utf-8").read())
+_seg = {}
+for _n in _mb_tree.body:
+    if (isinstance(_n, _ast.Assign) and isinstance(_n.targets[0], _ast.Name)
+            and _n.targets[0].id.startswith("MANIFEST") and isinstance(_n.value, _ast.List)):
+        _seg[_n.targets[0].id] = len(_n.value.elts)
+_tot_mb = sum(_seg.values())
+_bad_mb = []
+for _fn, _txt in _doc_txt.items():
+    for _ln in _txt.splitlines():
+        if "make_minimal_bundle" in _ln or _ln.strip().startswith("**42 文件"):
+            for _v in _re.findall(r"(\d+) 文件\s*/", _ln):
+                if int(_v) != _tot_mb:
+                    _bad_mb.append("%s: %s 文件（应 %d 文件）" % (_fn, _v, _tot_mb))
+_dist_dir = os.path.join(KIT, "dist", "ComfyUI-H3-Latent-Relay")
+_real_mb = -1
+if os.path.isdir(_dist_dir):
+    _real_mb = sum(len(_f) for _, _, _f in os.walk(_dist_dir))
+    if _real_mb != _tot_mb:
+        _bad_mb.append("`dist/` 实际 %d 文件 ≠ `MANIFEST` 的 %d（dist 是生成物 ⇒ 重跑打包器）"
+                       % (_real_mb, _tot_mb))
+print("      dist 白名单：%s = **%d 文件** ｜ `dist/` 实际 = %s"
+      % (" + ".join("%s %d" % (k.replace("MANIFEST_", ""), v) for k, v in _seg.items()),
+         _tot_mb, _real_mb if _real_mb >= 0 else "（不在，未核）"))
+ck("H4e dist 白名单文件数：`MANIFEST` 各段之和 == 文档声明（`dist/` 在时还核实际文件数）",
+   not _bad_mb and _tot_mb > 0, "%d 处：%s" % (len(_bad_mb), _bad_mb[:4]))
 
 # ============================================================================
 # H3g 本文件**自己的**期望数（2026-09-25 新增）

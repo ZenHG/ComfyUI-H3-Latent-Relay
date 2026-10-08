@@ -47,11 +47,11 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-import history_anchor as HA  # noqa: E402
+import history_anchor as HA
 
 try:                                            # 只在没装 safetensors 时才需要
     from safetensors.torch import load_file
-except Exception:                               # noqa: BLE001
+except Exception:
     load_file = None
 
 
@@ -147,7 +147,7 @@ def main() -> int:
     print("[1] 配置：%s" % cfg_path)
     try:
         raw = json.load(io.open(cfg_path, encoding="utf-8"))
-    except Exception as exc:                                   # noqa: BLE001
+    except Exception as exc:
         print("[FAIL] 配置文件不是合法 JSON：%s" % exc)
         return EXIT_FAIL
     if not isinstance(raw, dict):
@@ -246,7 +246,7 @@ def main() -> int:
         refs = HA.build_history_anchor_refs(
             videos, cfg, log=lambda m: print("      " + m),
             stage_labels=keep_idx)          # 传真实段号 ⇒ 日志与留痕直接用 stage
-    except Exception as exc:                                   # noqa: BLE001
+    except Exception as exc:
         problems.append("build_history_anchor_refs 抛异常：%s: %s"
                         % (type(exc).__name__, str(exc).splitlines()[0]))
         refs = None

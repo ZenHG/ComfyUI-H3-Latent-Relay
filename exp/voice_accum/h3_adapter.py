@@ -64,7 +64,7 @@ def build_audio(
        ⚠️ 代价：声锚已接但无 `_va.json` 时，本函数会多读一次 `_va.json`（= 1 次 isfile）。
 
     🔴 **必须给 `tail_latent`（= 桥自己那一段 `plan.audio_ref["audio_latent"]`）**：
-       旧口径下参考与**钉住前缀**同源（都取上段尾），`relay_core.py:4008-4012` 自己写着
+       旧口径下参考与**钉住前缀**同源（都取上段尾），`relay_core/bridge.py::build_continue_latent` 自己写着
        「两处读的都是"上段尾"，**只改一处会打架**」。VA 只替换 `audio_ref` ⇒ 不变式被打破
        ⇒ 软条件的信息进不去、只剩扰动（实测两臂余弦 0.2395）。本函数因此**以它结尾**
        （见 `voice_accum.compose_ref`）。缺它 ⇒ 会在 notes 里报红并退回旧口径。
@@ -132,7 +132,7 @@ def build_audio(
         try:
             lat = load_fn(p)
             stage_audio[k] = audio_fn(lat)
-        except Exception as exc:                      # noqa: BLE001
+        except Exception as exc:
             notes.append("段 %d：音频读取失败（%s: %s）⇒ 跳过" % (k, type(exc).__name__, exc))
             continue
         stage_orders[k] = list(ok)

@@ -7,7 +7,7 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 
 | 项 | 值 |
 |---|---|
-| 版本 | **0.6.29** |
+| 版本 | **0.6.31** |
 | 许可 | **MIT**（第三方出处见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)） |
 | 宿主 | **ComfyUI ≥ 0.35.0，且带 MiniMax-H3 支持**（宿主自身为 GPL-3.0，见 §许可与出处） |
 
@@ -345,7 +345,7 @@ python tools/voice_bank.py advise --bank <声库> --prompt-file 段N.md --prev-f
 ```
 ComfyUI-H3-Latent-Relay/
 ├── __init__.py            # 包入口：注册 /h3relay/concat 路由、选 V1/V3 出口、启动横幅
-├── relay_core.py          # 业务内核（唯一真相源）：时序网格 / 拷贝桥 / 裁重叠 / 音频缝 / 拼接
+├── relay_core/            # 业务内核（唯一真相源，11 文件包）：时序网格 / 拷贝桥 / 裁重叠 / 音频缝 / 拼接
 ├── nodes.py               # 节点层（8 个节点的输入输出与人话报告），直接 import relay_core
 ├── layout_contract.py     # 布局契约：找不到上游时放行 + 留痕，只在真的不一致时 raise
 ├── v3/                    # V3 外壳（io.ComfyNode + comfy_entrypoint）；V1 走 NODE_CLASS_MAPPINGS
@@ -353,7 +353,7 @@ ComfyUI-H3-Latent-Relay/
 ├── web/                   # 前端 JS：🧩 拼接按钮、Chain 面板、`run_id` 一处改全组、**节点中英切换按钮**（画布用；脚本用户见 docs/10 §7.4）
 ├── examples/              # 两个可直接打开的工作流：最小续接（21 节点）与全流程（47 节点）
 ├── docs/                  # 深度文档 01–10（原理 / 参数 / 采样链 / 画布 / 排障 / 脚本 / Chain / 测试 / 观测 / 音频）
-├── tests/                 # 离线自测（零 GPU）：512 项断言 + V3 逐字段 + 词分发纯函数
+├── tests/                 # 离线自测（零 GPU）：563 项断言 + V3 逐字段 + 词分发纯函数
 ├── tools/                 # 自检 / 取证 / 拼接 CLI / 打包器（含英文文档同步闸 en_sync.py）
 ├── licenses/              # 随包分发的第三方许可全文
 ├── dist/                  # 打包器的产出（最小分发集 + zip，不入库）
@@ -362,12 +362,13 @@ ComfyUI-H3-Latent-Relay/
 ├── icon.png / icon.svg    # Registry / Manager 卡片图标（400×400；`.svg` 是源，`.png` 是发布物）
 ├── banner.png / banner.svg # Registry 节点页横幅（21:9 = 1680×720；同样 svg 是源）
 ├── requirements.txt       # 供 ComfyUI-Manager 安装依赖
-└── （顶层还有 README_EN.md · CHANGES.md · CONTRIBUTING.md · SECURITY.md ·
+└── （顶层还有 README_EN.md · CHANGES.md · CONTRIBUTING.md · AGENTS.md · SECURITY.md ·
       CODE_OF_CONDUCT.md · THIRD-PARTY-NOTICES.md · LICENSE · .github/）
 ```
 
-安装后**运行期真正会被加载的**只有 `__init__.py` · `relay_core.py` · `nodes.py` · `layout_contract.py` ·
-`v3/`（4 文件）· `exp/history_anchor_v2/`（3 文件，被 `nodes.py` 顶层 import，所以必需）· `web/`（3 个 JS）
+安装后**运行期真正会被加载的**只有 `__init__.py` · `relay_core/`（11 文件）· `nodes.py` · `layout_contract.py` ·
+`v3/`（4 文件）· `exp/__init__.py` 与 `exp/history_anchor_v2/`（3 文件）· `exp/voice_accum/`（3 文件）
+（都被 `nodes.py` 顶层 import，所以必需）· `web/`（7 个 JS）
 —— `dist/` 里的最小分发集就是这些 + 示例 + 元数据；`docs/` `tests/` `tools/` 都是开发件。
 
 ---
@@ -387,7 +388,7 @@ ComfyUI-H3-Latent-Relay/
 | 9 | **`chunks=1` 才是与上游整段推理一致的唯一路径**：`chunks>1` 会**改画面**（3D 体积注意力被切断），只在 OOM 时升，升完**必须重看缝** |
 | 10 | 🔴 **续接契约取原生域**：`Latent 存` 接在放大**之前**；**二采的 guider 不接桥的 `conditioning`**（网格不同 ⇒ 当场炸） |
 | 11 | `diagnostics` 默认关（三路纯打印、**不参与裁量**）；想看 DTW / 裁量→跳跃曲线 / 外观漂移就打开它。⚠️ 网上旧文里的「沉降 1」是 0.5.0 前口径 —— **以本页与节点报告为准** |
-| 12 | 🔴 **每个功能的画布路与脚本路必须是同一套节点实现**（见文首铁律）；纯前端能力（🧩 按钮、Chain 面板格、**`run_id` 一处改全组同步**、**节点中英切换按钮**）脚本提交 JSON 时**会被忽略**，脚本用户走 [`docs/10`](docs/10-audio-seam-and-concat.md) §7.4 的三条非 UI 路径 |
+| 12 | 🔴 **每个功能的画布路与脚本路必须是同一套节点实现**（见文首铁律）；纯前端能力（🧩 按钮、Chain 面板格、**`run_id` 一处改全组同步**、**节点中英切换按钮**、**`stage_index` 一处推进全组**、**被旁路的「读上段 latent」自动恢复启用**、**音频参考额度角标**）脚本提交 JSON 时**会被忽略**。⚠️ 后三条**不是死角**，各有非 UI 替代路：段号**自己逐节点写同一个值**（Chain 的 `stage_index` tooltip 与 [`docs/10`](docs/10-audio-seam-and-concat.md) §7.4 都写了）；「读上段 latent」**别旁路**（JSON 里 `mode` 保持 `0`，Chain 才不会需要替你恢复）；额度**看桥的 `report` 输出**（与角标是同一份数字）。其余走 §7.4 的三条非 UI 路径 |
 
 ---
 
@@ -421,14 +422,15 @@ ComfyUI-H3-Latent-Relay/
 | [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md) · 🇬🇧 [`_EN`](docs/05-troubleshooting_EN.md) | **完整排障表** · **常见疑问 FAQ** · 工作流文件自检 · API 提交 |
 | [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md) · 🇬🇧 [`_EN`](docs/06-continuity-scripting_EN.md) | 出词纪律：段首缓冲 · 台词安全时刻 · 末帧锚链 · 音频缝配套 |
 | [`docs/07-chain.md`](docs/07-chain.md) · 🇬🇧 [`_EN`](docs/07-chain_EN.md) | Chain 自动连跑（换词 / 拼片 / 断点续跑） |
-| [`docs/08-testing.md`](docs/08-testing.md) · 🇬🇧 [`_EN`](docs/08-testing_EN.md) | 离线自测：31 组断言明细（512 项）· 工具清单 |
+| [`docs/08-testing.md`](docs/08-testing.md) · 🇬🇧 [`_EN`](docs/08-testing_EN.md) | 离线自测：34 组断言明细（563 项）· 工具清单 |
 | [`docs/09-metrics.md`](docs/09-metrics.md) · 🇬🇧 [`_EN`](docs/09-metrics_EN.md) | 观测量参考区间（DTW 残留 / 外观漂移）· 怎么自校准 |
 | [`docs/10-audio-seam-and-concat.md`](docs/10-audio-seam-and-concat.md) · 🇬🇧 [`_EN`](docs/10-audio-seam-and-concat_EN.md) | **音频缝与多段拼接**：缝的口径与调参指南 · **台词保护** · 判据能力边界 · 音轨档位 · 边车 · **不开画布的脚本用法** |
 | [`RELEASE-NOTES.md`](RELEASE-NOTES.md) | **面向用户的发布说明**（中英双语，一版一节）· **升级前先看这个** |
 | [`CHANGES.md`](CHANGES.md) | 版本史与每次实测证据（**开发者记录**，细节更全） |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | 开发环境 · 自测纪律 · **英文文档同步纪律** · 许可条款 |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | 开发环境 · **一次改动的闭环** · 自测纪律 · **英文文档同步纪律** · 许可条款 |
+| [`AGENTS.md`](AGENTS.md) | **给改这个仓库的 agent 的作业入口**：一次改动的闭环 · 三档检查（本地 / CI / 宿主+浏览器）· **铁律↔执行体映射表** · 全部机检一览 · 禁区 · 已知薄弱点 |
 | [`RELEASING.md`](RELEASING.md) | **发布规范（唯一真相源）**：GitHub + Comfy Registry 两个渠道必须成对、一条命令 `tools/release.py`、失败处置、密钥纪律 |
 | [`SECURITY.md`](SECURITY.md) | 密钥 / 依赖 / 网络行为声明 |
-| [`tools/README.md`](tools/README.md) | 十三个脚本的用途与期望值（九个自检/取证 + 拼接 CLI + 打包器 + **发布器** + **声库采集器**） |
+| [`tools/README.md`](tools/README.md) | 17 个脚本的用途与期望值（**12 个自检/取证** + 拼接 CLI + 打包器 + **发布器** + **声库采集器** + **浏览器冒烟门**） |
 | [`examples/README.md`](examples/README.md) | 两份可直接打开的工作流（最小续接 21 节点 / 全流程 47 节点）· 生成器 |
 | [`README_EN.md`](README_EN.md) | **英文精简版**（安装 / 接线 / 节点 / 参数 / 排障 / FAQ）—— 深度推导一律外链本文件与 `docs/` |

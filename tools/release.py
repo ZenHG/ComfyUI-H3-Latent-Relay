@@ -83,7 +83,7 @@ def git(*args, **kw):
 
 def http_json(url, timeout=30):
     req = urllib.request.Request(url, headers={"User-Agent": "h3-relay-release"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:      # noqa: S310 - 固定 https 域名
+    with urllib.request.urlopen(req, timeout=timeout) as r:  # 固定 https 域名
         return json.loads(r.read().decode("utf-8"))
 
 
@@ -351,7 +351,7 @@ def wait_ci(slug: str) -> None:
                 if it.get("headSha") == head:
                     rid = it["databaseId"]
                     break
-        except Exception:                                          # noqa: BLE001
+        except Exception:
             pass
         if rid:
             break
@@ -421,7 +421,7 @@ def _prev_released(gh: str, slug: str, version: str) -> str:
             quiet=True)
     try:
         tags = [str(it.get("tagName") or "") for it in json.loads(r.stdout or "[]")]
-    except Exception:                                          # noqa: BLE001
+    except Exception:
         return ""
     older = [t.lstrip("vV") for t in tags if t and _vkey(t) < _vkey(version)]
     return max(older, key=_vkey) if older else ""
@@ -524,7 +524,7 @@ def verify(f: dict, slug: str) -> None:
     try:
         vers = http_json("%s/nodes/%s/versions" % (REGISTRY_API, f["name"]))
         got = [v.get("version") for v in vers] if isinstance(vers, list) else []
-    except Exception as e:                                     # noqa: BLE001
+    except Exception as e:
         got = []
         say("  [FAIL] 读 registry 失败：%s: %s" % (type(e).__name__, e))
         ok = False
@@ -649,6 +649,23 @@ def main() -> int:
     ap.add_argument("--set-token", action="store_true",
                     help="把新的 registry PAT 写进 <仓根>/.comfy_registry_token（从 stdin 读，不发布）")
     a = ap.parse_args()
+
+    # 🔴 **工具自报模式**（2026-10-08 加）：`--verify-only` 与「预演」**不是一回事**，
+    #   实测有人按直觉理解错过。文档说清了不等于跑的人会看 ⇒ 让工具**自己把模式打出来**。
+    #   （机检做不到「文档描述 == 代码语义」；这一条是"出声"，不是"拦住"。）
+    if a.verify_only:
+        say("🔎 模式 = `--verify-only`：**只跑 ⑥ 交叉验证**（纯只读）。")
+        say("   ⚠️ 它**不跑 ① 前置**（干净工作树 / 版本四处 / review_050 / en_sync）——")
+        say("      要看前置预演，**不带任何参数**跑 `python tools/release.py`。")
+    if a.release_only:
+        say("🔎 模式 = `--release-only`：只补建 GitHub Release（不 push、不发 registry；幂等）。")
+    if a.skip_ci_wait:
+        say("🔴 模式含 `--skip-ci-wait`：**跳过「等 CI 绿」** —— 在没验证过的提交上发 registry，"
+            "而 registry 的 changelog 发出去就改不回来。")
+    if not (a.verify_only or a.release_only or a.set_token):
+        say("🔎 模式 = %s：① 前置 + 改动面%s。"
+            % ("真发布（--go）" if a.go else "**预演**",
+               " → push → 等 CI → Release → registry" if a.go else "（不推不发）"))
 
     global GIT
     GIT = os.environ.get("H3RELAY_GIT") or shutil.which("git") or "git"

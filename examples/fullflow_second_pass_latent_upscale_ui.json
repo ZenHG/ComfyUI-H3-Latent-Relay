@@ -1163,7 +1163,7 @@
       ],
       "size": [
         300,
-        440
+        580
       ],
       "flags": {},
       "order": 37,
@@ -1322,6 +1322,45 @@
             "name": "patch_guard_layers"
           },
           "link": null
+        },
+        {
+          "localized_name": "declick_ratio",
+          "name": "declick_ratio",
+          "shape": 7,
+          "type": "FLOAT",
+          "widget": {
+            "name": "declick_ratio"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "declick_quiet_dbfs",
+          "name": "declick_quiet_dbfs",
+          "shape": 7,
+          "type": "FLOAT",
+          "widget": {
+            "name": "declick_quiet_dbfs"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "declick_max_len_ms",
+          "name": "declick_max_len_ms",
+          "shape": 7,
+          "type": "FLOAT",
+          "widget": {
+            "name": "declick_max_len_ms"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "cut_head_frames",
+          "name": "cut_head_frames",
+          "type": "INT",
+          "widget": {
+            "name": "cut_head_frames"
+          },
+          "link": null
         }
       ],
       "outputs": [
@@ -1369,6 +1408,10 @@
         0,
         0,
         true,
+        0,
+        4.0,
+        -50.0,
+        50.0,
         0
       ],
       "widgets_values_named": {
@@ -1386,7 +1429,11 @@
         "join_segment_seconds": 0,
         "join_align_seconds": 0,
         "patch_guard": true,
-        "patch_guard_layers": 0
+        "patch_guard_layers": 0,
+        "declick_ratio": 4.0,
+        "declick_quiet_dbfs": -50.0,
+        "declick_max_len_ms": 50.0,
+        "cut_head_frames": 0
       }
     },
     {
@@ -1478,7 +1525,7 @@
       ],
       "size": [
         320,
-        530
+        551
       ],
       "flags": {},
       "order": 25,
@@ -1690,6 +1737,16 @@
             "name": "ref_anchor_frames"
           },
           "link": null
+        },
+        {
+          "localized_name": "audio_ref_seconds",
+          "name": "audio_ref_seconds",
+          "shape": 7,
+          "type": "FLOAT",
+          "widget": {
+            "name": "audio_ref_seconds"
+          },
+          "link": null
         }
       ],
       "outputs": [
@@ -1750,7 +1807,8 @@
         "demo",
         0,
         -1,
-        5
+        5,
+        0.0
       ],
       "widgets_values_named": {
         "context_frames": 22,
@@ -1769,7 +1827,8 @@
         "run_id": "demo",
         "stage_index": 0,
         "ref_anchor_stage": -1,
-        "ref_anchor_frames": 5
+        "ref_anchor_frames": 5,
+        "audio_ref_seconds": 0.0
       }
     },
     {

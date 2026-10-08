@@ -13,7 +13,7 @@
   静默覆盖 ⇒ 唯一可行的灰度手段就是这里：两条出口在 ``__init__.py`` 里**互斥切换**。
 
 本层只做**协议转换**：``define_schema`` 抄 V1 的 ``INPUT_TYPES``，``execute`` 转调
-``nodes.py`` 的 V1 实现。``relay_core.py`` 的算法与那 384 项断言**完全不被动到**。
+``nodes.py`` 的 V1 实现。``relay_core/`` 包的算法与那整套离线断言**完全不被动到**。
 
 节点清单（8 个，``node_id`` 与 V1 **完全同名** ⇒ 用户已存的工作流零改动可用）：
     H3RelayLatentUpscale / H3RelayLatentSave / H3RelayLatentLoad / H3RelayTrimAV /

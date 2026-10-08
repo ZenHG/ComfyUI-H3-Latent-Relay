@@ -139,9 +139,14 @@ const MODE_BYPASS = 4;
 /**
  * 带「本段段号」（`stage_index` widget）的节点类型 —— **单一真相源**。
  *
- * `nodes.py` 里声明了 `stage_index` 的一共五处：Chain 自己（1239）、LatentSave（552）、
- * LatentLoad（597）、CopyBridge（1476）、AudioSeam（1976）。Chain 自己由 `setStageAll`
- * 直接推进，其余四类走这张表 —— **漏掉任何一类，那个节点就会永远以第 1 段自居**。
+ * `nodes.py` 里声明了 `stage_index` 的一共**五处**，其中一处是 **Chain 自己**（由
+ * `setStageAll()` 的 `setStage(chainNode, v)` 直接推进，**不进表**），其余四类走这张表 ——
+ * **漏掉任何一类，那个节点就会永远以第 1 段自居**。
+ *
+ * 🔴 这个不变式由 `tests/test_prompt_dispatch.mjs` 的 **8.21** 与 `nodes.py` **双向对账**：
+ *   `{声明了 stage_index 的类}` 必须 == `{Chain 自己}` ∪ `STAGE_TYPES`。
+ *   ⚠ 此处**不写行号** —— 行号会随重构漂（本节原来那五行行号在 2026-10-07 拆包后**已经全错**，
+ *   最远的一处差了 126 行；而没有任何东西会因此报红）。
  *
  * 🔴 为什么必须收进表里（2026-09-30 真实事故）：旧代码手写三处（桥 / 落盘 / 读上段 latent），
  *   **漏了音频缝** ⇒ 连跑第 2 段时音频缝仍以 0 号自居，把第 1 段的床文件
@@ -465,13 +470,14 @@ function setStageAll(chainNode, pair, v) {
 
 // ─────────────────────────── run_id 同步（0.6.19） ───────────────────────────
 // 判断逻辑全在 `relay_kit_sync.js`（纯函数、离线可测）；这里只做**画布侧**三件事：
-// 收集同组快照 / 把值写下去 / 把结果说给人听。
+// 收集同步范围的快照 / 把值写下去 / 把结果说给人听。
 
 /** 广播进行中标志：我们自己写 widget 时压住回调，防自触发回环。 */
 let RUN_ID_SYNCING = false;
 
 /**
- * 同组内所有带 `run_id` 的节点快照（**同一分组框**，没有分组就全图）。
+ * **同步范围**内所有带 `run_id` 的节点快照（范围由 `runIdScope()` 决定：
+ * **默认全图**；仅"多条 Chain 且本节点在某个分组框内"才按框隔离 —— 0.6.31 起）。
  *
  * 范围与段号推进同源（都走 `nodesInSameGroup`）：一张图里放两部片子是正常用法
  * （`stage_index` 也是按分组隔离的），跨组同步会把另一部片子的目录名改掉。
@@ -489,7 +495,12 @@ let RUN_ID_SYNCING = false;
  */
 function runIdMembers(originNode) {
     const all = graphNodes().filter((n) => isRunIdType(n.type));
-    return nodesInSameGroup(originNode, all).map((n) => {
+    // 🔴 0.6.31：范围由 `runIdScope()` 决定（**默认全图**，见该函数注释）。
+    //   只有"多条 Chain 且本节点在某个分组框内"才按框隔离；其余一律全图
+    //   ⇒ **节点摆在画布哪里都能同步到**（GG 2026-10-07 的用法）。
+    const scope = runIdScope(originNode);
+    const picked = scope === "group" ? nodesInSameGroup(originNode, all) : all;
+    return picked.map((n) => {
         const src = readRunId(n);
         return {
             id: n.id, type: n.type,
@@ -574,7 +585,13 @@ function applyRunIdPlan(plan) {
  *      由 `notifyRunId` 退到控制台（**不猜**）。
  */
 function chainStateNear(n) {
-    const live = CHAINS.filter((s) => s?.chainNode);
+    // 🔴 2026-10-07 实测修：`CHAINS` 是 **Set**（0.6.12 `20cfdbd` 引入的模块级集合），
+    //   这里却用 `CHAINS.filter(...)` ⇒ `TypeError: CHAINS.filter is not a function`
+    //   ⇒ **凡是走到本函数的按钮一律「内部出错」**（浏览器实测：⏩ 连跑 / ▶ Run 全废，
+    //     而 ✔ Approve / ⏭ 续跑 / 🧩 拼成一条 / ↺ Reset / ⏹ Stop 五个不受影响）。
+    //   引入提交只改了 `CHAINS` 的类型，忘了改这一处 ⇒ 从 0.6.12 起一直带着，
+    //     单测与后端测试都覆盖不到（只有真点按钮才会暴露）。
+    const live = [...CHAINS].filter((s) => s?.chainNode);
     for (const s of live) {
         if (s.chainNode === n) return s;
         for (const g of graphGroups()) {
@@ -586,21 +603,38 @@ function chainStateNear(n) {
 }
 
 /**
- * 同步范围：`"group"` = 命中了分组框；`"graph"` = 没命中 ⇒ 退化为**全图**
- * （与段号推进同一套兜底语义 —— 但 run_id 改错的代价是**段文件落进另一部片子的目录**，
- *  所以这一档必须**明说**，不能只写在代码注释里）。
+ * `run_id` 的**同步范围**（0.6.31 改，GG 指正）。
+ *
+ * 🔴 原实现 = 「只在同一个分组框内同步」，理由是"一图两部片子时跨组会改掉另一部的目录名"。
+ *   但实测（2026-10-07）那张 fullflow 图的分组框只框住 4 个节点，
+ *   **音频缝与裁重叠在框外** ⇒ 改连跑节点的 `run_id` 时这两个**不同步**
+ *   ⇒ 音频缝与桥不一致 ⇒ **床源去错目录找 `audio_*.safetensors`**（静默失败）。
+ *   而**一图一部片、节点随意摆**才是绝大多数人的用法（GG 原话：「我这 H 仓的节点都是同一个节点组」）。
+ *
+ * ⇒ 新判据 = **图上有几个启用中的 Chain**（`H3RelayChain` 才代表"一部片"）：
+ *   · **≤ 1 个 ⇒ 全图**（默认，任意位置都同步）
+ *   · **≥ 2 个 ⇒ 按分组框隔离**（老行为，保住"一图两部片子"）
+ *   · ≥2 个但本节点**不在任何框里** ⇒ `graph-multi`：仍然全图，但**必须明说**
+ *     （不然用户以为隔离了、其实没有 —— 这正是本次踩的坑）。
  */
 function runIdScope(originNode) {
+    const chains = graphNodes().filter((n) => n.type === "H3RelayChain" && n.mode === MODE_ALWAYS);
+    if (chains.length <= 1) return "graph";
     for (const g of graphGroups()) {
         const b = groupBounds(g);
         if (b && inBounds(originNode, b)) return "group";
     }
-    return "graph";
+    return "graph-multi";
 }
 
-/** 范围说明的尾巴（命中分组就说"本组"，否则**点明是全图**）。 */
+/** 范围说明的尾巴：只在**真的需要提醒**时才说话（默认全图不必啰嗦）。 */
 function scopeNote(scope) {
-    return scope === "group" ? "" : "；⚠ 没找到分组框 ⇒ 范围是**全图**（若这张图上还有别的片子，请先画分组框）";
+    if (scope === "graph") {
+        return "；范围=**全图**（图上只有一条 Chain ⇒ 这张图就是一部片子）";
+    }
+    if (scope === "group") return "";
+    return "；⚠ 图上有**多条 Chain** 但这个节点**不在任何分组框里** ⇒ 范围退回**全图**"
+        + "（想让它们互不干扰，请把每部片子的节点各自画一个分组框）";
 }
 
 /**
@@ -614,7 +648,7 @@ function notifyRunId(originNode, phase, text) {
 }
 
 /**
- * 快路径：某格的 `run_id` 被改 ⇒ 非空就广播给同组其余节点。
+ * 快路径：某格的 `run_id` 被改 ⇒ 非空就广播给同步范围内的其余节点。
  *
  * 为什么读回调的**第一个参数**而不是 `widget.value`：ComfyUI 的 widget 回调约定首参即新值；
  * 而"赋值 vs 回调"的先后在个别前端版本里不一样，读 `widget.value` 有拿到**上一个值**的风险
@@ -629,7 +663,7 @@ function broadcastRunId(originNode, value) {
         const verdict = resolveRunId(members);
         if (verdict.state === "ok") {
             notifyRunId(originNode, "warn",
-                `这一格清空了，但同组还有 ${verdict.ids.length} 个节点是「${verdict.value}」`
+                `这一格清空了，但范围里还有 ${verdict.ids.length} 个节点是「${verdict.value}」`
                 + " ⇒ 名字不一致会找不到段文件。要清就全部清，要留就填回同一个名字。");
         }
         return null;
@@ -707,7 +741,7 @@ function runIdPreflight(node, state) {
         //   只报数量、不逐个点名：全连线时六个名字排一屏，重点反而看不见。
         const nLink = linkedIds(members).length;
         say(node, state, "warn",
-            "同组的 `run_id` 全是空的 ⇒ 段文件没有目录可落"
+            "同步范围里的 `run_id` 全是空的 ⇒ 段文件没有目录可落"
             + "（后端会直接报「run_id 不能为空」）。"
             + (nLink
                 ? `\n  ⚠ 其中 ${nLink} 个格子的值是**连线**送来的 ⇒ 请去改**上游那个节点**里的内容`
@@ -1346,29 +1380,69 @@ function bindGlobalListeners() {
     });
 }
 
+/**
+ * 有上限的轮询重试：等该节点的 `run_id` widget 建好就挂上钩子。
+ *
+ * 🔴 为什么要轮询而不是「一拍就够」：`nodeCreated` / `onNodeCreated` 都**早于** ComfyUI 异步补 widgets，
+ *   实测那一刻 `findWidget(node, "run_id")` 恒为 null ⇒ 一拍之后仍然太早。
+ *   12 次 × 500ms = 最多 6s；挂上即停；仍失败**必须出声**（否则就是「用户以为同步了、其实没同步」）。
+ */
+function scheduleRunIdHook(node) {
+    if (!isRunIdType(node?.type)) return;
+    if (hookRunIdWidget(node)) return;
+    let tries = 0;
+    const retry = () => {
+        tries += 1;
+        let ok = false;
+        try {
+            ok = hookRunIdWidget(node);
+        } catch (err) {
+            console.warn("[H3 Relay Chain] 挂 run_id 同步钩子失败（这一格仍能正常填）：", err);
+            return;
+        }
+        if (ok) return;
+        if (tries >= 12) {
+            console.warn("[H3 Relay Chain] run_id 同步钩子挂了 12 次仍没成功 ——"
+                + "这一格能正常填，但**改它不会自动同步到其它节点**。");
+            return;
+        }
+        setTimeout(retry, 500);
+    };
+    setTimeout(retry, 0);
+}
+
 app.registerExtension({
     name: "H3RelayKit.Chain",
 
     /**
      * 0.6.19：给每个带 `run_id` 的节点（六类，见 `relay_kit_sync.js` 的 `RUN_ID_TYPES`）挂上同步回调。
      *
-     * 为什么在这里而不是 `beforeRegisterNodeDef`：后者是**按类型**调的，拿不到具体实例的 widget；
-     * `nodeCreated` 时该实例的 widgets 已经建好（它晚于 `onNodeCreated`）。
-     * 少数前端版本若仍取不到 widget，下一拍重试一次 —— 宁可晚一拍，也不要静默不挂钩。
+     * 🔴 2026-10-07 浏览器实测修（**这才是 run_id 同步从来没生效的根因**）：
+     *   本机前端 **从不调用扩展的 `nodeCreated`** —— 在 `comfyui_frontend_package/static/assets/*.js`
+     *   里 grep 不到任何 `.nodeCreated` 分发点（只有各扩展**自己定义**该方法）。
+     *   ⇒ 0.6.19 那套「`nodeCreated` 里挂钩子」在本版前端上是**死代码**：
+     *   实测 6 个带 `run_id` 的节点 `__h3RunIdHook` **恒为 false**，用户改任一格都不广播，
+     *   而且**完全静默**（等 15s / 点画布 / `graph.change` 三种时机都不出现）。
+     *   ⚠ 本函数**保留**但不再是唯一入口 —— 有的前端版本确实会调它。
      */
     nodeCreated(node) {
         if (!isRunIdType(node?.type)) return;
-        if (hookRunIdWidget(node)) return;
-        setTimeout(() => {
-            try {
-                hookRunIdWidget(node);
-            } catch (err) {
-                console.warn("[H3 Relay Chain] 挂 run_id 同步钩子失败（这一格仍能正常填）：", err);
-            }
-        }, 0);
+        scheduleRunIdHook(node);
     },
 
     beforeRegisterNodeDef(nodeType, nodeData) {
+        // 🔴 2026-10-07：run_id 同步改挂到这条**确实会被调用**的路径
+        //   （Chain 的 7 个按钮就是靠它 + prototype.onNodeCreated 生效的，浏览器实测有按钮）。
+        if (isRunIdType(nodeData.name) && !nodeType.prototype.__h3RunIdHookPatch) {
+            nodeType.prototype.__h3RunIdHookPatch = true;
+            const origHookPatch = nodeType.prototype.onNodeCreated;
+            nodeType.prototype.onNodeCreated = function () {
+                const r = origHookPatch?.apply(this, arguments);
+                scheduleRunIdHook(this);
+                return r;
+            };
+        }
+
         if (nodeData.name !== "H3RelayChain") return;
 
         const origOnNodeCreated = nodeType.prototype.onNodeCreated;

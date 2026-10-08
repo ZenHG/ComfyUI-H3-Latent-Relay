@@ -13,6 +13,7 @@
 >
 > | 版本 | 迁移动作 |
 > |---|---|
+> | 0.6.30 | **无需动作**（图 / 连线 / 参数 / 图 JSON 全不动）。核心代码由单文件 `relay_core.py` 拆成 `relay_core/` 包 —— **对外导入名仍是 `relay_core`**（包内 `__init__.py` 全量再导出），脚本里的 `from relay_core import …` 照旧可用。**行为逐位不变**（逐符号源码比对 + 全部离线断言）。唯一可见变化在**下载件**：最小分发集 24 → 42 个文件（多出的是包内子模块，合计体积基本不变） |
 > | 0.6.28 | **无需动作**（图 / 连线 / 参数都不用改）。🆕 画布节点**中英切换** + **悬浮提示双语化**（⚠ **纯前端能力 ⇒ 脚本提交 JSON 不生效**，详见本节第 7 节）。🔴 **升级后必须刷新浏览器页面**（F5）——**重启 ComfyUI 进程不算**：前端是 SPA，页面打开后扩展 JS 常驻内存，**不刷新就还在跑旧版**。已因此被误报过"提示还是中文"：磁盘上是新版、浏览器里是旧版。另 🔴 若装了界面汉化插件（ComfyUI-Chinese-Translation 等），本包已加**帧级防覆盖兜底**与其共存（见本节第 9 节）——那类插件有 1 s 守护轮询专门覆盖第三方扩展的 `label`/`tooltip` |
 > | 0.6.27 | 🔴 **有行为变化，但无需改图**：**接了声锚时，音频参考窗也自动定长**（原料 = **声锚自身**）。旧口径接了声锚就退回视频钉住窗（0.925 s）⇒ 把一段**多人录音**接进声锚时**只有最后一个人的音色进得来**。新口径 `audio_ref_seconds=0` = 按声锚自身**取满上限**（累计够 6 s 有声才停，≤6 s）。⚠️ **锚不比 0.925 s 长 ⇒ 逐位同 0.6.26**（比的是步数不是秒）；更长才拉长。缝区钉住的那 0.925 s 不受影响 |
 > | 0.6.23 | **无需动作**（连线 / 参数 / 图都不动）。只有提示与文档：① 槽位**跳号**时桥节点标题写明**官方编号**（`<Audio j>` 按**已接线顺序**数、**不是槽号** —— 照槽号写会指空且不报错）；② report 多一行说明「本包注入的块没有 `<Audio j>` 标签、prompt 引不到」，并写明"一段多人的正路"（官方 `ref_audios` 槽 + `TrimAudioDuration`）。🔴 本包**不做** `voice_anchor_2/3` 式的多锚注入（理由见 0.6.23 节） |
@@ -34,6 +35,105 @@
 > | 0.6.0 | 引用 `H3RelayMotionContext` 的图需改接 `H3RelayCopyBridge`（该节点已删除） |
 > | 0.5.0 | ① `settle_frames` 默认 `-1 → 0`；② 0.5.0 之前存的图，UI 上看不到「裁重叠」新加的第 4 路输出 `prev_tail`（执行不受影响，但接不上 `H3RelayPost` 的 `guide`）⇒ 重加节点或给 JSON 的 `outputs` 末尾补一项 |
 > | 0.3.0 | `settle_frames` 新增（尾缺 ⇒ 取默认，旧工作流无需重连） |
+
+---
+
+## 0.6.31 — 2026-10-07
+
+**三个改动 + 一个新门**（GG 指正：前端功能要真验、run_id 要任意位置都同步、前后端都要实现）。
+
+### ① 修 bug：`⏩ 连跑` / `▶ Run` 必抛 TypeError（**引入于 0.6.12 `20cfdbd`**，随 0.6.13~0.6.30 对外发布）
+`web/relay_kit_chain.js::chainStateNear()` 对模块级集合 `CHAINS`（**Set**）用了 `CHAINS.filter(...)`。
+0.6.12「修 Chain 按钮点了没反应」那次把集合改成了 `Set` 却漏改这一处。
+调用点只有 1 处（`notifyRunId`）⇒ 只影响会触发 `run_id` 广播的按钮：**连跑**与 **Run**；
+Approve / 续跑 / Stop / 拼成一条 / Reset 五者不经过它，一直正常。
+**为什么没被发现**：要**真点按钮**才暴露；后端 518 条断言、三个 JS 单测、`/h3relay/health` 全绿。
+修法：`[...CHAINS].filter(...)`。
+
+### ② 修 bug：`run_id` 自动同步**从来没生效**（0.6.19 引入，完全静默）
+`web/relay_kit_chain.js::nodeCreated` 里的注释断言「`nodeCreated` 时 widgets 已建好」。
+实测：在本机前端上 **这个扩展点根本不会被调用** —— 宿主产物
+`comfyui_frontend_package/static/assets/*.js` 里 `grep -ro "\.nodeCreated"` **零命中**
+（只有各扩展自己定义该方法，没有任何分发点）。⇒ 钩子一次都没挂上，且失败**没有 warn**
+（只有 setTimeout 重试里才有）⇒ 用户改任一格 `run_id` 都不广播。
+修法：改挂到**确实会被调用**的 `beforeRegisterNodeDef` + `prototype.onNodeCreated`
+（Chain 那 7 个按钮就是靠这条路生效的）；`nodeCreated` 保留兼容别的前端版本；
+重试由「一拍就放弃」改成**有上限轮询**（12 × 500 ms），失败**必须出声**。
+
+### ③ 特性：`run_id` 同步范围 = **默认全图**（GG：我的节点都是同一个节点组）
+原实现只在**同一个分组框内**同步（理由：一图两部片子时跨组会改掉另一部的目录名）。
+实测那张 fullflow 图的分组框只框住 4 个节点 ⇒ **音频缝与裁重叠在框外、不同步**。
+新判据 = **图上有几个启用中的 Chain**：≤1 ⇒ **全图**（节点摆哪儿都同步得到）；≥2 ⇒ 才按框隔离；
+≥2 且不在任何框里 ⇒ 仍然全图，但 **status 里明说**。
+
+### ④ 后端补同一套语义（API / 脚本路）
+`relay_core/plan.py` 新增 `collect_run_ids` / `resolve_run_id` / `plan_run_id_sync` / `sync_run_id`
+（顶层可 `from relay_core import sync_run_id`），并新增路由 **`POST /h3relay/runid`**：
+送 `{prompt}` 或 `{prompt_id}` ⇒ 回各节点 `run_id` + 三态裁决；`{"apply":true,"value":"名字"}`
+⇒ 顺带回一份**已统一**的 prompt（直接可提交）。
+⚠️ 与前端 `web/relay_kit_sync.js` 是**两份实现**（规范 §二·D）⇒ 语义由
+**`tests/parity/run_id_cases.json` 一份 fixture、两侧各跑一遍**来对账（新增第 34 组断言 + `tests/test_run_id_parity.mjs`）。
+
+### ⑤ 新门：浏览器交互冒烟 `tools/ui_smoke.cjs`（零 GPU）
+载入 fullflow 图 → 断言 7 个按钮在位 + 6 个 `run_id` 钩子挂上 + **改一处全图同步**
+→ 逐个点按钮（先制造冲突 ⇒ 会提交的按钮必须在闸前停住、队列始终为空）→ 清空 Chain.run_id
+再点 Run（覆盖"补齐 + 广播"那条唯一能触发 bug① 的路径）→ 立刻清队列。
+**已做变异测试**：把两个 bug 放回去，门分别以「status 出现内部出错」与「钩子 0/6、同步 0/5」变红。
+⚠️ **故意不进 CI**（CI 里既没有活着的 ComfyUI 也没有浏览器 ⇒ 只会得到一个永远 SKIP 的假门）。
+
+## 0.6.30 — 2026-10-07
+
+**完整方案（拆包）**：`relay_core.py`（5482 行 / 233,640 字符）→ **`relay_core/` 包**（11 文件）。
+**对外身份不变**：包名仍是 `relay_core`，`__init__.py` **全量再导出** 243 个顶层名字（含
+下划线开头的内部名）⇒ `nodes.py` / `tests/` / `tools/` / `exp/` 的调用点**一行未改**。
+
+| 子模块 | 内容 | 原行区间 |
+|---|---|---|
+| `relay_core/_grid.py` | 时序网格常量与工具（5+17k 窗口 / 吸附 / 导出键） | 50–119 |
+| `relay_core/latent.py` | latent 取流 / 尾段切片 / AV latent 落盘往返 / 裁头重叠 | 122–299 · 1096–1200 |
+| `relay_core/audio.py` | 音频缝（patch + 床环铺）· declick · 音频读存 · 多段音频拼接 | 1203–2624 · 4198–4344 |
+| `relay_core/plan.py` | 续接计划（`RelayPlan` / `plan_relay` / `apply_relay`）· 音频参考窗自动定长 · 漂移对策 | 302–1093 · 1296–1301 |
+| `relay_core/seam.py` | 接缝检测与画质观测（沉降 / 硬跳 / 锐度 / 色档 / 复现残留 / 直方图 / 白平衡） | 2627–3821 |
+| `relay_core/bridge.py` | 拷贝桥（硬拷贝 + 噪声掩码 + 前缀权重族）· `build_continue_latent` | 3824–4195 |
+| `relay_core/metrics.py` | 🧪 只读观测（DTW 对齐代价 / 外观统计 / 漂移曲线） | 4347–4580 |
+| `relay_core/concat.py` | 多段拼接成片（PyAV）+ 输出挑选取回 + 提交图定序 | 4583–5279 |
+| `relay_core/upscale.py` | 画质域 AV latent 分块放大 | 5282–5417 |
+| `relay_core/prompt.py` | 词分发（第 k 段喂第 k 块词） | 5420–5482 |
+
+**为什么要拆**：它会继续长大（新功能按域落进对应子模块，改动面从"一个 5482 行文件"缩到"一个
+几百行文件"）。拆分**不是为了少写几行**，而是让同一时刻动不同域的改动**不再落在同一个文件上**。
+
+🔴 **拆包引出一个必须补的机制（猴子补丁转发）**：单测用 `CORE.SETTLE_REPEAT_PATH = True` 这类写法
+**强制走分支**（还有 `_frame_rms` / `_passthrough_video_stream` / `QUANTILE_*`）。拆包后这些名字的
+模块级全局在**子模块**里，而 `CORE.X = v` 只改包对象自己的属性 ⇒ 子模块内部读到的还是旧值 ——
+**断言照样绿、被测分支其实没进去**（静默失效）。⇒ `__init__.py` 把模块对象的类换成
+`_RelayCoreModule`，`__setattr__` 把赋值**转发到属主子模块**，语义与拆包前一致。
+⚠️ 这不是给用户用的 API；它的唯一职责是保住拆分前的语义。
+
+**等价性证据（三条，可复跑）**：
+1. **逐符号源码比对** —— 原文件 243 个顶层符号，在新包里 `ast.get_source_segment` **逐一逐字符相同**；
+   原模块 docstring 原样保留在 `relay_core/__init__.py`。
+2. `ruff check .` 全绿；`tests/test_relay_core.py` **512/0**（与拆分前一致）。
+3. 分发集打包器 + 全部门槛（见下）全过。
+
+**连带同步**（拆包会牵动的地方，逐处核过）：
+- `tools/make_minimal_bundle.py` 的 `MANIFEST_RUNTIME`：运行期文件 12 → **25**（含 `relay_core/` 11 个）。
+- `tools/review_050.py` 的 G3/G4：原来读 `relay_core.py` 单文件 ⇒ 改成读包内**全文拼接**。
+- `tools/check_ui_workflow.py`：`spec_from_file_location` 加载 `relay_core.py` ⇒ 改成**按包加载**
+  （带 `submodule_search_locations`）。
+- `tools/verify_rewrite_equivalence.py`：`new` 侧改成包内全文拼接（`old` 侧仍从 `git show <rev>` 取历史）。
+- 注释里的 `relay_core.py:<行号>` 引用 13 处 → 改成**符号式**引用
+  （如 `relay_core/bridge.py::build_continue_latent`）—— 顺带修掉 3 处**早已失效**的行号。
+- 文档：`README` / `README_EN` / `docs/08` / `CONTRIBUTING` / `requirements.txt` / `v3/*` /
+  `.comfyignore` / `tools/README.md` 逐处同步（含分发集 24→42 文件、796→1259 KB）。
+
+**测试套件同步拆分**：`tests/test_relay_core.py` 的**断言主体**按组拆到 `tests/cases/`（7 个
+`_g*.py`）；runner 只留文件头 / 定位 / `check()` / 分片执行 / 汇总。分片用
+`exec(compile(src, path, "exec"), globals())` **顺序执行到同一命名空间** ⇒ 与拆分前**同一 globals、
+同一顺序**（跨组共享的夹具照旧可见）。断言的**项数与组清单不变** ⇒ H3b/H3c/H3f 不受影响。
+⚠️ 分片以 `_` 开头 ⇒ `pytest tests/` 不会单独收集（否则每条断言跑两遍）。
+
+**升级动作**：**无需任何动作**。对外导入名仍是 `relay_core`，节点 / 连线 / 参数 / 图 JSON 全不动。
 
 ---
 

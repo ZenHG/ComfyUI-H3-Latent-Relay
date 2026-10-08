@@ -8,8 +8,8 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "condensed",
-          "h_en": "5f9cbc92eb490882",
-          "h_src": "90c1af6c51152a01",
+          "h_en": "70b35c214f844851",
+          "h_src": "f5faa7c0be41db9e",
           "seeded": "by-position"
         },
         {
@@ -48,16 +48,16 @@
           "zh": "目录结构",
           "en": "Repository layout",
           "mode": "condensed",
-          "h_en": "7d73b23b1fe857a2",
-          "h_src": "9f9074e52f25aab3",
+          "h_en": "527a6c76a1a483ba",
+          "h_src": "9c7b6cad0ece6516",
           "seeded": "by-position"
         },
         {
           "zh": "配置与注意事项",
           "en": "Configuration & hard rules",
           "mode": "condensed",
-          "h_en": "600782e13d09a47c",
-          "h_src": "94869ae8c12914e8",
+          "h_en": "893859636ee49ff9",
+          "h_src": "68fdb6c658eff3fc",
           "seeded": "by-position"
         },
         {
@@ -72,14 +72,14 @@
           "zh": "文档索引",
           "en": "Documentation index",
           "mode": "condensed",
-          "h_en": "3646c373c48208cc",
-          "h_src": "bc07f9ca2043990d",
+          "h_en": "739ee0818c7b5ac9",
+          "h_src": "216538bfcfca03f6",
           "seeded": "by-position"
         }
       ],
       "acks": [],
-      "stamped": "2026-10-06",
-      "src_sha": "29d2bb66177fa4ec"
+      "stamped": "2026-10-08",
+      "src_sha": "a9d70e942978f408"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -166,7 +166,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-06",
+      "stamped": "2026-10-08",
       "src_sha": "06ca2288755a21d0"
     },
     "docs/02-parameters.md": {
@@ -190,7 +190,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-06",
+      "stamped": "2026-10-08",
       "src_sha": "e963fef3e3351b25"
     },
     "docs/03-sampling-and-design.md": {
@@ -222,7 +222,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-06",
+      "stamped": "2026-10-08",
       "src_sha": "e0c4d1c18fb4b8e2"
     },
     "docs/04-canvas-and-widgets.md": {
@@ -238,7 +238,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-06",
+      "stamped": "2026-10-08",
       "src_sha": "d39be80cc6d876ab"
     },
     "docs/05-troubleshooting.md": {
@@ -294,7 +294,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-06",
+      "stamped": "2026-10-08",
       "src_sha": "18d37bd707ece8ff"
     },
     "docs/06-continuity-scripting.md": {
@@ -318,7 +318,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-06",
+      "stamped": "2026-10-08",
       "src_sha": "c046d84ff172f569"
     },
     "docs/07-chain.md": {
@@ -406,7 +406,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-06",
+      "stamped": "2026-10-08",
       "src_sha": "0a440b2a70334909"
     },
     "docs/08-testing.md": {
@@ -416,54 +416,54 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "full",
-          "h_en": "307e739d611b83bd",
-          "h_src": "4a7fa1eb1883ab86",
+          "h_en": "49eb4fc2e1e5860b",
+          "h_src": "5d1d2e98828facd9",
           "seeded": "by-position"
         },
         {
           "zh": "单测（零 GPU、秒级）",
           "en": "Unit tests (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "325b4559b046a8cf",
-          "h_src": "a77a6adf83740ecc",
+          "h_en": "2c7cc38cef013920",
+          "h_src": "2ce216ed64514658",
           "seeded": "by-position"
         },
         {
           "zh": "前端纯函数的单测（node 跑、零依赖）",
           "en": "Unit tests for front-end pure functions (run by node, zero dependencies)",
           "mode": "full",
-          "h_en": "73274876f1e55eed",
-          "h_src": "62dad2408ae4fa96",
+          "h_en": "2b3449b72123f7e5",
+          "h_src": "7501041620545390",
           "seeded": "by-position"
         },
         {
           "zh": "V3 外壳与默认出口（零 GPU、秒级）",
           "en": "V3 shell and default exit (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "0fa4be2681d7affc",
-          "h_src": "1b5d7b9c09db3309",
+          "h_en": "a0ba8f5a018a4679",
+          "h_src": "e51f85e0f5be9d55",
           "seeded": "by-position"
         },
         {
           "zh": "tools/ 下的其他自检（完整清单见 [`tools/README.md`](../tools/README.md)）",
           "en": "Other self-checks under tools/ (full list in [`tools/README.md`](../tools/README.md))",
           "mode": "full",
-          "h_en": "e57ada5fc1f38e0f",
-          "h_src": "8ea1cc133006d202",
+          "h_en": "bde820184f2a44ba",
+          "h_src": "18a41be2dd1389b1",
           "seeded": "by-position"
         },
         {
           "zh": "最小可运行分发集（给用户/分发用，不是开发件）",
           "en": "Minimal runnable distribution set (for users/distribution, not a development artifact)",
           "mode": "full",
-          "h_en": "de713f6ada4e0999",
-          "h_src": "42660dc6dd520293",
+          "h_en": "e47c8cba40f06ba1",
+          "h_src": "5e68cf32dd2fb165",
           "seeded": "by-position"
         }
       ],
       "acks": [],
-      "stamped": "2026-10-06",
-      "src_sha": "98f81698330bba7e"
+      "stamped": "2026-10-08",
+      "src_sha": "5ade499ee751bf5f"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",
@@ -518,7 +518,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-06",
+      "stamped": "2026-10-08",
       "src_sha": "6886d24ff831c09b"
     },
     "docs/10-audio-seam-and-concat.md": {
@@ -576,14 +576,14 @@
           "zh": "7.4 API / 脚本用户：不开画布怎么用（⚠ 先看\"哪些是 UI 特性\"）",
           "en": "7.4 API / script users: how to use it without the canvas (⚠ read \"which features are UI-only\" first)",
           "mode": "full",
-          "h_en": "f0bc998d169fce68",
-          "h_src": "1c5ccc8192fa2e66",
+          "h_en": "6c0f662467110fae",
+          "h_src": "a52d6ac220ea8df0",
           "seeded": "by-number"
         }
       ],
       "acks": [],
-      "stamped": "2026-10-06",
-      "src_sha": "a216f2142e169787"
+      "stamped": "2026-10-08",
+      "src_sha": "4f8784e66798db1a"
     }
   }
 }

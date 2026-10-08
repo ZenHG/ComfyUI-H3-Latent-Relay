@@ -1,19 +1,22 @@
 # 回归套件（CPU-only、零 GPU、秒级）：
 #   ruff 静态检查 → 回归五件套 → 默认出口断言 → V3 逐字段一致 → JS 词分发 → **分发集构建+自验**
 #
-# 失败时都会以非零退出码退出（tests/test_relay_core.py:1822、tools/review_050.py:864、
-# tools/smoke_nodes.py:236、tools/assert_default_exit.py、tests/test_v3_schema.py），
+# 失败时都会以非零退出码退出（这几个脚本都以自己的退出码表达成败）。
+# ⚠️ 行号不写在这里 —— 2026-10-07 拆包后 test_relay_core.py 从 3996 行变成 180 行，
+#    写死的行号当场全错；会漂的东西别写。
 # 所以不需要额外解析输出。
 #
 # 期望值：
-#   · 512/0  tests/test_relay_core.py      算法层
-#   ·  104/0  tools/review_050.py           文档—代码一致性（✅ 本数字由**本文件的 H3g 自引用机检**盯着）
+#   · 563/0  tests/test_relay_core.py      算法层
+#   ·  116/0  tools/review_050.py           文档—代码一致性（✅ 本数字由**本文件的 H3g 自引用机检**盯着）
 #   ·  16/0  tools/smoke_nodes.py          节点层冒烟（✅ H3j 自 2026-09-30 起机检）
-#   ·   4/4  tools/assert_default_exit.py  默认出口 = V3（契约 1 + 行为 3；必须单进程、不设环境变量）
-#   ·  70/0  tests/test_v3_schema.py       V3 与 V1 逐字段一致（两种环境各一个数，原因见下：
-#                                          能拿到宿主注册表 ⇒ **8 节点 / 122 个 input**；
-#                                          `sys.modules["nodes"]=None` 硬挡 ⇒ **7 节点 / 109 input**）
-#   ·  期望 41/0  tests/test_prompt_dispatch.mjs  前端纯函数（词分发 + run_id 同步）（node）
+#   ·   5/5  tools/assert_default_exit.py  默认出口 = V3（契约 2 + 行为 3；必须单进程、不设环境变量）
+#   ·  72/0  tests/test_v3_schema.py       V3 与 V1 逐字段一致（**8 节点 / 122 个 input**）
+#                                          ⚠️ 2026-10-07 起**只有一个数**了：节点在不在场只由它
+#                                          自己的 `INPUT_TYPES()` 决定，与"宿主 `nodes` 能不能
+#                                          import"无关（原因见下方「为什么 V3 机检只有一个数」）
+#   ·  期望 43/0  tests/test_prompt_dispatch.mjs  前端纯函数（词分发 + run_id 同步 + 阶段表对账）（node）
+#   ·  期望 29/0  tests/test_run_id_parity.mjs   run_id 同步的跨层对账（与 Python 第 34 组共用一份 fixture）（node）
 #   ·  期望 45/0  tests/test_audio_ref_budget.mjs  前端纯函数（音频参考额度：3 槽 + 本包 1）（node）
 #   ·  期望 33/0  tests/test_i18n.mjs            前端纯函数（画布中英切换：标签 + 悬浮提示）（node）
 # 改动后若这些数字变了，请同步 CONTRIBUTING.md「方面数/断言数」、tests 头注释 **以及本文件**。
@@ -33,24 +36,29 @@
 #   2. **宿主依赖不固定版本**（直接吃宿主 `requirements.txt` 的当前状态）⇒ 上游漂移会造成与本包无关的红（噪声）；
 #   3. `dist/` 被 ruff 排除（它是生成物）—— 但**分发集现在会被真的构建并自验**（见最后一步），
 #      此前它零 CI 覆盖（2026-09-30 实测：打包器缺 `import subprocess`，CI 全绿而真跑 NameError）。
-# 🔴 **为什么 V3 机检有两个数**（2026-09-25 首测 / **2026-09-30 修正机制**，别再猜）：
-#    `H3RelayLatentUpscale.INPUT_TYPES()` 会走到 `_comfy_registry()`，而它**第一步就 `import nodes`**。
-#    **分岔点不是"宿主 nodes 能不能 import"，而是那个异常是什么类型**：
-#    · 拿到宿主注册表（`import nodes` 成功）⇒ 上游不在注册表 ⇒ `_upscaler_cls()` 抛 **RuntimeError**
-#      ⇒ `_upscaler_module()` **捕获它**（只 except RuntimeError）⇒ 退回 `get_filename_list`
-#      （宿主自带注册 `latent_upscale_models`）⇒ INPUT_TYPES 不抛 ⇒ **8 节点 / 122 input / 70 项**。
-#    · `import nodes` 抛 **ImportError**（`sys.modules["nodes"] = None` 这种硬挡）⇒ 类型不是
-#      RuntimeError ⇒ **不吞** ⇒ 穿透 ⇒ INPUT_TYPES 抛 ⇒ 逐节点容错跳过它
-#      ⇒ **7 节点 / 109 input / 63 项**。**这是设计内的降级，不是失败。**
-#    · 🔴 `import nodes` 抛 **RuntimeError**（**CI 就是这种**：宿主 import 链里 `torch.cuda` 报
-#      `Found no NVIDIA driver on your system`）⇒ **被吞** ⇒ INPUT_TYPES 成功
-#      ⇒ **8 节点 / 122 input / 70 项**（所以 CI 的直跑与"本机"是同一档）。
-#    ⇒ 判据由**节点自己的 `INPUT_TYPES()`** 回答（`test_v3_schema.py` 的 2.1），
-#      **不是**由"宿主 nodes 能不能 import"去推 —— 后者在 CI 上会得出**相反**结论
-#      （2026-09-30 实测：探针说"期望 7"、实际 8 ⇒ 假红，而本地 70/0 复现不了）。
-#    ⚠️ 别用"只把上游节点从注册表摘掉"模拟第二档 —— 那是「装了宿主没装上游包」，仍是 8 节点。
-#       正确复现第二档：`sys.modules["nodes"] = None` 后跑 test_v3_schema
-#       ⇒ `63/0 · 7 节点 · 109 input`；工具版：`python tools/ci_env_repro.py tests/test_v3_schema.py`。
+# 🔴 **为什么 V3 机检现在只有一个数**（2026-09-25 首测 / 2026-09-30 修正机制 / **2026-10-07 收敛**）：
+#    `H3RelayLatentUpscale.INPUT_TYPES()` 要问 `_comfy_registry()` 拿**宿主**节点注册表，
+#    好去里面找上游包（作者的 MinimaxH3LatentUpscaler3D）：
+#    · 注册表**拿得到** ⇒ 上游不在里面 ⇒ `_upscaler_cls()` 抛 **RuntimeError**
+#      ⇒ `_upscaler_module()` **捕获它**（按设计）⇒ 退回 `get_filename_list`
+#      （宿主自带注册 `latent_upscale_models`）⇒ INPUT_TYPES 不抛。
+#    · 注册表**拿不到**（宿主 `nodes` 导不进来 / 被本包目录遮成影子模块）⇒ 同样收敛成
+#      **RuntimeError** ⇒ 同样被吞 ⇒ **它照样在场**。
+#    ⇒ 两种环境**都是 8 节点 / 122 input / 72 项**。
+#    🔴 2026-10-07 之前不是这样：`_comfy_registry()` 里的 `import nodes` 若抛 **ImportError**
+#      会**穿透**出去（`_upscaler_module()` 只 `except RuntimeError`）⇒ INPUT_TYPES 抛
+#      ⇒ V3 外壳的逐节点容错**静默跳过该节点** ⇒ **7 节点 / 63 项**。
+#      那个"第三档"只在 `sys.modules["nodes"] = None` 这种**人工硬挡**下出现 ——
+#      也就是说 `tools/ci_env_repro.py` 复现出来的**从来不是 CI 真正进入的状态**（CI 抛的是
+#      RuntimeError，被吞 ⇒ 8 节点）。**旧文档把一个人造态写成了"CI 的环境"，那是错的。**
+#      修法（`nodes.py::_comfy_registry`）：**先扫 `sys.modules`**（既更准，又不会把一个同名的
+#      影子 `nodes.py` 重新 exec 一遍 —— 那正是本函数注释里写明要避免的事），再 `import nodes`
+#      且**兜住任何异常** ⇒ 失败一律收敛成该函数声明的那一种（RuntimeError）。
+#    ⇒ 判据仍由**节点自己的 `INPUT_TYPES()`** 回答（`test_v3_schema.py` 的 2.1），
+#      **不是**由"宿主 nodes 能不能 import"去推（2026-09-30 实测：后者会给出**相反**结论 ⇒ 假红）。
+#    ⚠️ 别用"只把上游节点从注册表摘掉"模拟"没有注册表" —— 那是「装了宿主没装上游包」，仍是 8 节点。
+#       复现"没有宿主注册表"：`sys.modules["nodes"] = None` 后跑该测试（工具版
+#       `python tools/ci_env_repro.py tests/test_v3_schema.py`）⇒ **同样 72/0 · 8 节点**。
 #    🔴 2026-09-30 补记：这两行曾写成「8 节点」（跨行"跳过它 ⇒ 8 节点"）而**H3h 放过了**——
 #       因为它的判据只查"值在声明集合里"，不查 (节点数, input 数) **配对**。
 #       ⇒ 已把 H3h 收紧为**配对校验**，并修掉本文件这两处（机检的强弱也是被测对象）。
@@ -115,11 +123,11 @@ jobs:
           COMFYUI_PATH: ${{ runner.temp }}/ComfyUI
           PYTHONPATH: ${{ runner.temp }}/ComfyUI
         run: |
-          python tests/test_relay_core.py   # 期望 512/0
-          python tools/review_050.py        # 期望 104/0（H3g 自引用机检；L13 + H3j/H3k/H3l/H3m + H3n i18n 词表 + H3p i18n 悬浮提示 + H3q JS 逗号表达式 + H3r 防覆盖兜底 + H3s link 端点字段 + H3t 官方语言入口 + H3o 文档悬空引用）
+          python tests/test_relay_core.py   # 期望 563/0
+          python tools/review_050.py        # 期望 116/0（H3g 自引用机检；I1–I4 覆盖**全部**示例图；L13 + H3j/H3k/H3l/H3m + H3n i18n 词表 + H3p i18n 悬浮提示 + H3q JS 逗号表达式 + H3r 防覆盖兜底 + H3s link 端点字段 + H3t 官方语言入口 + H3o 文档悬空引用 + **H3u registry 包文件数真值 + H3v tools 脚本数真值 + H3w 未跟踪文件 + H3x setdefault-到-PYTHONPATH + H3y tools 脚本登记 + H3z release.py flag 齐全 + H4a Python 子进程显式 env + H4b 判据表自检 + H4c 台账一致 + H4d JS 期望数真值 + H4e dist 白名单真值** + I4 示例图节点数）
           python tools/smoke_nodes.py       # 期望 16/0
           # 这两个此前**只在本地清单里、CI 没跑**（2026-09-30 补齐覆盖缺口）：
-          python tests/test_experimental.py                              # 期望 29/0（实验层）
+          python tests/test_experimental.py                              # 期望 失败 0（实验层）
           python tools/check_ui_workflow.py examples/minimal_relay_official.json   # 期望「问题合计 0 条」
 
       # 默认出口 = V3（2026-09-24 从 v1 切过来）。**必须单跑一个进程**：
@@ -128,14 +136,14 @@ jobs:
         env:
           COMFYUI_PATH: ${{ runner.temp }}/ComfyUI
           PYTHONPATH: ${{ runner.temp }}/ComfyUI
-        run: python tools/assert_default_exit.py   # 期望 4/4
+        run: python tools/assert_default_exit.py   # 期望 5/5
 
       # V3 外壳与 V1 的逐字段一致性（零 GPU）。默认出口现在是 V3 ⇒ 它必须被 CI 覆盖。
-      # ⚠️ 两个数分别对应"能不能拿到宿主注册表"（差的那一个 = `H3RelayLatentUpscale`）：
-      #    能拿到 ⇒ **70/0 · 8 节点 / 122 个 input**（**CI 的直跑就是这一档** —— 宿主 import 抛的是
-      #    RuntimeError「无 NVIDIA 驱动」，被 `_upscaler_module()` 按设计吞掉）；
-      #    `sys.modules["nodes"]=None` 硬挡 ⇒ **63/0 · 7 节点 / 109 input**（设计内的降级，不是失败）。
-      #    🔴 判据在测试里由**节点自己的 INPUT_TYPES()** 回答，不是由"宿主 nodes 能不能 import"推。
+      # **一个数**：`72/0 · 8 节点 / 122 个 input` —— "有没有宿主注册表"两条路都收敛到这一档。
+      # 差的那个节点是 `H3RelayLatentUpscale`，它的 INPUT_TYPES 靠 `_upscaler_module()` 兜
+      # RuntimeError；2026-10-07 把 `_comfy_registry()` 的 ImportError 穿透堵掉后，
+      # "7 节点 / 63 项"那个第三档**不再可达**（详见文件头）。
+      # 🔴 判据在测试里由**节点自己的 INPUT_TYPES()** 回答，不是由"宿主 nodes 能不能 import"推。
       # 🔴 `if: always()`（2026-09-30 加）：GitHub 默认**首败即停** ⇒ 上一步一红，
       #    这一步的输出根本不会出现在日志里（实测：review_050 红了一次，
       #    "V3 schema parity" 这步的真实输出全被吞掉，只能靠再推一版来猜）。
@@ -145,11 +153,23 @@ jobs:
         env:
           COMFYUI_PATH: ${{ runner.temp }}/ComfyUI
           PYTHONPATH: ${{ runner.temp }}/ComfyUI
-        run: python tests/test_v3_schema.py       # 能拿到宿主注册表 70/0（8 节点 / 122 个 input）· 硬挡 63/0（7 节点 / 109 input）
+        run: python tests/test_v3_schema.py       # 期望 72/0（8 节点 / 122 个 input；有没有宿主注册表都是这一档）
 
       # Chain 词分发的纯函数（与浏览器里跑的是同一份 web/relay_kit_prompt.js）
       - name: Chain prompt dispatch (node)
-        run: node tests/test_prompt_dispatch.mjs   # 期望 41/0
+        run: node tests/test_prompt_dispatch.mjs   # 期望 43/0
+
+      # 🔴 run_id 同步语义的**跨层对账**（0.6.31 新增）：前端 web/relay_kit_sync.js 与
+      #    后端 relay_core/plan.py 是同一套语义的两份实现（规范 §二·D「跨层孪生」）。
+      #    本步读 tests/parity/run_id_cases.json，Python 侧第 34 组读**同一个文件** ⇒
+      #    任何一侧单方面改语义，两边都会红。⚠️ 别删本步：删掉之后两侧就只剩"看着一样"。
+      - name: run_id parity (node side)
+        run: node tests/test_run_id_parity.mjs   # 期望 29/0
+
+      # ⚠️ 浏览器交互冒烟（tools/ui_smoke.cjs）**故意不在 CI 里**：
+      #    它要一个**活着的 ComfyUI**（点按钮 ⇒ 前端 ⇒ /prompt）+ 一个浏览器；
+      #    本仓 CI 两者都没有 ⇒ 加进去只会得到一个永远 SKIP 的假门。
+      #    本机一条命令跑：node tools/ui_smoke.cjs（详见 tools/README.md 与 LOCAL 规范 §七-22）。
 
       # 音频参考额度的纯函数（与浏览器里跑的是同一份 web/relay_kit_refs.js）。
       # 🔴 为什么必须进 CI：这组的核心是两条**静默失效**回归 —— ① 槽位正则不认 Autogrow 的
@@ -177,3 +197,16 @@ jobs:
           COMFYUI_PATH: ${{ runner.temp }}/ComfyUI
           PYTHONPATH: ${{ runner.temp }}/ComfyUI
         run: python tools/make_minimal_bundle.py --zip --force
+
+      # 🔴 2026-10-07 新增：**外部开源用户视角**冒烟（`git clone` 那条渠道）。
+      #    为什么必须有：上面所有步骤都在**原仓里**跑 ⇒ 证明不了"clone 出来的那份自足"。
+      #    2026-10-07 把 `relay_core.py` 拆成 `relay_core/` 包（11 文件）时，缺一个文件
+      #    就会让所有用户装不上 —— 而原仓里跑什么都看不出来。
+      #    它按 `git ls-files` 复制一份干净副本，断言：两个出口（默认 V3 / `H3RELAY_NODE_API=v1`）
+      #    都注册同样一批节点、`INPUT_TYPES()` 全可求值、前端 JS 在位、**模块零外泄**；
+      #    再从 `dist/` **真跑一次节点方法**（不是只看 schema）。
+      - name: User-copy smoke (external user view)
+        env:
+          COMFYUI_PATH: ${{ runner.temp }}/ComfyUI
+          PYTHONPATH: ${{ runner.temp }}/ComfyUI
+        run: python tools/user_smoke.py           # 期望「通过 10 / 失败 0」

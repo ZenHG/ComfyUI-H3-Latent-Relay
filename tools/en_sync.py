@@ -188,7 +188,7 @@ def seed_mapping(zh_secs, en_secs, has_prev):
             used_en.add(en_by_num[n])
     left_zh = [h for h, _ in zh_secs if h not in mapping]
     left_en = [h for h, _ in en_secs if h not in used_en]
-    for zh_head, en_head in zip(left_zh, left_en):
+    for zh_head, en_head in zip(left_zh, left_en, strict=False):
         mapping[zh_head] = (en_head, "by-position")
         used_en.add(en_head)
     for zh_head in left_zh[len(left_en):]:
@@ -370,7 +370,7 @@ def cmd_check(verbose=False):
         print("  ℹ️ " + n)
     if all_fix:
         print("  🛠 机械面可自动修（跑 `--apply`，**不碰散文**）：")
-        for zh_path, _en, (k, w) in all_fix:
+        for zh_path, _en, (_k, w) in all_fix:
             print("     · [%s] %s" % (zh_path, w))
     if all_prob:
         print("  ❌ 需人处理（%d 项）：" % len(all_prob))
@@ -419,7 +419,7 @@ def cmd_brief(key):
     man = load_manifest() or {}
     gl = load_glossary()
     hit = None
-    for zh_path, en_path, default_mode in PAIRS:
+    for zh_path, en_path, _default_mode in PAIRS:
         for head, bodyt in split_sections(read(zh_path)):
             if head.startswith(key) or key == num_of(head):
                 hit = (zh_path, en_path, head, bodyt)
@@ -466,7 +466,7 @@ def cmd_brief(key):
 def cmd_apply(write=True):
     # 机械面只看文件本身，**不依赖清单**（首次初始化时清单还不存在）
     changed = 0
-    for zh_path, en_path, default_mode in PAIRS:
+    for zh_path, en_path, _default_mode in PAIRS:
         zh, en = read(zh_path), read(en_path)
         _p, fixes = mechanical(zh, en, split_sections(zh), split_sections(en))
         if not fixes:

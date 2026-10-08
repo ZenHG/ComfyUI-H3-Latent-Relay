@@ -19,11 +19,14 @@
 // ── 三条设计决定（都是为了避免"静默做错事"）────────────────────────────────
 // 1. **空值不广播**：用户把一个格子清空 ≠ 想把全组清空。空值只提示、不扩散。
 //    （否则在某个格子上误删一个字符就会把整部片子的目录名清掉。）
-// 2. **冲突不猜**：同组里出现两个不同的非空 run_id 时**不自动挑一个**，
+// 2. **冲突不猜**：范围里出现两个不同的非空 run_id 时**不自动挑一个**，
 //    而是把清单交给人 —— 自动挑错的那次会让段文件落进错的目录，比报错难查得多。
 //    这正是 `resolveRunId` 只有 ok / empty / conflict 三态、没有"选一个"的原因。
-// 3. **同步范围 = 同一个分组框**（与 `stage_index` 同一套 `nodesInSameGroup` 语义）：
-//    一张图里放两部片子（两组）是正常用法，跨组同步会把另一部片子改掉。
+// 3. **同步范围**（0.6.31 改，GG 指正）：**默认全图** —— 图上只有一条 Chain 时，
+//    节点摆在画布哪里都同步得到（这是绝大多数人的用法）。只有**多条 Chain**
+//    （= 一图多部片子）且本节点落在某个分组框内，才按框隔离，避免跨片改目录名。
+//    ⚠ 与后端 `relay_core/plan.py::sync_run_id` 是**两份实现**，语义由
+//    `tests/parity/run_id_cases.json` 逐条对账（不是"看起来一样"就算对齐）。
 //
 // 挂钩与提示在 `relay_kit_chain.js`；本模块**只做判断**，不碰画布、不碰 DOM。
 
@@ -88,9 +91,9 @@ function writable(list) {
 }
 
 /**
- * 裁决同组 `run_id` 是否一致。**不猜**。
+ * 裁决同步范围内 `run_id` 是否一致。**不猜**。
  *
- * @param members `[{id, type, runId}]` —— 同组内带 `run_id` 的节点快照
+ * @param members `[{id, type, runId}]` —— 同步范围内带 `run_id` 的节点快照
  * @returns `{state, value?, values, ids?, empty, byValue}`
  *   · `state: "ok"`       —— 非空值**只有一个**；`value` = 它，`ids` = 已有该值的节点 id，
  *                            `empty` = 还是空的节点 id（**这些格要补齐**）
@@ -125,7 +128,7 @@ export function resolveRunId(members) {
 }
 
 /**
- * 规划一次广播：把 `value` 写到**同组里还没有这个值的**节点上。
+ * 规划一次广播：把 `value` 写到**同步范围里还没有这个值的**节点上。
  *
  * @param members  `[{id, type, runId, linked?}]`
  *                 `linked: true` = 这一格被连线接管 ⇒ **跳过**（见 `linked()` 的说明：
@@ -176,7 +179,7 @@ export function describeRunIdConflict(verdict, nameOf = (id) => `#${id}`, linked
         const ids = (verdict.byValue.get(v) ?? []).map(mark).join("、");
         return `  · 「${v}」← ${ids}`;
     });
-    let msg = "⚠ 同组的 `run_id` 不一致（有 " + lines.length + " 个不同的名字）：\n"
+    let msg = "⚠ 同步范围内的 `run_id` 不一致（有 " + lines.length + " 个不同的名字）：\n"
         + lines.join("\n")
         + "\n  ⇒ 段文件会落到不同目录、桥找不到文件。请把它们改成**同一个名字**后重试。";
     if (linkedSet.size) {

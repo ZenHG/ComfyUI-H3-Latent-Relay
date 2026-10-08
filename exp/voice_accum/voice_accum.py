@@ -173,7 +173,7 @@ def load_config(path: str) -> Optional[dict]:
     try:
         with open(path, encoding="utf-8-sig") as fh:
             raw = json.load(fh)
-    except Exception as exc:                                   # noqa: BLE001
+    except Exception as exc:
         raise RuntimeError("VA 配置读取失败：%s ⇒ %s" % (path, exc)) from exc
     if not isinstance(raw, dict):
         raise RuntimeError("VA 配置顶层必须是对象，得到 %s：%s" % (type(raw).__name__, path))
@@ -385,8 +385,7 @@ def voiced_spans(x: Any, sr: float = AUDIO_HZ,
             s0 = i
         prev = i
     spans.append((s0, prev))
-    out = [(a0 / sr, (b0 + 1) / sr) for a0, b0 in spans if (b0 + 1 - a0) >= min_g]
-    return out
+    return [(a0 / sr, (b0 + 1) / sr) for a0, b0 in spans if (b0 + 1 - a0) >= min_g]
 
 
 def assign_by_prior(spans: Sequence[Tuple[float, float]],
@@ -757,7 +756,7 @@ def compose_ref(pieces: Sequence[torch.Tensor],
 
     ## 为什么必须这样做（读码确证，不是推断）
 
-    `relay_core.py:4008-4012` 自己写着：
+    `relay_core/bridge.py::build_continue_latent` 自己写着：
 
     > 0.6.1 声锚：钉住的音频前缀同样改用声锚尾窗（与 plan_relay 的 audio_ref **同源** ——
     > 两处读的都是"上段尾"，**只改一处会打架**）

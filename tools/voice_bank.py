@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# ruff: noqa: UP031, BLE001, UP009
 """voice_bank —— H3 长链声锚（voice anchor）声库：采集 / 查询 / 管理。
 
 背景（2026-10-02 实测）：
@@ -17,7 +16,7 @@
     4. 声锚质量下限：有声时长 ≥ MIN_VOICED_S（默认 0.6s）、峰值归一 0.9。
 
 台词守卫的两层分工（2026-10-02 本仓作者 指正后理清）：
-    · **节点侧守卫**（H3RelayAudioSeam 的 speech-onset 守卫，relay_core.py:838 起，
+    · **节点侧守卫**（H3RelayAudioSeam 的 speech-onset 守卫，relay_core/audio.py::_speech_onset_in_head，
       纯能量判据、零依赖、随包分发）—— 通用层：任何人开箱即用。
       本模块的 `longest_voiced_span`（能量法）与它同族：不需要 funasr 也能采。
     · **funasr ASR 验证**（本机已缓存模型，本地测试尺）—— 增强层：`--line` 给了
@@ -86,9 +85,9 @@ SR = 16000                    # **分析**用重采样率（有声检测 / RMS /
 #    ⇒ 想吃到高频得手动 `--force` 重采。
 SR_OUT_MIN = 32000             # 落盘采样率下限（**仅作文档与登记标注**，不再触发任何转换）
 MIN_VOICED_S = 0.6            # 声锚质量下限：有声时长
-# 🔴 消费端尾部窗（2026-10-04）。`_voice_anchor_tail`（relay_core.py）只取锚的**尾部**
+# 🔴 消费端尾部窗（2026-10-04）。`_voice_anchor_tail`（relay_core/plan.py）只取锚的**尾部**
 #    `a_frames/FPS*AUDIO_HZ` 个 latent 步，而 `a_frames = audio_frames or trim_frames`
-#    （`relay_core.py:652`）⇒ **尾窗秒数 = a_frames / FPS**（不是段长！）。
+#    （`relay_core/plan.py::plan_relay`）⇒ **尾窗秒数 = a_frames / FPS**（不是段长！）。
 #    默认 `trim_frames=22` ⇒ 22/24 = **0.917 秒**（README 记的 0.925 秒是按 37 步折算的）。
 #    ⇒ **锚的尾部静音 = 那部分等于没锚**（模型只拿到静音，音色条件失效）。
 #
@@ -399,7 +398,7 @@ def compile_rules(line_re=None, speaker_re=None):
             "    · `--speaker-re`：**捕获组 1 = 说话人标识**（例：--speaker-re '<([^>]+)>'，\n"
             "      或 `^([^:\\n：]+)[:：]` 匹配行首的「名字:」）；\n"
             "      标识是纯数字 ⇒ 当作 `<Subject N>` 编号；其它 ⇒ 当作**名字本身**。\n"
-            "    · 已开 `re.I` + `re.M` ⇒ 大小写不敏感、`^`/`$` 按**行**匹配。" % e)
+            "    · 已开 `re.I` + `re.M` ⇒ 大小写不敏感、`^`/`$` 按**行**匹配。" % e) from e
 
 
 def speaker_lines(prompt, *, line_re=None, speaker_re=None, probe=None):
@@ -522,7 +521,7 @@ def ledger_from_parts(who_groups, weight_groups, *, start_stage=0, note="") -> d
          **任何提示词格式都能用**（代价 = 用户要数一下每句多长）。
     """
     stages = {}
-    for i, (ws, xs) in enumerate(zip(who_groups or [], weight_groups or [])):
+    for i, (ws, xs) in enumerate(zip(who_groups or [], weight_groups or [], strict=False)):
         ws = [str(w).strip() for w in ws]
         xs = [float(x) for x in xs]
         if len(ws) != len(xs):
@@ -530,7 +529,7 @@ def ledger_from_parts(who_groups, weight_groups, *, start_stage=0, note="") -> d
                              % (start_stage + i, len(ws), len(xs)))
         if not ws:
             continue
-        stages[str(start_stage + i)] = [{"who": w, "chars": x} for w, x in zip(ws, xs)]
+        stages[str(start_stage + i)] = [{"who": w, "chars": x} for w, x in zip(ws, xs, strict=False)]
     return {"_note": _LEDGER_NOTE + ((" · " + note) if note else ""), "stages": stages}
 
 

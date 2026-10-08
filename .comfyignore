@@ -2,10 +2,14 @@
 # 语法 = .gitignore（⚠️ 行内不能写注释：`#` 只有**行首**才算注释，行尾的会被当成模式的一部分）。
 # 语义 = 「在 git 跟踪的文件里，再剔掉匹配这些模式的」。
 #
-# 为什么必须有它：`comfy node publish` 默认打包**全部 git 跟踪文件**（本仓 68 个），
+# 为什么必须有它：`comfy node publish` 默认打包**全部 git 跟踪文件**（本仓全部受控文件），
 # 其中大半是开发件（docs/tests/tools/.github）—— 推给用户既没用，还会把 tools/ 里的
-# subprocess / git 调用送进安全扫描面。分发包的真相源是 tools/make_minimal_bundle.py
-# 的清单（24 文件 / 789 KB），本文件让它与 registry 包口径一致。
+# subprocess / git 调用送进安全扫描面。分发包（我们发的 zip）的真相源是
+# tools/make_minimal_bundle.py 的**白名单**清单（文件数与体积见 `tools/README.md`）。
+# ⚠️ 两者**机制不同、口径不必相等**（2026-10-07 实测）：本文件是**黑名单**，作用在
+#    「git 跟踪文件」上 ⇒ registry 包 = 48 文件；白名单 dist = 42 文件。差的 6 个 =
+#    图标/横幅 4（Registry 卡片要用）+ `exp/history_anchor_v2/` 里 2 个开发件
+#    （有意不排 `exp/` 整块 —— 少一条特例少一个坑）。**别把「两者相等」当判据。**
 # 机检：tools/review_050.py 的 H3k（缺文件或漏排某条 = 红）。
 
 # —— 开发件（对使用者无价值）——
@@ -18,6 +22,7 @@ tools/
 CHANGES.md
 RELEASE-NOTES.md
 CONTRIBUTING.md
+AGENTS.md
 CODE_OF_CONDUCT.md
 SECURITY.md
 RELEASING.md
@@ -46,6 +51,8 @@ RESEARCH_*.md
 #   exp/                 → nodes.py 顶层 import history_anchor（exp/history_anchor_v2/）
 #                          整个目录一并随包（其中 test_history_anchor.py 是死重量，
 #                          但**不做例外**：运行期目录就该整块走，少一条特例少一个坑）
+#   relay_core/          → 业务内核（2026-10-07 由单文件 relay_core.py 拆成 11 文件包；
+#                          对外导入名仍是 relay_core，靠 __init__.py 全量再导出）
 #   v3/  web/  examples/ → 出口外壳 / 前端 JS / 示例工作流
 #   LICENSE  licenses/  THIRD-PARTY-NOTICES.md
 #                        → 许可合规，必须随包

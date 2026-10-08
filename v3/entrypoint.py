@@ -33,7 +33,7 @@ class H3RelayExtension(ComfyExtension):
         for cls in NODES:
             try:
                 cls.GET_SCHEMA()                   # 走官方缓存；构造失败即在此暴露
-            except Exception as exc:               # noqa: BLE001
+            except Exception as exc:
                 print("[H3 Relay] V3 节点 %s 的 schema 构造失败 ⇒ 已跳过它，其余节点照常加载。\n"
                       "            原因：%s: %s" % (cls.__name__, type(exc).__name__, exc))
                 continue

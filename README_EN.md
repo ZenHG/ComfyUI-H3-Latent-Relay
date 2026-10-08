@@ -10,7 +10,7 @@ not coupled to any third-party H3 node pack.
 
 | Item | Value |
 |---|---|
-| Version | **0.6.29** |
+| Version | **0.6.31** |
 | License | **MIT** (third-party attribution in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) |
 | Host | **ComfyUI ≥ 0.35.0 with MiniMax-H3 support** (the host itself is GPL-3.0, see License) |
 
@@ -405,7 +405,7 @@ Details and the word table: [`docs/04`](docs/04-canvas-and-widgets_EN.md) §Node
 ```
 ComfyUI-H3-Latent-Relay/
 ├── __init__.py            # entry point: /h3relay/concat route, V1/V3 exit selection, startup banner
-├── relay_core.py          # business core (single source of truth): timing grid / copy bridge / TrimAV / AudioSeam / concat
+├── relay_core/            # business core (single source of truth, 11-file package): timing grid / copy bridge / TrimAV / AudioSeam / concat
 ├── nodes.py               # node layer (the 8 nodes' inputs, outputs and human-readable reports)
 ├── layout_contract.py     # layout contract: pass through + leave a trace when upstream is missing, raise only on a real mismatch
 ├── v3/                    # V3 shell (io.ComfyNode + comfy_entrypoint); V1 goes through NODE_CLASS_MAPPINGS
@@ -413,7 +413,7 @@ ComfyUI-H3-Latent-Relay/
 ├── web/                   # front-end JS: the 🧩 concat button, Chain panel, `run_id` one-field-syncs-the-group, **the node Chinese/EN toggle** (canvas only)
 ├── examples/              # two openable workflows: minimal continuation (21 nodes) and full flow (47 nodes)
 ├── docs/                  # deep docs 01–10 (mechanism / parameters / sampling / canvas / troubleshooting / scripting / chain / tests / metrics / audio)
-├── tests/                 # offline self-test (zero GPU): 512 assertions + V3 parity + prompt-dispatch pure functions
+├── tests/                 # offline self-test (zero GPU): 563 assertions + V3 parity + prompt-dispatch pure functions
 ├── tools/                 # self-checks / forensic tools / concat CLI / bundler (incl. the en_sync docs gate)
 ├── licenses/              # third-party license texts shipped with the pack
 ├── dist/                  # bundler output (minimal distribution set + zip; not tracked)
@@ -422,12 +422,13 @@ ComfyUI-H3-Latent-Relay/
 ├── icon.png / icon.svg    # Registry / Manager card icon (400×400; the `.svg` is the source, `.png` is shipped)
 ├── banner.png / banner.svg # Registry node-page banner (21:9 = 1680×720; same source/render split)
 ├── requirements.txt       # dependencies for ComfyUI-Manager
-└── (top level also has README_EN.md · CHANGES.md · CONTRIBUTING.md · SECURITY.md ·
+└── (top level also has README_EN.md · CHANGES.md · CONTRIBUTING.md · AGENTS.md · SECURITY.md ·
      CODE_OF_CONDUCT.md · THIRD-PARTY-NOTICES.md · LICENSE · .github/)
 ```
 
-At runtime only `__init__.py` · `relay_core.py` · `nodes.py` · `layout_contract.py` · `v3/` (4 files) ·
-`exp/history_anchor_v2/` (3 files, imported at the top of `nodes.py`, hence required) · `web/` (3 JS files)
+At runtime only `__init__.py` · `relay_core/` (11 files) · `nodes.py` · `layout_contract.py` · `v3/` (4 files) ·
+`exp/__init__.py` and `exp/history_anchor_v2/` (3 files) · `exp/voice_accum/` (3 files) (all imported
+at the top of `nodes.py`, hence required) · `web/` (7 JS files)
 are actually loaded — the minimal distribution set in `dist/` is exactly those plus examples and metadata;
 `docs/`, `tests/` and `tools/` are development-only.
 
@@ -448,7 +449,7 @@ are actually loaded — the minimal distribution set in `dist/` is exactly those
 | 9 | **`chunks=1` is the only path consistent with upstream whole-segment inference**: `chunks>1` **changes the picture** (3D volumetric attention is cut); raise it only under OOM and **re-check the seam** |
 | 10 | 🔴 **The continuation contract is taken in the native domain**: LatentSave goes **before** the upscale; the **second pass's guider must not connect the bridge's `conditioning`** (different grid ⇒ it explodes) |
 | 11 | `diagnostics` is off by default (three print-only passes, **no effect on trimming**); enable it for DTW / trim-amount→jump curves / appearance drift. ⚠️ The "settle 1" seen in older posts is pre-0.5.0 — **trust this page and the node reports** |
-| 12 | 🔴 **The canvas path and the script path must be the same node implementation** (see the iron rule at the top); purely front-end capabilities (the 🧩 button, Chain panel fields, **the `run_id` one-field-syncs-the-group behaviour**, **the node Chinese/EN toggle**) **are ignored** when a script submits JSON — script users take the three non-UI paths in [`docs/10`](docs/10-audio-seam-and-concat_EN.md) §7.4 |
+| 12 | 🔴 **The canvas path and the script path must be the same node implementation** (see the iron rule at the top); purely front-end capabilities (the 🧩 button, Chain panel fields, **the `run_id` one-field-syncs-the-group behaviour**, **the node Chinese/EN toggle**, **the `stage_index` push-to-all behaviour**, **auto re-enabling a bypassed "read previous latent"**, **the audio-reference budget badge**) **are ignored** when a script submits JSON. ⚠️ The last three **are not dead ends** — each has a non-UI route: **write the same stage number into every node yourself** (the Chain `stage_index` tooltip and [`docs/10`](docs/10-audio-seam-and-concat_EN.md) §7.4 both say so); **do not bypass** "read previous latent" (keep `mode` at `0`, then Chain never has to restore it); read the budget from the **bridge's `report` output** (the very same numbers the badge shows). The rest take the three non-UI paths in §7.4 |
 
 ---
 
@@ -489,14 +490,15 @@ The Chinese documents are the source of truth; `README_EN.md` and the English `d
 | [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md) · 🇬🇧 [English](docs/05-troubleshooting_EN.md) | **complete troubleshooting table** · **FAQ** · workflow-file self-check · API submission |
 | [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md) · 🇬🇧 [English](docs/06-continuity-scripting_EN.md) | prompt-side discipline: head padding · dialogue-safe timing · last-frame anchor chaining |
 | [`docs/07-chain.md`](docs/07-chain.md) · 🇬🇧 [English](docs/07-chain_EN.md) | the Chain auto-run controller (prompts / concat / resume) |
-| [`docs/08-testing.md`](docs/08-testing.md) · 🇬🇧 [English](docs/08-testing_EN.md) | offline self-test: 31 assertion groups (512 assertions) · tool inventory |
+| [`docs/08-testing.md`](docs/08-testing.md) · 🇬🇧 [English](docs/08-testing_EN.md) | offline self-test: 34 assertion groups (563 assertions) · tool inventory |
 | [`docs/09-metrics.md`](docs/09-metrics.md) · 🇬🇧 [English](docs/09-metrics_EN.md) | reference ranges for observables (DTW residual / appearance drift) · self-calibration |
 | 🇨🇳 [`docs/10-audio-seam-and-concat.md`](docs/10-audio-seam-and-concat.md) | **audio seam & multi-segment concatenation** — Chinese only for now: seam conventions and tuning guide · **dialogue protection** · criterion limits · track levels · sidecars · **script usage without the canvas** |
 | [`RELEASE-NOTES.md`](RELEASE-NOTES.md) | **user-facing release notes** (bilingual, one section per version) · **read this before upgrading** |
 | [`CHANGES.md`](CHANGES.md) | version history with the measurement evidence for each change (the **developer** record) |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | dev environment · testing discipline · **English-doc sync discipline** · licence terms |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | dev environment · **the change loop** · testing discipline · **English-doc sync discipline** · licence terms |
+| [`AGENTS.md`](AGENTS.md) | **entry point for agents working on this repo**: the change loop · the three verification tiers (local / CI / host + browser) · **rule-to-enforcement map** · the full machine-check list · forbidden moves · known weak spots |
 | [`RELEASING.md`](RELEASING.md) | **release policy (single source of truth)**: GitHub + Comfy Registry must be updated as a pair · one command `tools/release.py` · failure handling · key discipline |
 | [`SECURITY.md`](SECURITY.md) | secrets / dependencies / network behaviour disclosure |
-| [`tools/README.md`](tools/README.md) | the thirteen scripts and their expected values (nine self-check/forensic + concat CLI + bundler + **releaser** + **voice-bank collector**) |
+| [`tools/README.md`](tools/README.md) | the 17 scripts and their expected values (**12 self-check/forensic** + concat CLI + bundler + **releaser** + **voice-bank collector** + **browser smoke gate**) |
 | [`examples/README.md`](examples/README.md) | the two openable workflows (minimal continuation 21 nodes / full flow 47 nodes) · generators |
 | [`README.md`](README.md) | **Chinese source of truth** (install / wiring / nodes / parameters / troubleshooting / FAQ) — in-depth derivations always link out to that file and `docs/` |

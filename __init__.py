@@ -31,6 +31,9 @@ AV 打包 latent 适配器）：**未装那个包时本包照常加载**，只�
     POST /h3relay/concat    把已跑完的 N 段拼成一条成片（画面流拷贝无损 + 音频逐段对齐 + 断言）
                             音轨档由 Chain 的 `audio_out` 决定（默认 AAC 256k / 可 192k / `pcm_lossless` 母版）；
                             每段有「Trim AV」落的 **PCM 边车**就直读它 ⇒ 音频代际 2 → 1（无损档零新增）
+    POST /h3relay/runid     `run_id` 跨节点同步（**API / 脚本路**，与前端广播同一套语义）
+                            送 `{prompt:…}` 或 `{prompt_id:…}` ⇒ 回各节点的 run_id + 三态裁决；
+                            送 `{"apply":true, "value":"名字"}` ⇒ 顺带回一份**已统一**的 prompt（直接拿去提交）
 
 手把手（UI 三步跑一条链）：
     1. 桥和落盘的 stage_index 填 0，点 Chain 的 ▶ Run —— 第 1 段落盘
@@ -58,7 +61,7 @@ _CONCAT_LOCK = asyncio.Lock()
 #     `elif hasattr(module,"comfy_entrypoint"): ...`
 #   （ComfyUI/nodes.py:2295-2337）—— V1 分支命中即 return ⇒ 同时导出两者时 **V3 永不生效**。
 #   所以 V3 模式下把 NODE_CLASS_MAPPINGS **显式设为 None**（宿主的判据含 "is not None"）。
-# 默认 **v3**（2026-09-24 切换）：V3 出口已过 70 项逐字段机检（8 节点 / 122 个 input
+# 默认 **v3**（2026-09-24 切换）：V3 出口已过 72 项逐字段机检（8 节点 / 122 个 input
 # 的顺序·取值·组合项全序与 V1 一致）＋ 2 段真实链验证（362/362 帧守恒 · 流拷贝无损 ·
 # PCM 边车被拼接路由取到）。
 # ⚠️ 回退到 V1：设 H3RELAY_NODE_API=v1 后重启 —— 两条出口的代码都还在，只是默认换了。
@@ -73,8 +76,8 @@ NODE_API_FALLBACK_REASON = None
 
 if NODE_API == "v3":
     try:
-        from .v3.entrypoint import comfy_entrypoint          # noqa: F401
-    except Exception as _v3_err:                             # noqa: BLE001
+        from .v3.entrypoint import comfy_entrypoint
+    except Exception as _v3_err:
         # V3 出口依赖宿主的 `comfy_api`，而它的传递闭包要宿主自己的整套 Python 依赖
         # （实测缺过 packaging / comfy-aimdo / tqdm，2026-09-24 GitHub Actions 三次实测）。
         # 原则：**一个可选出口不许把整包搞挂** —— 退回 V1 并**大声说明**（不静默降级）。
@@ -90,7 +93,7 @@ if NODE_API == "v3":
     NODE_DISPLAY_NAME_MAPPINGS = None
     __all__ = ["comfy_entrypoint", "WEB_DIRECTORY"]
 else:
-    from .nodes import (                                     # noqa: F401
+    from .nodes import (
         NODE_CLASS_MAPPINGS,
         NODE_DISPLAY_NAME_MAPPINGS,
     )
@@ -99,7 +102,7 @@ else:
 
 WEB_DIRECTORY = "./web"
 
-__version__ = "0.6.29"
+__version__ = "0.6.31"
 
 
 # ============================================================================
@@ -116,7 +119,23 @@ try:                                   # 宿主提供；离线单测环境里没
 except Exception:                      # pragma: no cover - 取决于运行环境
     PromptServer = None
 
-if PromptServer is not None:           # pragma: no branch
+# 🔴 两道守卫，缺一不可（2026-10-07 补第二道）：
+#   ① `PromptServer is not None` —— `import server` 失败（离线/裸环境）；
+#   ② `PromptServer.instance` 已构造 —— `server` **能导入**但**还没起服务**的情况。
+#   只判 ① 时，②这种情况会在下面 `@PromptServer.instance.routes.post(...)` 那行抛
+#   `AttributeError: type object 'PromptServer' has no attribute 'instance'`
+#   ⇒ **整包 import 失败**。谁会踩到：任何**离线/工具化**地加载本包的人 ——
+#   第三方脚本、别的节点包做 introspection、`spec_from_file_location` 探针。
+#   ⚠️ 宿主正常启动序（`main.py` 先建 instance 再载自定义节点）不会踩到。
+#   ⇒ 判 ② 不成立时**只跳过路由**、并**出声**（不静默）：拼接的**非 UI 路**（库调用 /
+#     `assemble_mp4_segments` / docs/10 §7.4）依然可用，所以只提示、不抛。
+_PS_INST = getattr(PromptServer, "instance", None) if PromptServer is not None else None
+if PromptServer is not None and _PS_INST is None:
+    print("[H3 Relay] ⚠ `server.PromptServer.instance` 尚未创建 ⇒ `/h3relay/*` 路由本次**未注册**"
+          "（画布上的 🧩 拼接按钮不可用）。正常由 ComfyUI 启动时不会出现；"
+          "离线/工具化加载（或脚本/无头用户）请走库调用 —— 见 docs/10 §7.4。")
+
+if _PS_INST is not None:               # pragma: no branch
     import os
 
     import folder_paths
@@ -326,7 +345,7 @@ if PromptServer is not None:           # pragma: no branch
                 if paths:
                     segs.append(paths[0])
                     pcms.append(cands)
-        except Exception as exc:            # noqa: BLE001
+        except Exception as exc:
             # 「从 history 里挑段」这层同样**不许把异常甩成 500** —— 画布上什么都看不到，
             # 用户只会以为"点了没反应"（同本文件对拼接编码路的要求）。
             lines.append("  🔴 从 history 解析段文件时出错（%s）：%s"
@@ -375,7 +394,7 @@ if PromptServer is not None:           # pragma: no branch
                     None, lambda: CORE.assemble_mp4_segments(
                         segs, out_path, on_log=print, audio_codec=a_codec,
                         audio_bitrate=a_bitrate, crf=crf, pcm_paths=pcms))
-            except Exception as exc:            # noqa: BLE001
+            except Exception as exc:
                 # 拼接内部抛错（缺库 / 文件被占用 / 编码器缺失…）也必须变成画布上看得懂的提示，
                 # 不然前端只看到 500、status 格子里什么都没有。
                 lines.append("  🔴 拼接过程抛错（%s）：%s" % (type(exc).__name__, exc))
@@ -387,6 +406,8 @@ if PromptServer is not None:           # pragma: no branch
                                       "out": out_path if rep.get("ok") else "",
                                       "attempted_out": out_path, "asserts": rep.get("asserts"),
                                       "searched": note})
+
+
 
     # ========================================================================
     # 环境自检（7.4②）：`GET /h3relay/health`
@@ -414,7 +435,7 @@ if PromptServer is not None:           # pragma: no branch
             return web.json_response({"ok": False, "error": "缺少 run_id 参数"}, status=400)
         try:
             path = _progress_path(run_id)
-        except Exception as err:                     # noqa: BLE001
+        except Exception as err:
             return web.json_response({"ok": False, "error": "run_id 不合法：%s" % err})
         if not _os.path.isfile(path):
             return web.json_response({
@@ -423,11 +444,102 @@ if PromptServer is not None:           # pragma: no branch
         try:
             with open(path, encoding="utf-8") as fh:
                 data = _json.load(fh)
-        except Exception as err:                     # noqa: BLE001
+        except Exception as err:
             return web.json_response({"ok": False, "error": "进度文件读不了：%s" % err})
         data["ok"] = True
         data["path"] = path
         return web.json_response(data)
+
+    # ========================================================================
+    # `run_id` 跨节点同步（0.6.31）：`POST /h3relay/runid`
+    # ========================================================================
+    # 为什么值得有：前端 Chain 的广播（改一处 `run_id` 同步全组）**只存在于 UI**。
+    #   API / 脚本用户没有那条路 —— 六处各填一遍，填错一处就去**错的目录**找上一段
+    #   （报错算好的，读到上一轮旧段最坏）。这里给脚本用户同一条路。
+    # ⚠ 与前端 `web/relay_kit_sync.js` 是**两份实现**（规范 §二·D）⇒ 语义由
+    #   `tests/parity/run_id_cases.json` 逐条对账（两侧各跑一遍、都要过），不是"看着一样"。
+    #   🔴 **范围**：API 侧没有"画布位置"这回事 ⇒ 天然是**全图**（= 前端"只有一条 Chain"那一档）。
+    @PromptServer.instance.routes.post("/h3relay/runid")
+    async def h3relay_runid(request):  # pragma: no cover - 需要运行中的宿主
+        """`run_id` 自检 / 同步（API 路）。三种入参组合：
+
+        * `{prompt: {…}}` —— 直接送 API 格式的 prompt（最常用）
+        * `{prompt_id: "…"}` —— 从 history 里取那次提交的 prompt
+        * `{"value": "名字", "apply": true}` —— 想要一份**已统一**的 prompt 回传
+          （冲突时**拒绝改写**，只在 report 里点名 —— 与前端同一条"不猜"纪律）
+        """
+        import json as _json
+        from .relay_core import collect_run_ids, resolve_run_id, sync_run_id
+
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+
+        prompt = data.get("prompt")
+        if not isinstance(prompt, dict):
+            pid = str(data.get("prompt_id") or "").strip()
+            if not pid:
+                return web.json_response(
+                    {"ok": False,
+                     "error": "要送 `prompt`（API 格式的图）或 `prompt_id`（history 里的那次提交）"},
+                    status=400)
+            entry = None
+            try:
+                # 🔴 2026-10-07 修：`prompt_queue.history` 就是 `{prompt_id: entry}`，
+                #   `.get(pid)` **已经是那条记录**。原来写成 `.get(pid).get(pid)`（两次）
+                #   ⇒ 永远 None ⇒ **「按 prompt_id 自检」这条路完全走不通**（审核 P1-7 命中）。
+                entry = PromptServer.instance.prompt_queue.history.get(pid)
+            except Exception as err:
+                return web.json_response(
+                    {"ok": False, "error": "读 history 失败：%s" % err}, status=500)
+            if not entry:
+                return web.json_response(
+                    {"ok": False, "error": "history 里没有 %s（重启会清空 /history）" % pid}, status=404)
+            try:
+                prompt = entry["prompt"][2]          # ComfyUI 的三元组 (number, prompt_id, prompt, …)
+            except Exception as err:
+                return web.json_response(
+                    {"ok": False, "error": "那条提交里取不出 prompt：%s" % err}, status=500)
+
+        members = collect_run_ids(prompt)
+        verdict = resolve_run_id(members)
+        out = {
+            "ok": True,
+            "scope": "graph",
+            "scope_note": "API 侧没有画布位置概念 ⇒ 范围恒为**全图**"
+                          "（等价于前端「图上只有一条 Chain」那一档）",
+            "members": members,
+            "verdict": {
+                "state": verdict["state"],
+                "value": verdict["value"],
+                "values": verdict["values"],
+                "ids": verdict["ids"],
+                "empty": verdict["empty"],
+                "by_value": {k: list(v) for k, v in verdict["by_value"].items()},
+            },
+        }
+        if not members:
+            out["report"] = ("本图没有任何带 `run_id` 的本包节点 —— "
+                             "六类节点（连跑/桥/落盘/读上段/裁重叠/音频缝）一个都没进这张图。")
+            return web.json_response(out)
+
+        want = data.get("value")
+        want = str(want).strip() if want is not None else None
+        if data.get("apply"):
+            res = sync_run_id(prompt, value=want)
+            out["changed"] = bool(res["changed"])
+            out["report"] = res["report"]
+            if res["changed"]:
+                out["prompt"] = res["prompt"]       # 直接拿去 POST /prompt
+        else:
+            out["report"] = _describe_run_id(verdict)
+        # ⚠ `dumps` 要传**函数**不是模块：传 `import json as _json` 那个模块会
+        #   `TypeError: 'module' object is not callable`（aiohttp 报 500，报文不指向真因）。
+        #   传 `_json.dumps` 是为了 `report` 里的中文**不转义**（这行报告是给人看的）。
+        return web.json_response(out, dumps=_json.dumps)
 
     @PromptServer.instance.routes.get("/h3relay/health")
     async def h3relay_health(request):  # pragma: no cover - 需要运行中的宿主
@@ -441,7 +553,7 @@ if PromptServer is not None:           # pragma: no branch
         try:
             from . import layout_contract as _lc
             _c_ok, _c_msgs = _lc.check_layout(force=True)
-        except Exception as _e:                      # noqa: BLE001
+        except Exception as _e:
             _c_ok, _c_msgs = None, ["检查本身失败：%r" % (_e,)]
 
         # ③ 上游可选依赖（第 8 节点用；没装不影响其它 7 个）
@@ -449,7 +561,7 @@ if PromptServer is not None:           # pragma: no branch
             from . import nodes as _n
             _has = _n._comfy_registry().get(_n._UPSCALER_NODE) is not None
             _up = "已装" if _has else "未装（可选；只影响 🔍 H3 Relay · Latent Upscale）"
-        except Exception as _e:                      # noqa: BLE001
+        except Exception as _e:
             _up = "未知（%s）" % type(_e).__name__
 
         # ④ 宿主带不带 MiniMax-H3 —— 缺了的话本包**节点照样注册、图照样搭，但续接静默无效**
@@ -458,13 +570,13 @@ if PromptServer is not None:           # pragma: no branch
         try:
             from . import layout_contract as _lc2
             _h3, _h3_why = _lc2.host_h3_status()
-        except Exception as _e:                      # noqa: BLE001
+        except Exception as _e:
             _h3, _h3_why = None, "查不出来（%s: %s）" % (type(_e).__name__, _e)
 
         try:
             import torch as _t
             _torch = _t.__version__
-        except Exception:                            # noqa: BLE001
+        except Exception:
             _torch = "（未装）"
 
         _fp = folder_paths
@@ -503,7 +615,7 @@ def _node_names():
 
     ⚠ V3 模式下 `NODE_CLASS_MAPPINGS` **恒为 None**（见文件头「两条出口必须互斥」），
       所以必须走 `v3.nodes_v3.NODES`；某些加载环境（离线工具）拿不到它时，**退回 V1 的映射** ——
-      两套清单本来就一一对应（`tools/assert_default_exit.py` + 70 项逐字段机检都在锁这件事）。
+      两套清单本来就一一对应（`tools/assert_default_exit.py` + 72 项逐字段机检都在锁这件事）。
 
     🔴 2026-09-25 修：原先写的是 `from .v3 import nodes`，而**文件名是 `v3/nodes_v3.py`**
       ⇒ 每次都抛 `ModuleNotFoundError`，又被下面的 `except: pass` 吞掉 ⇒ **这个分支从来没生效过**，
@@ -527,14 +639,14 @@ def _node_names():
                   "这行说明 V3 出口有问题，别只看 banner 的节点数。")
         elif NODE_CLASS_MAPPINGS:
             return sorted(NODE_CLASS_MAPPINGS)
-    except Exception as _e:                 # noqa: BLE001
+    except Exception as _e:
         # 🔴 不许静默：退回 V1 计数会让 banner/health 报出**另一套出口**的清单。
         print("[H3 Relay] ⚠️ 节点清单取用失败（%s: %s）⇒ 退回 V1 映射计数，"
               "banner 的节点数可能不代表当前出口。" % (type(_e).__name__, _e))
     try:
         from .nodes import NODE_CLASS_MAPPINGS as _v1
         return sorted(_v1 or {})
-    except Exception:                       # noqa: BLE001
+    except Exception:
         return []
 
 
@@ -549,7 +661,7 @@ def _host_h3_warning() -> str:
     try:
         from . import layout_contract as _lc
         ok, detail = _lc.host_h3_status()
-    except Exception:                          # noqa: BLE001
+    except Exception:
         return ""
     if ok is False:
         return ("[H3 Relay] ❌ 宿主没有 MiniMax-H3 支持（%s）"
@@ -566,7 +678,7 @@ def _load_banner() -> str:
         from . import layout_contract as _lc
         _ok, _ = _lc.check_layout()
         contract = "✓" if _ok else "**不一致（会产出错位坏片）**"
-    except Exception as _e:                 # noqa: BLE001
+    except Exception as _e:
         contract = "未查（%s）" % type(_e).__name__
     line = ("[H3 Relay] v%s 已加载｜节点 %s 个（出口 %s）｜时序契约 %s"
             % (__version__, n_nodes if n_nodes >= 0 else "?", api, contract))
@@ -576,5 +688,33 @@ def _load_banner() -> str:
 
 try:
     print(_load_banner())
-except Exception as _e:                     # noqa: BLE001
+except Exception as _e:
     print("[H3 Relay] ⚠ 加载摘要生成失败（不影响包加载）：%r" % (_e,))
+
+
+def _describe_run_id(verdict):
+    """把 `resolve_run_id` 的裁决写成人话（`POST /h3relay/runid` 的 `report` 字段）。
+
+    🔴 与前端 `describeRunIdConflict` 同一条纪律：**冲突必须点名哪个节点是哪个值** ——
+    只说"不一致"的话，脚本用户还得自己去图里逐个格子对。
+    """
+    state = (verdict or {}).get("state")
+    by_value = (verdict or {}).get("by_value") or {}
+    if state == "ok":
+        # 🔴 "还有 N 个空着"**必须点名是哪几个** —— 只给数量的话，API/脚本用户还得回去
+        #   自己逐个数（前端那条孪生 `describeRunIdConflict` 同样纪律）。审核 P1-8。
+        return ("`run_id` 一致：「%s」（%d 个节点已用它）%s"
+                % (verdict.get("value"), len(verdict.get("ids") or []),
+                   ("；这 %d 个还空着（补齐后会一起用这个名）：%s"
+                    % (len(verdict.get("empty") or []), "、".join(verdict.get("empty") or [])))
+                   if verdict.get("empty") else ""))
+    if state == "empty":
+        return ("本图所有 `run_id` 都是空的 —— 落盘时会直接 raise「run_id 不能为空」。"
+                "  ⇒ 用法：`{\"apply\":true,\"value\":\"myFilm\"}`。")
+    lines = ["⚠ 本图 `run_id` 不一致（有 %d 个不同的名字）："
+             % len(verdict.get("values") or [])]
+    for v in verdict.get("values") or []:
+        lines.append("  · 「%s」← %s" % (v, "、".join(by_value.get(v) or [])))
+    lines.append("  ⇒ 段文件会落到不同目录、桥找不到文件。"
+                 "请显式给 `value` 让路由统一，或把它们改成同一个名字。")
+    return "\n".join(lines)

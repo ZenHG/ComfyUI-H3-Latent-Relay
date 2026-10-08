@@ -25,7 +25,7 @@ V3 要求 input 的 **id 名与顺序、默认值、min/max/step、组合项全�
 """
 from __future__ import annotations
 
-from comfy_api.latest import ComfyExtension, io, ui      # noqa: F401
+from comfy_api.latest import ComfyExtension, io, ui
 
 from .. import nodes as V1                               # 业务逻辑与 schema 的唯一真相源
 
@@ -173,8 +173,8 @@ def node_output(raw):
 def call_v1(class_name, kwargs):
     """按 V1 类的 ``FUNCTION`` 名调它的实现，返回值转 ``io.NodeOutput``。
 
-    V3 外壳**只做协议转换**，业务逻辑一行不重写 ⇒ ``nodes.py`` / ``relay_core.py``
-    的行为与那 384 项断言完全不被动到（这也是本轮迁移的全部风险来源）。
+    V3 外壳**只做协议转换**，业务逻辑一行不重写 ⇒ ``nodes.py`` / ``relay_core/``
+    的行为与那整套离线断言完全不被动到（这也是本轮迁移的全部风险来源）。
     """
     cls = getattr(V1, class_name)
     return node_output(getattr(cls(), cls.FUNCTION)(**kwargs))
