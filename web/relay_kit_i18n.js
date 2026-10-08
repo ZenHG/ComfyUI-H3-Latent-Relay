@@ -166,6 +166,8 @@ export const H3_WIDGETS = {
     declick_quiet_dbfs: { zh: "静噪底", en: "quiet floor" },
     declick_max_len_ms: { zh: "去咔最长毫秒", en: "declick max ms" },
     cut_head_frames: { zh: "裁头帧数", en: "cut head frames" },
+    loudness_normalize: { zh: "响度均衡", en: "loudness normalize" },
+    loudness_target_dbfs: { zh: "响度目标", en: "loudness target" },
     // 连跑
     segments: { zh: "段数", en: "segments" },
     status: { zh: "状态", en: "status" },
@@ -516,8 +518,8 @@ export const H3_TIPS = {
     },
     // ===== 连跑控制 =====
     "H3RelayChain.segments": {
-        zh: "连跑几段。只对「⏩ 连跑」按钮有效：填 2 = 跑 2 段就停；填 0 = 一直跑直到点「⏹ Stop」。填了 prompts 时段数不要超过词块数。",
-        en: "How many segments the chain run covers. Only affects the «⏩ Chain» button: 2 = stop after 2 segments; 0 = keep going until you press «⏹ Stop». With prompts filled, do not exceed the block count.",
+        zh: "跑到第几段为止。只对「⏩ 连跑 / ⏭ 续跑」有效：填 3 = 跑到第 3 段就停（不是「再跑 3 段」）；段号已在第 3 段之后 ⇒ 不排队并说明。填 0 = 一直跑直到点「⏹ Stop」。填了 prompts 时不要超过词块数（第 N 段要用第 N 块词）。",
+        en: "Run until this segment number. Only affects «⏩ Chain» / «⏭ Resume»: 3 = stop after segment 3 (NOT «3 more segments»); if the stage number is already past 3 it does not queue and tells you why. 0 = keep going until «⏹ Stop». With prompts filled, do not exceed the block count (segment N uses block N).",
     },
     "H3RelayChain.status": {
         zh: "不用填。显示连跑状态：跑到第几段 / 有没有在排队 / 出错原因。🔴 按钮点了没反应时先看这一格。",
@@ -639,6 +641,14 @@ export const H3_TIPS = {
     "H3RelayAudioSeam.cut_head_frames": {
         zh: "组 4。本段会被裁掉多少帧（= 桥的 context_frames）。本节点工作在未裁音频上，而产物是裁后的 ⇒ 裁出来的孤立峰在它眼里不孤立（前面还有上一段语音）。填了它抑制器就会把该处当「新文件头」来判 ⇒ 命中。0 = 不启用该修正。一般由跑批脚本自动填。",
         en: "Group 4. How many frames get trimmed from this segment (= the bridge's context_frames). This node works on untrimmed audio while the output is trimmed, so a post-trim isolated peak does not look isolated here (the previous segment's speech precedes it). Filling it makes the suppressor judge that spot as a \"new file head\", so it hits. 0 = disable the correction. Normally filled automatically by the batch script.",
+    },
+    "H3RelayAudioSeam.loudness_normalize": {
+        zh: "组 5。**默认开**：把本段音频的人声响度对齐到统一目标，治「段与段响度不均衡」。接了声锚时锚已被归一 ⇒ 这里落在容忍带内**不动**；不接锚时由它兜底（实测同一部片子三段差 **7.97 dB**）。关掉即恢复旧行为。",
+        en: "Group 5. **On by default**: aligns this segment's speech loudness to one target, fixing segment-to-segment loudness steps. With a voice anchor the anchor is already normalized, so this stays inside its tolerance band and **does nothing**; without one it is the backstop (measured **7.97 dB** spread across three segments). Turn it off to restore the old behaviour.",
+    },
+    "H3RelayAudioSeam.loudness_target_dbfs": {
+        zh: "组 5。响度归一的目标（**有声窗 RMS 中位**，dBFS）。默认 **−23.0** = 与声锚 `voice_bank` 的归一目标**同值**（有锚 / 无锚段落回同一处）。⚠ 它描述的是**人声**响度：静音与环境声不计入。",
+        en: "Group 5. Target for loudness normalization (**median RMS of voiced windows**, dBFS). Default **−23.0** matches the voice anchor's `voice_bank` target, so anchored and unanchored segments land on the same level. ⚠ It describes **speech** loudness: silence and ambience are excluded.",
     },
     // ===== 潜空间分块放大 =====
     "H3RelayLatentUpscale.latent": {

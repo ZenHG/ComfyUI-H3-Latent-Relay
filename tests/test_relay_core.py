@@ -174,6 +174,8 @@ _CASES = [
     "_g33_split_contract.py",
     # ⚠ 同上：**新写的**（0.6.31 的 API 侧 run_id 同步），不在 `tmp/do_split_tests.py` 的拼回自证里。
     "_g34_run_id_sync.py",
+    # ⚠ 同上：**新写的**（0.6.32 的响度归一：口径一致 / 归一 / 幂等）。
+    "_g35_loudness.py",
 ]
 for _case in _CASES:
     _case_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cases", _case)

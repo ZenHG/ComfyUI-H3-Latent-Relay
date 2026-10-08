@@ -567,12 +567,19 @@ try:
     #    ⇒ 本夹具回到「未命中 ⇒ 返回原对象」。
     #    ⚠️ 因此这条断言现在**同时验两件事**：stage 0 的直通语义 + 断崖判据不被削。
     #    ⚠️ 夹具的随机源是**有种子**的（上方 `torch.manual_seed(7)`）⇒ 结果确定，不是 flaky。
-    check("22.13 节点 stage 0 ⇒ 直通（原对象返回、长度守恒）+ 仍落盘（后段的床源靠它）",
-          (_a0 is _bed_a and os.path.isfile(_p0) and "第 1 段无缝可补" in _l0
-           and int(_a0["waveform"].shape[-1]) == int(_bed_a["waveform"].shape[-1])),
-          "同一对象=%s isfile=%s 长度 %d→%d"
-          % (_a0 is _bed_a, os.path.isfile(_p0), int(_bed_a["waveform"].shape[-1]),
-             int(_a0["waveform"].shape[-1])))
+    # 🔴 0.6.32：响度归一**默认开** ⇒ stage 0 不再"原对象返回"（那正是它该做的：
+    #   第 1 段的电平同样要受控）。判据换成**更强**的一条：**只差一个标量增益**
+    #   （最小二乘增益 + 残差 < 1e-6）—— 它同时证明了"没夹带别的处理"。
+    _g13 = (float((_a0["waveform"] * _bed_a["waveform"]).sum())
+            / max(float((_bed_a["waveform"] ** 2).sum()), 1e-12))
+    _res13 = float((_a0["waveform"] - _bed_a["waveform"] * _g13).abs().max())
+    check("22.13 节点 stage 0 ⇒ 直通（长度守恒 + **只差一个标量增益**）+ 仍落盘（后段的床源靠它）",
+          (os.path.isfile(_p0) and "第 1 段无缝可补" in _l0
+           and int(_a0["waveform"].shape[-1]) == int(_bed_a["waveform"].shape[-1])
+           and _res13 < 1e-6),
+          "isfile=%s 长度 %d→%d 增益 %.4f 残差 %.2e"
+          % (os.path.isfile(_p0), int(_bed_a["waveform"].shape[-1]),
+             int(_a0["waveform"].shape[-1]), _g13, _res13))
     _a1, _l1, _j1 = unwrap(_n22obj.seam(_cur_a, _RID22, 1, patch_seconds=2.0))
     _got = _a1["waveform"][..., :_keep22]
     _want = CORE.load_audio(_p0)["waveform"]

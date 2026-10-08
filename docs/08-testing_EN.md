@@ -154,7 +154,7 @@ failure):
 ## V3 shell and default exit (zero GPU, seconds)
 
 ```bash
-COMFYUI_PATH=<root> python tests/test_v3_schema.py      # expected 72/0 (8 nodes / 122 inputs; same tier with or without the host registry)
+COMFYUI_PATH=<root> python tests/test_v3_schema.py      # expected 72/0 (8 nodes / 124 inputs; same tier with or without the host registry)
 COMFYUI_PATH=<root> python tools/assert_default_exit.py  # expected 5/5
 ```
 
@@ -173,7 +173,7 @@ wrong slot in the parameter table means **the user's parameters are silently shi
 >   (the host registers `latent_upscale_models` itself) ⇒ does not raise.
 > · Registry **unobtainable** (host `nodes` cannot be imported / is shadowed by this pack's own directory)
 >   ⇒ it likewise converges to **RuntimeError** ⇒ likewise swallowed ⇒ **the node is still present**.
-> ⇒ Both environments are **8 nodes / 122 input / 72 items**, hence **one number**.
+> ⇒ Both environments are **8 nodes / 124 input / 72 items**, hence **one number**.
 >
 > 🔴 It was not like this before 2026-10-07: if the `import nodes` inside `_comfy_registry()` raised
 >   **ImportError** it would **propagate** (`_upscaler_module()` only catches `RuntimeError`) ⇒

@@ -8,8 +8,8 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "condensed",
-          "h_en": "70b35c214f844851",
-          "h_src": "f5faa7c0be41db9e",
+          "h_en": "a40b28be965b4def",
+          "h_src": "457415d6d954c04c",
           "seeded": "by-position"
         },
         {
@@ -48,8 +48,8 @@
           "zh": "目录结构",
           "en": "Repository layout",
           "mode": "condensed",
-          "h_en": "527a6c76a1a483ba",
-          "h_src": "9c7b6cad0ece6516",
+          "h_en": "6b1544aafc390fc7",
+          "h_src": "ffc777e82fd37d36",
           "seeded": "by-position"
         },
         {
@@ -72,14 +72,14 @@
           "zh": "文档索引",
           "en": "Documentation index",
           "mode": "condensed",
-          "h_en": "739ee0818c7b5ac9",
-          "h_src": "216538bfcfca03f6",
+          "h_en": "418b061f12c7712a",
+          "h_src": "7977b0dcbbd4162a",
           "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-10-08",
-      "src_sha": "a9d70e942978f408"
+      "src_sha": "d09807da023ef2e5"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -256,8 +256,8 @@
           "zh": "排障",
           "en": "Troubleshooting",
           "mode": "full",
-          "h_en": "f986ba10792f08ea",
-          "h_src": "4b5cd3f7b903c2e3",
+          "h_en": "f3551adc582f2085",
+          "h_src": "e9b9e1d6ff6ec659",
           "seeded": "by-position"
         },
         {
@@ -295,7 +295,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-08",
-      "src_sha": "18d37bd707ece8ff"
+      "src_sha": "91b3903dc1a118bf"
     },
     "docs/06-continuity-scripting.md": {
       "en": "docs/06-continuity-scripting_EN.md",
@@ -328,16 +328,16 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "full",
-          "h_en": "b250faf701508203",
-          "h_src": "c5965475439ea449",
+          "h_en": "5fd653a37e204634",
+          "h_src": "e4b2aa3c5e686028",
           "seeded": "by-position"
         },
         {
           "zh": "参数（可选格，一律在 `status` 之后追加 / **默认 ⇒ 老图行为逐位不变**）",
           "en": "Parameters (optional cells, always appended after `status` / **default ⇒ old-graph behaviour bit-exact unchanged**)",
           "mode": "full",
-          "h_en": "369ec94f8cf157d8",
-          "h_src": "ddd3fcb26502005b",
+          "h_en": "67ff51b3170ef1a4",
+          "h_src": "961281c4e7c2b95a",
           "seeded": "by-position"
         },
         {
@@ -407,7 +407,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-08",
-      "src_sha": "0a440b2a70334909"
+      "src_sha": "290d5d9df613135e"
     },
     "docs/08-testing.md": {
       "en": "docs/08-testing_EN.md",
@@ -425,7 +425,7 @@
           "en": "Unit tests (zero GPU, seconds)",
           "mode": "full",
           "h_en": "2c7cc38cef013920",
-          "h_src": "2ce216ed64514658",
+          "h_src": "ed50e368b9842000",
           "seeded": "by-position"
         },
         {
@@ -440,8 +440,8 @@
           "zh": "V3 外壳与默认出口（零 GPU、秒级）",
           "en": "V3 shell and default exit (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "a0ba8f5a018a4679",
-          "h_src": "e51f85e0f5be9d55",
+          "h_en": "efc68d0fc329b5bf",
+          "h_src": "85c355ff042b5ca8",
           "seeded": "by-position"
         },
         {
@@ -463,7 +463,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-08",
-      "src_sha": "041097e54eff812e"
+      "src_sha": "cca7b9a1c9a5950b"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",
@@ -536,8 +536,8 @@
           "zh": "7.1 多段拼接：N 个 mp4 怎么接成一条",
           "en": "7.1 Multi-segment concatenation: how to join N mp4 files into one",
           "mode": "full",
-          "h_en": "2c90b250f96a4b95",
-          "h_src": "05c7937903590388",
+          "h_en": "af5391630d74a536",
+          "h_src": "f37e3c9a0dff5af4",
           "seeded": "by-number"
         },
         {
@@ -583,7 +583,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-08",
-      "src_sha": "4f8784e66798db1a"
+      "src_sha": "bd7ea09f072bcb73"
     }
   }
 }

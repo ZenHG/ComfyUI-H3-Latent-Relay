@@ -105,6 +105,21 @@
 //   · Chain 的 `run_id` 默认是空的（可选·续跑用），而桥/落盘的默认是 `relay`
 //     ⇒ **不碰 run_id 的老图一字不变**：preflight 只在"同组内有非空值"时才可能动作。
 //
+// 0.6.32 —— `segments` 改成**绝对量**（跑到第 N 段为止）+ 续跑起点取 `max(进度, 段号)`：
+//   · 🔴 问题（GG 2026-10-08 报）：跑完 2 段后追加第 3 块词、把 `segments` 设成 3、点「⏭ 续跑」
+//     ⇒ **像没反应**。三处原因叠在一起：
+//     ① 旧语义是**相对量**（"从当前段号起再跑几段"），而人的直觉是**绝对量**（"跑到第 N 段"）
+//        ⇒ 用户为"跑到第 3 段"而填 3，预检却按 `start + seg − 1 = 3` 算 ⇒ 要求 4 块词 ⇒ 拦下；
+//     ② 续跑起点 = 进度文件里的「已开始段」k，而正常跑完时**段号已经比 k 大 1**
+//        ⇒ 续跑把段号从 2 **退回** 1 ⇒ 白重跑一段（"连跑和续跑一样"的观感也来自这里）；
+//     ③ 拦下只在 `status` 格写一行字，按钮毫无变化 ⇒ 观感就是"点了没用"。
+//   · 修法一：`segments = N` ⇒ **跑到第 N 段**（0 仍 = 无限）。起点为 0 时与旧行为**逐位相同**
+//     ⇒ 存量图 / 脚本不受影响；只有"中途起点 + 有限段"这一组合的语义变了，而那正是报的场景。
+//   · 修法二：续跑起点 = `max(进度 k, 画布段号)`。段号比进度新 ⇒ 那一段已收尾 ⇒ 直接接着跑，
+//     **不退段号**；段号 ≤ 进度（宿主在采样中途被杀）⇒ 仍从 k 重跑，**绝不跳段**。
+//   · 修法三：拦下时除 `status` 外再走一次 `notifyUser`（toast）—— 慢过程的按钮
+//     "点了没反应"必须显眼，不能只写在一个用户不会看的格子里。
+//
 // 效能（0.6.13）：
 //   · **全局监听只注册一份**（模块级 `CHAINS` 集合）。旧写法在每个 Chain 实例的
 //     `onNodeCreated` 里各注册 3 个 `api` 监听 ⇒ 多实例时开销成倍，且**节点被删/复制后
@@ -374,7 +389,7 @@ function throttle(fn, ms = 200) {
 }
 
 /** 「⏩ 连跑」按钮的原始文字（运行中会被换成带进度的）。 */
-const CHAIN_BTN = "⏩ 连跑（按 segments 自动循环）";
+const CHAIN_BTN = "⏩ 连跑（跑到第 segments 段为止）";
 
 function setStatus(chainNode, text) {
     const w = findWidget(chainNode, "status");
@@ -1018,7 +1033,8 @@ function checkStagePrompt(chainNode, stage) {
         return {
             ok: false,
             message: `⚠ prompts 只有 ${blocks.length} 块词，第 ${stage + 1} 段没有对应词 ⇒ **没有排队**。`
-                + `（要么补齐第 ${stage + 1} 块，要么把 segments 改成 ${blocks.length} 或更小。）`,
+                + `（要么补齐第 ${stage + 1} 块，要么把 segments 改成 ${blocks.length}`
+                + ` —— segments 是「跑到第 N 段」，而现有词只够跑到第 ${blocks.length} 段。）`,
         };
     }
     return {
@@ -1213,32 +1229,49 @@ async function concatFilm(chainNode, state, auto = false) {
 }
 
 /**
- * 开始一轮连跑（「⏩ 连跑」与「⏭ 续跑」共用同一段逻辑，只有文案不同）。
+ * 开始一轮连跑（「⏩ 连跑」与「⏭ 续跑」共用同一段逻辑，只有**起点**与文案不同）。
+ *
+ * 🔴 0.6.32：`segments` 是**绝对量** —— `N` = **跑到第 N 段为止**（0 = 无限）。
+ *   旧语义是相对量（"从当前段号起再跑几段"），起点为 0 时两者数值相同，
+ *   只有"中途起点 + 有限段"才分道 —— 而那正是用户会踩的地方（见文件头 0.6.32 段）。
  *
  * 返回 `true` = 已成功排队；`false` = 被前置检查拦下（**没有排队**）。
+ *
+ * `note` 是可选的一句补充说明（如续跑为什么从这一段起跑），拼进 status 的"开始"那行。
  */
-async function startChainRun(node, state, pair, label = "连跑") {
-    const seg = Math.round(widgetValue(node, "segments", 0) || 0);
-    // 🔴 0.6.14 预检：有限段模式下，把会跑到的**最后一段**提前验词——
-    //   别跑到一半才发现词不够（首段有词、末段没有时旧代码会白跑前几段）。
+async function startChainRun(node, state, pair, label = "连跑", note = "") {
+    const seg = Math.round(widgetValue(node, "segments", 0) || 0);   // 目标末段（1 起算；0 = 无限）
+    const start = getStage(pair.bridge);                             // 起点段号（0 起算）
     if (seg > 0) {
+        // 🔴 0.6.32 预检 A：起点**已经越过目标** ⇒ 说明这一段早跑过了。
+        //   旧代码没有这一条 ⇒ 用户会得到一个"跑完什么都不发生"的空轮（比报错更难查）。
+        if (start > seg - 1) {
+            const msg = `画布段号已在第 ${start + 1} 段，而 segments=${seg} 表示「跑到第 ${seg} 段」`
+                + ` ⇒ 目标已经跑过。要接着跑，把 segments 改成 ${start + 1} 或更大。`;
+            say(node, state, "warn", msg);
+            notifyUser("⏩ 连跑没有排队", msg, "warn");
+            return false;
+        }
+        // 🔴 预检 B：有限段模式下，把会跑到的**最后一段**提前验词——
+        //   别跑到一半才发现词不够（首段有词、末段没有时旧代码会白跑前几段）。
         const src = readPrompts(node);
         if (src.ok) {
             const blocks = splitPromptBlocks(src.text);
-            const start = getStage(pair.bridge);
-            const last = start + seg - 1;
-            if (blocks.length && last >= blocks.length) {
-                const fit = Math.max(1, blocks.length - start);
-                say(node, state, "warn",
-                    `prompts 只有 ${blocks.length} 块词，连跑会跑到第 ${last + 1} 段 ⇒ 不够。` +
-                    `要么补齐到 ${last + 1} 块，要么把 segments 改成 ${fit}。`);
+            if (blocks.length && seg > blocks.length) {
+                const msg = `prompts 只有 ${blocks.length} 块词，而 segments=${seg} 表示「跑到第 ${seg} 段」`
+                    + ` ⇒ 第 ${blocks.length + 1} 段起没有对应词。`
+                    + `要么补齐到 ${seg} 块，要么把 segments 改成 ${blocks.length}（= 跑到第 ${blocks.length} 段）。`;
+                say(node, state, "warn", msg);
+                notifyUser("⏩ 连跑没有排队", msg, "warn");
                 return false;
             }
         }
         // src 读不到（连线情形）不拦：startStage 里会给出更具体的指引。
     }
     state.mode = "chain";
-    state.remaining = seg;
+    state.chainStart = start;
+    state.chainTarget = seg > 0 ? seg - 1 : Infinity;
+    state.remaining = seg > 0 ? seg - start : 0;      // 本轮还要跑几段
     // 🔴 0.6.18：**不再清空** `stageIds`。旧代码在这里 `= []` ⇒ 从第 3 段开始连跑（前两段已跑过）
     //   会把第 1、2 段的记录一起抹掉 ⇒ 拼出来的片只有后半段。陈旧的记录由 `startStage` 的
     //   "丢掉 stage > k" 规则负责 —— 它保住了 k 之前**仍然有效**的那几段。
@@ -1246,11 +1279,13 @@ async function startChainRun(node, state, pair, label = "连跑") {
     state.resetPair();          // pairIds 与 pairReady 必须成对重置（只清一个 ⇒ 缓存永不失效）
     state.sawMine = false;
     state.awaiting = false;   // 由 queuePrompt 成功后再置位
-    say(node, state, "running", `${label}开始：segments=${seg <= 0 ? "∞" : seg}，首段排队中…`);
+    say(node, state, "running",
+        `${label}开始：${seg <= 0 ? "一直跑（∞）" : `跑到第 ${seg} 段（本轮 ${state.remaining} 段）`}`
+        + `，首段排队中…` + (note ? `｜${note}` : ""));
     state.onStageChanged?.();          // 按钮立刻变「⏳ 连跑中 …」（明显反馈）
     let ok = null;
     try {
-        ok = await startStage(node, state, getStage(pair.bridge), label, pair);
+        ok = await startStage(node, state, start, label, pair);
     } catch {
         // 排队抛错（`queuePrompt` 已写 ⚠ status）—— 这里必须**把模式收回 idle**：
         // 否则状态机卡在 chain 态，之后每个按钮都被「正在连跑中」挡住，用户只能刷新页面。
@@ -1275,8 +1310,12 @@ function refreshChainLabel(state, node) {
     let text = CHAIN_BTN;
     if (state.mode === "chain") {
         const seg = Math.round(widgetValue(node, "segments", 0) || 0);
-        const doneN = seg > 0 ? Math.max(0, seg - state.remaining) : 0;
-        const pos = seg > 0 ? `${bar(doneN / seg)} ${doneN}/${seg}` : "∞";
+        // 🔴 0.6.32：进度按**本轮**算 —— 起点不是 0 时不能拿 `segments` 当分母，
+        //   否则从第 3 段起跑会显示「0/3」，看起来像要把前两段重跑一遍。
+        const start0 = state.chainStart ?? 0;
+        const total = seg > 0 ? Math.max(0, seg - start0) : 0;
+        const doneN = total > 0 ? Math.max(0, total - state.remaining) : 0;
+        const pos = seg > 0 ? `${bar(total ? doneN / total : 1)} ${doneN}/${total}` : "∞";
         text = `⏳ 连跑中 ${pos}${state.lastProgress ? " · " + state.lastProgress : ""}`;
     }
     if (w.label === text) return;
@@ -1457,6 +1496,11 @@ app.registerExtension({
             //   executing 事件每执行一个节点都会触发，在里面重算 findPair 等于每节点扫一遍全图。
             const state = {
                 mode: "idle", remaining: 0, sawMine: false, awaiting: false, hinted: false,
+                // 🔴 0.6.32：本轮的**起点段号**与**目标末段号**（都 0 起算；`Infinity` = 无限）。
+                //   为什么要在开跑时锁下来：`segments` 现在是**绝对量**（跑到第 N 段），
+                //   而本轮要跑几段 = `chainTarget - chainStart + 1` —— 起点不是 0 时必须减掉它，
+                //   否则进度条会从 0 开始显示，看起来像要把前面的段重跑一遍。
+                chainStart: 0, chainTarget: Infinity,
                 // stageIds：**按段号**存 `{id, seq}`（`seq` = 该记录属于第几轮）——
                 //   `id` = 那段排队拿到的 prompt_id（拼接时按它取回落盘的 mp4）；
                 //   `seq` 用来标"这一段来自更早一轮"（同一次拼接里混轮 ⇒ 段间可能不接续）。
@@ -1580,7 +1624,10 @@ app.registerExtension({
 
                     const seg = Math.round(widgetValue(node, "segments", 0) || 0);
                     const infinite = seg <= 0;
-                    const more = infinite || this.remaining > 1;
+                    // 🔴 0.6.32：`segments` 是**绝对量**（跑到第 N 段）⇒ "还有没有下一段"看的是
+                    //   「刚跑完那一段的下一段号 ≤ N−1」，不是"剩余计数 > 1"。
+                    //   （段号要到下面的收尾路径才推，所以此处 `getStage` 就是刚跑完的那一段。）
+                    const more = infinite || getStage(pair.bridge) + 1 < seg;
                     if (this.remaining > 0) this.remaining -= 1;
 
                     if (!more) {
@@ -1698,7 +1745,7 @@ app.registerExtension({
                 await startStage(node, state, next, "Approve", pair);
             });
 
-            addBtn("⏩ 连跑（按 segments 自动循环）", async () => {
+            addBtn("⏩ 连跑（跑到第 segments 段为止）", async () => {
                 const pair = findPair(node);
                 if (!pair) return;
                 if (!runIdPreflight(node, state)) return;   // 0.6.19：名字不一致不许排队
@@ -1752,8 +1799,19 @@ app.registerExtension({
                 const k = Math.max(0, Math.round(prog.stage_index ?? 0));
                 const when = prog.updated
                     ? new Date(prog.updated * 1000).toLocaleString() : "时间未知";
-                setStageAll(node, pair, k);
-                await startChainRun(node, state, pair, `⏭ 续跑（上次第 ${k + 1} 段，${when}）`);
+                // 🔴 0.6.32：起点取 `max(进度 k, 画布段号)`。
+                //   进度文件记的是「第 k 段**已开始**」；而一段正常跑完后 `stepDone` 会把段号
+                //   推到 k+1 ⇒ **段号比进度新 = 那一段已经收尾** ⇒ 直接从段号接着跑，
+                //   不再把段号退回去白重跑一段（旧行为：段号从 2 退回 1 ⇒ 用户以为"续跑没用"）。
+                //   段号 ≤ 进度（宿主在采样中途被杀）⇒ 仍从 k 重跑，**绝不跳段**。
+                const cur = getStage(pair.bridge);
+                const startAt = Math.max(k, cur);
+                const why = startAt > k
+                    ? `进度记的是第 ${k + 1} 段，而画布段号已在第 ${cur + 1} 段 ⇒ 那一段已收尾，直接接着跑`
+                    : `从进度记的第 ${k + 1} 段重跑`;
+                setStageAll(node, pair, startAt);
+                await startChainRun(node, state, pair,
+                    `⏭ 续跑（起点第 ${startAt + 1} 段）`, `${why} · 进度时间 ${when}`);
             });
 
             // ⚠ 「刹车」不防抖：用户点 Stop 就该立刻响应。

@@ -53,11 +53,30 @@ def _secs(stream):
             if (stream is not None and stream.duration) else 0.0)
 
 
+def _start(stream):
+    """流的**容器起始偏移**（秒）；拿不到返回 0.0。
+
+    🔴 为什么需要它（2026-10-08 实测）：**落盘节点会自己决定时间戳**。第三方 Combine 类节点
+    给视频轨打一个非零 `start`（实测 `start 0.125` = 3 帧 @24fps），同时**把音频补上等长的
+    前置静音** ⇒ 音画尾部仍然对齐、内容也不错位。
+    只看 `duration` 会把它算成「音频比视频长 0.125s ⇒ 音频绕过了 Trim AV」⇒ **好段被误判拒拼**。
+    ⇒ 判据要用「**视频结束时刻**」（= `start + duration`）去比，不是只用 `duration`。
+    """
+    try:
+        st, tb = stream.start_time, stream.time_base
+        return float(st * tb) if (st is not None and tb is not None) else 0.0
+    except Exception:          # 流没有时间戳信息（罕见）⇒ 当 0 处理，退回旧口径
+        return 0.0
+
+
 def probe_mp4(path):
     """读段文件的**容器层**事实（不解码画面）。
 
-    ``a_prime_samples`` = 音频比视频多出来的样本数（priming + 尾部填充），
+    ``a_prime_samples`` = 音频比**视频结束时刻**多出来的样本数（priming + 尾部填充），
     同时也是「这条音频线有没有绕过裁重叠」的判据（绕过时 ≈ 裁掉帧数/fps × 采样率）。
+
+    🔴 口径（2026-10-08 改）：比的是**视频的结束时刻** ``v_start + v_seconds``，
+    不是 `v_seconds` —— 有些落盘节点给视频轨打非零 `start`（见 `_start`）。
     """
     av = _av_module()
     with av.open(str(path)) as c:
@@ -70,21 +89,31 @@ def probe_mp4(path):
         if not frames:                      # nb_frames 缺失时退回逐包数（快，不解码）
             frames = sum(1 for p in c.demux(v) if p.pts is not None)
             vd = frames / fps if fps else vd
+        v_start = _start(v)
         ad = _secs(a)
         rate = int(a.codec_context.sample_rate) if a is not None else 0
+        # 期望的音频长度 = 视频**起始偏移 + 内容长度**（即视频结束时刻）。
+        #   减掉 `v_start` 之后，`a_v_delta` 才只反映「音频真的多了多少」，不受落盘节点
+        #   自定的时间戳原点影响。`v_start = 0` 时与旧口径**逐位相同**。
+        delta = (ad - vd - v_start) if a is not None else 0.0
         return {"path": str(path), "frames": frames, "fps": fps, "v_seconds": vd,
-                "a_seconds": ad, "a_v_delta": (ad - vd) if a is not None else 0.0,
+                "v_start": v_start, "v_end": vd + v_start,
+                "a_seconds": ad, "a_v_delta": delta,
                 "has_audio": a is not None, "a_codec": a.codec_context.name if a else "",
                 "a_rate": rate, "a_layout": str(a.codec_context.layout.name) if a else "",
                 "width": int(v.codec_context.width), "height": int(v.codec_context.height),
-                "a_prime_samples": int(round((ad - vd) * rate)) if (a and rate) else 0}
+                "a_prime_samples": int(round(delta * rate)) if (a and rate) else 0}
 
 
 def assert_segments_joinable(clips):
     """拼接前的**逐段体检** → ``{"ok","problems","warnings"}``。查三件：
 
-      ① 没有视频流 / 帧数为 0；② 各段分辨率·fps·音频规格不一致；③ 音频比视频长**超过 1 帧**
-      （= 该段音频很可能**绕过了「Trim AV」**：画面裁了、音频没裁 ⇒ 每段差 ~0.9s 且逐段累积）。
+      ① 没有视频流 / 帧数为 0；② 各段分辨率·fps·音频规格不一致；③ 音频比**视频结束时刻**
+      （``v_start + v_seconds``）长**超过 1 帧**（= 该段音频很可能**绕过了「Trim AV」**：
+      画面裁了、音频没裁 ⇒ 每段差 ~0.9s 且逐段累积）。
+
+    ⚠️ ③ 的口径**必须减掉视频轨自己的起始偏移**（见 `_start`）：落盘节点可以自由决定时间戳
+    原点，拿 `duration` 硬比会把「音频补了等长前置静音」的好段误判成绕过 Trim AV。
     """
     clips = list(clips)
     if not clips:
@@ -294,7 +323,14 @@ def concat_mp4_segments(paths, out_path, *, crf=16, preset="medium", audio_bitra
                 #   ⇒ 100 ms 足够放过正常段；而"链上更靠前的节点"差的是裁量/align（典型 0.9 s）
                 #   ⇒ 100 ms 能干净分开。
                 #   ⚠ 它是**同源**判据、**不是"更准"判据** —— 见下面挑候选的注释。
-                tol_len = max(int(round(0.1 * rate)), int(round(rate / float(fr))))
+                # 🔴 2026-10-08：容差必须**加上视频轨与音频轨起始偏移之差**。落盘节点给视频轨打
+                #   `start`（实测 0.125s）时，音频容器时长会比「视频内容长度」多出那么多 ⇒
+                #   边车（长度 = 视频内容）会被误判「与 mp4 音频不同源」而**整段拒收**
+                #   （实测差 4000 样本 > 容差 3200 ⇒ 3/3 段全走 AAC 路）。
+                #   ⚠️ 用 `abs`：两边谁晚开始都可能（节点也可以给音频轨打偏移）。
+                v_shift = abs(_start(vin) - _start(ain)) if ain is not None else 0.0
+                tol_len = (max(int(round(0.1 * rate)), int(round(rate / float(fr))))
+                           + int(round(v_shift * rate)))
                 bad = []
                 cands = pcms[idx] if idx < len(pcms) else None
                 if isinstance(cands, str):
@@ -448,9 +484,10 @@ def assemble_mp4_segments(paths, out_path, *, video="auto", audio_codec="aac",
     health = assert_segments_joinable(clips)
     lossless = str(audio_codec).lower() in LOSSLESS_AUDIO_CODECS
     lines = ["[H3 Relay] 多段拼接：%d 段 → %s" % (len(clips), out_path)] + [
-        "           · %s：%d 帧 %.3fs ｜ 音频 %.3fs（差 %+.4fs / %+d 样本）"
-        % (os.path.basename(c["path"]), c["frames"], c["v_seconds"], c["a_seconds"],
-           c["a_v_delta"], c["a_prime_samples"]) for c in clips]
+        "           · %s：%d 帧 %.3fs%s ｜ 音频 %.3fs（差 %+.4fs / %+d 样本）"
+        % (os.path.basename(c["path"]), c["frames"], c["v_seconds"],
+           ("（视频轨起于 %.3fs）" % c["v_start"]) if c.get("v_start") else "",
+           c["a_seconds"], c["a_v_delta"], c["a_prime_samples"]) for c in clips]
     lines.append("           · 音轨档：%s%s ｜ 画面：%s"
                  % (audio_codec, "" if lossless else " @" + str(audio_bitrate),
                     "流拷贝（无损）" if video != "encode" else "重编码 crf=%d" % int(crf)))

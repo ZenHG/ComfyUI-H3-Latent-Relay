@@ -244,6 +244,107 @@ def quietest_window(wf: torch.Tensor, n_samples: int,
     return i, float(rms[i])
 
 
+# ------------------------------------------------------------------ 响度归一
+# 🔴 2026-10-08 立（GG 报「不接声锚也应当响度均衡，且应是默认」+ 实测数据）。
+#   背景：模型**跟随锚的响度** —— 接了声锚时 `tools/voice_bank.py::normalize_anchor`
+#   把锚对齐到 `TARGET_RMS_DBFS`；**不接锚**时没人管，每段的电平由模型自己决定。
+#   实测（同一部片子三段真实素材，有声窗 RMS 中位）：
+#     −23.22 / −20.63 / −15.25 dBFS ⇒ **段间差 7.97 dB**，且后两段峰值 1.378（**已削波**）。
+#   ⇒ 把**每段音频**对齐到同一个目标：段间台阶消失，顺带治削波。
+#   ⚠️ 目标值与统计量**必须与 `tools/voice_bank.py` 逐字一致**（有锚段 / 无锚段要落到同一处，
+#      否则只是把一种台阶换成另一种）；两者的一致性由对照断言锁住（`tests/cases/_g35_*`）。
+AUDIO_LOUDNESS_TARGET_DBFS: float = -23.0   # 有声窗 RMS 中位目标（**与 voice_bank 同值**）
+AUDIO_LOUDNESS_WIN_S: float = 0.05          # 分析窗长（秒）
+AUDIO_LOUDNESS_PCT: float = 75.0            # 有声判据：逐窗 RMS 的该百分位
+AUDIO_LOUDNESS_TOL_DB: float = 0.5          # 已在目标 ±该值内 ⇒ **不动**（别白改无损素材）
+AUDIO_LOUDNESS_MAX_GAIN_DB: float = 12.0    # 抬升上限（静音段不该被硬抬起来）
+AUDIO_LOUDNESS_MAX_CUT_DB: float = 18.0     # 衰减上限
+AUDIO_LOUDNESS_PEAK_CEIL: float = 0.98      # 峰值护栏：加完增益后不许超过它
+AUDIO_LOUDNESS_MIN_VOICED: int = 2          # 有声窗少于该数 ⇒ 判「测不出人声」⇒ 可见降级
+
+
+def speech_rms_db(x, sr: int, win_s: float = AUDIO_LOUDNESS_WIN_S,
+                  pct: float = AUDIO_LOUDNESS_PCT):
+    """「人声」响度 = **有声窗 RMS 中位**（dBFS）。返回 ``(db, 有声窗占比)``。
+
+    口径与 `tools/voice_bank.py::speech_rms_db` **逐字一致**：单声道 / 50 ms 窗 /
+    阈值 = 全段逐窗 RMS 的 P75 / 取 ≥ 阈值的那些窗的 RMS **中位**。
+    **不把静音与环境声算进来** —— 整段 RMS 会被非语音内容带偏。
+
+    测不出（太短 / 几乎全静音）⇒ ``(None, 占比)``：调用方必须走**可见降级**（铁律 15）。
+    """
+    import numpy as np
+    x = np.asarray(x, dtype=np.float32).reshape(-1)
+    w = int(win_s * sr)
+    n = len(x) // w if w > 0 else 0
+    if n < 3:
+        return None, 0.0
+    rms = np.sqrt((x[:n * w].reshape(n, w) ** 2).mean(axis=1))
+    db = 20.0 * np.log10(np.maximum(rms, 1e-9))
+    voiced = db >= float(np.percentile(db, pct))
+    frac = float(voiced.mean())
+    if int(voiced.sum()) < AUDIO_LOUDNESS_MIN_VOICED:
+        return None, frac
+    return float(np.median(db[voiced])), frac
+
+
+def normalize_loudness(audio: Any, target_dbfs: float = AUDIO_LOUDNESS_TARGET_DBFS,
+                       peak_ceil: float = AUDIO_LOUDNESS_PEAK_CEIL):
+    """把一段 AUDIO 的**人声响度**对齐到 ``target_dbfs``；返回 ``(out, 说明)``。
+
+    说明里带实测值 / 增益 / 走了哪条分支 —— 上层**必须**把它打进日志（铁律 15）。
+    测不出人声 ⇒ **原样返回 + 说明**，不猜、不动（宁可不动，也不要瞎抬一段静音）。
+
+    只改 ``waveform``，其余键原样带过（`lead` / `dt` 这类边车字段不归它管）。
+    """
+    import torch
+    if audio is None:
+        return audio, ""
+    wf = audio.get("waveform")
+    sr = int(audio.get("sample_rate") or 0)
+    if not torch.is_tensor(wf) or wf.numel() == 0 or sr <= 0:
+        return audio, "⚠ 音频形状不可用（sr=%s）⇒ 不归一" % sr
+    mono = wf
+    while mono.dim() > 1:                       # 压到 1 维做测量（与 voice_bank 同口径）
+        # stereo ⇒ `(L+R)/2`（标准 downmix）。实测与 `voice_bank` 的**单声道**口径逐位一致
+        # （5 组素材差 = 0.000000，见 `tests/cases/_g35_*`）。
+        # ⚠️ 已知边界：若 L/R 反相，均值会抵消 ⇒ 测出的响度偏低。真实对白素材不反相；
+        #   真要覆盖它得换 `max(|L|,|R|)` 口径，那会**改口径**（与声锚不再同源）⇒ 不做。
+        mono = mono.mean(dim=0)
+    db, frac = speech_rms_db(mono.detach().float().cpu().numpy(), sr)
+    if db is None:
+        return audio, "⚠ 人声响度不可测（有声窗占比 %.2f）⇒ **不归一**（原样）" % frac
+    gain_db = float(target_dbfs) - db
+    if abs(gain_db) <= AUDIO_LOUDNESS_TOL_DB:
+        return audio, "响度 %.2f dBFS 已在目标 %.1f ±%.1f dB 内 ⇒ 不动" % (
+            db, float(target_dbfs), AUDIO_LOUDNESS_TOL_DB)
+    g = max(-AUDIO_LOUDNESS_MAX_CUT_DB, min(AUDIO_LOUDNESS_MAX_GAIN_DB, gain_db))
+    pk0 = float(wf.abs().max())
+    capped = ""
+    # 🔴 峰值护栏**只在抬升时**限制，而且一次算到位 —— 这是"幂等"的必要条件：
+    #   旧写法先按目标增益、超护栏再乘一次 ⇒ 结果响度偏离目标（实测 −23.61 而非 −23.00）
+    #   ⇒ 下一次调用又会算出 +0.61 dB 再被压回 ⇒ **来回动**。与**声锚**叠加时那就是双重处理
+    #   （锚已把上游对齐到同一目标 ⇒ 这里必须落在容忍带内 ⇒ "不动"）。
+    #   衰减时峰值必然下降，不需要限制。
+    if g > 0 and pk0 > 0:
+        room = 20.0 * math.log10(peak_ceil / pk0)
+        if room < g:
+            g = room
+            capped = "｜⚠ 抬升被峰值护栏限到 %+.2f dB" % g
+    y = wf * (10.0 ** (g / 20.0))
+    pk1 = float(y.abs().max())
+    if pk1 > 1.0:
+        # 输入本身就已过冲（AAC 解码常见）⇒ 只**报告**不额外压：压了会把响度拉离目标，
+        # 与"段间均衡"这个目的直接冲突。要让成片不削波请查上游（生成/落盘的增益）。
+        # ⚠️ 这里的 1.0 = **0 dBFS 物理上限**，与参数 `peak_ceil` 不是一回事
+        #   （后者是"抬升时留多少余量"的软目标）。
+        capped += "｜⚠ 本段峰值 %.3f 超 0 dBFS（输入即过冲）⇒ 不额外压" % pk1
+    out = dict(audio)
+    out["waveform"] = y
+    return out, ("响度 %.2f → %.2f dBFS（增益 %+.2f dB%s）%s"
+                 % (db, db + g, g, "，夹在上限" if abs(g - gain_db) > 1e-6 else "", capped))
+
+
 def _frame_rms(wf: torch.Tensor, hop_samples: int = 1600):
     """整段「逐帧 RMS」+ 帧参数 ⇒ ``(rms[nfr], hop, nfr)``；不足 2 帧返回 ``(None, hop, 0)``。
 

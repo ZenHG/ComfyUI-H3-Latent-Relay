@@ -1361,6 +1361,22 @@
             "name": "cut_head_frames"
           },
           "link": null
+        },
+        {
+          "name": "loudness_normalize",
+          "type": "BOOLEAN",
+          "link": null,
+          "widget": {
+            "name": "loudness_normalize"
+          }
+        },
+        {
+          "name": "loudness_target_dbfs",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "loudness_target_dbfs"
+          }
         }
       ],
       "outputs": [
@@ -1412,7 +1428,9 @@
         4.0,
         -50.0,
         50.0,
-        0
+        0,
+        true,
+        -23.0
       ],
       "widgets_values_named": {
         "run_id": "demo",
@@ -2015,7 +2033,7 @@
         "concat_result": "",
         "▶ Run（按当前段号跑一次）": null,
         "✔ Approve（段号+1 并跑下一段）": null,
-        "⏩ 连跑（按 segments 自动循环）": null,
+        "⏩ 连跑（跑到第 segments 段为止）": null,
         "⏭ 续跑（从上次跑到的那段继续）": null,
         "⏹ Stop（本轮跑完即停）": null,
         "🧩 拼成一条（把已跑的 N 段拼成成片）": null,

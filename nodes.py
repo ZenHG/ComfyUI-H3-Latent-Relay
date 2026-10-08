@@ -1163,7 +1163,8 @@ class H3RelayChain:
 
         ▶ Run      按当前段号跑一次（不满意再点一次，覆盖同段号的文件）
         ✔ Approve  段号 +1，排队跑下一段
-        ⏩ 连跑     按 segments 的段数自动一段段跑（0 = 一直跑，直到点 Stop）
+        ⏩ 连跑     自动一段段跑，**跑到第 `segments` 段为止**（0 = 一直跑，直到点 Stop）
+        ⏭ 续跑     读 `run_id` 的进度文件，从上次跑到的地方接着跑（宿主卡死/重启后用）
         ⏹ Stop     当前这段跑完后不再推进
         ↺ Reset    段号归 0，从第 1 段重来
         🧩 拼成一条 把已经跑完的几段拼成一条成片
@@ -1194,9 +1195,11 @@ class H3RelayChain:
             "required": {
                 "segments": ("INT", {
                     "default": 5, "min": 0, "max": 9999, "step": 1,
-                    "tooltip": "【连跑几段】只对「⏩ 连跑」按钮有效。\n"
-                               "填 2 = 自动跑 2 段就停；填 0 = 一直跑，直到你点「⏹ Stop」。\n"
-                               "其他按钮不受它影响。填了 prompts 时，段数不要超过词块数。",
+                    "tooltip": "【跑到第几段为止】只对「⏩ 连跑 / ⏭ 续跑」有效。\n"
+                               "填 3 = **跑到第 3 段**就停（不是「再跑 3 段」）；"
+                               "画布段号已在第 3 段之后 ⇒ 不排队并说明。\n"
+                               "填 0 = 一直跑，直到你点「⏹ Stop」。其他按钮不受它影响。\n"
+                               "填了 prompts 时，segments 不要超过词块数（第 N 段要用第 N 块词）。",
                 }),
             },
             "optional": {
@@ -2276,6 +2279,26 @@ class H3RelayAudioSeam:
                                "   请自行折算：`填入值 = 帧数 × 你的fps ÷ 24`。\n"
                                "   报告里会打印实际使用的换算（`裁帧边界 @x.xxxs`），对不上一眼能看出来。",
                 }),
+                # —— 2026-10-08：**响度归一**（不接声锚也要）。**继续追加在末位**，槽位安全。
+                "loudness_normalize": ("BOOLEAN", {"advanced": True,
+                    "default": True,
+                    "tooltip": "【组 5 · 响度均衡】**默认开**：把本段音频的人声响度对齐到统一目标，"
+                               "治「段与段响度不均衡」。\n"
+                               "🔴 为什么默认开：模型**跟随声锚的响度** —— 接了声锚时锚已被归一，"
+                               "**不接锚**时没人管 ⇒ 每段电平由模型自己决定"
+                               "（实测同一部片子三段差 **7.97 dB**，且后两段峰值 1.378 已削波）。\n"
+                               "口径与声锚一致（有声窗 RMS 中位、目标 −23.0 dBFS）"
+                               "⇒ 有锚段与无锚段落到同一电平，不会在缝上再出现台阶。\n"
+                               "⚠️ 关掉它（或改 `loudness_target_dbfs`）即恢复旧行为。",
+                }),
+                "loudness_target_dbfs": ("FLOAT", {"advanced": True,
+                    "default": -23.0, "min": -60.0, "max": 0.0, "step": 0.5,
+                    "tooltip": "【组 5】响度归一的目标（**有声窗 RMS 中位**，dBFS）。\n"
+                               "默认 **−23.0** = 与声锚 `voice_bank` 的归一目标**同值**"
+                               "（有锚 / 无锚段落回同一处）。\n"
+                               "⚠️ 它**不是**整段 RMS、也不是峰值 —— 静音与环境声不计入，"
+                               "所以描述的是**人声**的响度。",
+                }),
             },
         }
     RETURN_TYPES = ("AUDIO", "STRING", "AUDIO")
@@ -2342,10 +2365,28 @@ class H3RelayAudioSeam:
              join_cross_ms=0.0, join_segment_seconds=0.0, join_align_seconds=0.0,
              patch_guard=True, patch_guard_layers=CORE.AUDIO_SEAM_PATCH_GUARD_LAYERS,
              declick_ratio=4.0, declick_quiet_dbfs=-50.0, cut_head_frames=0,
-             declick_max_len_ms=None):
+             declick_max_len_ms=None,
+             loudness_normalize=True,
+             loudness_target_dbfs=CORE.AUDIO_LOUDNESS_TARGET_DBFS):
         me = _audio_stage_path(run_id, int(stage_index))
         idx = int(stage_index)
         patch = float(patch_seconds or 0.0)
+        # 🔴 2026-10-08：**响度归一**（不接声锚也要）。放在**最前面**，三条理由：
+        #   ① 它是**线性增益** ⇒ 与后续的 J-cut 视图切换 / patch / declick 顺序无关；
+        #   ② 落盘的 `audio_0000i`（供后段当**床源**）与第 3 路 `joined` 取的都是归一后的音频
+        #      ⇒ 缝处两侧电平一致，不会在缝上再出现台阶；
+        #   ③ 与**声锚**不冲突：锚（`voice_bank.normalize_anchor`）已把锚对齐到**同一个**
+        #      目标 −23.0 dBFS，模型跟随锚 ⇒ 本段本就接近目标 ⇒ 这里增益落在容忍带内 ⇒ **不动**。
+        #      （即"锚归一是把上游拉齐、这里是给没有锚的情况兜底"，两者幂等叠加，不是两套标准。）
+        _ld_note = ""
+        if loudness_normalize:
+            try:
+                audio, _ld_note = CORE.normalize_loudness(
+                    audio, float(loudness_target_dbfs))
+            except Exception as _ld_err:       # 归一出错**不能**拖垮这一段（与写进度同一条纪律）
+                audio, _ld_note = audio, "⚠ 响度归一失败（原样送出）：%r" % (_ld_err,)
+            if _ld_note:
+                print("[H3 Relay] 响度归一（本段）：%s" % _ld_note)
         # 🔴 2026-09-19 J-cut：原始（未裁）音频另落盘，供 _joined 取「被裁掉的前奏」；
         #   工作视图切到 [align:]（= 裁后音频）—— patch/落盘 audio_0000i/第 1 路输出
         #   的语义全部保持现状（都基于裁后视图）。

@@ -1683,6 +1683,22 @@
           "widget": {
             "name": "cut_head_frames"
           }
+        },
+        {
+          "name": "loudness_normalize",
+          "type": "BOOLEAN",
+          "link": null,
+          "widget": {
+            "name": "loudness_normalize"
+          }
+        },
+        {
+          "name": "loudness_target_dbfs",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "loudness_target_dbfs"
+          }
         }
       ],
       "outputs": [
@@ -1727,7 +1743,9 @@
         4.0,
         -50.0,
         50.0,
-        0
+        0,
+        true,
+        -23.0
       ]
     },
     {

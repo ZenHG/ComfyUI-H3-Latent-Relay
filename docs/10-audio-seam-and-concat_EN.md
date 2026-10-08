@@ -33,6 +33,13 @@ The paired prompt-side disciplines (segment-head buffer, dialogue-safe moments, 
 ⇒ **each segment file's audio length = its video length**, with **no overlap** between segments.
 So the correct way to join is **a plain head-to-tail splice**.
 
+> 🔴 **A segment's video and audio do not have to share one time origin** (2026-10-08). The save node decides timestamps:
+> measured on a third-party Combine node, the **video track starts at `0.125s`** (= 3 frames @24fps) while the audio is padded
+> with matching **leading silence** ⇒ the tail is still aligned and nothing is shifted. **This pack's check compares the
+> video's *end time*** (`start + duration`) ⇒ such segments join normally; the official `SaveVideo` has no such offset, so both work.
+> ⚠️ Do not misread it as "the audio bypassed the overlap trim" — that one is **audio ~0.9 s longer than the video's end time,
+> accumulating per segment**. Check it with `ffprobe <segment.mp4>` on the `start` field of the video line.
+
 > ⚠️ **【auto-run ≠ a finished film】** Running the chain gives you N mp4 files. Since 0.6.7 `H3RelayChain` can splice them for you (see below),
 > but **you must click it** (enable `auto_concat` or press 🧩) — it won't silently do it for you.
 

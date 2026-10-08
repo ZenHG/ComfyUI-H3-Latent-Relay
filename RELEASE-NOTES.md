@@ -19,6 +19,52 @@
 
 ---
 
+## 0.6.32 — 2026-10-08
+
+🔴 **「跑到第几段」这一格改了含义。图、连线、参数都不用改，但要刷新浏览器页面。**
+
+**① `segments` 现在 = 「跑到第 N 段」**（以前读作「再跑 N 段」）。从第 1 段起跑时两者相同，
+老图行为不变；只有**从中间接着跑**才不同：段号已在第 3 段、填 3 ⇒ 只跑这 1 段。
+段号已越过这一格 ⇒ 不排队，并告诉你该填几。
+
+**② 「⏭ 续跑」不再把已跑好的段号退回去。** 起点取「进度段号」与「画布段号」里更靠后的那个：
+正常跑完后画布段号已经更新，续跑就直接接着跑；只有宿主采样中途被杀才重跑那一段。
+
+**③ 按钮"点了没反应"现在看得见**（弹一次提示）。
+
+**④ 拼接不再把「视频轨有起始偏移」的段判成坏段**（有些落盘节点会这么写）⇒ 现在按「视频结束时刻」比。
+
+**⑤ 响度均衡默认开（不接声锚也生效）。** 以前不接锚时每段电平由模型自己决定，实测同片三段差
+**7.97 dB**；现在统一对齐（−23.0 dBFS），实测 **8.08 → 2.43 dB**。关掉：取消勾选 `loudness_normalize`。
+
+**升级动作**：把 `web/` 换成新版并**刷新浏览器页面**（F5）。图、连线、参数都不用改。
+
+<!-- EN -->
+
+🔴 **The "run up to which stage" cell changed meaning. No graph, wiring or parameter change — but refresh the browser page.**
+
+**① `segments` now means "run up to stage N"** (it used to read as "N more stages"). Starting from
+stage 1 the two are identical, so existing graphs behave as before; they differ only when you **start
+from the middle** — canvas stage 3 with `segments=3` runs that one stage. If the stage number is
+already past it, nothing is queued and it says what to enter.
+
+**② «⏭ Resume» no longer pushes your finished stage number backwards.** The start point is the later
+of the progress file's stage and the canvas stage; after a normal finish the canvas number is already
+ahead, so resume just continues. Only a host killed mid-sampling re-runs that stage.
+
+**③ A blocked button is now visible** (a popup, not silence).
+
+**④ Concatenation no longer rejects segments whose video track has a non-zero start** (some save nodes
+write it that way) — it now compares the video's **end time**.
+
+**⑤ Loudness levelling is now on by default (it works without a voice anchor too).** Without an anchor
+each segment's level was up to the model, measured at a **7.97 dB** spread across three segments; all
+segments are now aligned to one target (−23.0 dBFS), measured **8.08 → 2.43 dB**. Untick
+`loudness_normalize` on the audio-seam node to turn it off.
+
+**Action required**: replace `web/` with the new version and **refresh the browser page** (F5).
+No graph, wiring or parameter changes.
+
 ## 0.6.31 — 2026-10-07
 
 🔴 **修两个一直坏着的按钮；`run_id` 改成"任意位置都同步"，并且 API 侧也有了。**

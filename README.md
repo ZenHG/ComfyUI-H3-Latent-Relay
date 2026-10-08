@@ -7,7 +7,7 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 
 | 项 | 值 |
 |---|---|
-| 版本 | **0.6.31** |
+| 版本 | **0.6.32** |
 | 许可 | **MIT**（第三方出处见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)） |
 | 宿主 | **ComfyUI ≥ 0.35.0，且带 MiniMax-H3 支持**（宿主自身为 GPL-3.0，见 §许可与出处） |
 
@@ -353,7 +353,7 @@ ComfyUI-H3-Latent-Relay/
 ├── web/                   # 前端 JS：🧩 拼接按钮、Chain 面板、`run_id` 一处改全组、**节点中英切换按钮**（画布用；脚本用户见 docs/10 §7.4）
 ├── examples/              # 两个可直接打开的工作流：最小续接（21 节点）与全流程（47 节点）
 ├── docs/                  # 深度文档 01–10（原理 / 参数 / 采样链 / 画布 / 排障 / 脚本 / Chain / 测试 / 观测 / 音频）
-├── tests/                 # 离线自测（零 GPU）：563 项断言 + V3 逐字段 + 词分发纯函数
+├── tests/                 # 离线自测（零 GPU）：566 项断言 + V3 逐字段 + 词分发纯函数
 ├── tools/                 # 自检 / 取证 / 拼接 CLI / 打包器（含英文文档同步闸 en_sync.py）
 ├── licenses/              # 随包分发的第三方许可全文
 ├── dist/                  # 打包器的产出（最小分发集 + zip，不入库）
@@ -422,7 +422,7 @@ ComfyUI-H3-Latent-Relay/
 | [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md) · 🇬🇧 [`_EN`](docs/05-troubleshooting_EN.md) | **完整排障表** · **常见疑问 FAQ** · 工作流文件自检 · API 提交 |
 | [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md) · 🇬🇧 [`_EN`](docs/06-continuity-scripting_EN.md) | 出词纪律：段首缓冲 · 台词安全时刻 · 末帧锚链 · 音频缝配套 |
 | [`docs/07-chain.md`](docs/07-chain.md) · 🇬🇧 [`_EN`](docs/07-chain_EN.md) | Chain 自动连跑（换词 / 拼片 / 断点续跑） |
-| [`docs/08-testing.md`](docs/08-testing.md) · 🇬🇧 [`_EN`](docs/08-testing_EN.md) | 离线自测：34 组断言明细（563 项）· 工具清单 |
+| [`docs/08-testing.md`](docs/08-testing.md) · 🇬🇧 [`_EN`](docs/08-testing_EN.md) | 离线自测：34 组断言明细（566 项）· 工具清单 |
 | [`docs/09-metrics.md`](docs/09-metrics.md) · 🇬🇧 [`_EN`](docs/09-metrics_EN.md) | 观测量参考区间（DTW 残留 / 外观漂移）· 怎么自校准 |
 | [`docs/10-audio-seam-and-concat.md`](docs/10-audio-seam-and-concat.md) · 🇬🇧 [`_EN`](docs/10-audio-seam-and-concat_EN.md) | **音频缝与多段拼接**：缝的口径与调参指南 · **台词保护** · 判据能力边界 · 音轨档位 · 边车 · **不开画布的脚本用法** |
 | [`RELEASE-NOTES.md`](RELEASE-NOTES.md) | **面向用户的发布说明**（中英双语，一版一节）· **升级前先看这个** |

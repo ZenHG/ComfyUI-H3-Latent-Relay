@@ -18,11 +18,19 @@ It pulls **Chain + bridge + write-to-disk** (plus the "Latent Load" used along t
 |---|---|
 | ▶ Run | Run once at the current stage number (click again if unhappy, overwriting the same stage-number file) |
 | ✔ Approve | Stage number +1 (bridge/write-to-disk change in sync), queue the next stage |
-| ⏩ 连跑 | Auto-loop according to `segments`: run one stage → stage number +1 → run again (0 = infinite). **While running the button text becomes progress**: `⏳ 连跑中 ██████░░░░ 3/10 · 采样 5/8` |
-| ⏭ 续跑 | **Resume from the stage it last ran to** (0.6.15). Reads `output/relay_kit/<run_id>/_progress.json` ⇒ sets the stage number back ⇒ starts the auto-run. After the host hangs / is killed by the watchdog you do not have to start over. ⚠ You must fill in `run_id` first (consistent with bridge / write-to-disk) |
+| ⏩ 连跑 | Auto-run stage by stage, **up to stage `segments`** (0 = infinite). **While running the button text becomes progress**: `⏳ 连跑中 ██████░░░░ 3/5 · 采样 5/8` (progress counts **this round** — it does not over-report when the start is not stage 1) |
+| ⏭ 续跑 | **Resume from where it last ran** (0.6.15). Reads `output/relay_kit/<run_id>/_progress.json` ⇒ start = `max(progress stage, canvas stage)` ⇒ starts the auto-run. After the host hangs / is killed by the watchdog you do not have to start over. ⚠ You must fill in `run_id` first (consistent with bridge / write-to-disk) |
 | ⏹ Stop | Stop advancing after the current sampling run finishes |
 | 🧩 拼成一条 | Concat the N stages already run into a single film (0.6.7). **The concatenated film path is written into the `concat_result` cell** + one popup |
 | ↺ Reset | Stage number back to 0, restart from stage 1 (also clears this round's stage records) |
+
+> 🔴 **`segments` = "run up to stage N"** (since 0.6.32). It is **not** "N more stages".
+> Starting from stage 1 the two readings are numerically the same; when you **start from the middle**
+> (resume / manually changed stage number) they differ: canvas stage 3 with `segments=3` ⇒ this round runs
+> that 1 stage only, it does not re-run the first two.
+> If the stage number is **already past N** ⇒ nothing is queued, and it tells you what to set `segments` to
+> (no wasted empty round). When it blocks, it also fires one toast on top of the `status` cell — a
+> slow process must show "the click did nothing" visibly.
 
 > ⚠️ **Clicking `▶ Run` / `✔ Approve` mid-auto-run is blocked with a notice** (it will not silently kick the state machine back to idle).
 
@@ -58,6 +66,7 @@ Every successful queue records the `prompt_id` against the **stage number** (`{i
 
 | Cell | Default | Effect |
 |---|---|---|
+| `segments` | `5` | **Run up to which stage** (0 = infinite). Only affects «⏩ 连跑 / ⏭ 续跑»; if the canvas stage number is already past it ⇒ nothing is queued and it says what to set. With `prompts` filled, do not exceed the block count |
 | `prompts` | `""` | **Each stage's own prompt**: split into blocks by a **standalone `---` line**, block k feeds stage k. Empty = no prompt swap (old behaviour) |
 | `prompt_target` | `""` | Which cell the prompt is written into. Empty = auto-detect; `683` = the highest-priority prompt cell on that node; `683.h3_data` = name the field explicitly |
 | `auto_concat` | `false` | ⏩ after the auto-run ends, **automatically concat** into a film |

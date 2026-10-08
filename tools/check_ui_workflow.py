@@ -463,7 +463,8 @@ def check_chain_prompts(wf, oi):
     """Chain 词分发 / 自动拼接自检（0.6.7）。
 
     这三样错法**都只在"跑到第 N 段"或"连跑结束时"才暴露**，节点自己看不见（那几个格子只给前端读）：
-      · `prompts` 块数 < `segments` ⇒ 跑到第 k 段拒绝排队；
+      · `prompts` 块数 < `segments` ⇒ 第 `segments` 段没有词、跑到那里拒绝排队
+        （0.6.32 起 `segments` 是**绝对量** = 「跑到第 N 段」，与 `stage_index` 起点无关）；
       · `prompt_target` 写了具体节点 id、但该 id 不在这张图里；
       · 开了 `auto_concat`，图里却没有视频落盘节点（拼的时候一段都找不到）。
     """
@@ -489,9 +490,10 @@ def check_chain_prompts(wf, oi):
             blocks = []
         if blocks and seg > 0 and len(blocks) < seg:
             where = ("（词源 #%s，连线）" % src_id) if src_text is not None else ""
-            out.append("node %s H3RelayChain: `prompts` 只有 %d 块词、`segments`=%d ⇒ 跑到第 %d 段会"
-                       "**拒绝排队**（补齐第 %d 块，或把 segments 改成 ≤ %d）%s"
-                       % (n["id"], len(blocks), seg, len(blocks) + 1, len(blocks) + 1, len(blocks), where))
+            out.append("node %s H3RelayChain: `prompts` 只有 %d 块词、而 `segments`=%d 表示"
+                       "「跑到第 %d 段」⇒ 第 %d 段起没有对应词、跑到那里会**拒绝排队**"
+                       "（补齐第 %d 块，或把 segments 改成 %d）%s"
+                       % (n["id"], len(blocks), seg, seg, len(blocks) + 1, len(blocks) + 1, len(blocks), where))
         tgt = str(v.get("prompt_target") or "").strip()
         if tgt and not any(str(x.get("id")) == tgt.split(".")[0].strip() for x in nodes):
             out.append("node %s H3RelayChain: `prompt_target=%s` 指向的节点不在这张图上 "

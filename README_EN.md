@@ -10,7 +10,7 @@ not coupled to any third-party H3 node pack.
 
 | Item | Value |
 |---|---|
-| Version | **0.6.31** |
+| Version | **0.6.32** |
 | License | **MIT** (third-party attribution in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) |
 | Host | **ComfyUI ≥ 0.35.0 with MiniMax-H3 support** (the host itself is GPL-3.0, see License) |
 
@@ -413,7 +413,7 @@ ComfyUI-H3-Latent-Relay/
 ├── web/                   # front-end JS: the 🧩 concat button, Chain panel, `run_id` one-field-syncs-the-group, **the node Chinese/EN toggle** (canvas only)
 ├── examples/              # two openable workflows: minimal continuation (21 nodes) and full flow (47 nodes)
 ├── docs/                  # deep docs 01–10 (mechanism / parameters / sampling / canvas / troubleshooting / scripting / chain / tests / metrics / audio)
-├── tests/                 # offline self-test (zero GPU): 563 assertions + V3 parity + prompt-dispatch pure functions
+├── tests/                 # offline self-test (zero GPU): 566 assertions + V3 parity + prompt-dispatch pure functions
 ├── tools/                 # self-checks / forensic tools / concat CLI / bundler (incl. the en_sync docs gate)
 ├── licenses/              # third-party license texts shipped with the pack
 ├── dist/                  # bundler output (minimal distribution set + zip; not tracked)
@@ -490,7 +490,7 @@ The Chinese documents are the source of truth; `README_EN.md` and the English `d
 | [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md) · 🇬🇧 [English](docs/05-troubleshooting_EN.md) | **complete troubleshooting table** · **FAQ** · workflow-file self-check · API submission |
 | [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md) · 🇬🇧 [English](docs/06-continuity-scripting_EN.md) | prompt-side discipline: head padding · dialogue-safe timing · last-frame anchor chaining |
 | [`docs/07-chain.md`](docs/07-chain.md) · 🇬🇧 [English](docs/07-chain_EN.md) | the Chain auto-run controller (prompts / concat / resume) |
-| [`docs/08-testing.md`](docs/08-testing.md) · 🇬🇧 [English](docs/08-testing_EN.md) | offline self-test: 34 assertion groups (563 assertions) · tool inventory |
+| [`docs/08-testing.md`](docs/08-testing.md) · 🇬🇧 [English](docs/08-testing_EN.md) | offline self-test: 34 assertion groups (566 assertions) · tool inventory |
 | [`docs/09-metrics.md`](docs/09-metrics.md) · 🇬🇧 [English](docs/09-metrics_EN.md) | reference ranges for observables (DTW residual / appearance drift) · self-calibration |
 | 🇨🇳 [`docs/10-audio-seam-and-concat.md`](docs/10-audio-seam-and-concat.md) | **audio seam & multi-segment concatenation** — Chinese only for now: seam conventions and tuning guide · **dialogue protection** · criterion limits · track levels · sidecars · **script usage without the canvas** |
 | [`RELEASE-NOTES.md`](RELEASE-NOTES.md) | **user-facing release notes** (bilingual, one section per version) · **read this before upgrading** |
