@@ -32,6 +32,9 @@
 ② 后端补上同一套语义：新函数 `relay_core.sync_run_id` 与新接口 `POST /h3relay/runid`，
 **跑批脚本不用再手改六处**。③ 新增一条浏览器冒烟门，专盯"后端全绿但按钮不能用"这类静默失效。
 
+**另**：本版**一并包含未单独发布的 0.6.30**（纯内部拆包）。你唯一可能注意到的是
+**下载件从 24 个文件变成 42 个** —— 体积与用法都不变。
+
 **升级动作**：**刷新一次浏览器**即可（前端脚本即时加载）。跑批脚本可选用
 `POST /h3relay/runid` 先自检一遍 `run_id` 是否一致。
 
@@ -51,6 +54,10 @@ films. (2) The back end gained the same semantics: a new `relay_core.sync_run_id
 `POST /h3relay/runid` route, so **batch scripts no longer edit six fields by hand**. (3) Added a
 browser-level smoke gate that targets exactly the failure mode where "the back end is green but the buttons
 do not work".
+
+**Note**: this release **also includes 0.6.30**, which was never published on its own (a purely internal
+refactor). The only thing you may notice is that the download now contains 42 files instead of 24 —
+same total size, same usage.
 
 **Action required**: **just reload your browser** (front-end scripts load on refresh). Batch scripts may
 optionally call `POST /h3relay/runid` to check that every `run_id` agrees before submitting.
