@@ -50,7 +50,7 @@
 | **H4b** | truth | `review_050.py` 自身判据表自检 | 注入 `ck("X", True)`（恒真）或两条同名 `ck()` | — |
 | **H4c** | truth | 判据台账 | 从本台账删掉一个编号（或 `review_050` 里加一条未登记的编号） | git |
 | **I1** | hygiene | 示例图 widgets_values **未超出** schema 槽位数 | — | — |
-| **I2** | hygiene | 取值都在候选/范围内 | — | — |
+| **I2** | hygiene | 取值都在候选/范围内 | — | host |
 | **I3** | hygiene | **全部**示例图的 widget 输入带 `widget` 标记 | — | — |
 | **J1** | hygiene | 存量工作流无『输出数组过期』的节点 | — | — |
 | **J3** | hygiene | custom_nodes 无「同包第二份副本」 | — | — |

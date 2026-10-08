@@ -462,6 +462,12 @@ _EX = [(f, json.load(open(os.path.join(KIT, "examples", f), encoding="utf-8")))
 print("      覆盖示例图 %d 张：%s" % (len(_EX), "、".join(_EX_FILES)))
 
 _unknown, _mismatch, _map = [], [], []
+# 本环境的「宿主缺资源」兜底态（同源取自 `nodes.py`，供 I2 判"前提是否失效"）
+_collapsed = []
+try:
+    _ups_now = list(N._upscale_model_names())
+except Exception:
+    _ups_now = []
 for _fn, _wf in _EX:
     for n in _wf["nodes"]:
         t = n["type"]
@@ -495,6 +501,17 @@ for _fn, _wf in _EX:
                 continue
             cfg = spec[1]
             if isinstance(spec[0], (list, tuple)) and val not in spec[0]:
+                # 🔴 2026-10-08 修：**宿主缺资源**时「候选项」会塌缩成单点兜底串
+                #   （`nodes.py::_upscale_model_names` 在本环境返回 `["(权重缺失：…)"]`）。
+                #   此时「示例图的值不在候选内」是**前提失效**，不是错位 ——
+                #   实测：CI（新 clone 的宿主、无放大权重）报 `I2 红`，本机（有权重）绿
+                #   ⇒ **典型的「本地绿 CI 红」**（本仓最高频的返工病因）。
+                #   **同源判据**：拿 `nodes.py` 同一个函数在**本环境**返回的列表来比，
+                #   不在这里另写一遍字面量。
+                #   ⚠️ **必须出声**：跳过几项要打出来，否则就成了"永远跳过"的假绿。
+                if len(_ups_now) == 1 and list(spec[0]) == _ups_now:
+                    _collapsed.append("%s %s.%s=%r" % (_fn, t, name, val))
+                    continue
                 _unknown.append("%s %s.%s=%r 不在候选项 %s" % (_fn, t, name, val, spec[0]))
             if isinstance(val, (int, float)) and not isinstance(val, bool):
                 lo, hi = cfg.get("min"), cfg.get("max")
@@ -508,8 +525,11 @@ ck("I1 示例图 widgets_values **未超出** schema 槽位数（短数组合法
 for _fn, _t, _nid, _pairs in _map:
     print("      %s / %s#%s：%s" % (_fn.split("_")[0], _t, _nid,
                                    ", ".join("%s=%r" % kv for kv in _pairs[:5])))
-ck("I2 取值都在候选/范围内（错位会在这里露出来）", not _unknown,
-   "异常=%s" % _unknown[:4])
+if _collapsed:
+    print("      ⚠️ 跳过 %d 项（宿主**缺资源** ⇒ 该参数的候选集塌缩成单点兜底串，"
+          "「值不在候选内」无从判断）：%s" % (len(_collapsed), _collapsed[:4]))
+ck("I2 取值都在候选/范围内（错位会在这里露出来；宿主缺资源时**跳过并出声**）", not _unknown,
+   "异常=%s ｜ 跳过（宿主缺资源）%d 项" % (_unknown[:4], len(_collapsed)))
 
 # 🔴 I3（2026-09-19 新增）：示例图的 widget 输入必须带 `widget` 标记。
 #   前端 `nonWidgetedInputs()`（renderer/.../nodeDataUtils.ts）把**没有标记**的输入
