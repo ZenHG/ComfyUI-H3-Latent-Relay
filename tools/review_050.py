@@ -2226,6 +2226,61 @@ ck("H4f 无「`return` 后直接跟一个 `open(` 调用」的形态"
    not _ro, "%d 处：%s" % (len(_ro), _ro[:4]))
 
 # ============================================================================
+# H4g 交付物不得含**字节码**与**符号链接**（2026-10-10 新增）
+# ============================================================================
+# 🔴 为什么需要：宿主 0.39.0 起带**自定义节点治理**（宿主 `app/governance.py`，上游 PR #16167）。
+#   `pack_digest()` 对本包这种节点包做三件硬事（2026-10-10 实读宿主源码）：
+#     ① 包目录本身是符号链接 ⇒ raise（`:183`）；② 包内**任一**符号链接 ⇒ raise（`:195`）；
+#     ③ 包内**任一** `__pycache__/`、`.pyc`、`.pyo` ⇒ `_PackBytecodeError`（`:202-209`）。
+#     理由（宿主源码注释）：指纹式命名的 `.pyc` 会**不读 `.py`** 直接执行 ⇒ 摘要量不到它。
+#   `GOVERNANCE_REQUIRED = False`（`:18`）⇒ 普通安装行为不变，**受管构建**才开。
+#   拒载发生在 `pack_refusal()`（`:128`）里**算本包摘要**那一刻，宿主给的话术是
+#   「it carries compiled Python files the policy cannot check … Delete them and restart」，
+#   且宿主注释自己写明这种字节码「Usually left by an earlier run without the policy」。
+#   ⚠️ 算摘要的时机（`:143-151`）：**allowlist 一律算**；**blocklist 只对本包被按摘要列出时算**
+#   ⇒ 不是"一装治理就红"，而是"治理一旦要核本包，带字节码就过不去"。
+#   ⚠️ 同一 PR 把包摘要的扩展名定为 `…/.js/.mjs` ⇒ 日后改 `web/*.js` 会让**已签名的策略失效**。
+# 判据纪律（本仓既定：只把**与环境无关的事实**判红）：
+#   ① git 受控集（= `comfy node pack` / `dist` 的来源）不许有字节码 / 符号链接【硬】；
+#   ② `dist/` 存在时逐文件核【硬 —— 那是用户真下载的东西】；
+#   ③ 部署副本有字节码 ⇒ **只报信息**（那是**运行产生的** ⇒ 判红就等于每次跑都红 = 噪声）。
+# ⚠️ 已知盲点（照本仓习惯写明）：`dist/*.zip` 是**压缩包** ⇒ 不解压就看不见里面的字节码；
+#   本判据只覆盖 `dist/<目录>`。zip 由 `make_minimal_bundle.py` / `comfy node pack` 产出，
+#   而受控集干净（第 ① 条）已保证它们的输入不含字节码。
+def _bc_scan(_base):
+    """`_base` 下所有 `__pycache__` 与字节码文件的相对路径；目录不存在 ⇒ 空表。"""
+    _hit = []
+    if os.path.isdir(_base):
+        for _r, _ds, _fs in os.walk(_base):
+            _hit += [os.path.relpath(os.path.join(_r, _d), _base) for _d in _ds if _d == "__pycache__"]
+            _hit += [os.path.relpath(os.path.join(_r, _f), _base)
+                     for _f in _fs if _f.endswith((".pyc", ".pyo"))]
+    return _hit
+
+
+_bc_git = [p for p in _tracked if p.endswith((".pyc", ".pyo")) or "__pycache__" in p.split("/")]
+_sym_git = []
+for _ln in (_sp.run(["git", "-C", KIT, "ls-files", "-s"], capture_output=True, text=True,
+                    encoding="utf-8", errors="replace").stdout or "").splitlines():
+    _c = _ln.split("\t")
+    if len(_c) == 2 and _c[0].startswith("120000"):
+        _sym_git.append(_c[1])
+_bc_dist, _deploy_dir = _bc_scan(_dist_dir), os.path.join(_CNODES, os.path.basename(KIT))
+_bc_deploy = _bc_scan(_deploy_dir)
+print("      受控集：字节码 %d ｜ 符号链接 %d ｜ `dist/` 字节码 %d ｜ 部署副本字节码 %d"
+      % (len(_bc_git), len(_sym_git), len(_bc_dist), len(_bc_deploy)))
+if not _tracked:
+    print("         · 🔴 `git ls-files` **空** ⇒ 判据前提失效（不在仓库里？）—— 判红，不许静默通过")
+if _bc_deploy:
+    print("         · 受管构建一旦**要核本包摘要**（allowlist 一律核）就会拒载；普通安装不受影响。"
+          "处置：find \"%s\" -name __pycache__ -type d -prune -exec rm -rf {} +" % _deploy_dir)
+ck("H4g 交付物无字节码/符号链接：git 受控集与 `dist/` **硬判**，部署副本只报信息"
+   "（宿主治理 `pack_refusal` 在**算本包摘要**时拒载带 `__pycache__`/`.pyc` 的包）",
+   bool(_tracked) and not (_bc_git or _sym_git or _bc_dist),
+   "受控集 %s ｜ 符号链接 %s ｜ dist %s ｜ ls-files %d"
+   % (_bc_git[:3], _sym_git[:3], _bc_dist[:3], len(_tracked)))
+
+# ============================================================================
 # H3g 本文件**自己的**期望数（2026-09-25 新增）
 # ============================================================================
 # 🔴 **必须是本文件最后一个 ck()**：它算的是「本文件的总检查数」= 此刻已跑数 + 自己这 1 条。
