@@ -2267,18 +2267,24 @@ for _ln in (_sp.run(["git", "-C", KIT, "ls-files", "-s"], capture_output=True, t
         _sym_git.append(_c[1])
 _bc_dist, _deploy_dir = _bc_scan(_dist_dir), os.path.join(_CNODES, os.path.basename(KIT))
 _bc_deploy = _bc_scan(_deploy_dir)
-print("      受控集：字节码 %d ｜ 符号链接 %d ｜ `dist/` 字节码 %d ｜ 部署副本字节码 %d"
-      % (len(_bc_git), len(_sym_git), len(_bc_dist), len(_bc_deploy)))
+# 宿主规则①：**包目录本身**是符号链接 ⇒ raise（`:183`）。`dist/` 是我们自己的产物 ⇒ 判硬；
+# 部署副本作信息（开发期用软链指回仓库是常见做法，受管构建下才需要换真目录）。
+_sym_dist, _sym_deploy = os.path.islink(_dist_dir), os.path.islink(_deploy_dir)
+print("      受控集：字节码 %d ｜ 符号链接 %d ｜ `dist/` 字节码 %d%s ｜ 部署副本字节码 %d%s"
+      % (len(_bc_git), len(_sym_git), len(_bc_dist), "（**目录本身是软链**）" if _sym_dist else "",
+         len(_bc_deploy), "（**目录本身是软链**）" if _sym_deploy else ""))
 if not _tracked:
     print("         · 🔴 `git ls-files` **空** ⇒ 判据前提失效（不在仓库里？）—— 判红，不许静默通过")
-if _bc_deploy:
-    print("         · 受管构建一旦**要核本包摘要**（allowlist 一律核）就会拒载；普通安装不受影响。"
-          "处置：find \"%s\" -name __pycache__ -type d -prune -exec rm -rf {} +" % _deploy_dir)
+if _bc_deploy or _sym_deploy:
+    print("         · 受管构建一旦**要核本包摘要**（allowlist 一律核）就会拒载；普通安装不受影响。处置：")
+    print("           清字节码：find \"%s\" -name __pycache__ -type d -prune -exec rm -rf {} +" % _deploy_dir)
+    print("           换真目录：把副本从软链改回**真目录**（受管构建拒载软链的包）")
 ck("H4g 交付物无字节码/符号链接：git 受控集与 `dist/` **硬判**，部署副本只报信息"
    "（宿主治理 `pack_refusal` 在**算本包摘要**时拒载带 `__pycache__`/`.pyc` 的包）",
-   bool(_tracked) and not (_bc_git or _sym_git or _bc_dist),
-   "受控集 %s ｜ 符号链接 %s ｜ dist %s ｜ ls-files %d"
-   % (_bc_git[:3], _sym_git[:3], _bc_dist[:3], len(_tracked)))
+   bool(_tracked) and not (_bc_git or _sym_git or _bc_dist or _sym_dist),
+   "受控集 %s ｜ 符号链接 %s ｜ dist %s%s ｜ ls-files %d"
+   % (_bc_git[:3], _sym_git[:3], _bc_dist[:3], " ｜ dist 目录是软链" if _sym_dist else "",
+      len(_tracked)))
 
 # ============================================================================
 # H3g 本文件**自己的**期望数（2026-09-25 新增）
