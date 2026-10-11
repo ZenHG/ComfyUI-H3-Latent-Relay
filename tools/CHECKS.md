@@ -50,7 +50,7 @@
 | **H4b** | truth | `review_050.py` 自身判据表自检 | 注入 `ck("X", True)`（恒真）或两条同名 `ck()` | — |
 | **H4c** | truth | 判据台账 | 从本台账删掉一个编号（或 `review_050` 里加一条未登记的编号） | git |
 | **H4f** | hygiene | 无「`return` 后直接跟一个 `open | 把任一受控 `*.py` 改成「`return` 后直接跟 `open(`」的形态 | — |
-| **H4g** | hygiene | 交付物无字节码/符号链接：git 受控集与 `dist/` **硬判**，部署副本只报信息 | 把任一受控文件改成 `.pyc` 形态后 `git add -f`（受控集里出现字节码） | — |
+| **H4g** | hygiene | 交付物无字节码/符号链接：git 受控集、`dist/`、`dist/*.zip` 名录 **硬判**，部署副本只报信息 | ① 把任一受控文件改成 `.pyc` 形态后 `git add -f`（受控集里出现字节码）；② 往 `dist/<包>/` 里放一个软链（包内符号链接，宿主规则②） | — |
 | **I1** | hygiene | 示例图 widgets_values **未超出** schema 槽位数 | — | — |
 | **I2** | hygiene | 取值都在候选/范围内 | — | host |
 | **I3** | hygiene | **全部**示例图的 widget 输入带 `widget` 标记 | — | — |

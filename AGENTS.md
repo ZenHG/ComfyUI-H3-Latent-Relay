@@ -124,6 +124,8 @@ python tools/release.py            # 预演；--go 才真发；唯一真相源 =
 | **H4c** | 判据台账（`tools/checks_ledger.py`）与本文件编号**双向一致**，且 `tools/CHECKS.md` 未过期 ⇒ **新加判据不登记 = 红** |
 | **H4d** | JS 测试（4 个 `.mjs`）的期望数 == **实跑**（`node` 找不到 ⇒ **红**，fail-closed） |
 | **H4e** | dist 白名单文件数：`MANIFEST` 各段之和 == 文档声明（`dist/` 在时还核实际文件数） |
+| **H4f** | 无「`return` 后直接跟一个 `open(`」的形态（`SIM115` 的已知盲点） |
+| **H4g** | 交付物无字节码/符号链接：git 受控集、`dist/`、`dist/*.zip` 名录**硬判**，部署副本只报信息（宿主治理 `pack_refusal`） |
 
 > ⚠️ **本表是摘要，可能滞后**。**权威清单 = `tools/CHECKS.md`**（由 `tools/checks_ledger.py --write` 生成，
 > **H4c** 盯着它与 `review_050` 的编号双向一致）。要「有哪些判据 / 每条盯什么口径 / 有没有变异测试 /

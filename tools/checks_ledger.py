@@ -95,7 +95,8 @@ MUTATION = {
     "H4d": "把 `ci.yml` 头注释里 `test_run_id_parity` 的期望数改成 22",
     "H4e": "把 `make_minimal_bundle.py` 的 `MANIFEST_RUNTIME` 删一项（42 → 41）",
     "H4f": "把任一受控 `*.py` 改成「`return` 后直接跟 `open(`」的形态",
-    "H4g": "把任一受控文件改成 `.pyc` 形态后 `git add -f`（受控集里出现字节码）",
+    "H4g": "① 把任一受控文件改成 `.pyc` 形态后 `git add -f`（受控集里出现字节码）；"
+           "② 往 `dist/<包>/` 里放一个软链（包内符号链接，宿主规则②）",
     "H3f": "把 `ci.yml` 里 `test_relay_core` 的期望数改成 562",
     "H3g": "把 `docs/08-testing.md` 里 `review_050` 的期望数改成 105",
     "H3h": "把 `ci.yml` 里 V3 的 input 数改成 121",

@@ -356,8 +356,27 @@ ck("H3d nodes.py 模块头注释的节点数 == 注册数",
 #   CHANGES.md 是历史流水（当时确实发生在某台机器上），豁免。
 #   ⚠ 判据本身用拼串构造，免得这个文件因为"写着要禁的字面量"而被自己抓到。
 import subprocess as _sp
-_files = (_sp.run(["git", "-C", KIT, "ls-files"], capture_output=True, text=True,
-                  encoding="utf-8", errors="ignore").stdout or "").split()
+
+
+def _git_paths(_args=()):
+    """`git ls-files -z …` 的**逐条原始路径**（`-z` 由本函数强制加上）。
+
+    🔴 为什么必须 `-z`（2026-10-11 实测缺口）：`git ls-files` 默认 `core.quotePath=true`
+      ⇒ **非 ASCII 文件名**会被输出成 `"\\344\\270\\255..."`（**带引号 + 八进制转义**）。
+      此前本文件的 `_files` / `_tracked` 都用 `stdout.split()` 读 ⇒ 拿到的是那种
+      **打不开的字符串** ⇒ 逐文件读内容的判据（H3e 本机路径 / H3m 凭据 / H3x setdefault /
+      H4f return-open / H4g 字节码）会**静默跳过**该文件 = **假绿**。
+      实证：注入 `_h4g探针.md`（内容含本机路径）与 `_h4g探针.pyc` 并 `git add -f`
+      ⇒ 只有 H3u 因「包文件数 48→50」红了，**H3e 与 H4g 都报 OK**（漏报）。
+      ⚠️ 更静默的形态：把新文件放进 `.comfyignore` 已排除的目录（如 `docs/`）⇒ 连 H3u 都不响。
+      `-z` = 以 NUL 分隔且**不转义** ⇒ 拿到的就是可直接 `os.path.join` 的真实路径。
+    """
+    _o = _sp.run(["git", "-C", KIT, "ls-files", "-z"] + list(_args), capture_output=True,
+                 text=True, encoding="utf-8", errors="replace").stdout or ""
+    return [p for p in _o.split("\0") if p]
+
+
+_files = _git_paths()
 _EXT = {"py", "js", "mjs", "md", "json", "yml", "yaml", "txt"}
 _MACHINE = _re.compile(r"(?<![A-Za-z])[%s]:[\\/]|%s" % ("IH", r"C:\\+Users"), _re.I)
 _hits = []
@@ -1899,8 +1918,9 @@ ck("H3m 仓库内无凭据字面量（受控文件内容 + 最近 N 条提交信
 #   ⇒ **真值判据**：从被测对象**真算一遍**，再与声明比。这才是这两条该有的形态。
 import fnmatch as _fnm
 
-_tracked = (subprocess.run(["git", "-C", KIT, "ls-files"], capture_output=True,
-                           text=True, encoding="utf-8", errors="replace").stdout or "").split()
+# ⚠️ 读法必须走 `_git_paths()`（`-z`）—— 见它的 docstring：`stdout.split()` 会**静默漏掉**
+#   非 ASCII 文件名（git 默认把它们引号+八进制转义），H3x / H4f / H4g 都吃这个亏。
+_tracked = _git_paths()
 
 # —— H3u：`.comfyignore` 声明的包文件数 vs 真算 ——
 # 为什么能纯标准库算准：该文件只用「整目录（以 `/` 结尾）」「单文件」「根级通配」三种形态，
@@ -2244,11 +2264,20 @@ ck("H4f 无「`return` 后直接跟一个 `open(` 调用」的形态"
 #   ① git 受控集（= `comfy node pack` / `dist` 的来源）不许有字节码 / 符号链接【硬】；
 #   ② `dist/` 存在时逐文件核【硬 —— 那是用户真下载的东西】；
 #   ③ 部署副本有字节码 ⇒ **只报信息**（那是**运行产生的** ⇒ 判红就等于每次跑都红 = 噪声）。
-# ⚠️ 已知盲点（照本仓习惯写明）：`dist/*.zip` 是**压缩包** ⇒ 不解压就看不见里面的字节码；
-#   本判据只覆盖 `dist/<目录>`。zip 由 `make_minimal_bundle.py` / `comfy node pack` 产出，
-#   而受控集干净（第 ① 条）已保证它们的输入不含字节码。
+# ⚠️ 盲点①（**2026-10-11 起关掉一半**）：`dist/*.zip` 是**压缩包** ⇒ 逐文件扫看不见里面。
+#   但**名录**（`zipfile.namelist()`）**不用解压**就能读 ⇒ 现在也扫名录（零成本）。剩下没覆盖的
+#   只是「zip 内文件的内容」—— zip 由受控集产出（第 ① 条兜）。
+# ⚠️ 盲点②（**dist 那一档只在本地生效**）：CI 的步骤顺序是「回归套件（含本文件）→ … → 打包器」
+#   ⇒ 跑本文件时 `dist/` **还不存在** ⇒ `dist` 档在 CI 里**恒为空跑**。它的用武之地是本机
+#   （dist 是长命产物）。**别把「CI 绿」当成「dist 干净」的证明。**
+# ⚠️ 盲点③：仓库根的 `node.zip`（`comfy node pack` 的预览包）不扫 —— 它的输入就是受控集
+#   （`comfy node pack` 只打包 `git ls-files` 的结果），受控集干净 ⇒ 它不可能带字节码。
 def _bc_scan(_base):
-    """`_base` 下所有 `__pycache__` 与字节码文件的相对路径；目录不存在 ⇒ 空表。"""
+    """`_base` 下所有 `__pycache__` 与字节码文件的相对路径；目录不存在 ⇒ 空表。
+
+    ⚠️ 比宿主**严**一点：宿主只把**文件**放进 `contents`（`is_file()`），空的 `__pycache__/`
+      它不报；本函数把**目录本身**也计入。对两个硬判档无害 —— git 存不了空目录。
+    """
     _hit = []
     if os.path.isdir(_base):
         for _r, _ds, _fs in os.walk(_base):
@@ -2258,33 +2287,82 @@ def _bc_scan(_base):
     return _hit
 
 
+def _sym_scan(_base):
+    """`_base`（含自身）下**所有符号链接**的相对路径；不存在 ⇒ 空表。
+
+    🔴 必须**逐层**扫，不能只看顶层。宿主规则② = 「包内**任一**符号链接即 raise」
+      （`governance.py:195` ⇒ `any(c.is_symlink() for c in path.rglob("*"))`），规则① 才是
+      「包目录**本身**是软链」（`:183`）。首版只查了规则①。
+      2026-10-11 变异测试实测：往 `dist/ComfyUI-H3-Latent-Relay/` 里放一个指向同目录文件的软链
+      ⇒ 旧判据**报 OK（假绿）**，而宿主会拒载该包。
+    ⚠️ `os.walk` 默认不跟进软链目录，但仍把它们列在 `_ds` 里 ⇒ 能被发现。
+    """
+    _hit = []
+    if os.path.islink(_base):
+        _hit.append(".")
+    elif os.path.isdir(_base):
+        for _r, _ds, _fs in os.walk(_base):
+            for _n in list(_ds) + list(_fs):
+                if os.path.islink(os.path.join(_r, _n)):
+                    _hit.append(os.path.relpath(os.path.join(_r, _n), _base))
+    return _hit
+
+
+def _bc_zip(_path):
+    """压缩包**名录**里的 `__pycache__`/字节码条目（只读 `namelist()`，**不解压**）。
+
+    ⚠️ fail-closed：包读不开（损坏 / 不是 zip）⇒ 返回**非空**哨兵 ⇒ 判红，不静默通过。
+    """
+    import zipfile
+    if not os.path.isfile(_path):
+        return []
+    try:
+        with zipfile.ZipFile(_path) as _z:
+            return [n for n in _z.namelist()
+                    if n.endswith((".pyc", ".pyo")) or "__pycache__" in n.split("/")]
+    except (OSError, ValueError, zipfile.BadZipFile) as _e:
+        return ["<读不开：%s>" % type(_e).__name__]
+
+
 _bc_git = [p for p in _tracked if p.endswith((".pyc", ".pyo")) or "__pycache__" in p.split("/")]
+# ⚠️ 用 `-z` 读（`_git_paths`）：非 ASCII 名在默认 `quotePath=true` 下会被引号 + 八进制转义，
+#   那样 `.endswith(".pyc")` 永远不成立 ⇒ 漏报。
 _sym_git = []
-for _ln in (_sp.run(["git", "-C", KIT, "ls-files", "-s"], capture_output=True, text=True,
-                    encoding="utf-8", errors="replace").stdout or "").splitlines():
+for _ln in _git_paths(["-s"]):
     _c = _ln.split("\t")
     if len(_c) == 2 and _c[0].startswith("120000"):
         _sym_git.append(_c[1])
 _bc_dist, _deploy_dir = _bc_scan(_dist_dir), os.path.join(_CNODES, os.path.basename(KIT))
 _bc_deploy = _bc_scan(_deploy_dir)
+import glob as _globz
+_bc_zip_hits = ["%s:%s" % (os.path.basename(_z), _n)
+                for _z in sorted(_globz.glob(os.path.join(KIT, "dist", "*.zip")))
+                for _n in _bc_zip(_z)]
 # 宿主规则①：**包目录本身**是符号链接 ⇒ raise（`:183`）。`dist/` 是我们自己的产物 ⇒ 判硬；
 # 部署副本作信息（开发期用软链指回仓库是常见做法，受管构建下才需要换真目录）。
-_sym_dist, _sym_deploy = os.path.islink(_dist_dir), os.path.islink(_deploy_dir)
-print("      受控集：字节码 %d ｜ 符号链接 %d ｜ `dist/` 字节码 %d%s ｜ 部署副本字节码 %d%s"
-      % (len(_bc_git), len(_sym_git), len(_bc_dist), "（**目录本身是软链**）" if _sym_dist else "",
-         len(_bc_deploy), "（**目录本身是软链**）" if _sym_deploy else ""))
+# 规则②（包内任一符号链接）由 `_sym_scan` 逐层覆盖，连目录本身一起。
+_sym_dist, _sym_deploy = _sym_scan(_dist_dir), _sym_scan(_deploy_dir)
+_dist_link, _deploy_link = os.path.islink(_dist_dir), os.path.islink(_deploy_dir)
+print("      受控集：字节码 %d ｜ 符号链接 %d ｜ `dist/` 字节码 %d ｜ `dist/` 符号链接 %d%s ｜ "
+      "`dist/*.zip` 名录 %d ｜ 部署副本字节码 %d%s"
+      % (len(_bc_git), len(_sym_git), len(_bc_dist), len(_sym_dist),
+         "（**目录本身是软链**）" if _dist_link else "", len(_bc_zip_hits),
+         len(_bc_deploy), "（**目录本身是软链**）" if _deploy_link else ""))
 if not _tracked:
     print("         · 🔴 `git ls-files` **空** ⇒ 判据前提失效（不在仓库里？）—— 判红，不许静默通过")
+if _bc_zip_hits:
+    print("         · zip **名录里**就有字节码（不解压即可见）⇒ 解出来的包会被受管构建拒载：%s"
+          % (_bc_zip_hits[:3],))
 if _bc_deploy or _sym_deploy:
     print("         · 受管构建一旦**要核本包摘要**（allowlist 一律核）就会拒载；普通安装不受影响。处置：")
-    print("           清字节码：find \"%s\" -name __pycache__ -type d -prune -exec rm -rf {} +" % _deploy_dir)
+    print("           清字节码：find \"%s\" -name __pycache__ -type d -prune -exec rm -rf {} +"
+          % os.path.normpath(_deploy_dir))
     print("           换真目录：把副本从软链改回**真目录**（受管构建拒载软链的包）")
-ck("H4g 交付物无字节码/符号链接：git 受控集与 `dist/` **硬判**，部署副本只报信息"
+ck("H4g 交付物无字节码/符号链接：git 受控集、`dist/`、`dist/*.zip` 名录 **硬判**，部署副本只报信息"
    "（宿主治理 `pack_refusal` 在**算本包摘要**时拒载带 `__pycache__`/`.pyc` 的包）",
-   bool(_tracked) and not (_bc_git or _sym_git or _bc_dist or _sym_dist),
-   "受控集 %s ｜ 符号链接 %s ｜ dist %s%s ｜ ls-files %d"
-   % (_bc_git[:3], _sym_git[:3], _bc_dist[:3], " ｜ dist 目录是软链" if _sym_dist else "",
-      len(_tracked)))
+   bool(_tracked) and not (_bc_git or _sym_git or _bc_dist or _sym_dist or _bc_zip_hits),
+   "受控集 %s ｜ 符号链接 %s ｜ dist 字节码 %s ｜ dist 软链 %s ｜ zip %s ｜ ls-files %d"
+   % (_bc_git[:3], _sym_git[:3], _bc_dist[:3], _sym_dist[:3], _bc_zip_hits[:3], len(_tracked)))
 
 # ============================================================================
 # H3g 本文件**自己的**期望数（2026-09-25 新增）
