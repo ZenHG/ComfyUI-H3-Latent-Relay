@@ -149,6 +149,9 @@ export const H3_WIDGETS = {
     precision: { zh: "精度", en: "precision" },
     device: { zh: "设备", en: "device" },
     force_unload: { zh: "用后卸载", en: "unload after" },
+    spatial_tiles: { zh: "空间分块数", en: "spatial tiles" },
+    spatial_overlap: { zh: "空间重叠", en: "spatial overlap" },
+    seam_feather: { zh: "接缝羽化", en: "seam feather" },
     // 音频缝
     patch_seconds: { zh: "补丁秒数", en: "patch seconds" },
     tile_seconds: { zh: "平铺秒数", en: "tile seconds" },
@@ -700,8 +703,20 @@ export const H3_TIPS = {
         en: "Where to compute. The cpu option is for troubleshooting only — far slower.",
     },
     "H3RelayLatentUpscale.force_unload": {
-        zh: "跑完卸载。把放大模型退回 CPU 腾显存。⚠ 分多块时开启会反复装卸（更慢），所以默认关；单块且后面还要接采样器时才开。",
-        en: "Unload after run. Returns the upscale model to CPU to free VRAM. ⚠ With multiple chunks this reloads repeatedly (slower), hence off by default; enable it for a single chunk when a sampler follows.",
+        zh: "跑完卸载。把放大模型退回 CPU 腾显存。⚠ 只要分了块（`chunks` 或 `spatial_tiles` 任一个 > 1）开启就会**每块**装卸一次（明显更慢），所以默认关；单块、且后面还要接采样器时才开。",
+        en: "Unload after run. Returns the upscale model to CPU to free VRAM. ⚠ Whenever the work is split (`chunks` or `spatial_tiles` above 1) this load/unloads **once per tile** (clearly slower), hence off by default; enable it for a single tile when a sampler follows.",
+    },
+    "H3RelayLatentUpscale.spatial_tiles": {
+        zh: "显存旋钮之二（**低显存优先用它**）：沿**长边**把画面切成几块跑。1 = 不切（与旧版逐位一致）。为什么优先它：**时间轴保持完整** ⇒ 时间上下文一点不丢；代价是空间边界变窄 ⇒ 接缝靠「重叠 + 核心区独占 + 羽化」压进过渡带。💰 块数越多越吃算力（重叠区要重跑）⇒ 一般 2~4 块就够。⚠ 切了就会改画面 ⇒ **切完必须重看缝**。",
+        en: "Second VRAM knob (**prefer this one when VRAM is short**): split the frame into N tiles along the **long edge**. 1 = no split (bit-identical to the old path). Why prefer it: the **time axis stays whole** ⇒ no temporal context is lost; the cost moves to the spatial boundary, where overlap + exclusive cores + feathering push the seam into a transition band. 💰 More tiles cost more compute (overlap is recomputed) ⇒ 2–4 is usually enough. ⚠ Splitting still changes the picture ⇒ **re-inspect the seam afterwards**.",
+    },
+    "H3RelayLatentUpscale.spatial_overlap": {
+        zh: "空间重叠。相邻两条的重叠宽度（latent 格，1 格 ≈ 16 像素）。默认 8。它只当**上下文**用 —— 核心区是独占的（不做半透明叠加）⇒ 重叠区不会重影。💰 它直接换算力（实测长边 80 格、重叠 8 ⇒ 3 块多算约 40%）。⚠ 必须装得下「接缝羽化」；装不下、或大到两条裁同一块，会直接报错不偷改。",
+        en: "Spatial overlap. Overlap width between neighbouring tiles (latent cells, 1 cell ≈ 16 px). Default 8. It is **context only** — cores are exclusive (no half-transparent blending) ⇒ no ghosting in the overlap. 💰 It converts directly into compute (measured: long edge 80 cells, overlap 8 ⇒ ~40% extra for 3 tiles). ⚠ It must fit `seam_feather`; if it does not, or if it grows so large that two tiles crop the same region, it errors out instead of silently adjusting.",
+    },
+    "H3RelayLatentUpscale.seam_feather": {
+        zh: "接缝羽化。过渡带宽度（latent 格）。默认 4；0 = 最锐利（硬过渡）。相邻两条在这条带上权重互补（一个 1→0、一个 0→1，和恒为 1）。成片里出现极淡色差线时调到 8~12；⚠ 调大要同步调大「空间重叠」。",
+        en: "Seam feathering. Width of the transition band (latent cells). Default 4; 0 = sharpest (hard transition). Neighbouring tiles are complementary across this band (one 1→0, one 0→1, summing to 1). If a faint colour-difference line shows up in the final cut, raise it to 8–12; ⚠ raise `spatial_overlap` along with it.",
     },
 };
 

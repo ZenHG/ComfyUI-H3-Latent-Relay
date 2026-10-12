@@ -2663,6 +2663,33 @@
             "name": "force_unload"
           },
           "link": null
+        },
+        {
+          "localized_name": "spatial_tiles",
+          "name": "spatial_tiles",
+          "type": "INT",
+          "widget": {
+            "name": "spatial_tiles"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "spatial_overlap",
+          "name": "spatial_overlap",
+          "type": "INT",
+          "widget": {
+            "name": "spatial_overlap"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "seam_feather",
+          "name": "seam_feather",
+          "type": "INT",
+          "widget": {
+            "name": "seam_feather"
+          },
+          "link": null
         }
       ],
       "outputs": [
@@ -2702,7 +2729,10 @@
         32,
         "bf16",
         "cuda",
-        false
+        false,
+        1,
+        8,
+        4
       ],
       "widgets_values_named": {
         "model_name": "minimax_h3_latent_upscaler_3d_bf16.safetensors",
@@ -2716,7 +2746,10 @@
         "align": 32,
         "precision": "bf16",
         "device": "cuda",
-        "force_unload": false
+        "force_unload": false,
+        "spatial_tiles": 1,
+        "spatial_overlap": 8,
+        "seam_feather": 4
       }
     },
     {

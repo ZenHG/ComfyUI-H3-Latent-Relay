@@ -70,6 +70,18 @@ def pick_prompt_block(text: Any, stage: int) -> Tuple[str, int]:
     if k < 0:
         raise ValueError("段号不能为负（得到 %d）。" % k)
     if k >= len(blocks):
+        if len(blocks) == 1:
+            # 🔴 单块词 + stage>0 是**最高频的误接法**（2026-10-12 追痕实盘：debug ~30 分钟）：
+            #   母版把「prompt 节点 → Chain.prompts」接成连线后，一个 prompt 节点只喂一条词，
+            #   而连跑按「第 k 段喂第 k 块」取 ⇒ 第 2 段起必炸。这里把**两种正确接法**直接写进报错。
+            raise ValueError(
+                "本段是第 %d 段，但 `prompts` 只有 1 块词 —— 连跑按「第 k 段喂第 k 块」取词，"
+                "第 2 段起就没词可喂。\n"
+                "    两种正确接法（任选其一）：\n"
+                "      ① 母版：在 `prompts` 里用 `---` 把词分成 %d 块（第 k 块喂第 k 段）；\n"
+                "      ② 脚本/API：每次提交自带**全量**词块 —— 只有一块词时它只对应第 1 段（stage=0）。\n"
+                "    ⚠ 本包**不会**把唯一那块词复用给后面的段（那就是「以为换了词、其实没换」）。"
+                % (k + 1, k + 1))
         raise ValueError(
             "prompts 只有 %d 块词，跑不到第 %d 段 ⇒ 补齐第 %d 块，"
             "或把 segments 改成 %d 或更小。" % (len(blocks), k + 1, k + 1, len(blocks))

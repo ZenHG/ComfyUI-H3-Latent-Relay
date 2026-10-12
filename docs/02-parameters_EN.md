@@ -151,7 +151,10 @@ and bit-continuity of lip-sync and the pinned region are all unaffected).
 | `scale` | `2.0` | 【×multiplier mode】 upscale only, never downscale (< 1 raises upstream). ⚠️ A factor that is not a multiple of the `align` step (e.g. ×1.1) **rounds each axis separately ⇒ anisotropic scaling + aspect-ratio drift**, so production should use `target dimensions` instead |
 | `width` / `height` | `1280` / `704` | 【target-dimensions mode】 **pixel** width/height, automatically rounded to a multiple of `align` |
 | `megapixels` | `1.0` | 【megapixel mode】 on a 12 GB card keep ≤ 1.5; lower it under VRAM pressure |
-| `chunks` | `1` | 【VRAM knob】 how many tiles to cut along the time axis. **1 = the whole segment in one pass** (fastest, hungriest). 🔴 **`chunks>1` changes the picture** (measured at 480×864 / 47 frames: per-pixel MAE **5.62/255**, 0 of 192 frames bit-identical) — upstream is `AttnBlock3D` **volumetric attention**, hard-coded to 32 frames per block, so cutting tiles changes the context; it is **not a "mathematically equivalent VRAM saving"**. So: locked at 1 by default, raised only when VRAM genuinely cannot fit it, and **after raising it you must re-check the seam** |
+| `chunks` | `1` | 【VRAM knob ① · time axis】 how many tiles to cut along the time axis. **1 = the whole segment in one pass** (fastest, hungriest). 🔴 **`chunks>1` changes the picture** (measured at 480×864 / 47 frames: per-pixel MAE **5.62/255**, 0 of 192 frames bit-identical) — cutting tiles swaps the **cross-tile temporal context**; it is **not a "mathematically equivalent VRAM saving"**. So: locked at 1 by default, raised only when VRAM genuinely cannot fit it, and **after raising it you must re-check the seam**. ⚠️ Mechanism correction (2026-10-12): what gets swapped is the `TemporalConv` (kernel 5) context, **not** an attention block — upstream `_detect_arch()` always forces `attn` to False, and `load_state_dict(strict=True)` succeeds ⇒ the weights contain no attention block. **The conclusion (the picture changes) stands; only the mechanism is corrected** |
+| `spatial_tiles` | `1` | 【VRAM knob ② · spatial axis, **prefer this one on low VRAM**】 how many tiles to cut along the **long edge**; **1 = no split (bit-identical to the old path)**. 🔴 Why prefer it: every tile keeps its **whole time axis** ⇒ no temporal context is lost; the cost moves to the **spatial boundary**, where the two parameters below push the seam into a transition band. Combines with `chunks` (**time chunking outside, spatial tiling inside**) ⇒ peak VRAM = one tile. ⚠️ It **also changes the picture**, just in a different place ⇒ **re-check the seam after splitting** (picture quality is human-judged only) |
+| `spatial_overlap` | `8` | 【spatial overlap】 overlap width between neighbouring tiles (latent cells, 1 cell ≈ 16 px). It is **context only** — cores are **exclusive** (no half-transparent blending) ⇒ no ghosting in the overlap. ⚠️ It must fit `seam_feather` (roughly ≥ feather + 1 cell); if not, it **raises and states the value to use** |
+| `seam_feather` | `4` | 【seam feathering】 transition-band width (latent cells). `0` = sharpest (hard transition). Neighbouring tiles are **complementary** across this band (one 1→0, one 0→1, summing to 1). Raise to 8–12 if a faint colour-difference line shows up; ⚠️ raise `spatial_overlap` along with it |
 | `overlap` | `5` | how many frames on each side of a tile boundary take part in the linear blend. Default 5 = upstream's 3D temporal kernel (`temporal_kernel`); **must not exceed the model's kernel width**, and is subject to the compliance constraint below |
 | `align` | `32` | the multiple that output width/height are rounded to. **32 is a hard requirement of the H3 upscaler model — do not lower it** |
 | `precision` | `bf16` | bf16/fp16 save VRAM; fp32 is the most stable but slow. Matching the weights' own precision is safest |
@@ -163,6 +166,32 @@ and bit-continuity of lip-sync and the pinned region are all unaffected).
 parameters are never quietly rewritten (same discipline as the mask and the frame grid).
 The stitching math matches upstream: replicate padding on both sides + linear blend weights + normalization
 by accumulated weight.
+
+**Spatial tiling (new in 0.6.33): conventions and limits** — it is the **same kind of VRAM knob** as time
+chunking (splitting changes the picture):
+
+- **Geometry**: one axis (the long edge). Output-side cores **partition** `[0, axis)` exactly (first starts
+  at 0, last ends at the axis length, strictly increasing). Each tile's **requested size is computed by us**
+  (reconciled line-by-line against upstream `execute` lines 541–569) ⇒ the stitched result has the **same size**
+  as a whole-frame run; letting upstream round each tile by itself would not stitch back.
+- **Seam**: **exclusive** cores + a cosine feather at the boundary (neighbouring tiles are complementary over
+  the same band ⇒ sum is exactly 1) ⇒ no half-transparent overlay, no ghosting.
+- **Measured (synthetic trilinear fixture, zero GPU)**: when the ratio is **exactly representable** (e.g. ×2.0)
+  the tiled result is **bit-identical** to the whole-frame run (max|Δ| ≤ 1e-6); when it is not (×1.1) the
+  content differs by ≤ **1.5% of full scale**, and the **seam-band error is no larger than the non-seam error**
+  (stitching adds no extra step). ⚠️ This is a **geometry and stitching** measurement, **not a picture-quality
+  claim** — the real model's quality is human-judged (same discipline as `chunks`).
+- **Invalid configurations always raise with a pointer**: `align` mismatched with `downsample` (16), overlap too
+  narrow for the feather band, a tile narrower than upstream's `width`/`height` floor (**64 px**), or more tiles than
+  the long edge can hold — each says which parameter to change.
+- **Existing graphs do not break**: this version adds 3 parameters. `widgets_values` is stored **by position**, and
+  the frontend-added `h3_i18n_bar` sits at the end ⇒ **in any graph restored positionally** (saved by an older
+  frontend / without `widgets_values_named`) that trailing empty string lands on a new parameter. The node
+  **falls back to the default and prints one line** (rule 15): no silent rewrite, no crash.
+  ⚠️ I have **not** measured every frontend's restore behaviour (by name or by position, and how a numeric widget
+  treats an empty string) ⇒ what is guaranteed here is only "no crash + it says so".
+- **Two cases that do not take the spatial path**: `spatial_tiles=1` (the old path, unchanged) and
+  target size == input size (upstream already passes it straight through).
 
 **Outputs**: `[0] latent` (repacked, audio stream untouched), `[1] report` (requested tiles → actual tiles /
 T / audio shape / number of upstream calls / peak VRAM / elapsed time — check this to see whether tiling

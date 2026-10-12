@@ -311,6 +311,22 @@ def _comfy_registry() -> dict:
         "    本节点要在 ComfyUI 进程内运行，不能脱离宿主单跑。")
 
 
+def _stored_int(value, default, name):
+    """把存档里的 widget 值读成 int —— **读不出来就退回默认值并出声**。
+
+    为什么需要它（开源用户实测会踩）：`widgets_values` 是**按位置**存的（见 `CONTRIBUTING.md` 铁律），
+    而前端会把自己加的 widget（`h3_i18n_bar`）追加在**末尾**。本包一旦给节点新增参数，
+    **老图**里那个末尾的空串就会落到新参数上 ⇒ 直接 `int("")` 当场炸、而且报错与"参数"毫无关系。
+    这里退回默认值 + 打一行说明（铁律 15：退化分支必须可观测），**绝不**静默改成别的数。
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        print("[H3 Relay] ⚠ %s 的存档值 %r 读不成整数（老图按位置存 ⇒ 本版新增参数后槽位错位）"
+              "⇒ 本次按默认值 %d 走；请在画布上重设一次再保存。" % (name, value, int(default)))
+        return int(default)
+
+
 def _upscaler_cls():
     """取上游学习式 3D 放大节点类（MIT，LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler）。
 
@@ -384,9 +400,21 @@ class H3RelayLatentUpscale:
         `chunks=1` = 整段一次过（最快、最省计算，最吃显存）。
       · 拼接数学与上游同口径（两侧 replicate 填充 + 线性渐变权重 + 按累计权重归一），
         并有单测锁「分块结果 == 整段结果」（见 tests 第 27 组）。
-        🔴 **那锁的是拼接数学，不是画面**：上游内部是 3D 体积注意力，切块 = 换跨块时间上下文
+        🔴 **那锁的是拼接数学，不是画面**：切块 = 换**跨块时间上下文**
+        （`TemporalConv` 时间核 5；⚠️ 机理更正 2026-10-12：**不是**注意力块 —— 上游
+        `_detect_arch()` 恒 `attn=False`，且 `load_state_dict(strict=True)` 能过）
         ⇒ `chunks>1` **会改画面**（实测逐帧 MAE 5.62/255，见 docs/05 排障表与 docs/02）。
         默认锁 1；只在显存真放不下时才升，**升完必须重看缝**。
+
+    两个显存旋钮（2026-10-12 加第二个，低显存优先用第二个）：
+      · `chunks`（**时间维**分块，旧）—— 省得最多，但**换掉跨块时间上下文** ⇒ 最伤画面。
+      · `spatial_tiles`（**空间维**沿长边切条，新）—— 每块的**时间轴完整** ⇒ 时间上下文不丢；
+        代价换成空间边界变窄，用 `spatial_overlap` + `seam_feather` 把接缝压进过渡带。
+        🔴 它**同样会改画面**（边界处感受野变窄），只是"改在哪"不同 ⇒ 与 `chunks` 同一性质，
+        不是"无副作用"档。单测锁的是**几何与拼接**（比例可精确表示时与整段**逐位相同**；
+        除不尽时缝带误差不大于非缝带 ⇒ 没有额外阶跃），**画面必须人工目检**。
+      · 两者可叠加：**时间分块在外、空间分块在内** ⇒ 峰值显存 = 一个时间块 × 一条空间块。
+      · `spatial_tiles=1` ⇒ **完全走旧路径**（连上游调用方式都不变），逐位同旧版。
 
     ⚠ 域纪律：本节点属**画质域**（与 `H3RelayPost` 同域，一个动 latent 一个动像素）；
       时间轴（裁重叠）仍归 `H3RelayTrimAV`，音频仍归 `H3RelayAudioSeam`。
@@ -451,8 +479,32 @@ class H3RelayLatentUpscale:
                 }),
                 "force_unload": ("BOOLEAN", {
                     "default": False,
-                    "tooltip": "【跑完卸载】把放大模型退回 CPU 腾显存。⚠ 分多块时开启会反复装卸（更慢），\n"
-                               "所以默认关；单块且后面还要接采样器时才开。",
+                    "tooltip": "【跑完卸载】把放大模型退回 CPU 腾显存。⚠ 只要分了块（`chunks` 或 `spatial_tiles`\n"
+                               "任一个 > 1）开启就会**每块**装卸一次（明显更慢），所以默认关；\n"
+                               "单块、且后面还要接采样器时才开。",
+                }),
+                "spatial_tiles": ("INT", {
+                    "default": 1, "min": 1, "max": 16, "step": 1,
+                    "tooltip": "【显存旋钮之二 · 低显存优先用它】沿**长边**把画面切成几块跑；1 = 不切（与旧版逐位一致）。\n"
+                               "🔴 为什么优先它：**时间轴保持完整** ⇒ 时间上下文（模型的 3D 时间核）一点不丢；\n"
+                               "代价换成**空间边界**变窄 ⇒ 接缝靠「重叠 + 核心区独占 + 羽化」压进过渡带。\n"
+                               "与上面的 `chunks` 可叠加（时间分块在外、空间分块在内）⇒ 峰值显存 = 一块。\n"
+                               "⚠ 切了就会改画面（边界处感受野变窄）⇒ **切完必须重看缝**，别只信数字。\n"
+                               "💰 块数越多越吃算力（重叠区要重跑）⇒ 一般 2~4 块就够；长边放不下这么多条会直接报错。",
+                }),
+                "spatial_overlap": ("INT", {
+                    "default": CORE.UPSCALE_TILE_OVERLAP_DEFAULT, "min": 1, "max": 64, "step": 1,
+                    "tooltip": "【空间重叠】相邻两条的**重叠**宽度（latent 格，1 格 ≈ 16 像素）。默认 8。\n"
+                               "它只当**上下文**用 —— 核心区是独占的（不做半透明叠加），所以重叠区不会重影。\n"
+                               "💰 它直接换算力：重叠区每块都要重跑一遍（实测长边 80 格、重叠 8 ⇒ 3 块多算约 **40%**，\n"
+                               "   4 块约 60%）。省算力就调小，但至少要装得下 `seam_feather`。\n"
+                               "⚠ 装不下、或大到「两条裁的是同一块」（显存不省、算力翻倍）会直接报错，不偷改。",
+                }),
+                "seam_feather": ("INT", {
+                    "default": CORE.UPSCALE_TILE_FEATHER_DEFAULT, "min": 0, "max": 16, "step": 2,
+                    "tooltip": "【接缝羽化】过渡带宽度（latent 格）。默认 4；0 = 最锐利（硬过渡）。\n"
+                               "相邻两条在这条带上权重互补（一个 1→0、一个 0→1，和恒为 1）。\n"
+                               "成片里出现极淡的色差线时调到 8~12；⚠ 调大要同步调大 `spatial_overlap`。",
                 }),
             },
         }
@@ -462,13 +514,23 @@ class H3RelayLatentUpscale:
     FUNCTION = "upscale"
     CATEGORY = CATEGORY
     DESCRIPTION = ("H3 AV latent 分块放大：拆包→逐块调上游学习式 3D 放大器（零去噪、只放大空间、时间维不动）"
-                   "→回包保留原音频；块数自选（⚠ 它是显存旋钮：chunks>1 会改画面，见 docs/05 排障表）。")
+                   "→回包保留原音频；**两个显存旋钮**：`chunks`（时间维，最省但最伤画面）与 "
+                   "`spatial_tiles`（空间维沿长边切条，**时间上下文不丢**，低显存优先用它）。"
+                   "⚠ 两者都会改画面，见 docs/02 与 docs/05 排障表；切完必须重看缝。")
 
-    @_node_errors("chunks", "overlap", "align")
+    @_node_errors("chunks", "overlap", "align", "spatial_tiles", "spatial_overlap", "seam_feather")
     def upscale(self, latent, model_name, mode, scale, width, height, megapixels,
-                chunks, overlap, align, precision, device, force_unload):
+                chunks, overlap, align, precision, device, force_unload,
+                spatial_tiles=1, spatial_overlap=CORE.UPSCALE_TILE_OVERLAP_DEFAULT,
+                seam_feather=CORE.UPSCALE_TILE_FEATHER_DEFAULT):
         import time
         import torch
+
+        # 存档槽位错位的兜底（见 `_stored_int`）：老图的末尾空串可能落到这三个新参数上。
+        spatial_tiles = _stored_int(spatial_tiles, 1, "spatial_tiles")
+        spatial_overlap = _stored_int(spatial_overlap, CORE.UPSCALE_TILE_OVERLAP_DEFAULT,
+                                      "spatial_overlap")
+        seam_feather = _stored_int(seam_feather, CORE.UPSCALE_TILE_FEATHER_DEFAULT, "seam_feather")
 
         up_cls = _upscaler_cls()
         src = latent["samples"] if isinstance(latent, dict) else latent
@@ -494,23 +556,63 @@ class H3RelayLatentUpscale:
         else:
             raise ValueError("未知 mode=%r（可选：scale by multiplier / target dimensions / megapixels）。" % mode)
 
+        # latent→像素 的倍数由上游定义，我们不自已猜一个（空间分块的请求尺寸也要用它）
+        import sys as _sys
+        _mod = _sys.modules.get(type(up_cls).__module__)
+        vae_ds = int(getattr(_mod, "VAE_DOWNSAMPLE", 0) or 0)
+        ds = vae_ds if vae_ds > 0 else 16
+
+        # —— 空间分块计划：**只在 spatial_tiles>1 时启用**（=1 完全走旧路径 ⇒ 逐位同旧版）——
+        #    目标尺寸必须**自己先算出来**（与上游 execute 同口径）：让每块按自己的尺寸四舍五入
+        #    ⇒ 各块拼不回整段尺寸。
+        #    ⚠ 4D 单帧 latent 也吃这条（`temporal_tile_upscale` 会先补成 T=1 的 5D 再交给 `_one`）
+        #      —— 不许静默跳过用户显式设的旋钮（铁律 15）。
+        tile_plan = None
+        if int(spatial_tiles) > 1:
+            h_in, w_in = int(video.shape[-2]), int(video.shape[-1])
+            if mode == "scale by multiplier":
+                h_out, w_out = CORE.upscale_out_size(h_in, w_in, mode, scale=float(scale),
+                                                     align=int(align), downsample=ds)
+            elif mode == "target dimensions":
+                h_out, w_out = CORE.upscale_out_size(h_in, w_in, mode, width=int(width),
+                                                     height=int(height), align=int(align),
+                                                     downsample=ds)
+            else:
+                h_out, w_out = CORE.upscale_out_size(h_in, w_in, mode, megapixels=float(megapixels),
+                                                     align=int(align), downsample=ds)
+            if (h_out, w_out) != (h_in, w_in):      # 尺寸不变 ⇒ 上游会原样直通，切了也没意义
+                tile_plan = CORE.spatial_tile_plan(
+                    h_in, w_in, h_out, w_out, tiles=int(spatial_tiles),
+                    overlap=int(spatial_overlap), feather=int(seam_feather),
+                    align=int(align), downsample=ds)
+
         if device == "cuda" and torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
 
         t0 = time.time()
         calls = [0]
 
-        def _one(seg: "torch.Tensor") -> "torch.Tensor":
+        def _call(seg, mode_cfg):
             calls[0] += 1
-            r = up_cls.execute(latent={"samples": seg}, model_name=model_name, mode=cfg,
-                              align=int(align), enable_temporal_chunking=False,
-                              force_unload=bool(force_unload), device=device, precision=precision)
+            r = up_cls.execute(latent={"samples": seg}, model_name=model_name, mode=mode_cfg,
+                               align=int(align), enable_temporal_chunking=False,
+                               force_unload=bool(force_unload), device=device, precision=precision)
             r = getattr(r, "result", r)
             d = r[0] if isinstance(r, (tuple, list)) else r
             out = d["samples"] if isinstance(d, dict) else d
             if not torch.is_tensor(out):
                 raise ValueError("上游放大器没返回张量（得到 %s）—— 检查权重与 models/latent_upscale_models/。" % type(out))
             return out.unsqueeze(2) if out.dim() == 4 else out
+
+        def _one(seg):
+            """一个**时间块**的放大：空间分块开着就在这一块内部再切空间条。"""
+            if tile_plan is None:
+                return _call(seg, cfg)
+            return CORE.spatial_tile_upscale(
+                seg,
+                lambda s, th, tw: _call(s, {"mode": "target dimensions",
+                                            "width": int(tw) * ds, "height": int(th) * ds}),
+                tile_plan)
 
         v2 = CORE.temporal_tile_upscale(video, _one, plan)
         dt = time.time() - t0
@@ -522,10 +624,12 @@ class H3RelayLatentUpscale:
         samples_out = v2 if audio is None else CORE._nested_pair(v2, audio, template=src)
         packed = {"samples": samples_out}
 
-        # latent→像素 的倍数由上游定义，我们不自已猜一个
-        import sys as _sys
-        _mod = _sys.modules.get(type(up_cls).__module__)
-        vae_ds = int(getattr(_mod, "VAE_DOWNSAMPLE", 0) or 0)
+        tile_txt = ""
+        if tile_plan is not None:
+            tile_txt = (" | 空间分块 长边%s 共%d条（请求%d）重叠%d格 羽化%d格 输出%d×%d（网格%d）"
+                        % (tile_plan["axis"], tile_plan["n_tiles"], tile_plan["tiles_requested"],
+                           tile_plan["overlap"], tile_plan["feather"],
+                           tile_plan["h_out"], tile_plan["w_out"], tile_plan["grid"]))
         px = (" | 像素域 %dx%d → %dx%d" % (int(video.shape[-1]) * vae_ds, int(video.shape[-2]) * vae_ds,
                                            int(v2.shape[-1]) * vae_ds, int(v2.shape[-2]) * vae_ds)) if vae_ds else ""
         peak = ""
@@ -533,13 +637,13 @@ class H3RelayLatentUpscale:
             peak = " | 显存峰值 %.1f MB" % (torch.cuda.max_memory_allocated() / 1024 ** 2)
         report = ("放大 %dx%d → %dx%d latent（align=%d）%s | 时间维不动 T=%d | "
                   "块数 请求%d→实际%d（每块 %d 帧，overlap %d）| 音频流原样 %s | 上游调用 %d 次 | "
-                  "精度 %s/%s | force_unload=%s | 合法块数上限 %d%s | %.1fs"
+                  "精度 %s/%s | force_unload=%s | 合法块数上限 %d%s%s | %.1fs"
                   % (int(video.shape[-1]), int(video.shape[-2]), int(v2.shape[-1]), int(v2.shape[-2]),
                      int(align), px, n_frames, int(chunks), plan["n_chunks"], plan["chunk_frames"],
                      int(overlap),
                      tuple(audio.shape) if audio is not None else "无",
                      calls[0], precision, device, bool(force_unload),
-                     CORE.max_upscale_chunks(n_frames, int(overlap)), peak, dt))
+                     CORE.max_upscale_chunks(n_frames, int(overlap)), tile_txt, peak, dt))
         print("[H3 Relay] " + report)
         return (packed, report)
 

@@ -321,10 +321,16 @@ from .concat import (
 from .upscale import (
     UPSCALE_CHUNK_FRAMES_DEFAULT,
     UPSCALE_OVERLAP_DEFAULT,
+    UPSCALE_TILE_FEATHER_DEFAULT,
+    UPSCALE_TILE_OVERLAP_DEFAULT,
+    _core_window_1d,
     _pad_frames,
     max_upscale_chunks,
+    spatial_tile_plan,
+    spatial_tile_upscale,
     temporal_tile_upscale,
     upscale_chunk_plan,
+    upscale_out_size,
 )
 
 # —— prompt：词分发（连跑时「第 k 段喂第 k 块词」）。
@@ -581,6 +587,8 @@ __all__ = [
     "step_offsets",
     "steps_for_frames",
     "streams_from_latent",
+    "spatial_tile_plan",
+    "spatial_tile_upscale",
     "target_level",
     "temporal_tile_upscale",
     "trim_audio_head",
@@ -588,6 +596,10 @@ __all__ = [
     "trim_jump_curve",
     "unsharp_frames",
     "upscale_chunk_plan",
+    "upscale_out_size",
+    "UPSCALE_TILE_FEATHER_DEFAULT",
+    "UPSCALE_TILE_OVERLAP_DEFAULT",
+    "_core_window_1d",
     "video_from_latent",
     "video_tail_from_latent",
 ]
@@ -884,10 +896,16 @@ _OWNER = {
     # upscale
     "UPSCALE_CHUNK_FRAMES_DEFAULT": "upscale",
     "UPSCALE_OVERLAP_DEFAULT": "upscale",
+    "UPSCALE_TILE_FEATHER_DEFAULT": "upscale",
+    "UPSCALE_TILE_OVERLAP_DEFAULT": "upscale",
+    "_core_window_1d": "upscale",
     "_pad_frames": "upscale",
     "max_upscale_chunks": "upscale",
+    "spatial_tile_plan": "upscale",
+    "spatial_tile_upscale": "upscale",
     "temporal_tile_upscale": "upscale",
     "upscale_chunk_plan": "upscale",
+    "upscale_out_size": "upscale",
     # prompt
     "PROMPT_SEPARATOR_MIN_DASHES": "prompt",
     "_lines_like_js": "prompt",

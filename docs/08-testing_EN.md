@@ -33,7 +33,7 @@ namespace** — the same globals and the same order as the single-file flat scri
 fixtures shared across groups remain visible. ⚠️ Case file names start with `_`, so `pytest tests/`
 does **not** collect them separately (otherwise every assertion would run twice).
 
-**572 assertions, zero GPU, no model loading**, covering thirty-four aspects:
+**607 assertions, zero GPU, no model loading**, covering thirty-six aspects:
 
 ### Counting and declaration discipline (the two notes from former README §8, moved in with the slimming)
 
@@ -44,7 +44,7 @@ does **not** collect them separately (otherwise every assertion would run twice)
   the other two drifted for a long time unnoticed).
 - ⚠️ **When writing a correction note, do not restate the old wrong number** — that pollutes the regexes
   of the machine checks above.
-- This file's line "572 assertions / thirty-four aspects" + the `| 21 |` row of the table below are
+- This file's line "607 assertions / thirty-six aspects" + the `| 21 |` row of the table below are
   machine-checked by **H3c** (since 2026-09-30; after the README slimming the criterion moved from the
   README to this file).
 
@@ -86,6 +86,7 @@ does **not** collect them separately (otherwise every assertion would run twice)
 | 33 | **Split contract (2026-10-07)**: `relay_core`'s **package identity** (it has `__path__`, its entry point is `__init__.py`) + the **full re-export** in `__init__.py` (every name in `__all__` is reachable from the package, no duplicates) + 🔴 **monkey-patch forwarding** (`relay_core.X = v` must be written to **every** submodule holding X): `_HOLDERS` is reconciled name by name against the real holder set for **all** exported names; one case for a **cross-module copy** (`FPS` has 4 holders) and one for a **single owner** (`SETTLE_REPEAT_PATH`); plus a **really-takes-effect** assertion (changing `GUIDE_RUNS` makes `snap_guide_run(35)` go from 22 to 5). ⚠️ With owner-only forwarding this group goes red (verified by a **mutation test**, so it is not a false green) |
 | 34 | **`run_id` cross-node sync (2026-10-07, 0.6.31)**: the API / script-side implementation `collect_run_ids` / `resolve_run_id` / `plan_run_id_sync` / `sync_run_id`; 🔴 **cross-layer parity** (it is the same semantics as the front-end `web/relay_kit_sync.js`, i.e. two implementations ⇒ they share the single fixture `tests/parity/run_id_cases.json` and both sides must pass); rewriting does **not** drop the node's other input keys and does **not** mutate the caller's prompt in place; an explicit `value` rescues the all-empty case; already-consistent input is **idempotent** (no dict copy); all four names are reachable on the `relay_core` top level and listed in `__all__` |
 | 32 | **Automatic audio-reference window sizing (0.6.25)**: `audio_ref_seconds=0` ⇒ **automatic** (accumulate 2 seconds of **voiced** content walking back from the previous segment's tail, cap 6 seconds) ⇒ **several speakers' timbre in one reference slot** (budget unchanged); 🔴 **the criterion must use the first difference** (the real path is a **VAE latent**, already normalized ⇒ judging by RMS always yields "voiced cells = 0"); 🔴 **the threshold takes P99, not P50 / max** (four-way comparison: `P50×2` is pulled down by the silent difference tail ⇒ the window drifts from the true 2.00 to **6.69 s**; `max×0.05` is pinned by **a single outlier pulse** ⇒ voiced cells **215 → 2**; Otsu grips too tight ⇒ only `P99×0.20` holds across all scenarios); the criteria are **all relative** (lowering everything by −40 dBFS leaves the window length unchanged); **lengthening a silent segment 8× leaves the window unchanged**, **injecting an outlier pulse leaves the window unchanged** (two 🔴 regressions 32.3 / 32.4); every degradation is observable: silence / peak<1e-6 / **NaN·Inf fail-closed** / **empty audio does not throw** (`reshape(-1,0)` would break the chain) / a cap point named; priority: `audio_ref_seconds` > `audio_frames` > automatic (32.12–32.15); with a voice anchor wired ⇒ automatic **does not intervene** and the report names it |
+| 36 | **Spatial tiling (2026-10-12, 0.6.33)**: split along the **long edge** (`spatial_tiles`) — every tile keeps the **whole time axis** ⇒ no temporal context is lost; the cost moves to the spatial boundary. Geometry: cores **partition** `[0, axis)` exactly (the first starts at 0, the last ends at the axis length, strictly increasing); each tile's requested size is a multiple of the `align/downsample` grid and fits "core + feather band" (the last tile has no right feather); when the ratio is **exactly representable** (×2.0) the tiled result is **bit-identical** to the whole-frame run (max|Δ| ≤ 1e-6); when it is not (×1.1) the content differs by ≤1.5% of full scale and the **seam-band error is no larger than the non-seam error** (stitching adds no step); under a constant mock each tile's core equals that tile's constant cell-for-cell. Frame count / size / rank / wrong ruler / non-tensor all raise; a mismatched `align`/`downsample` or an overlap too narrow for the feather band raises with a pointer to the parameter to change. The node layer calls upstream once per tile (3 tiles ⇒ 3 calls via `target dimensions`), audio is **bit-unchanged**, and `spatial_tiles=1` is **bit-identical to the old path**. Fake upscaler = trilinear (analytic), zero GPU |
 
 ## Unit tests for front-end pure functions (run by node, zero dependencies)
 
@@ -154,7 +155,7 @@ failure):
 ## V3 shell and default exit (zero GPU, seconds)
 
 ```bash
-COMFYUI_PATH=<root> python tests/test_v3_schema.py      # expected 72/0 (8 nodes / 124 inputs; same tier with or without the host registry)
+COMFYUI_PATH=<root> python tests/test_v3_schema.py      # expected 72/0 (8 nodes / 127 inputs; same tier with or without the host registry)
 COMFYUI_PATH=<root> python tools/assert_default_exit.py  # expected 5/5
 ```
 
@@ -173,7 +174,7 @@ wrong slot in the parameter table means **the user's parameters are silently shi
 >   (the host registers `latent_upscale_models` itself) ⇒ does not raise.
 > · Registry **unobtainable** (host `nodes` cannot be imported / is shadowed by this pack's own directory)
 >   ⇒ it likewise converges to **RuntimeError** ⇒ likewise swallowed ⇒ **the node is still present**.
-> ⇒ Both environments are **8 nodes / 124 input / 72 items**, hence **one number**.
+> ⇒ Both environments are **8 nodes / 127 input / 72 items**, hence **one number**.
 >
 > 🔴 It was not like this before 2026-10-07: if the `import nodes` inside `_comfy_registry()` raised
 >   **ImportError** it would **propagate** (`_upscaler_module()` only catches `RuntimeError`) ⇒

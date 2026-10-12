@@ -48,8 +48,8 @@
           "zh": "目录结构",
           "en": "Repository layout",
           "mode": "condensed",
-          "h_en": "a8ddbdddbc5db5c9",
-          "h_src": "320582192170eb5c",
+          "h_en": "ec3b482373ad244b",
+          "h_src": "7cec7bafb8334515",
           "seeded": "by-position"
         },
         {
@@ -72,14 +72,14 @@
           "zh": "文档索引",
           "en": "Documentation index",
           "mode": "condensed",
-          "h_en": "418b061f12c7712a",
-          "h_src": "22ea4a54c95a8790",
+          "h_en": "04c5aae385f4fec0",
+          "h_src": "29e07060c24b6d6a",
           "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-10-12",
-      "src_sha": "9c659c799945fea9"
+      "src_sha": "e6e55d7447bdd40c"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -184,14 +184,14 @@
           "zh": "参数",
           "en": "Parameters",
           "mode": "full",
-          "h_en": "1401b17c25e5adbd",
-          "h_src": "bd057407fc45a83a",
+          "h_en": "3fb4f0f737ba8480",
+          "h_src": "9256c19bee942dae",
           "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-10-12",
-      "src_sha": "e963fef3e3351b25"
+      "src_sha": "d595e54bf2af1841"
     },
     "docs/03-sampling-and-design.md": {
       "en": "docs/03-sampling-and-design_EN.md",
@@ -280,8 +280,8 @@
           "zh": "排障表（补：原 README §9）",
           "en": "Troubleshooting table (addendum: former README §9)",
           "mode": "full",
-          "h_en": "07877ffd011bb0c8",
-          "h_src": "32c2e74d65a25c9b",
+          "h_en": "d138a8ba7052124c",
+          "h_src": "f7849e11bc1fc0bc",
           "seeded": "by-position"
         },
         {
@@ -295,7 +295,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-12",
-      "src_sha": "f161c208dd9a754e"
+      "src_sha": "9115e791360e9ca7"
     },
     "docs/06-continuity-scripting.md": {
       "en": "docs/06-continuity-scripting_EN.md",
@@ -424,8 +424,8 @@
           "zh": "单测（零 GPU、秒级）",
           "en": "Unit tests (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "ba5fccf23e6fad0b",
-          "h_src": "5b85c234a6641ab4",
+          "h_en": "473ba6b2990d06be",
+          "h_src": "43556722eb47863d",
           "seeded": "by-position"
         },
         {
@@ -440,8 +440,8 @@
           "zh": "V3 外壳与默认出口（零 GPU、秒级）",
           "en": "V3 shell and default exit (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "efc68d0fc329b5bf",
-          "h_src": "85c355ff042b5ca8",
+          "h_en": "d92b5a5ffe55e77b",
+          "h_src": "7bbc483522adf326",
           "seeded": "by-position"
         },
         {
@@ -463,7 +463,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-12",
-      "src_sha": "6d3f8dd1ca7d35c1"
+      "src_sha": "863a4fe4889180f3"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",

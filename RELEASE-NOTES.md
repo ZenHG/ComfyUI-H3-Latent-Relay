@@ -21,55 +21,22 @@
 
 ## 0.6.33 — 2026-10-12
 
-🔴 **「🧩 拼成一条」曾经会拒拼，而且给出的理由是错的。图、连线、参数都不用改，但要刷新浏览器页面。**
+🔴 **图、连线、参数都不用改，但要刷新浏览器页面。**
 
-**① 失败时看到的那句话，以后就是真错因。** 以前状态格只显示报告第一行（"拼接请求：…"说明行），
-真错因只在浏览器控制台里 —— 两段跑好了却拼不出来，看着却像成功。
+**低显存多了个「省得更干净」的旋钮：`spatial_tiles`**（沿画面**长边**切块放大）—— 每块的**时间轴完整** ⇒ 时间上下文一点不丢，代价换成空间边界变窄（用 `spatial_overlap` + `seam_feather` 把接缝压进过渡带）。默认 `1` = **不切**，与旧版**逐位一致**；与 `chunks` 可叠加（时间分块在外、空间分块在内）。🔴 **切了就会改画面** ⇒ **切完必须重看缝**。另：`prompts` 只有 1 块词而本段 `stage>0` 时，报错会**直接给出两种正确接法**。
 
-**② 兜底选段收紧了。** 刷新过页面后，拼接会回扫服务器的 history；以前"图里有连跑节点"就算一段
-（连跑预检也算）⇒ 取"最近 N 段"取到一串**空提交** ⇒ 一段视频都没找到。现在只认**真落了段视频**的提交，
-同段号只留最新，报告里写出取了哪几段。
+**顺带修掉「🧩 拼成一条」的一批问题**：① 不再误报"一段视频文件都没找到"（兜底回扫只认**真落了段视频**的提交）；② 失败时状态格显示**真错因**；③ 两段同规格却报"规格不一致"的伪差修掉（fps 改**相对容差** 0.5%）；④ 连跑/拼接按钮**整行都能点**；⑤ 官方「停止/取消」与队列清空后状态会**回落**；⑥ `prompts` 留空不再被拦。
 
-**③ 明明同规格却报"规格不一致"，那是伪差。** 两段都是 24 fps，却报
-`608x352@24.0113 vs 608x352@24.0126` —— 容器把时长量化到毫秒带出来的差。现在改用**相对容差**
-（0.5%，下限 0.02 fps）：同族差异不误判，真不同规格（24 vs 25/30）照样拒。
-
-**④ 按钮整行都能点了**（以前只有按钮本体那一小段算命中区，点在行内别处没反应）。
-
-**⑤ 官方「停止」、以及队列面板的「Clear queue / 删掉排队项」都会让状态回落**
-（以前停在「连跑中 · 采样 x/y」或「已排队」，像还在跑）。
-
-**⑥ 有词但 `prompt` 没接线才拦；`prompts` 清空不再要求接线**（旧文案早这么写，代码却一律拦）。
-
-**升级动作**：把 `web/` 换成新版并**刷新浏览器页面**（F5）。图、连线、参数都不用改。
+**升级动作**：不用改任何东西；装完刷新浏览器页面（F5）。想省显存就把「空间分块数」从 1 往上调。
 
 <!-- EN -->
-🔴 **"🧩 Concatenate" could refuse to splice, and its stated reason was wrong. Nothing to change in your graph — but refresh the browser page.**
+🔴 **No graph, wiring or parameter changes — but refresh the browser page.**
 
-**① The failure message is now the real cause.** The status box used to show only the report's first line
-(an informational line), so the real cause lived only in the browser console — a run where both segments
-were fine looked like a success.
+**A "cleaner" VRAM knob: `spatial_tiles`** — it upscales in tiles along the **long edge**, so every tile keeps its **whole time axis** and no temporal context is lost; the cost moves to the spatial boundary, handled by `spatial_overlap` + `seam_feather`. Default `1` = **no split**, **bit-identical** to the old path; it combines with `chunks` (time chunking outside, spatial tiling inside). 🔴 **Splitting still changes the picture** ⇒ **re-inspect the seam afterwards**. Also: when `prompts` holds a single block and the segment is `stage>0`, the error now **names both correct wirings**.
 
-**② The fallback segment picker is stricter.** After a page refresh, concatenation rescans the server's
-history; any submission whose graph contained the chain node counted — pre-flight ones
-included — so the "latest N" was **empty submissions** and nothing was found. It now counts only
-submissions that **really wrote a segment video**, keeps the newest per stage, and names them.
+**Also fixes a batch of "🧩 Join into one" issues**: ① it no longer falsely reports that no segment video was found (the fallback scan only accepts submissions that actually wrote a segment video); ② on failure the status cell shows the **real cause**; ③ a false "spec mismatch" between identically sized segments is fixed (fps uses a **0.5% relative tolerance**); ④ chain and join buttons are **clickable across the whole row**; ⑤ the official Stop/Cancel and clearing the queue now make the status **fall back**; ⑥ an empty `prompts` is no longer blocked.
 
-**③ "Format mismatch" between identical segments was a false alarm.** Both are 24 fps, yet it reported
-`608x352@24.0113 vs 608x352@24.0126` — an artefact of the container quantising duration to ms. It now
-uses a **relative tolerance** (0.5%, floor 0.02 fps): same-family differences pass, real mismatches
-(24 vs 25/30) are still rejected.
-
-**④ Buttons respond to a click anywhere in their row** (previously only the button box itself did).
-
-**⑤ The status now falls back after the host's "Stop" — and after the queue panel's "Clear queue"**
-(it used to sit at "running · sampling x/y" or "queued", as if still going).
-
-**⑥ A missing `prompt` link only blocks you when there are words to send; an empty `prompts` no longer
-requires it** (the old hint said exactly that — the code always blocked).
-
-**Action required**: replace `web/` and **refresh the browser page** (F5). No graph, wiring or parameter
-changes.
+**Action required**: nothing. Refresh the browser page (F5) after installing. Raise "spatial tiles" above 1 to save VRAM.
 
 ## 0.6.32 — 2026-10-08
 

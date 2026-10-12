@@ -272,6 +272,17 @@ except Exception as e:
     check("11.17 词块不够 ⇒ 直接报错（不静默复用）",
           "1 块" in str(e) or "只有一块" in str(e), repr(e)[:140])
 
+# 11.17b 处方必须写进报错（2026-10-12 追痕实盘：单块词 + 母版自然接线 ⇒ 第 2 段必炸，
+#   而旧文案只说"块数不够"，用户 debug ~30 分钟）。判据 = 报错里给出**两种正确接法** +
+#   明说"不会复用唯一那块"（否则用户会以为它能自动顶替）。
+try:
+    _chain.run(segments=9, prompts="只有一块", stage_index=1)
+    check("11.17b 单块词的报错里给出两种正确接法 + 明说不复用", False, "没 raise")
+except Exception as e:
+    _m17b = str(e)
+    check("11.17b 单块词的报错里给出两种正确接法 + 明说不复用",
+          "---" in _m17b and "全量" in _m17b and "不会" in _m17b, repr(e)[:150])
+
 # 11.18 未填 prompts ⇒ 空词 + 明说"不换词"（老行为：一个字都不动）
 _p_empty = _chain.run(segments=2, prompts="", stage_index=1)
 check("11.18 未填 prompts ⇒ 输出空词并说明不换词（老行为不变）",

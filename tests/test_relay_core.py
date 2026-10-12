@@ -83,6 +83,12 @@
      端到端改写（**不丢**同节点其它 input 键、**不就地**改调用方的 prompt、已一致时**幂等**）；
      🔴 与前端 `web/relay_kit_sync.js` 是**两份实现** ⇒ 共用 `tests/parity/run_id_cases.json`
      一份 fixture **跨层对账**（Node 侧另有 `tests/test_run_id_parity.mjs`，两侧都要过）
+ 35. 响度归一（2026-10-08，0.6.32）：口径与 `tools/voice_bank.py::speech_rms_db` **逐位一致**、
+     把偏离目标的音频拉回目标、**幂等**（连跑不来回动 —— 与声锚叠加的必要条件）
+ 36. 空间分块放大（2026-10-12，0.6.33）：长边单轴切条的**几何**（核心区恰好平铺、每块请求尺寸
+     是 align 网格倍数且装得下羽化带）、**比例可精确表示时分块结果与整段逐位相同**、
+     比例除不尽时缝带误差**不大于**非缝带（没有额外阶跃）、帧数/尺寸/秩/尺子不符一律 raise、
+     节点层按块调上游且 `spatial_tiles=1` **逐位同旧版**
 拆分说明（2026-10-07）：**断言主体**按组分片到 `tests/cases/`，本文件只留
 文件头 / 定位 / `check()` / 分片执行 / 汇总。执行语义与拆分前逐位等价（见 runner 里的注释）。
 """
@@ -176,6 +182,8 @@ _CASES = [
     "_g34_run_id_sync.py",
     # ⚠ 同上：**新写的**（0.6.32 的响度归一：口径一致 / 归一 / 幂等）。
     "_g35_loudness.py",
+    # ⚠ 同上：**新写的**（0.6.33 的空间分块：几何 / 逐位等同 / 缝带无额外阶跃 / 节点层）。
+    "_g36_spatial_tile.py",
 ]
 for _case in _CASES:
     _case_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cases", _case)
