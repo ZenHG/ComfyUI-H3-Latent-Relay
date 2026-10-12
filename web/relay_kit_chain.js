@@ -895,6 +895,9 @@ async function queuePrompt(chainNode, state, stage) {
         // 排队**成功** ⇒ 本组进入「等一轮跑完」态：`stepDone()` 只认置位后的收尾信号，
         // 免得队列提交瞬间宿主先发的空事件（实测 `executing(NULL)` 会紧跟着来）把段号误推。
         if (state) state.awaiting = true;
+        // 🔴 0.6.33：置位"等这一轮"的同时清掉 `hostBusy` —— 它是**队列被清空**那条兜底的判据
+        //   （见 `onQueueStatus`）：本轮从没见过宿主干活 ⇒ 才是真的被取消/清掉了。
+        if (state) state.hostBusy = false;
         return id ?? "queued";
     } catch (err) {
         say(chainNode, state, "error", "排队失败：" + err.message);
@@ -1009,15 +1012,10 @@ function readPrompts(chainNode) {
  * 返回 `{ok, message}`；`ok=false` 时调用方**不排队**。
  */
 function checkStagePrompt(chainNode, stage) {
-    if (!promptOutputLinked(chainNode)) {
-        return {
-            ok: false,
-            message: "⚠ 本节点的 `prompt` 输出**没有接线** ⇒ 词分发不会生效。\n"
-                + "0.6.15 起词由**节点**输出（前端不再替你写格子）：把 `Chain.prompt` "
-                + "连到出词节点的 `prompt` 输入即可。\n"
-                + "（只跑一段、不需要换词的话，把 `prompts` 留空就不会拦你。）",
-        };
-    }
+    // 🔴 0.6.33 改了**判据顺序**（GG 2026-10-12 点名"文案与行为不一致"）：先判"有没有词"，
+    //   没有词就**不要求接线** —— 旧顺序是"没接线一律拦下"，可提示语却写着
+    //   "把 `prompts` 留空就不会拦你" ⇒ **文案与行为打架**（本轮探针被它卡了好几次）。
+    //   语义上也只有"有词要发"时才需要 `prompt` 那根线。
     const src = readPrompts(chainNode);
     if (!src.ok) {
         return {
@@ -1028,7 +1026,17 @@ function checkStagePrompt(chainNode, stage) {
         };
     }
     const blocks = splitPromptBlocks(src.text);
-    if (!blocks.length) return { ok: true, message: "" };   // 留空 = 不换词
+    if (!blocks.length) return { ok: true, message: "" };   // 留空 = 不换词（也无需接线）
+    if (!promptOutputLinked(chainNode)) {
+        return {
+            ok: false,
+            message: `⚠ 「prompts」里有 ${blocks.length} 块词，但本节点的「prompt」输出**没有接线**`
+                + " ⇒ 词发不出去（会静默不换词）。\n"
+                + "0.6.15 起词由**节点**输出（前端不再替你写格子）："
+                + "把 `Chain.prompt` 连到出词节点的 `prompt` 输入即可。\n"
+                + "（只跑一段、不需要换词的话，把「prompts」**清空**就不会拦你。）",
+        };
+    }
     if (stage >= blocks.length) {
         return {
             ok: false,
@@ -1479,6 +1487,11 @@ function bindGlobalListeners() {
     api.addEventListener("execution_interrupted", ({ detail }) => {
         for (const s of CHAINS) s.onInterrupted(detail);
     });
+    // 🔴 0.6.33：队列面板的 **Clear queue / 删除排队项** 不发 prompt 级事件 —— 宿主只发这条
+    //   `status`（`wipe_queue()` ⇒ `queue_updated()`）。不认它 ⇒ 状态机一直停在"已排队"。
+    api.addEventListener("status", ({ detail }) => {
+        for (const s of CHAINS) s.onQueueStatus(detail);
+    });
     // 采样进度（**每步都触发**）⇒ 只用来更新「⏩ 连跑」按钮上的进度文字，走节流。
     api.addEventListener("progress", ({ detail }) => {
         for (const s of CHAINS) s.onProgress(detail);
@@ -1562,6 +1575,12 @@ app.registerExtension({
             //   executing 事件每执行一个节点都会触发，在里面重算 findPair 等于每节点扫一遍全图。
             const state = {
                 mode: "idle", remaining: 0, sawMine: false, awaiting: false, hinted: false,
+                // 🔴 `hostBusy`：本轮**宿主是否真的动过**（任何 executing/cached/executed 事件）。
+                //   与 `sawMine` 的区别：`sawMine` 要求"命中了本组桥/落盘"（findPair 失败时永远 false），
+                //   而 `hostBusy` 只问"宿主有没有在执行东西"。用途 = 区分这两件事：
+                //     · 队列被清空（宿主**没动过**）⇒ 该写"本段没跑"；
+                //     · 真跑完了只是收尾信号丢了（宿主动过）⇒ 别乱写"被取消"。
+                hostBusy: false,
                 // 🔴 0.6.32：本轮的**起点段号**与**目标末段号**（都 0 起算；`Infinity` = 无限）。
                 //   为什么要在开跑时锁下来：`segments` 现在是**绝对量**（跑到第 N 段），
                 //   而本轮要跑几段 = `chainTarget - chainStart + 1` —— 起点不是 0 时必须减掉它，
@@ -1629,6 +1648,7 @@ app.registerExtension({
                     // detail 为空 = 本轮队列跑完。宿主若另发 `execution_success`，收尾**只认那条**，
                     // 否则两条都触发 ⇒ 段号一次跳 2。
                     if (detail == null) { if (!hostSendsSuccess) this.stepDone(); return; }
+                    if (this.armed()) this.hostBusy = true;      // 宿主真动过（见 hostBusy 的用途）
                     if (this.mode !== "chain") return;
                     this.markMine(executingNodeId(detail));
                 },
@@ -1638,14 +1658,42 @@ app.registerExtension({
 
                 /** 整轮命中缓存（宿主不发 per-node executing）时的证据。 */
                 onCached(detail) {
+                    if (this.armed()) this.hostBusy = true;
                     if (this.mode !== "chain") return;
                     for (const id of detail?.nodes ?? []) this.markMine(id);
                 },
 
                 /** 产出事件——兼作兜底（个别前端在缓存轮只发 executed）。 */
                 onExecuted(detail) {
+                    if (this.armed()) this.hostBusy = true;
                     if (this.mode !== "chain") return;
                     this.markMine(detail?.display_node ?? detail?.node ?? null);
+                },
+
+                /**
+                 * 🔴 0.6.33：宿主 `status` 事件（`server.queue_updated()` ⇒ `{"status":{"exec_info":
+                 * {queue_remaining:N}}}`）——**队列面板 Clear / 删掉排队项**那条路**只有这条信号**
+                 * （没有 prompt 级事件，见宿主 `wipe_queue()`：它只调 `queue_updated`）。
+                 * 只认 `execution_interrupted` 的话，那种取消会让状态机一直停在"已排队"。
+                 *
+                 * 判据两条**同时**成立才算"我们这一轮被取消"：
+                 *   ① `queue_remaining === 0`（队列里什么都不剩）
+                 *   ② `!hostBusy`（本轮宿主**从没动过** —— 真跑过只是收尾信号丢了的话，
+                 *      交给 `execution_success` / `executing(null)` 那条路，这里不动）
+                 * ⇒ 段号**保持当前值**（这一段没落盘），点「▶ Run」/「⏭ 续跑」重跑即可。
+                 */
+                onQueueStatus(detail) {
+                    if (!this.armed()) return;
+                    const n = detail?.status?.exec_info?.queue_remaining;
+                    if (n !== 0) return;
+                    if (this.hostBusy) return;
+                    this.mode = "idle";
+                    this.awaiting = false;
+                    this.remaining = 0;
+                    this.onStageChanged();
+                    say(node, this, "stopped",
+                        "队列已被清空（Clear queue / 删除排队项）：本段**没有跑**，段号保持当前值 —— "
+                        + "点「▶ Run」或「⏭ 续跑」重跑这一段即可。");
                 },
 
                 onExecutionError() {

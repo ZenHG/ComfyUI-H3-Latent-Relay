@@ -48,8 +48,8 @@
           "zh": "目录结构",
           "en": "Repository layout",
           "mode": "condensed",
-          "h_en": "6e78599f6396082b",
-          "h_src": "bcc5d27ac56a7d07",
+          "h_en": "a8ddbdddbc5db5c9",
+          "h_src": "320582192170eb5c",
           "seeded": "by-position"
         },
         {
@@ -73,13 +73,13 @@
           "en": "Documentation index",
           "mode": "condensed",
           "h_en": "418b061f12c7712a",
-          "h_src": "a16f79ad54b8febb",
+          "h_src": "22ea4a54c95a8790",
           "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-10-12",
-      "src_sha": "5c536bb42ff6ae28"
+      "src_sha": "9c659c799945fea9"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -288,14 +288,14 @@
           "zh": "常见疑问（FAQ，补：原 README §10）",
           "en": "FAQ (addendum: former README §10)",
           "mode": "full",
-          "h_en": "3d17708a7f4badef",
-          "h_src": "6b22ab50094b838c",
+          "h_en": "d1cfce317fd09a83",
+          "h_src": "6132fae0351843b9",
           "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-10-12",
-      "src_sha": "2f923f9c2037ab13"
+      "src_sha": "f161c208dd9a754e"
     },
     "docs/06-continuity-scripting.md": {
       "en": "docs/06-continuity-scripting_EN.md",
@@ -424,16 +424,16 @@
           "zh": "单测（零 GPU、秒级）",
           "en": "Unit tests (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "5659fcec080edd75",
-          "h_src": "d30da78ac67afc75",
+          "h_en": "ba5fccf23e6fad0b",
+          "h_src": "5b85c234a6641ab4",
           "seeded": "by-position"
         },
         {
           "zh": "前端纯函数的单测（node 跑、零依赖）",
           "en": "Unit tests for front-end pure functions (run by node, zero dependencies)",
           "mode": "full",
-          "h_en": "c48d1f98d85202f5",
-          "h_src": "f969ff117454c6c3",
+          "h_en": "bf95359397b71fc5",
+          "h_src": "de61fcc64ef17bf2",
           "seeded": "by-position"
         },
         {
@@ -463,7 +463,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-12",
-      "src_sha": "cdf78fa971f5577f"
+      "src_sha": "6d3f8dd1ca7d35c1"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",
@@ -536,8 +536,8 @@
           "zh": "7.1 多段拼接：N 个 mp4 怎么接成一条",
           "en": "7.1 Multi-segment concatenation: how to join N mp4 files into one",
           "mode": "full",
-          "h_en": "486ab41bff6958db",
-          "h_src": "a89ea2e51173def6",
+          "h_en": "63be4a64d5c60fb2",
+          "h_src": "d370f2372cf35688",
           "seeded": "by-number"
         },
         {
@@ -583,7 +583,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-12",
-      "src_sha": "015c42482cfcdc4f"
+      "src_sha": "be117c5d7c7cd1d6"
     }
   }
 }

@@ -319,6 +319,11 @@ It is first a **file name** issue, then a **version** issue:
 (that path takes segments by stage number), or use the CLI:
 `python tools/concat_segments.py s1.mp4 s2.mp4 -o film.mp4`.
 
+**② You pressed "Clear queue" (or deleted a queued item) mid-run.** The host only sends a `status`
+message (no prompt-level event) for that. Since 0.6.33 the pack recognises it and writes "queue was cleared: this segment **did not run**" (criterion: `queue_remaining === 0` **and** the host never did anything this round, so it cannot misfire). The stage number stays; just re-run that segment.
+
+**③ Words present but the `prompt` link is missing** is what blocks you; an empty `prompts` means "no words to send" and no longer requires the link (since 0.6.33).
+
 **Another one that is often misread**: two segments are obviously the same format, yet it reports
 "segment 2's format differs from segment 1: 608x352@24.0113 vs 608x352@24.0126" — that is a **fake
 difference** produced by the container quantising its duration (both segments are nominally 24 fps).

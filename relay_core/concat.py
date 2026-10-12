@@ -105,14 +105,33 @@ def probe_mp4(path):
                 "a_prime_samples": int(round(delta * rate)) if (a and rate) else 0}
 
 
-# 🔴 段间 fps 比较**必须带容差**（2026-10-12 实测）：探针里的 `fps` = 容器的 `average_rate`
-#   = 帧数 ÷ 容器时长，而时长被容器时间基（宿主 SaveVideo 实测 1/90000）量化到 ms
-#   ⇒ **同一台机、同一张图**跑出来的两段会得到 24.0113 与 24.0126 这种差别
-#   （它们的 `base_rate` / `guessed_rate` **都恒为 24** —— 那才是"规格"）。
-#   逐位比较 `round(fps, 6)` ⇒ **好段被误判"规格不一致"而拒拼**（实测：旁路该闸后
-#   拼装四项断言全过、帧数 192/192 守恒、A·VΔ = 0.0）。
-#   容差 0.02 fps：容得下量化噪声（实测差 0.0013），仍能拒真不同（23.976 vs 24 差 0.024）。
-_FPS_TOL = 0.02
+# 🔴 段间 fps 比较用**相对容差**（0.5%，带绝对下限 0.02 fps），不是逐位比（2026-10-12 实测）。
+#
+# 为什么要容差：探针里的 `fps` 是容器的 `average_rate` = 帧数 ÷ 容器时长，而时长是被**导出**的量
+#   （容器时间基量化 + muxer 的时长写法）⇒ **同一台机、同一张图**跑出来的两段会得到
+#   24.0113 与 24.0126 这种差别（它们的 `base_rate` / `guessed_rate` 都恒为 24 —— 那才是"规格"）。
+#   逐位比较 ⇒ 好段被判"规格不一致"拒拼（实测：旁路该闸后拼装四项断言全过、192/192 帧守恒、A·VΔ=0）。
+#
+# 为什么是**相对**量而不是某一个固定数字：量化噪声随 fps 等比例放大（29.97 的绝对噪声是 23.976 的
+#   1.25 倍）。固定 0.02 对高帧率段是收紧、对低帧率段是放松；相对 0.5% 在任何帧率上都是"同一族"的量级。
+#
+# 放行 / 拒绝的边界（都在单测里锁着）：
+#   · 同族差异（23.976 vs 24 = 0.1%、实测那对 = 0.005%）⇒ **放行**。
+#     两条路都会按**每段自己的 fr** 重排时间戳（copy 路 `v_off += n_in/fr`；encode 路按段重建 CFR），
+#     0.1% 的漂移在 8 s 上只有 8 ms，且退路那条有四项断言把关。
+#   · 真不同规格（24 vs 25/30/60；8 vs 8.5 这种低帧率差）⇒ **拒绝**（差 ≫ 容差）。
+# 绝对下限 0.02 fps：保住低帧率段（如 8 fps 时 0.5% 只有 0.04 fps）不被缩到量不出来。
+_FPS_TOL_ABS = 0.02
+_FPS_TOL_REL = 0.005
+
+
+def fps_tolerance(ref_fps):
+    """段间 fps 比较的容差（由**参照段的帧率**导出，见上面那段实测记录）。"""
+    try:
+        ref = float(ref_fps or 0.0)
+    except (TypeError, ValueError):
+        ref = 0.0
+    return max(_FPS_TOL_ABS, _FPS_TOL_REL * ref)
 
 
 def assert_segments_joinable(clips):
@@ -124,13 +143,14 @@ def assert_segments_joinable(clips):
 
     ⚠️ ③ 的口径**必须减掉视频轨自己的起始偏移**（见 `_start`）：落盘节点可以自由决定时间戳
     原点，拿 `duration` 硬比会把「音频补了等长前置静音」的好段误判成绕过 Trim AV。
-    ⚠️ ② 的 fps 比较**必须带容差**（`_FPS_TOL`）—— 容器里的 `average_rate` 是导出的量，
-    不是规格（见 `_FPS_TOL` 处的实测记录）。
+    ⚠️ ② 的 fps 比较**必须带容差**（`fps_tolerance`）—— 容器里的 `average_rate` 是导出的量，
+    不是规格（见 `_FPS_TOL_ABS` 处的实测记录）。
     """
     clips = list(clips)
     if not clips:
         return {"ok": False, "problems": ["没有任何段文件。"], "warnings": []}
     ref, problems = clips[0], []
+    tol_fps = fps_tolerance(ref.get("fps"))
     for i, c in enumerate(clips):
         n = i + 1
         if not c.get("frames"):
@@ -138,12 +158,12 @@ def assert_segments_joinable(clips):
         if i:
             _d_fps = abs(float(c["fps"]) - float(ref["fps"]))
             if ((c["width"], c["height"]) != (ref["width"], ref["height"])
-                    or _d_fps > _FPS_TOL):
+                    or _d_fps > tol_fps):
                 problems.append("第 %d 段规格与第 1 段不一致：%dx%d@%.4f vs %dx%d@%.4f"
-                                "（fps 差 %.4f / 容差 %.2f）—— 段文件必须同规格。"
+                                "（fps 差 %.4f / 容差 %.4f）—— 段文件必须同规格。"
                                 % (n, c["width"], c["height"], c["fps"],
                                    ref["width"], ref["height"], ref["fps"],
-                                   _d_fps, _FPS_TOL))
+                                   _d_fps, tol_fps))
             if c.get("has_audio") != ref.get("has_audio"):
                 problems.append("第 %d 段的音频流有无与第 1 段不一致，拼出来必错位。" % n)
             for k, label in (("a_rate", "采样率"), ("a_layout", "声道"), ("a_codec", "音频编码")):

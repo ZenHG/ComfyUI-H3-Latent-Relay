@@ -153,6 +153,31 @@ console.log("[7] chain.js 阶段表 ↔ say() 相位串 一致性（静态扫描
         /const btns = row\.querySelectorAll\("button"\)/.test(src)
         && /rowFallbackBound/.test(src)
         && /document\.addEventListener\("pointerdown"/.test(src));
+
+    // 🔴 7.7~7.9 = 2026-10-12 第二轮（GG 点名三条"优雅处理"）的静态锁。
+    check("7.7 「队列被清空」兜底在位：`status` 监听 + `onQueueStatus` 两条判据（remaining==0 且 !hostBusy）",
+        /addEventListener\("status"/.test(src)
+        && /s\.onQueueStatus\(detail\)/.test(src)
+        && /onQueueStatus\(detail\) \{\s*\n\s*if \(!this\.armed\(\)\) return;/.test(src)
+        && /queue_remaining/.test(src)
+        && /if \(this\.hostBusy\) return;/.test(src)
+        && /if \(state\) state\.hostBusy = false;/.test(src));
+    check("7.8 `checkStagePrompt` 先判词、后判接线（留空 ⇒ 不要求接线；文案与行为一致）",
+        src.indexOf("const blocks = splitPromptBlocks(src.text);")
+            < src.indexOf("if (!promptOutputLinked(chainNode)) {")
+        && /if \(!blocks\.length\) return \{ ok: true, message: "" \};/.test(src));
+    // 🔴 7.9 真踩过（本会话）：模板串里写反引号 ⇒ 变成 tagged template，**语法照样过**、
+    //   运行时才炸（`prompts` 被当函数调用）。`node --check` 抓不到 ⇒ 必须静态扫。
+    //   判据 = **每个代码行的反引号个数必须是偶数**（模板串在本文件都是一行内闭合；
+    //   出事那行的计数是 5 ⇒ 奇数）。⚠️ 只扫代码行：注释 / JSDoc 里的反引号无害。
+    //   ⚠️ 为什么不按"形态"扫：反引号在**双引号串里**无害，正则分不清那两种
+    //   （第一版就是这么误报的）—— 按个数扫没有这个歧义。
+    const oddBacktick = src.split("\n")
+        .filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l))
+        .filter((l) => (l.match(/`/g) || []).length % 2 === 1)
+        .map((l) => l.trim().slice(0, 60));
+    check("7.9 文案里的反引号不许截断模板串（会退化成 tagged template：语法过、运行炸）",
+        oddBacktick.length === 0, "奇数反引号行：" + oddBacktick.join(" / "));
 }
 
 // ---------------------------------------------------------------- 8. run_id 跨节点同步
@@ -341,7 +366,7 @@ function tableTypes(src, varName) {
 //   `LOCAL-维护规范` 的 §六 门槛表漂了 7 天）。`ci.yml` 与 `docs/08` 都要给用户写"期望 N/0"，
 //   而 N 的真正来源是**这份文件实跑出来的数** ⇒ 让它自引用：谁改了测试而没同步那两处，这里就红。
 //   （同款做法见 `tools/review_050.py` 的 H3g 自引用机检。）
-const EXPECTED_CHECKS = 46;   // 含本行这条自检自己
+const EXPECTED_CHECKS = 49;   // 含本行这条自检自己
 // ↑ 2026-10-07：42 → 43（8.14 改成锁两条入口 + 新增 8.15「挂钩会重试到挂上为止」）。
 //   前一条：41 → 42（新增 8.21 STAGE_TYPES ↔ nodes.py 双向对账）。
 //   🔴 这个常量就是「N/0」的**唯一真相源** —— ci.yml / docs/08 里写的那两个 42 得跟着它走，

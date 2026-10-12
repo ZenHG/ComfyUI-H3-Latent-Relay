@@ -123,7 +123,7 @@ ffmpeg -y -i s0.mp4 -i s1.mp4 -i s2.mp4 -i s3.mp4 \
 The container's `average_rate` = frames ÷ duration, and duration is quantised to ms by the time base ⇒ two
 segments from the **same graph** come out as `24.0113` and `24.0126` (their `base_rate` / `guessed_rate` are
 **both 24**). Comparing them bit-exactly ⇒ a **good segment is judged "format mismatch" and refused**; with
-the tolerance it still rejects genuinely different rates (23.976 vs 24, a difference of 0.024).
+Since 0.6.33 it uses a **relative tolerance** (`fps_tolerance(ref)` = max(0.02, 0.5% × the reference fps)): same-family differences are allowed (23.976 vs 24 = 0.1%) while genuinely different formats are still rejected (24 vs 25/30). Both paths re-stamp timestamps with **each segment's own fr**, so a 0.1% drift is only 8 ms over 8 s.
 
 ## 7.2 Bed-window speech avoidance: what the criteria can and cannot catch (read this first)
 

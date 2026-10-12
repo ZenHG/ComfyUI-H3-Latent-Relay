@@ -387,10 +387,21 @@ else:
     _h_q = CORE.assert_segments_joinable([_mkclipd(24.0126), _mkclipd(24.0113)])
     check("26.4b 体检放过**容器量化**带来的 fps 微差（实测 24.0113 vs 24.0126 = 同一张图的两段）",
           _h_q["ok"], "problems=%s" % _h_q["problems"])
-    _h_edge = CORE.assert_segments_joinable([_mkclipd(24.0), _mkclipd(23.976)])
-    check("26.4c 体检仍拒**真不同**的 fps（23.976 vs 24，差 0.024 > 容差）并报出差值",
-          (not _h_edge["ok"]) and any("fps 差" in p for p in _h_edge["problems"]),
-          "%s" % _h_edge["problems"][:1])
+    # 🔴 26.4c 容差是**相对量**（0.5%，下限 0.02 fps）⇒ 同族差异放行、真不同规格仍拒。
+    #   为什么不用一个固定数字：量化噪声随 fps 等比例放大（29.97 的绝对噪声是 23.976 的 1.25 倍）。
+    _h_family = CORE.assert_segments_joinable([_mkclipd(24.0), _mkclipd(23.976)])
+    check("26.4c **同族**帧率差异放行（23.976 vs 24，差 0.024 ≪ 容差 0.12）",
+          _h_family["ok"], "problems=%s" % _h_family["problems"])
+    _h_real = CORE.assert_segments_joinable([_mkclipd(24.0), _mkclipd(30.0)])
+    check("26.4d **真不同**规格仍拒（24 vs 30）并在消息里打出差值/容差",
+          (not _h_real["ok"]) and any("fps 差" in p and "容差" in p for p in _h_real["problems"]),
+          "%s" % _h_real["problems"][:1])
+    check("26.4e 容差随参照帧率放大且不低于下限（纯函数，可直接对账）",
+          0.02 <= CORE.fps_tolerance(0) <= CORE.fps_tolerance(8) < CORE.fps_tolerance(60)
+          and abs(CORE.fps_tolerance(24) - 0.12) < 1e-9,
+          "tol(0)=%.4f tol(8)=%.4f tol(24)=%.4f tol(60)=%.4f"
+          % (CORE.fps_tolerance(0), CORE.fps_tolerance(8),
+             CORE.fps_tolerance(24), CORE.fps_tolerance(60)))
 
     # —— 26.5 体检不过 ⇒ 一段都不拼（坏片不许落地） ——
     _bad_out = os.path.join(_TMP26, "should_not_exist.mp4")
