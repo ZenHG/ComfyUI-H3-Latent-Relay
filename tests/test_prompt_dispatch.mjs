@@ -133,6 +133,26 @@ console.log("[7] chain.js 阶段表 ↔ say() 相位串 一致性（静态扫描
         [...keys].every((k) => k === "idle"
             ? /^\s{4}idle: \{ glyph: "[^"]+", color: null/m.test(src)
             : new RegExp(`^\\s{4}${k}: \\{ glyph: "[^"]+", color: "#[0-9a-fA-F]{6}"`, "m").test(src)));
+
+    // 🔴 7.4~7.6 = 0.6.33 两处前端修复的**静态锁**（真前端实测见交接；这里防"以后被悄悄删掉"）。
+    //   为什么必须有机检：这两条都是**用户体验层**的修复 —— 删掉之后代码照跑、
+    //   单测照绿、日志照干净，只有人点上去才会发现"又只能点符号了 / 停了状态还停在跑"。
+    check("7.4 「整行可点」兜底在位且在节点创建时被调用（含「点在按钮本体就放手」的判据）",
+        /function bindRowClickFallback\(\)/.test(src)
+        && /bindRowClickFallback\(\);/.test(src)
+        && /if \(btn\.contains\(ev\.target\)\) return;/.test(src)
+        && /if \(btns\.length !== 1\) return;/.test(src)
+        && /state\.btnByGlyph\.set\(firstGlyph\(label\), run\)/.test(src)
+        && /const row = ev\.target\.closest\?\.\("\.lg-node-widgets > \*"\)/.test(src));
+    check("7.5 官方「停止 / 取消」已接：`execution_interrupted` 监听 + `onInterrupted` 带 armed 闸",
+        /addEventListener\("execution_interrupted"/.test(src)
+        && /s\.onInterrupted\(detail\)/.test(src)
+        && /onInterrupted\(detail\) \{\s*\n\s*if \(!this\.armed\(\)\) return;/.test(src)
+        && /say\(node, this, "stopped",/.test(src));
+    check("7.6 兜底只认「恰好一个按钮」的 widget 行（数字步进器 / i18n 条那类多按钮行不许接管）",
+        /const btns = row\.querySelectorAll\("button"\)/.test(src)
+        && /rowFallbackBound/.test(src)
+        && /document\.addEventListener\("pointerdown"/.test(src));
 }
 
 // ---------------------------------------------------------------- 8. run_id 跨节点同步
@@ -321,7 +341,7 @@ function tableTypes(src, varName) {
 //   `LOCAL-维护规范` 的 §六 门槛表漂了 7 天）。`ci.yml` 与 `docs/08` 都要给用户写"期望 N/0"，
 //   而 N 的真正来源是**这份文件实跑出来的数** ⇒ 让它自引用：谁改了测试而没同步那两处，这里就红。
 //   （同款做法见 `tools/review_050.py` 的 H3g 自引用机检。）
-const EXPECTED_CHECKS = 43;   // 含本行这条自检自己
+const EXPECTED_CHECKS = 46;   // 含本行这条自检自己
 // ↑ 2026-10-07：42 → 43（8.14 改成锁两条入口 + 新增 8.15「挂钩会重试到挂上为止」）。
 //   前一条：41 → 42（新增 8.21 STAGE_TYPES ↔ nodes.py 双向对账）。
 //   🔴 这个常量就是「N/0」的**唯一真相源** —— ci.yml / docs/08 里写的那两个 42 得跟着它走，

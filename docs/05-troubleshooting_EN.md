@@ -293,3 +293,35 @@ It is first a **file name** issue, then a **version** issue:
    `banzhangVideoCombine` (they convert to f32 themselves), to work around it.
 
 ---
+
+### 10.12 I clicked "🧩 拼成一条" and it says "no video file was found" / "failed: rescanning history…"?
+
+**Symptom**: both segments finished and their files are on disk, yet concatenation is refused — and the
+"failure reason" shown in the status box reads as if it were reporting two segments found.
+
+**Two causes (both fixed in 0.6.33)**:
+
+1. **The status box was not showing the real cause** (before 0.6.33): the first line of the concatenation
+   report is the "concat request: …" **informational line**, and the status box showed only that first line
+   ⇒ the real cause (the line starting with `🔴`) was invisible.
+   **The full report is in the browser console**: F12 → Console → `[H3 Relay Chain] 拼接完整报告`.
+   From 0.6.33 the status box shows the `🔴` line directly.
+2. **The fallback path counted submissions that produced no segment video** (before 0.6.33):
+   if you **refreshed the page**, this round's segment records (memory only) are gone ⇒ concatenation
+   falls back to **rescanning the server's `/history`**. If the criterion was merely "does this submission's
+   graph contain the Chain node", the chain's **pre-flight submissions** and half-finished submissions
+   counted as segments too ⇒ taking the "latest N" picked a run of **empty submissions** (they still carry a
+   stage number) ⇒ no video file was found at all.
+   From 0.6.33 the criterion is **that submission really wrote a segment video**, and for a repeated stage
+   number only the **newest** one is kept; the report names **which segments were taken**, so you can check.
+
+**Workaround (without upgrading)**: after a chain run, click "🧩 拼成一条" **without refreshing** the page
+(that path takes segments by stage number), or use the CLI:
+`python tools/concat_segments.py s1.mp4 s2.mp4 -o film.mp4`.
+
+**Another one that is often misread**: two segments are obviously the same format, yet it reports
+"segment 2's format differs from segment 1: 608x352@24.0113 vs 608x352@24.0126" — that is a **fake
+difference** produced by the container quantising its duration (both segments are nominally 24 fps).
+Since 0.6.33 the comparison carries a **0.02 fps tolerance**.
+
+---

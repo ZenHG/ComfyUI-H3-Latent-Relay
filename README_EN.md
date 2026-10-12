@@ -10,7 +10,7 @@ not coupled to any third-party H3 node pack.
 
 | Item | Value |
 |---|---|
-| Version | **0.6.32** |
+| Version | **0.6.33** |
 | License | **MIT** (third-party attribution in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) |
 | Host | **ComfyUI ≥ 0.35.0 with MiniMax-H3 support** (the host itself is GPL-3.0, see License) |
 
@@ -413,7 +413,7 @@ ComfyUI-H3-Latent-Relay/
 ├── web/                   # front-end JS: the 🧩 concat button, Chain panel, `run_id` one-field-syncs-the-group, **the node Chinese/EN toggle** (canvas only)
 ├── examples/              # two openable workflows: minimal continuation (21 nodes) and full flow (47 nodes)
 ├── docs/                  # deep docs 01–10 (mechanism / parameters / sampling / canvas / troubleshooting / scripting / chain / tests / metrics / audio)
-├── tests/                 # offline self-test (zero GPU): 566 assertions + V3 parity + prompt-dispatch pure functions
+├── tests/                 # offline self-test (zero GPU): 572 assertions + V3 parity + prompt-dispatch pure functions
 ├── tools/                 # self-checks / forensic tools / concat CLI / bundler (incl. the en_sync docs gate)
 ├── licenses/              # third-party license texts shipped with the pack
 ├── dist/                  # bundler output (minimal distribution set + zip; not tracked)

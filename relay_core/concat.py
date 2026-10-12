@@ -105,6 +105,16 @@ def probe_mp4(path):
                 "a_prime_samples": int(round(delta * rate)) if (a and rate) else 0}
 
 
+# 🔴 段间 fps 比较**必须带容差**（2026-10-12 实测）：探针里的 `fps` = 容器的 `average_rate`
+#   = 帧数 ÷ 容器时长，而时长被容器时间基（宿主 SaveVideo 实测 1/90000）量化到 ms
+#   ⇒ **同一台机、同一张图**跑出来的两段会得到 24.0113 与 24.0126 这种差别
+#   （它们的 `base_rate` / `guessed_rate` **都恒为 24** —— 那才是"规格"）。
+#   逐位比较 `round(fps, 6)` ⇒ **好段被误判"规格不一致"而拒拼**（实测：旁路该闸后
+#   拼装四项断言全过、帧数 192/192 守恒、A·VΔ = 0.0）。
+#   容差 0.02 fps：容得下量化噪声（实测差 0.0013），仍能拒真不同（23.976 vs 24 差 0.024）。
+_FPS_TOL = 0.02
+
+
 def assert_segments_joinable(clips):
     """拼接前的**逐段体检** → ``{"ok","problems","warnings"}``。查三件：
 
@@ -114,6 +124,8 @@ def assert_segments_joinable(clips):
 
     ⚠️ ③ 的口径**必须减掉视频轨自己的起始偏移**（见 `_start`）：落盘节点可以自由决定时间戳
     原点，拿 `duration` 硬比会把「音频补了等长前置静音」的好段误判成绕过 Trim AV。
+    ⚠️ ② 的 fps 比较**必须带容差**（`_FPS_TOL`）—— 容器里的 `average_rate` 是导出的量，
+    不是规格（见 `_FPS_TOL` 处的实测记录）。
     """
     clips = list(clips)
     if not clips:
@@ -124,12 +136,14 @@ def assert_segments_joinable(clips):
         if not c.get("frames"):
             problems.append("第 %d 段没有可读的视频帧：%s" % (n, c.get("path")))
         if i:
-            if (c["width"], c["height"], round(c["fps"], 6)) != (
-                    ref["width"], ref["height"], round(ref["fps"], 6)):
-                problems.append("第 %d 段规格与第 1 段不一致：%dx%d@%.4f vs %dx%d@%.4f —— "
-                                "段文件必须同规格。"
+            _d_fps = abs(float(c["fps"]) - float(ref["fps"]))
+            if ((c["width"], c["height"]) != (ref["width"], ref["height"])
+                    or _d_fps > _FPS_TOL):
+                problems.append("第 %d 段规格与第 1 段不一致：%dx%d@%.4f vs %dx%d@%.4f"
+                                "（fps 差 %.4f / 容差 %.2f）—— 段文件必须同规格。"
                                 % (n, c["width"], c["height"], c["fps"],
-                                   ref["width"], ref["height"], ref["fps"]))
+                                   ref["width"], ref["height"], ref["fps"],
+                                   _d_fps, _FPS_TOL))
             if c.get("has_audio") != ref.get("has_audio"):
                 problems.append("第 %d 段的音频流有无与第 1 段不一致，拼出来必错位。" % n)
             for k, label in (("a_rate", "采样率"), ("a_layout", "声道"), ("a_codec", "音频编码")):

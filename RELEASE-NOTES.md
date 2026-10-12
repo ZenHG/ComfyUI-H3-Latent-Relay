@@ -19,6 +19,54 @@
 
 ---
 
+## 0.6.33 — 2026-10-12
+
+🔴 **「🧩 拼成一条」曾经会拒拼，而且给出的理由是错的。图、连线、参数都不用改，但要刷新浏览器页面。**
+
+**① 失败时看到的那句话，以后就是真错因。** 以前状态格只显示报告的第一行（"拼接请求：…"这种说明行），
+真错因只在浏览器控制台里 —— 两段都跑好了却拼不出来，看起来却像成功。现在失败时直接显示带 🔴 的那行。
+
+**② 兜底选段收紧了。** 刷新过页面之后，拼接会回扫服务器的 history；以前只要那次提交的图里有连跑节点
+就算一段（连跑的预检提交也算）⇒ 取"最近 N 段"取到一串**空提交** ⇒ 一段视频都没找到。
+现在只认**真的落下了段视频**的提交，同一段号只留最新那条，并在报告里写出取了第几段。
+
+**③ 明明同规格却报"规格不一致"，那是伪差。** 两段都是 24 fps，却报
+`608x352@24.0113 vs 608x352@24.0126` —— 那是容器把时长量化到毫秒带出来的差。现在比较带 0.02 fps 容差。
+
+**④ 按钮整行都能点了**（以前只有按钮本体那一小段算命中区，点在行内别处没反应）。
+
+**⑤ 官方「停止」之后状态会回落**（以前停在「连跑中 · 采样 x/y」，看着像还在跑）。
+
+**升级动作**：把 `web/` 换成新版并**刷新浏览器页面**（F5）。图、连线、参数都不用改。
+
+<!-- EN -->
+
+🔴 **"🧩 Concatenate" could refuse to splice, and its stated reason was wrong. No graph, wiring or parameter change — but refresh the browser page.**
+
+**① The failure message is now the real cause.** The status box used to show only the first line of the
+concatenation report (an informational "concat request: …" line), so the real cause lived only in the
+browser console — a run where both segments were fine looked like a success. On failure the box now
+shows the line marked 🔴.
+
+**② The fallback segment picker is stricter.** After a page refresh, concatenation rescans the server's
+history; it used to count any submission whose graph contained the chain node (including the chain's
+pre-flight submissions) ⇒ taking the "latest N" picked a run of **empty submissions** ⇒ no video file
+was found. It now counts only submissions that **really wrote a segment video**, keeps only the newest
+entry per stage number, and names the stages it took.
+
+**③ "Format mismatch" between identical segments was a false alarm.** Both segments are 24 fps, yet it
+reported `608x352@24.0113 vs 608x352@24.0126` — an artefact of the container quantising its duration to
+milliseconds. The comparison now carries a 0.02 fps tolerance.
+
+**④ Buttons respond to a click anywhere in their row** (previously only the button box itself did, so
+clicks on the rest of the row did nothing).
+
+**⑤ The status now falls back after the host's "Stop"** (it used to sit at "running · sampling x/y",
+looking as if it were still going).
+
+**Action required**: replace `web/` with the new version and **refresh the browser page** (F5).
+No graph, wiring or parameter changes.
+
 ## 0.6.32 — 2026-10-08
 
 🔴 **「跑到第几段」这一格改了含义。图、连线、参数都不用改，但要刷新浏览器页面。**

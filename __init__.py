@@ -102,7 +102,7 @@ else:
 
 WEB_DIRECTORY = "./web"
 
-__version__ = "0.6.32"
+__version__ = "0.6.33"
 
 
 # ============================================================================
@@ -164,6 +164,16 @@ if _PS_INST is not None:               # pragma: no branch
     def _mp4_paths(entry):
         """history 条目 → 该次提交落盘的**视频**绝对路径（type 可能是 output/temp/input）。"""
         return [_abs_of(p) for p in CORE.pick_video_outputs((entry or {}).get("outputs") or {})]
+
+    def _has_segment_video(entry):
+        """这次提交**真的落下了段视频**吗？（就一个判据，抽出来是为了两个调用点口径一致）
+
+        🔴 为什么它必须存在（2026-10-12 实测事故）：同一张图里，**带本 Chain 节点 ≠ 这一段跑出了东西**。
+        连跑预检 / 只跑半截 / 只预览的提交**也带本 Chain 节点**（段号照样有值），
+        只是没落段视频。旧代码把它们也算成一段 ⇒ "取最近 N 段"取到一串空提交 ⇒ 一段视频都没找到
+        ⇒ 拒拼；而报告里"共 N 次"看着还挺正常（恰恰是用户看到"失败：回扫 history…"的那一次）。
+        """
+        return bool(CORE.pick_video_outputs((entry or {}).get("outputs") or {}))
 
     def _pcm_candidates(entry):
         """本段的 PCM 边车候选 → ``(paths, note)``；``paths`` **已按优先级排好**。
@@ -261,20 +271,31 @@ if _PS_INST is not None:               # pragma: no branch
         🔴 **不压实**：段号与位置一一对应。旧代码把稀疏的 id 列表压紧（`[p for p in ids if …]`）
         ⇒ 第 2 段的 id 顶到第 1 段槽 ⇒ **拼出来的片段序是错的**（2026-09-30 日志实证）。
         缺哪段就明说哪段，绝不悄悄往前挪。
+
+        🔴 **一段的判据 = 那次提交真的落了段视频**（`_has_segment_video`，2026-10-12）：两条路
+        （按段号 / 回扫）都按它筛 —— "提交里带本 Chain 节点"只是**必要**条件，不是充分条件。
         """
         hist = queue.get_history(max_items=_HIST_SCAN) or {}
         if want:
-            pairs, unresolved = [], []
+            pairs, unresolved, no_video = [], [], []
             for stage, pid in want:
                 ent = hist.get(pid) if pid else None
                 if ent is None:
                     unresolved.append(stage + 1)
+                elif not _has_segment_video(ent):
+                    # 记录在、但**那次提交没落段视频**（跑了一半 / 被中断 / 只跑了预检）
+                    #   ⇒ 这一段拼不成。旧代码把它当"命中"塞进 pairs，路由再默默跳过它
+                    #   ⇒ 成片**少一段却看着像成功**（缺段的成片比没有成片更坏）。
+                    no_video.append(stage + 1)
                 else:
                     pairs.append((stage + 1, pid, ent))
-            missing = sorted(set(_stage_gaps([s for s, _ in want]) + unresolved))
+            missing = sorted(set(_stage_gaps([s for s, _ in want]) + unresolved + no_video))
             note = "按段号取：%d/%d 段命中" % (len(pairs), len(want))
-            if missing:
-                note += "；第 %s 段没有可用的记录（重启过后端？）" % "、".join(map(str, missing))
+            if unresolved:
+                note += "；第 %s 段没有可用的记录（重启过后端？）" % "、".join(map(str, unresolved))
+            if no_video:
+                note += "；第 %s 段那次提交**没落段视频**（跑了一半 / 被中断？）" \
+                        % "、".join(map(str, no_video))
             return pairs, note, missing
         if count <= 0:
             return [], ("没给段记录，且 count ≤ 0 ⇒ 不知道该拼哪几段。"
@@ -282,19 +303,29 @@ if _PS_INST is not None:               # pragma: no branch
         found = []
         for pid, e in hist.items():
             node = _chain_node(e, chain_id)
-            if node is not None:
+            if node is not None and _has_segment_video(e):
                 found.append((_chain_stage(node), pid, e))
         if not found:
-            return [], "回扫 history：**没有**找到「图里带本 Chain 节点」的提交（后端重启过？）", []
+            return [], ("回扫 history：**没有**找到「图里带本 Chain 节点、且真的落了段视频」的提交"
+                        "（后端重启过？或这一轮还没跑完？）"), []
         # 全都读得出段号才按段排；只要有一个读不出（老提交没有 inputs）就退回 history 顺序
         # （= 执行顺序，对"没记录只能回扫"这条兜底路是最可靠的代理）—— 不混着排。
         if all(s is not None for s, _, _ in found):
-            found.sort(key=lambda t: t[0])
-        found = found[-count:]
-        return ([(s + 1 if s is not None else None, pid, e) for s, pid, e in found],
-                "回扫 history：图里带本 Chain 的提交共 %d 次，取最近 %d 次（按段号排）"
-                % (len(found), len(found)),
-                _stage_gaps([s for s, _, _ in found]))
+            # 🔴 同一段号可能有多条（重跑 / 预检提交）：**每段只留最新那条**。
+            #   历史顺序 = 执行顺序（后出现的更新）⇒ 后者覆盖前者即可。
+            #   不去重的话，"取最近 2 段"会拿到**同一段的两次重跑** ⇒ 拼出一条首尾同段的成片。
+            newest = {}
+            for stage, pid, e in found:
+                newest[stage] = (pid, e)
+            found = [(s, pid, e) for s, (pid, e) in sorted(newest.items())]
+        taken = found[-count:]
+        note = ("回扫 history：真的落了段视频的提交有 %d 条 ⇒ 取最近 %d 段"
+                % (len(found), len(taken)))
+        if all(s is not None for s, _, _ in taken):
+            note += "（第 %s 段）" % "、".join(str(s + 1) for s, _, _ in taken)
+        return ([(s + 1 if s is not None else None, pid, e) for s, pid, e in taken],
+                note,
+                _stage_gaps([s for s, _, _ in taken]))
 
     @PromptServer.instance.routes.post("/h3relay/concat")
     async def h3relay_concat(request):  # pragma: no cover - 需要运行中的宿主

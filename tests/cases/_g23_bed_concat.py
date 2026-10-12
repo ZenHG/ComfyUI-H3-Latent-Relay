@@ -371,6 +371,27 @@ else:
     check("26.4 体检抓到帧率不一致（拼出来必坏）",
           (not _h_fps["ok"]) and any("规格" in p for p in _h_fps["problems"]))
 
+    # 🔴 26.4b/26.4c fps 闸必须**带容差**（2026-10-12 实测事故）：探针里的 fps = 容器的
+    #   `average_rate` = 帧数 ÷ 容器时长，而时长被时间基（宿主 SaveVideo 实测 1/90000）
+    #   量化到 ms ⇒ **同一张图**跑出的两段会得到 24.0113 与 24.0126（它们的 `base_rate` /
+    #   `guessed_rate` 都恒为 24）。旧代码逐位比 ⇒ 好段被判"规格不一致"拒拼。
+    #   夹具 = 实测那对数字（手搓 dict：这是纯函数，不需要真文件）。
+    def _mkclipd(fps):
+        """手搓一条"体检用"的段描述（纯函数入参，不需要真文件）。"""
+        return {"path": "probe.mp4", "frames": 107, "fps": fps,
+                "v_seconds": 4.456, "v_start": 0.0, "v_end": 4.456,
+                "a_seconds": 4.458, "a_v_delta": 0.002, "has_audio": True,
+                "a_codec": "aac", "a_rate": 32000, "a_layout": "stereo",
+                "width": 608, "height": 352, "a_prime_samples": 64}
+
+    _h_q = CORE.assert_segments_joinable([_mkclipd(24.0126), _mkclipd(24.0113)])
+    check("26.4b 体检放过**容器量化**带来的 fps 微差（实测 24.0113 vs 24.0126 = 同一张图的两段）",
+          _h_q["ok"], "problems=%s" % _h_q["problems"])
+    _h_edge = CORE.assert_segments_joinable([_mkclipd(24.0), _mkclipd(23.976)])
+    check("26.4c 体检仍拒**真不同**的 fps（23.976 vs 24，差 0.024 > 容差）并报出差值",
+          (not _h_edge["ok"]) and any("fps 差" in p for p in _h_edge["problems"]),
+          "%s" % _h_edge["problems"][:1])
+
     # —— 26.5 体检不过 ⇒ 一段都不拼（坏片不许落地） ——
     _bad_out = os.path.join(_TMP26, "should_not_exist.mp4")
     _rep_bad = CORE.assemble_mp4_segments([_c1, _c_long], _bad_out)
@@ -883,6 +904,14 @@ else:
                                                   "type": "output"}]},
                     }}
 
+        def _staged(stage, name):
+            """带真段号 + 视频产物的提交条目（0.6.33 起"算不算一段"看**有没有视频产物**）。"""
+            return {"prompt": [None, None, {"7": {"class_type": "H3RelayChain",
+                                                  "inputs": {"stage_index": stage}}}],
+                    "outputs": {"31": {"images": [{"filename": name,
+                                                   "subfolder": "relay_kit/x",
+                                                   "type": "output"}]}}}
+
         _hist = {"p1": _entry("a.mp4"), "p2": _entry("b.mp4"),
                  "p9": {"prompt": [None, None, {"5": {"class_type": "KSampler"}}],
                         "outputs": {}}}
@@ -913,8 +942,8 @@ else:
               "%s" % (_paths,))
 
         _p2, _n2, _m2 = _pk._pick_segments(_q, [], "7", 5)
-        check("26.16 没给段记录时回扫 history：只认「图里带本 Chain 节点」的提交",
-              [p[1] for p in _p2] == ["p1", "p2"] and "2 次" in _n2, _n2)
+        check("26.16 没给段记录时回扫 history：只认「图里带本 Chain 节点**且真落了段视频**」的提交",
+              [p[1] for p in _p2] == ["p1", "p2"] and "2 条" in _n2, _n2)
 
         _p3, _n3, _m3 = _pk._pick_segments(_q, [], "7", 0)
         check("26.17 既没段记录、count 也 ≤ 0 ⇒ 明确说「不知道该拼哪几段」（不瞎拼）",
@@ -925,14 +954,9 @@ else:
               _p4 == [] and _m4 == [1] and "0/1 段命中" in _n4, "%s ｜ missing=%s" % (_n4, _m4))
 
         # 26.51 回扫路也要按**真段号**排（不能只按时间序）—— `_chain_stage` 从提交图里读
-        _hist2 = {
-            "q1": {"prompt": [None, None, {"7": {"class_type": "H3RelayChain",
-                                                 "inputs": {"stage_index": 2}}}],
-                   "outputs": {}},
-            "q2": {"prompt": [None, None, {"7": {"class_type": "H3RelayChain",
-                                                 "inputs": {"stage_index": 0}}}],
-                   "outputs": {}},
-        }
+        #   ⚠ 0.6.33 起回扫路**只认真落了段视频的提交** ⇒ 夹具必须带视频产物，
+        #   否则测到的是"一条都不算"（排序根本不会被执行）。
+        _hist2 = {"q1": _staged(2, "c.mp4"), "q2": _staged(0, "a2.mp4")}
         _p5, _n5, _m5 = _pk._pick_segments(_FakeQueue(_hist2), [], "7", 5)
         check("26.51 回扫按**真段号**排（history 里后写的 stage 0 也要排到前面）+ 报出缺第 2 段",
               [p[0] for p in _p5] == [1, 3] and _m5 == [2],
@@ -971,6 +995,49 @@ else:
         check("26.66 seq 原样带出（路由用它写「哪几段来自更早一轮」）",
               _pk._normalize_stages({"stages": [{"stage": 0, "prompt_id": "a", "seq": 7}]})
               == [(0, "a", 7)])
+
+        # 🔴 26.69 本组第三核心回归（2026-10-12 真实事故）：**带本 Chain 节点 ≠ 跑出了东西**。
+        #   现场 = 24 条提交带本 Chain 节点、只有 6 条真落了段；兜底路按段号取"最近 2 次"
+        #   正好命中两条 `stage_index=2` 的**空提交**（只跑了预览）⇒ 一段视频都没找到 ⇒ 拒拼。
+        #   更坏的是：尾注"共 2 次"看着还挺正常 —— 判据必须落在"有没有段视频"上。
+        _hist3 = {
+            "v0": _staged(0, "s0.mp4"),      # 真段
+            "v1": _staged(1, "s1.mp4"),      # 真段
+            # 这两条：图里带本 Chain 节点、段号也推到 2，但**没落段视频**
+            "e1": {"prompt": [None, None, {"7": {"class_type": "H3RelayChain",
+                                                 "inputs": {"stage_index": 2}}}],
+                   "outputs": {"12": {"images": [{"filename": "p.png",
+                                                  "type": "output"}]}}},
+            "e2": {"prompt": [None, None, {"7": {"class_type": "H3RelayChain",
+                                                 "inputs": {"stage_index": 2}}}],
+                   "outputs": {}},
+        }
+        _p9, _n9, _m9 = _pk._pick_segments(_FakeQueue(_hist3), [], "7", 2)
+        check("26.69 回扫路只认**真的落了段视频**的提交（带 Chain 节点的空提交不算一段）",
+              [p[1] for p in _p9] == ["v0", "v1"] and _m9 == [] and "2 条" in _n9, _n9)
+
+        # 🔴 26.70 同一段号多条（重跑 / 预检）⇒ **每段只留最新那条**：不去重的话，
+        #   "取最近 2 段"会拿到**同一段的两次重跑** ⇒ 拼出一条首尾同段的成片。
+        _hist4 = {"a": _staged(0, "old0.mp4"), "b": _staged(1, "s1.mp4"),
+                  "c": _staged(0, "new0.mp4")}          # 段 0 重跑（后写的更新）
+        _p10, _n10, _m10 = _pk._pick_segments(_FakeQueue(_hist4), [], "7", 2)
+        check("26.70 同一段号多条 ⇒ 每段只留**最新**那条（重跑不许顶掉另一段的位置）",
+              [p[0] for p in _p10] == [1, 2] and [p[1] for p in _p10] == ["c", "b"]
+              and _pk._mp4_paths(_p10[0][2])[0].endswith("new0.mp4"),
+              "pairs=%s" % ([(p[0], p[1]) for p in _p10],))
+
+        # 🔴 26.71 回扫路的 note 要点名**取了哪几段**（真段号）+ 真的落段条数：
+        #   用户得能一眼核对"我拼的是第 1、2 段吗"（旧 note 只写"取最近 N 次"，段号看不见，
+        #   而那次故障里它写的还是"共 2 次"—— 看着正常、实际取的是空提交）。
+        check("26.71 回扫路 note 带真段号（可核对）+ 报出真的落段条数",
+              "第 1、2 段" in _n9 and "真的落了段视频的提交有 2 条" in _n9, _n9)
+
+        # 🔴 26.72 按段号路：记录在、但那次提交**没落段视频** ⇒ 必须报成"缺这一段"，
+        #   不许当"命中"塞进 pairs 再被路由静默跳过（缺段的成片比没有成片更坏）。
+        _p11, _n11, _m11 = _pk._pick_segments(_FakeQueue(_hist3), [(0, "v0"), (1, "e1")], "7", 0)
+        check("26.72 按段号路：提交在但**没落段视频** ⇒ 计入 missing 并点名原因",
+              [p[0] for p in _p11] == [1] and _m11 == [2] and "没落段视频" in _n11,
+              "stages=%s missing=%s ｜ %s" % ([p[0] for p in _p11], _m11, _n11))
 
         # 26.32~26.34 音轨档映射与「每段边车」的取回（纯函数级）
         check("26.32 音轨档映射：默认 aac 256k；192k 可覆盖；无损档 = PCM f32（无码率参数）",

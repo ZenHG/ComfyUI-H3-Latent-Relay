@@ -103,6 +103,28 @@ ffmpeg -y -i s0.mp4 -i s1.mp4 -i s2.mp4 -i s3.mp4 \
 
 > After splicing **you must self-check** (the two ffprobe lines above): frame-count conservation + A/V duration diff ≤ 1 frame. If it fails, switch to ① or change material.
 
+**③ Which segments were actually spliced? (since 0.6.33 the report lets you check)**
+
+- **With segment records** (you ran ▶ / ⏩ on the canvas) they are taken by **true stage number**, and the
+  report says "taken by stage number: N/M hit".
+- **Without segment records** (you refreshed the page — the records live in memory only) it **rescans the
+  server's `/history`**, with three criteria: ① only submissions that **really wrote a segment video** count
+  ("the graph contains a Chain node" does not qualify — a chain pre-flight submission contains it too);
+  ② for a repeated stage number only the **newest** one is kept (a re-run must not displace another
+  segment's slot); ③ the report names **which segments were taken**.
+- 🔴 **A segment is defined by a real segment video**: if a record exists but that submission only ran a
+  preview / a half run, the report says "segment k **wrote no segment video**" — it will **not** silently
+  skip it and splice a film that is missing a segment (a film with a hole is worse than no film).
+- ⚠️ On failure the status box shows the report's **first `🔴` line** (since 0.6.33); the full report is
+  still in the browser console.
+
+**④ The fps comparison in the format health check carries a tolerance (0.02 fps, since 0.6.33)**
+
+The container's `average_rate` = frames ÷ duration, and duration is quantised to ms by the time base ⇒ two
+segments from the **same graph** come out as `24.0113` and `24.0126` (their `base_rate` / `guessed_rate` are
+**both 24**). Comparing them bit-exactly ⇒ a **good segment is judged "format mismatch" and refused**; with
+the tolerance it still rejects genuinely different rates (23.976 vs 24, a difference of 0.024).
+
 ## 7.2 Bed-window speech avoidance: what the criteria can and cannot catch (read this first)
 
 When `patch_seconds > 0` the node **automatically avoids the voiced regions in the bed source**. The criterion is **energy-based**

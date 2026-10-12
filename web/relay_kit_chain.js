@@ -1211,8 +1211,15 @@ async function concatFilm(chainNode, state, auto = false) {
         // 🔴 status 是**单行** widget：多行 report 塞进去会被压扁、成片路径反而看不见。
         // 所以：路径进**专用格** `concat_result`（不会被状态消息冲掉、可选中复制），
         // 完整报告进控制台，再给一次**明显提示**（toast）。
+        // 🔴 失败时**不能只取第一行**（0.6.33 修）：报告第一行是「拼接请求：…」**说明行**
+        //   （命中了哪几段 / 走了哪条选段路），真错因在第 2 行起、以 🔴 开头。
+        //   旧代码把它当"失败原因"显示 ⇒ 用户看到的是一句**看着像成功**的话
+        //   （实测 GG 看到的是"失败：回扫 history：…"），真错因只在控制台里。
         const rep = String(data.report || data.error || "拼接失败");
-        const first = rep.split("\n").map((s) => s.trim()).filter(Boolean)[0] || rep;
+        const lines = rep.split("\n").map((s) => s.trim()).filter(Boolean);
+        const head = lines[0] || rep;
+        const why = lines.find((s) => s.includes("🔴")) || lines[1] || head;
+        const first = data.ok ? head : why;
         const resultText = data.ok ? (data.out || "(路径见控制台)") : `失败：${first}`;
         setWidgetValue(chainNode, "concat_result", resultText);
         say(chainNode, state, data.ok ? "done" : "error",
@@ -1388,6 +1395,56 @@ try {
     };
 } catch { /* 非浏览器环境（测试里 import 本文件）忽略 */ }
 
+/** 取字符串的**首个码点**（emoji 是代理对 ⇒ `slice(0,1)` 会切出半个字形）。 */
+function firstGlyph(s) {
+    return Array.from(String(s || "").trim())[0] || "";
+}
+
+/** 「整行可点」兜底只绑一次（见 `bindRowClickFallback`）。 */
+let rowFallbackBound = false;
+
+/**
+ * 🔴 0.6.33「整行可点」兜底（GG 2026-10-12 点名："只有点前面的符号才触发"）。
+ *
+ * 前端把按钮渲染成 `<button>`（新版前端实测盒子 = 整行宽，但**命中区永远只是它自己的盒子**）：
+ * 行内其它位置（标签列、行左端的槽位条、前端换版后变窄的按钮盒）点上去**什么都不会发生**
+ * ⇒ 用户以为按钮坏了、或者按了没反应。
+ *
+ * 做法 = 在 `document` 上挂**一个** capture `pointerdown`：
+ *   · 只处理**本组的节点 DOM 内**、且落在「只有一个按钮的 widget 行」里的指针；
+ *   · 点在按钮**本体**上 ⇒ 立刻放手，交给前端原生路（**绝不重复触发**）；
+ *   · 否则按**首个字形**取回同一个回调（含防抖/反馈，与点按钮完全同一条路）。
+ *
+ * ⚠️ 挂在 `document` 而不是节点元素上：前端是 Vue 渲染，节点 DOM 会被**重建**
+ *   （刷新图、切标签、换主题都会），挂在旧元素上的监听器会**静默失效**。
+ * ⚠️ 拿不到 DOM（画布渲染的版本）⇒ 本兜底天然 inert，不影响原路径。
+ */
+function bindRowClickFallback() {
+    if (rowFallbackBound) return;
+    rowFallbackBound = true;
+    document.addEventListener("pointerdown", (ev) => {
+        try {
+            const host = ev.target?.closest?.("[data-node-id]");
+            if (!host) return;
+            const id = String(host.getAttribute("data-node-id") || "");
+            const st = [...CHAINS].find((s) => String(s.chainNode?.id) === id);
+            if (!st) return;
+            const row = ev.target.closest?.(".lg-node-widgets > *");
+            if (!row) return;
+            const btns = row.querySelectorAll("button");
+            // 行里不是**恰好一个**按钮 ⇒ 不是本包的按钮行（数字步进器有 2 个、i18n 条另有结构）
+            if (btns.length !== 1) return;
+            const btn = btns[0];
+            if (btn.contains(ev.target)) return;        // 点在按钮本体：交给原生路
+            const fn = st.btnByGlyph.get(firstGlyph(btn.textContent));
+            if (!fn) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            fn();
+        } catch { /* 兜底路径自己不许把点击搞崩 */ }
+    }, true);
+}
+
 function bindGlobalListeners() {
     if (listenersBound) return;
     listenersBound = true;
@@ -1412,6 +1469,15 @@ function bindGlobalListeners() {
     });
     api.addEventListener("execution_error", () => {
         for (const s of CHAINS) s.onExecutionError();
+    });
+    // 🔴 0.6.33 官方「停止 / 取消」（队列面板的 Stop、或直接 `/interrupt`）⇒ 宿主发这一条
+    //   （实测宿主 `execution.py::handle_execution_error`：中断异常走 `execution_interrupted`、
+    //   `broadcast=True`，载荷 `{prompt_id, node_id, node_type, executed}`）。
+    //   不认它 ⇒ 状态机一直停在 `armed()`（等一轮跑完），而那一轮**永远不会回来**
+    //   （中断后不会再有 `execution_success`）⇒ 按钮与色带停在「连跑中 · 采样 x/y」，
+    //   用户以为还在跑，其实早就停了。
+    api.addEventListener("execution_interrupted", ({ detail }) => {
+        for (const s of CHAINS) s.onInterrupted(detail);
     });
     // 采样进度（**每步都触发**）⇒ 只用来更新「⏩ 连跑」按钮上的进度文字，走节流。
     api.addEventListener("progress", ({ detail }) => {
@@ -1511,6 +1577,10 @@ app.registerExtension({
                 phase: "idle",
                 pairIds: new Set(), pairReady: false,
                 btns: {}, lastProgress: "",          // 按钮引用 / 最近一次采样进度文案
+                // 🔴 0.6.33「整行可点」兜底用：**首个字形 → 回调**。
+                //   为什么不用 label 当键：label 会被 `flashPressed`（`⏳ … 已点击`）与
+                //   连跑进度（`⏩ 连跑 · 采样 x/y`）改写，**首个字形是唯一不动的锚**。
+                btnByGlyph: new Map(),
                 chainNode: node,
 
                 /** 本组"正在等一轮跑完"（排队成功后置位；`stepDone` 消费掉）。 */
@@ -1585,6 +1655,29 @@ app.registerExtension({
                     this.onStageChanged();
                     say(node, this, "error",
                         "执行出错，连跑已停（stage_index 保持当前值，可直接重跑）。");
+                },
+
+                /**
+                 * 官方「停止 / 取消」收尾（0.6.33）：宿主中断当前 prompt ⇒ 这一轮**不会**再回
+                 * `execution_success`。只认 `armed()`（本组正在等这一轮）—— 别组 / 上一轮的中断
+                 * 不许把本组打回空闲。段号**保持当前值**：这一段没落盘，重跑这一段即可，
+                 * **绝不往前推进**（推进 = 成片里少一段而报告看着正常）。
+                 */
+                onInterrupted(detail) {
+                    if (!this.armed()) return;
+                    const pair = findPair(node);
+                    const stage = pair ? getStage(pair.bridge) : null;
+                    const want = stage == null ? null : (this.stageIds[stage]?.id ?? null);
+                    // 带 prompt_id 的就对一下：不是我们这一轮的中断（别组 / 更早的残留）不算数
+                    if (detail?.prompt_id && want && String(detail.prompt_id) !== String(want)) return;
+                    this.mode = "idle";
+                    this.awaiting = false;
+                    this.remaining = 0;
+                    this.onStageChanged();
+                    say(node, this, "stopped",
+                        (stage == null ? "已被官方停止（Stop / 取消）"
+                                       : `已被官方停止（Stop / 取消）：第 ${stage} 段没跑完`)
+                        + "。段号保持当前值，这一段没有落盘 —— 点「▶ Run」或「⏭ 续跑」重跑这一段即可。");
                 },
 
                 /** `progress` = 采样步数（**每步都触发** ⇒ 走节流）。 */
@@ -1665,6 +1758,7 @@ app.registerExtension({
 
             CHAINS.add(state);
             bindGlobalListeners();
+            bindRowClickFallback();
             // 节点被删/复制时把状态摘出去 —— 否则监听回调会一直留着这个闭包。
             const origOnRemoved = node.onRemoved;
             node.onRemoved = function () {
@@ -1709,6 +1803,8 @@ app.registerExtension({
                 w = node.addWidget("button", label, null, guard(node, label, run),
                                    { serialize: false });
                 state.btns[label] = w;
+                // 🔴 0.6.33：「整行可点」兜底要按**首个字形**找到这个回调（见 btnByGlyph）。
+                state.btnByGlyph.set(firstGlyph(label), run);
                 return w;
             };
 
