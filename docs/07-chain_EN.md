@@ -69,7 +69,7 @@ Every successful queue records the `prompt_id` against the **stage number** (`{i
 | `segments` | `5` | **Run up to which stage** (0 = infinite). Only affects «⏩ 连跑 / ⏭ 续跑»; if the canvas stage number is already past it ⇒ nothing is queued and it says what to set. With `prompts` filled, do not exceed the block count |
 | `prompts` | `""` | **Each stage's own prompt**: split into blocks by a **standalone `---` line**, block k feeds stage k. Empty = no prompt swap (old behaviour) |
 | `prompt_target` | `""` | Which cell the prompt is written into. Empty = auto-detect; `683` = the highest-priority prompt cell on that node; `683.h3_data` = name the field explicitly |
-| `auto_concat` | `false` | ⏩ after the auto-run ends, **automatically concat** into a film |
+| `auto_concat` | **`true`** (since 0.6.34) | ⏩ after the auto-run ends, **automatically concat** into a film; off = segment mp4 files only |
 | `concat_name` | `""` | Film filename (without extension). Empty = use the write-to-disk `run_id`; saved under ComfyUI's `output/` |
 | `stage_index` | `0` | **Which stage is being run now** (0-based). It decides which **block** of `prompts` the `prompt` output port gives. Clicking ▶/✔/⏩ on the canvas **changes it together with the bridge, write-to-disk, and the previous-stage latent read**; in scripts you change it yourself (see `docs/10` §7.4) |
 | `run_id` | `""` | **For resume-from-checkpoint**: fill the same value as the bridge / write-to-disk `run_id`. Once filled, each stage writes its progress into `_progress.json` in the same directory as the stage files; empty = no progress recorded (not a single extra file is written) |
@@ -319,6 +319,12 @@ with the voice anchor the distance from the baseline shrinks to 1/5, and the cli
 - When not connected: the behaviour is **bit-exact identical** to the old version (off by default, zero migration cost);
 - Supports three latent forms: `VAEEncodeAudio`'s pure audio tensor (mainstream) / AV joint latent
   (NestedTensor, take stream 2) / an already-split list.
+
+🔵 **Since 0.6.34 there is a "no wiring" mode, `voice_anchor_stage` (INT, default −1 = off)**: ≥ 0 means that when
+`voice_anchor` is not wired, the **audio stream** of `output/relay_kit/<run_id>/stage_<this>` is read as the voice anchor — exactly parallel to the appearance anchor's
+`ref_anchor_stage`. The effect equals `voice_anchor`; only the source differs, and it saves a `LoadAudio + VAEEncodeAudio` pair and a wire.
+Three boundaries: ① it must be lower than this segment's index (the anchor must be a **finished** segment); ② a wired `voice_anchor` wins — this field then has no effect and says so in the report;
+③ with `pin_audio=False` this field **does not read from disk** (the anchor has nowhere to land) and states why.
 
 ### Limitations
 

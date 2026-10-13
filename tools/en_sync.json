@@ -8,8 +8,8 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "condensed",
-          "h_en": "5cda2de1af2d4fe5",
-          "h_src": "c7bc23b97ff86d59",
+          "h_en": "d941307882463221",
+          "h_src": "80b6ee69917a6e3a",
           "seeded": "by-position"
         },
         {
@@ -40,16 +40,16 @@
           "zh": "使用方法",
           "en": "Usage",
           "mode": "condensed",
-          "h_en": "96edfa93c01252c6",
-          "h_src": "cf2410e8467b1675",
+          "h_en": "d831f4fa5af10086",
+          "h_src": "c91f8acaad04b704",
           "seeded": "by-position"
         },
         {
           "zh": "目录结构",
           "en": "Repository layout",
           "mode": "condensed",
-          "h_en": "ec3b482373ad244b",
-          "h_src": "7cec7bafb8334515",
+          "h_en": "513ef4bde24c8d0f",
+          "h_src": "dbad652f81283ad3",
           "seeded": "by-position"
         },
         {
@@ -72,14 +72,14 @@
           "zh": "文档索引",
           "en": "Documentation index",
           "mode": "condensed",
-          "h_en": "04c5aae385f4fec0",
-          "h_src": "29e07060c24b6d6a",
+          "h_en": "a80646bf9671516e",
+          "h_src": "e23b202e4620a070",
           "seeded": "by-position"
         }
       ],
       "acks": [],
-      "stamped": "2026-10-12",
-      "src_sha": "e6e55d7447bdd40c"
+      "stamped": "2026-10-14",
+      "src_sha": "e16b77323bccbe98"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -166,7 +166,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-12",
+      "stamped": "2026-10-14",
       "src_sha": "06ca2288755a21d0"
     },
     "docs/02-parameters.md": {
@@ -184,14 +184,14 @@
           "zh": "参数",
           "en": "Parameters",
           "mode": "full",
-          "h_en": "3fb4f0f737ba8480",
-          "h_src": "9256c19bee942dae",
+          "h_en": "dafff69f2af04b47",
+          "h_src": "634d0dd18d71a27b",
           "seeded": "by-position"
         }
       ],
       "acks": [],
-      "stamped": "2026-10-12",
-      "src_sha": "d595e54bf2af1841"
+      "stamped": "2026-10-14",
+      "src_sha": "2b6cd3118cc63bbf"
     },
     "docs/03-sampling-and-design.md": {
       "en": "docs/03-sampling-and-design_EN.md",
@@ -222,7 +222,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-12",
+      "stamped": "2026-10-14",
       "src_sha": "e0c4d1c18fb4b8e2"
     },
     "docs/04-canvas-and-widgets.md": {
@@ -238,7 +238,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-12",
+      "stamped": "2026-10-14",
       "src_sha": "d39be80cc6d876ab"
     },
     "docs/05-troubleshooting.md": {
@@ -294,7 +294,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-12",
+      "stamped": "2026-10-14",
       "src_sha": "9115e791360e9ca7"
     },
     "docs/06-continuity-scripting.md": {
@@ -318,7 +318,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-12",
+      "stamped": "2026-10-14",
       "src_sha": "c046d84ff172f569"
     },
     "docs/07-chain.md": {
@@ -336,8 +336,8 @@
           "zh": "参数（可选格，一律在 `status` 之后追加 / **默认 ⇒ 老图行为逐位不变**）",
           "en": "Parameters (optional cells, always appended after `status` / **default ⇒ old-graph behaviour bit-exact unchanged**)",
           "mode": "full",
-          "h_en": "67ff51b3170ef1a4",
-          "h_src": "961281c4e7c2b95a",
+          "h_en": "88af8e28b63a0530",
+          "h_src": "f2f543b358322c20",
           "seeded": "by-position"
         },
         {
@@ -400,14 +400,14 @@
           "zh": "声锚（voice_anchor，0.6.19）：跨说话人续接时锁定音色",
           "en": "Voice anchor (voice_anchor, 0.6.19): lock timbre when continuing across speakers",
           "mode": "full",
-          "h_en": "0c0d64440a554167",
-          "h_src": "3603ddb459c93a83",
+          "h_en": "649f783ffdfbd87c",
+          "h_src": "29984df3c30dbbe3",
           "seeded": "by-position"
         }
       ],
       "acks": [],
-      "stamped": "2026-10-12",
-      "src_sha": "290d5d9df613135e"
+      "stamped": "2026-10-14",
+      "src_sha": "4c54359bbd0fed87"
     },
     "docs/08-testing.md": {
       "en": "docs/08-testing_EN.md",
@@ -424,8 +424,8 @@
           "zh": "单测（零 GPU、秒级）",
           "en": "Unit tests (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "473ba6b2990d06be",
-          "h_src": "43556722eb47863d",
+          "h_en": "fb0d655106b8bb6a",
+          "h_src": "52852aa71be0eec9",
           "seeded": "by-position"
         },
         {
@@ -440,16 +440,16 @@
           "zh": "V3 外壳与默认出口（零 GPU、秒级）",
           "en": "V3 shell and default exit (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "d92b5a5ffe55e77b",
-          "h_src": "7bbc483522adf326",
+          "h_en": "bbc588b394eaad60",
+          "h_src": "169054ee6948161a",
           "seeded": "by-position"
         },
         {
           "zh": "tools/ 下的其他自检（完整清单见 [`tools/README.md`](../tools/README.md)）",
           "en": "Other self-checks under tools/ (full list in [`tools/README.md`](../tools/README.md))",
           "mode": "full",
-          "h_en": "0004c29eff5bc076",
-          "h_src": "1773caa81fd75d70",
+          "h_en": "9ddbe70059149d81",
+          "h_src": "20da02d69e5873fe",
           "seeded": "by-position"
         },
         {
@@ -462,8 +462,8 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-12",
-      "src_sha": "863a4fe4889180f3"
+      "stamped": "2026-10-14",
+      "src_sha": "98a9c283f7a606d3"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",
@@ -518,7 +518,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-12",
+      "stamped": "2026-10-14",
       "src_sha": "6886d24ff831c09b"
     },
     "docs/10-audio-seam-and-concat.md": {
@@ -536,8 +536,8 @@
           "zh": "7.1 多段拼接：N 个 mp4 怎么接成一条",
           "en": "7.1 Multi-segment concatenation: how to join N mp4 files into one",
           "mode": "full",
-          "h_en": "63be4a64d5c60fb2",
-          "h_src": "d370f2372cf35688",
+          "h_en": "da51fbe614579c06",
+          "h_src": "b1acb9802fe1f3ba",
           "seeded": "by-number"
         },
         {
@@ -582,8 +582,8 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-12",
-      "src_sha": "be117c5d7c7cd1d6"
+      "stamped": "2026-10-14",
+      "src_sha": "068491bc51cdce1e"
     }
   }
 }

@@ -340,6 +340,95 @@ check("29.15 真实产物尺度（std≈0.4，实测下限附近）不被守卫�
       "std=%.3f" % float(_va_real["samples"].std(dim=-1, unbiased=False).max()))
 
 
+# 29.16~29.21 声锚「免接线」档 `voice_anchor_stage`（0.6.34 新增）。
+#   动机：外观锚早有「填段号自动读盘」的路（`ref_anchor_stage`），声锚没有 ⇒ 想用声锚
+#   必须多搭 LoadAudio + VAEEncodeAudio 再拉一根线。本档把它对齐成同一套用法。
+#   判据 = 「只填段号」必须与「手动接同一份锚」**逐位相同**；四种错法都要 raise/出声。
+_va_stage_lat = {"samples": CORE._nested_pair(torch.randn(1, 4, 6, 8, 8), _va_audio.clone())}
+# ⚠ 打桩要打在 **nodes.py 用的那个** `relay_core` 上：本测试把 nodes.py 当 `h3latentrelay.nodes`
+#   加载 ⇒ 它的 `from . import relay_core` 与分片里的顶层 `relay_core` 是**两个模块对象**
+#   （第一版打在顶层 CORE 上，结果真函数照样被调到、白跑一次 IO）。
+_orig_load29 = NODES.CORE.load_av_latent
+_orig_path29 = NODES._stage_path
+_read29 = []
+NODES._stage_path = lambda rid, idx: "FAKE/%s/stage_%05d.safetensors" % (rid, int(idx))
+NODES.CORE.load_av_latent = lambda p: (_read29.append(p), _va_stage_lat)[1]
+try:
+    _br29 = NODES.H3RelayCopyBridge()
+    _o_auto, _r_auto, _t_auto, _ = _br29.bridge(_tgt29, _prv29, 5,
+                                                run_id="film", stage_index=1,
+                                                voice_anchor_stage=0)
+    _o_hand, _r_hand, _t_hand, _ = _br29.bridge(_tgt29, _prv29, 5,
+                                                run_id="film", stage_index=1,
+                                                voice_anchor=_va_stage_lat)
+    check("29.16 声锚免接线档：只填段号 ⇒ 与「手动接同一份锚」逐位相同（视频 + 音频）",
+          torch.equal(CORE.video_from_latent(_o_auto), CORE.video_from_latent(_o_hand))
+          and torch.equal(CORE.audio_from_latent(_o_auto), CORE.audio_from_latent(_o_hand)),
+          _r_auto[-90:])
+    check("29.17 自动读盘写进 report 且点明来源（不静默）",
+          "voice_anchor_stage=0" in _r_auto and "未使用外部接线" in _r_auto,
+          _r_auto[-90:])
+
+    def _raise29(fn, want):
+        try:
+            fn()
+            return None
+        except Exception as e:
+            # 命中 ⇒ 返回 None（通过）；没命中 ⇒ 返回差在哪（失败）
+            return None if want in str(e) else "文案不含 %r：%s" % (want, str(e)[:80])
+
+    _e29a = _raise29(lambda: _br29.bridge(_tgt29, _prv29, 5, run_id="film", stage_index=1,
+                                          voice_anchor_stage=1), "必须小于本段段号")
+    check("29.18 段号不小于本段 ⇒ raise（锚必须取更早跑完的段）", _e29a is None, str(_e29a))
+    _e29b = _raise29(lambda: _br29.bridge(_tgt29, _prv29, 5, run_id="", stage_index=1,
+                                          voice_anchor_stage=0), "需要 run_id")
+    check("29.19 没填 run_id ⇒ raise 并点名该填哪个（不静默找不到文件）", _e29b is None, str(_e29b))
+
+    def _boom29(_p):
+        raise FileNotFoundError(_p)
+    NODES.CORE.load_av_latent = _boom29
+    _e29c = _raise29(lambda: _br29.bridge(_tgt29, _prv29, 5, run_id="film", stage_index=1,
+                                          voice_anchor_stage=0), "段文件不存在")
+    check("29.20 段文件不存在 ⇒ raise 并给两条出路（跑完该段 / 改回 -1）", _e29c is None, str(_e29c))
+
+    NODES.CORE.load_av_latent = lambda p: (_read29.append(p), _va_stage_lat)[1]
+    _read29.clear()
+    _o_both, _r_both, _t_both, _ = _br29.bridge(_tgt29, _prv29, 5, run_id="film", stage_index=1,
+                                                voice_anchor=_va_stage_lat, voice_anchor_stage=0)
+    check("29.21 两个都给了 ⇒ 接线优先、本档不生效，且 report 出声（不静默）",
+          not _read29 and "不生效" in _r_both
+          and torch.equal(CORE.video_from_latent(_o_both), CORE.video_from_latent(_o_hand)),
+          _r_both[-80:])
+    # 29.22 / 29.23 两个「设了却没生效」的档 —— 都必须**出声**（铁律 15：兜底分支可观测）
+    _read29.clear()
+    _o_p29, _r_p29, _t_p29, _ = _br29.bridge(_tgt29, None, 5, run_id="film",
+                                             stage_index=0, voice_anchor_stage=0)
+    check("29.22 直通档（没有上一段）+ 设了声锚段号 ⇒ 出声说「本段不生效」，且不读盘",
+          not _read29 and "不生效" in _r_p29 and "直通" in _r_p29, _r_p29[-90:])
+
+    _read29.clear()
+    _o_np29, _r_np29, _t_np29, _ = _br29.bridge(_tgt29, _prv29, 5, run_id="film", stage_index=1,
+                                                pin_audio=False, voice_anchor_stage=0)
+    check("29.23 pin_audio=False + 设了声锚段号 ⇒ 不读盘（省一次整文件 IO）+ 说明为什么没生效",
+          not _read29 and "pin_audio=False" in _r_np29, _r_np29[-90:])
+
+    # 29.24 老图槽位错位：新参数读到非整数（空串）⇒ 退回默认 −1（关），**不许炸**
+    #     ⚠ 兜底那行是 `print` 到 stdout（不是 report）⇒ 必须**抓 stdout** 才看得到它出声。
+    import contextlib as _ctx
+    import io as _io
+    _read29.clear()
+    _buf29 = _io.StringIO()
+    with _ctx.redirect_stdout(_buf29):
+        _o_ws29, _r_ws29, _t_ws29, _ = _br29.bridge(_tgt29, _prv29, 5, run_id="film",
+                                                    stage_index=1, voice_anchor_stage="")
+    check("29.24 存档错位（新参数读到空串）⇒ 退回默认 −1 = 关，不读盘、不炸、且出声",
+          not _read29 and "读不成整数" in _buf29.getvalue(),
+          _buf29.getvalue().strip().splitlines()[-1][:90] if _buf29.getvalue().strip() else "（无输出）")
+finally:
+    NODES.CORE.load_av_latent = _orig_load29
+    NODES._stage_path = _orig_path29
+
+
 print()
 print("=" * 78)
 print("30) 孤立瞬态抑制 declick（0.6.22 新增）")
@@ -755,3 +844,58 @@ check("31.8 🔴 首段（本段不注入音频参考）⇒ **这三行一条都
       "（「没动就不报」—— 首段的 report 不许被这段文案污染）",
       _apply31(0, own=False)["report"] == "", _apply31(0, own=False)["report"][:60])
 
+
+# 29.25~29.30 实验总开关 `exp_anchor`（0.6.34 新增）：一个选择器管住两个隐性实验。
+#    🔴 各档语义：auto（默认）= 只看配置文件（**存量用户零行为变化**）；
+#       off = 显式关（文件在也不开，且必须出声）；显式档 = 缺文件直接 raise。
+#    🔴 空 run_id（第 1 段合法）**不许**在闸里炸 —— 这是本轮修的真回归。
+import io as _io
+import os as _os
+import tempfile as _tf
+
+def _mk_stage_fn(_d):
+    return lambda rid, idx: _os.path.join(_d, "stage_%05d.safetensors" % int(idx))
+
+def _mk_dir(with_va=False, with_ti=False):
+    d = _tf.mkdtemp(prefix="h3_expgate_")
+    for _nm, _mk in (("_va.json", with_va), ("_tiha.json", with_ti)):
+        if _mk:
+            with _io.open(_os.path.join(d, _nm), "w", encoding="utf-8") as _fh:
+                _fh.write("{}")
+    return d
+
+G = NODES._exp_gate
+_a = _mk_dir()
+_b = _mk_dir(with_va=True, with_ti=True)
+_c = _mk_dir(with_va=True)
+
+_r = G("auto", "film", _mk_stage_fn(_a))
+check("29.25 auto + 无配置文件 ⇒ 两个都关、零说明（旧行为）",
+      _r == (False, False, []), "%s" % (_r,))
+_r = G("auto", "film", _mk_stage_fn(_b))
+check("29.26 auto + 两个文件都在 ⇒ 两个都开（照旧只看文件）",
+      _r == (True, True, []), "%s" % (_r,))
+_r = G("off", "film", _mk_stage_fn(_b))
+check("29.27 off + 文件都在 ⇒ 两个都关，且**两种情况都出声**（不许静默）",
+      _r[0] is False and _r[1] is False and len(_r[2]) == 2
+      and all("未生效" in n for n in _r[2]), "%s" % (_r[-1][:1],))
+_r = G("voice_accum", "film", _mk_stage_fn(_c))
+check("29.28 显式 voice_accum + 文件在 ⇒ 只开 VA（TIHA 仍关）",
+      _r == (True, False, []), "%s" % (_r,))
+expect_raise("29.29 显式 voice_accum + 缺文件 ⇒ raise 并点名那是**数据**不是开关",
+             lambda: G("voice_accum", "film", _mk_stage_fn(_a)), "不只是开关")
+check("29.30 🔴 空 run_id + auto ⇒ **不炸**（第 1 段合法），视作无配置文件",
+      G("auto", "", NODES._stage_path) == (False, False, []),
+      "%s" % (G("auto", "", NODES._stage_path),))
+expect_raise("29.31 空 run_id + 显式档 ⇒ raise 且错因对准 run_id",
+             lambda: G("history_anchor", "", NODES._stage_path), "run_id 是空")
+expect_raise("29.32 档位字面量不认识 ⇒ raise（不许当关）",
+             lambda: G("voice", "film", _mk_stage_fn(_a)), "不认识")
+check("29.33 显式档缺文件时**不读盘**（isfile 都没走到就 raise）",
+      NODES.EXP_ANCHOR_MODES[0] == "auto" and "off" in NODES.EXP_ANCHOR_MODES,
+      "%s" % (NODES.EXP_ANCHOR_MODES,))
+for _d in (_a, _b, _c):
+    for _f in _os.listdir(_d):
+        _os.remove(_os.path.join(_d, _f))
+    _os.rmdir(_d)
+print("        （实验开关的临时目录已清理）")

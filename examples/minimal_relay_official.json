@@ -701,6 +701,24 @@
           "widget": {
             "name": "audio_ref_seconds"
           }
+        },
+        {
+          "localized_name": "voice_anchor_stage",
+          "name": "voice_anchor_stage",
+          "type": "INT",
+          "widget": {
+            "name": "voice_anchor_stage"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "exp_anchor",
+          "name": "exp_anchor",
+          "type": "COMBO",
+          "widget": {
+            "name": "exp_anchor"
+          },
+          "link": null
         }
       ],
       "outputs": [
@@ -753,8 +771,14 @@
         0,
         -1,
         5,
-        0.0
-      ]
+        0.0,
+        -1,
+        "auto"
+      ],
+      "widgets_values_named": {
+        "voice_anchor_stage": -1,
+        "exp_anchor": "auto"
+      }
     },
     {
       "id": 12,

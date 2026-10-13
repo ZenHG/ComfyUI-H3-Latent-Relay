@@ -431,8 +431,12 @@ _it22 = NODES.H3RelayAudioSeam.INPUT_TYPES()
 _opt22 = _it22["optional"]
 _REQ22 = _it22["required"]
 
-check("22.1 默认全关（patch/tile=0，fade=0.25，bed_stage=0，OUTPUT_NODE）",
-      _opt22["patch_seconds"][1]["default"] == 0.0
+check("22.1 默认：patch=1.2（头部补丁默认开）/ tile=0，fade=0.25，bed_stage=0，OUTPUT_NODE",
+      # 2026-10-13：`patch_seconds` 默认 0 → 1.2 —— 它自己的 tooltip 写着「建议 2.0」却默认关，
+      #   等于每个新工作流都从「音频每段重启一次」开始。取 1.2 与出词侧「段首前 1.2s 无词」
+      #   的纪律对齐（`patch_guard` 默认开再兜一层）。
+      #   ⚠ 副作用：段号 ≥1 而上一段音频不在盘上 ⇒ 现在报错，不再静默直通。
+      abs(_opt22["patch_seconds"][1]["default"] - 1.2) < 1e-9
       and _opt22["tile_seconds"][1]["default"] == 0.0
       and abs(_opt22["fade_seconds"][1]["default"] - 0.25) < 1e-9
       and _opt22["bed_stage"][1]["default"] == 0
@@ -715,9 +719,9 @@ check("22.27 无亏空 ⇒ 逐位直通（不误伤：亏空=0 的帧一个样�
       "输出差 %.2e" % float((_onb.float() - _xnb.float()).abs().max()))
 _oa1, _ra1 = NODES.H3RelayPost().apply(_xsa, None, settle_auto=1.0, settle_sharpen=0.6)
 _itp = NODES.H3RelayPost.INPUT_TYPES()["optional"]
-check("22.28 节点互斥（auto 优先、固定版弃权点名）+ settle_auto 默认 0、紧邻 settle_sharpen",
+check("22.28 节点互斥（auto 优先、固定版弃权点名）+ settle_auto 默认 0.5、紧邻 settle_sharpen",
       "固定锐化弃权" in _ra1
-      and _itp["settle_auto"][1]["default"] == 0.0
+      and _itp["settle_auto"][1]["default"] == 0.5
       and list(_itp).index("settle_auto") == list(_itp).index("settle_sharpen") + 1
       and "亏空" in _itp["settle_auto"][1]["tooltip"],
       _ra1.split("；")[-1][:56])

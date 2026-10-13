@@ -7,7 +7,7 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 
 | 项 | 值 |
 |---|---|
-| 版本 | **0.6.33** |
+| 版本 | **0.6.34** |
 | 许可 | **MIT**（第三方出处见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)） |
 | 宿主 | **ComfyUI ≥ 0.35.0，且带 MiniMax-H3 支持**（宿主自身为 GPL-3.0，见 §许可与出处） |
 
@@ -196,7 +196,7 @@ python tools/voice_bank.py advise --bank <声库> --prompt-file 段N.md --prev-f
 
 ### 多段拼接成一条
 
-每段各出一个 mp4。Chain 节点上**开 `auto_concat`** 或点 **🧩 拼成一条**（画面流拷贝无损、
+每段各出一个 mp4。Chain 节点上 **`auto_concat` 默认开**（连跑完自动拼）或随时点 **🧩 拼成一条**（画面流拷贝无损、
 音频逐段去 priming 对齐、拼完自检四项）；不开画布也能拼：
 `python tools/concat_segments.py s1.mp4 s2.mp4 -o film.mp4`（退出码 0 = 过四项断言）。
 ⚠️ 别用 `ffmpeg -f concat -c copy` 或 `acrossfade`（实测会虚增时长 / 每缝偷 0.25 s 且累积）。
@@ -313,7 +313,7 @@ python tools/voice_bank.py advise --bank <声库> --prompt-file 段N.md --prev-f
   （改官方会触发官方重载当前工作流，代价不可接受）。
 - 🔴 **只改显示，绝不改图**：只改 `label` / `title` / **`widget.tooltip`**，
   **从不改 `name` / 下拉框的值** ⇒ 工作流 JSON 一个字节都不变。你自己改过的节点标题**原样保留**。
-- **悬浮提示**已精简为「这参数干什么 + 推荐填什么」（原文最长 1084 字符的历史沿革留在 `docs/`）；
+- **悬浮提示**已精简为「这参数干什么 + 推荐填什么」（最长 1084 → 150 字符；历史沿革留在 `docs/`）；
   词表里没有的参数**保留后端原文**，不会被改坏。
 - 与「音频参考额度」提示**共存**：标题只换名字那一段，追加在后面的额度提示不会被抹掉。
 - 🔴 **与界面汉化插件（ComfyUI-Chinese-Translation / Global Translation 等）会抢字段** ——
@@ -353,7 +353,7 @@ ComfyUI-H3-Latent-Relay/
 ├── web/                   # 前端 JS：🧩 拼接按钮、Chain 面板、`run_id` 一处改全组、**节点中英切换按钮**（画布用；脚本用户见 docs/10 §7.4）
 ├── examples/              # 两个可直接打开的工作流：最小续接（21 节点）与全流程（47 节点）
 ├── docs/                  # 深度文档 01–10（原理 / 参数 / 采样链 / 画布 / 排障 / 脚本 / Chain / 测试 / 观测 / 音频）
-├── tests/                 # 离线自测（零 GPU）：607 项断言 + V3 逐字段 + 词分发纯函数
+├── tests/                 # 离线自测（零 GPU）：625 项断言 + V3 逐字段 + 词分发纯函数
 ├── tools/                 # 自检 / 取证 / 拼接 CLI / 打包器（含英文文档同步闸 en_sync.py）
 ├── licenses/              # 随包分发的第三方许可全文
 ├── dist/                  # 打包器的产出（最小分发集 + zip，不入库）
@@ -422,7 +422,7 @@ ComfyUI-H3-Latent-Relay/
 | [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md) · 🇬🇧 [`_EN`](docs/05-troubleshooting_EN.md) | **完整排障表** · **常见疑问 FAQ** · 工作流文件自检 · API 提交 |
 | [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md) · 🇬🇧 [`_EN`](docs/06-continuity-scripting_EN.md) | 出词纪律：段首缓冲 · 台词安全时刻 · 末帧锚链 · 音频缝配套 |
 | [`docs/07-chain.md`](docs/07-chain.md) · 🇬🇧 [`_EN`](docs/07-chain_EN.md) | Chain 自动连跑（换词 / 拼片 / 断点续跑） |
-| [`docs/08-testing.md`](docs/08-testing.md) · 🇬🇧 [`_EN`](docs/08-testing_EN.md) | 离线自测：36 组断言明细（607 项）· 工具清单 |
+| [`docs/08-testing.md`](docs/08-testing.md) · 🇬🇧 [`_EN`](docs/08-testing_EN.md) | 离线自测：36 组断言明细（625 项）· 工具清单 |
 | [`docs/09-metrics.md`](docs/09-metrics.md) · 🇬🇧 [`_EN`](docs/09-metrics_EN.md) | 观测量参考区间（DTW 残留 / 外观漂移）· 怎么自校准 |
 | [`docs/10-audio-seam-and-concat.md`](docs/10-audio-seam-and-concat.md) · 🇬🇧 [`_EN`](docs/10-audio-seam-and-concat_EN.md) | **音频缝与多段拼接**：缝的口径与调参指南 · **台词保护** · 判据能力边界 · 音轨档位 · 边车 · **不开画布的脚本用法** |
 | [`RELEASE-NOTES.md`](RELEASE-NOTES.md) | **面向用户的发布说明**（中英双语，一版一节）· **升级前先看这个** |
@@ -431,6 +431,6 @@ ComfyUI-H3-Latent-Relay/
 | [`AGENTS.md`](AGENTS.md) | **给改这个仓库的 agent 的作业入口**：一次改动的闭环 · 三档检查（本地 / CI / 宿主+浏览器）· **铁律↔执行体映射表** · 全部机检一览 · 禁区 · 已知薄弱点 |
 | [`RELEASING.md`](RELEASING.md) | **发布规范（唯一真相源）**：GitHub + Comfy Registry 两个渠道必须成对、一条命令 `tools/release.py`、失败处置、密钥纪律 |
 | [`SECURITY.md`](SECURITY.md) | 密钥 / 依赖 / 网络行为声明 |
-| [`tools/README.md`](tools/README.md) | 17 个脚本的用途与期望值（**12 个自检/取证** + 拼接 CLI + 打包器 + **发布器** + **声库采集器** + **浏览器冒烟门**） |
+| [`tools/README.md`](tools/README.md) | 18 个脚本的用途与期望值（**13 个自检/取证** + 拼接 CLI + 打包器 + **发布器** + **声库采集器** + **浏览器冒烟门**） |
 | [`examples/README.md`](examples/README.md) | 两份可直接打开的工作流（最小续接 21 节点 / 全流程 47 节点）· 生成器 |
 | [`README_EN.md`](README_EN.md) | **英文精简版**（安装 / 接线 / 节点 / 参数 / 排障 / FAQ）—— 深度推导一律外链本文件与 `docs/` |

@@ -41,11 +41,11 @@ So the correct way to join is **a plain head-to-tail splice**.
 > accumulating per segment**. Check it with `ffprobe <segment.mp4>` on the `start` field of the video line.
 
 > ⚠️ **【auto-run ≠ a finished film】** Running the chain gives you N mp4 files. Since 0.6.7 `H3RelayChain` can splice them for you (see below),
-> but **you must click it** (enable `auto_concat` or press 🧩) — it won't silently do it for you.
+> it **joins automatically** when the chain finishes (`auto_concat` is on by default since 0.6.34); you can also press 🧩 at any time.
 
 **① Preferred: one-click in the pack (0.6.7)**
 
-On the Chain node: enable `auto_concat` ⇒ auto-splice when the run finishes; or press **🧩 拼成一条** at any time.
+On the Chain node `auto_concat` is on by default ⇒ auto-splice when the run finishes; turn it off to keep segment mp4 files only, or press **🧩 拼成一条** at any time.
 The picture is **stream-copied (lossless)**, audio is de-primed and aligned per segment, and right after splicing it self-checks four items
 (frame-count conservation / no PTS holes / DTS increasing / A·VΔ ≤ 1 frame); measured, a 4-segment 29 s film comes out in **1.3 seconds**.
 If the self-check fails it keeps the film for evidence and states in the status that it **must not be used as a final product**.

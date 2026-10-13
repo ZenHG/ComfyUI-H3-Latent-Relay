@@ -33,7 +33,7 @@ namespace** — the same globals and the same order as the single-file flat scri
 fixtures shared across groups remain visible. ⚠️ Case file names start with `_`, so `pytest tests/`
 does **not** collect them separately (otherwise every assertion would run twice).
 
-**607 assertions, zero GPU, no model loading**, covering thirty-six aspects:
+**625 assertions, zero GPU, no model loading**, covering thirty-six aspects:
 
 ### Counting and declaration discipline (the two notes from former README §8, moved in with the slimming)
 
@@ -44,7 +44,7 @@ does **not** collect them separately (otherwise every assertion would run twice)
   the other two drifted for a long time unnoticed).
 - ⚠️ **When writing a correction note, do not restate the old wrong number** — that pollutes the regexes
   of the machine checks above.
-- This file's line "607 assertions / thirty-six aspects" + the `| 21 |` row of the table below are
+- This file's line "625 assertions / thirty-six aspects" + the `| 21 |` row of the table below are
   machine-checked by **H3c** (since 2026-09-30; after the README slimming the criterion moved from the
   README to this file).
 
@@ -155,7 +155,7 @@ failure):
 ## V3 shell and default exit (zero GPU, seconds)
 
 ```bash
-COMFYUI_PATH=<root> python tests/test_v3_schema.py      # expected 72/0 (8 nodes / 127 inputs; same tier with or without the host registry)
+COMFYUI_PATH=<root> python tests/test_v3_schema.py      # expected 72/0 (8 nodes / 129 inputs; same tier with or without the host registry)
 COMFYUI_PATH=<root> python tools/assert_default_exit.py  # expected 5/5
 ```
 
@@ -174,7 +174,7 @@ wrong slot in the parameter table means **the user's parameters are silently shi
 >   (the host registers `latent_upscale_models` itself) ⇒ does not raise.
 > · Registry **unobtainable** (host `nodes` cannot be imported / is shadowed by this pack's own directory)
 >   ⇒ it likewise converges to **RuntimeError** ⇒ likewise swallowed ⇒ **the node is still present**.
-> ⇒ Both environments are **8 nodes / 127 input / 72 items**, hence **one number**.
+> ⇒ Both environments are **8 nodes / 129 input / 72 items**, hence **one number**.
 >
 > 🔴 It was not like this before 2026-10-07: if the `import nodes` inside `_comfy_registry()` raised
 >   **ImportError** it would **propagate** (`_upscaler_module()` only catches `RuntimeError`) ⇒
@@ -220,7 +220,7 @@ real problem on its very first run** (in CI the V3 exit actually could not load)
 
 | Tool | What it judges | Expected |
 |---|---|---|
-| `tools/review_050.py` | doc–code consistency (node list / parameter table / assertion count / version / **all** example-graph slots (I1-I4: slots / node counts / widget markers) / **the three iron rules** / **the L13 English-doc sync gate** / **the H3j smoke expected values** / **H3k registry metadata** / **H3l release policy present** / **H3m no credential literals** / **H3n i18n word-table completeness** / **H3p bilingual tooltip completeness** / **H3q JS comma expression** / **H3r i18n anti-overwrite guard** / **H3s link endpoint field compat** / **H3t official locale entry** / **H3o dangling doc references** / **H3u registry package file count (true value)** / **H3v tools script count (true value)** / **H3w untracked files** /  **H3x `setdefault` to `PYTHONPATH`** / **H3y tools script registry** / **H3z release.py flags complete** / **H4a explicit env for Python children** / **H4b criterion-table self-check** / **H4c ledger consistency** / **H4d JS expected values (true value)** / **H4e dist whitelist (true value)** / **H4f `SIM115` blind spot** / **H4g artifacts carry no bytecode or symlinks**) | **118/0** |
+| `tools/review_050.py` | doc–code consistency (node list / parameter table / assertion count / version / **all** example-graph slots (I1-I4: slots / node counts / widget markers) / **the three iron rules** / **the L13 English-doc sync gate** / **the H3j smoke expected values** / **H3k registry metadata** / **H3l release policy present** / **H3m no credential literals** / **H3n i18n word-table completeness** / **H3p bilingual tooltip completeness** / **H3q JS comma expression** / **H3r i18n anti-overwrite guard** / **H3s link endpoint field compat** / **H3t official locale entry** / **H3o dangling doc references** / **H3u registry package file count (true value)** / **H3v tools script count (true value)** / **H3w untracked files** /  **H3x `setdefault` to `PYTHONPATH`** / **H3y tools script registry** / **H3z release.py flags complete** / **H4a explicit env for Python children** / **H4b criterion-table self-check** / **H4c ledger consistency** / **H4d JS expected values (true value)** / **H4e dist whitelist (true value)** / **H4f `SIM115` blind spot** / **H4g artifacts carry no bytecode or symlinks**) | **119/0** |
 | `tools/smoke_nodes.py` | node-layer functional smoke test (the seven continuation items really run once; 🔍 the upscale node needs upstream weights and is not in the smoke test) | **16/0** |
 | `tools/assert_default_exit.py` | default exit = V3 (contract 2 + behaviour 3; includes **the node set V3 actually registers**) | **5/5** |
 | `tools/sync_deploy_check.py` | the deployed copy matches the commit state of the given commit | all `OK` |

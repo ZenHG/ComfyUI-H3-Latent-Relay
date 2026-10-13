@@ -213,7 +213,10 @@ def main() -> int:
     print("\n── 3. 裁重叠 / 后处理 / 音频缝 ──")
     run_node("H3RelayTrimAV", ctx)
     run_node("H3RelayPost", ctx)
-    run_node("H3RelayAudioSeam", ctx)
+    # ⚠ `patch_seconds` 默认 1.2（2026-10-13 起）⇒ 段号 ≥1 时会去找上一段的落盘音频当床源。
+    #   冒烟目录里没有那个文件 ⇒ 显式传 0 走直通档：本工具只验「接线通不通」，
+    #   补丁本身（长度守恒 / 台词守卫 / 床源选择）在 `tests/cases/_g18_match_audio.py` 里测。
+    run_node("H3RelayAudioSeam", dict(ctx, patch_seconds=0.0))
 
     print("\n── 4. 控制节点 ──")
     run_node("H3RelayChain", ctx)

@@ -162,7 +162,9 @@ for k, v in N.H3RelayCopyBridge.INPUT_TYPES()["optional"].items():
     if k in ("conditioning", "run_id", "stage_index",
              "ref_anchor_latent", "ref_anchor_stage", "ref_anchor_frames"):
         continue                      # 复合桥族：**仅在接上 conditioning 时**才生效（见 D1b）
-    if v[1]["default"] not in (0, 0.0, False, "hard", "smoothstep"):
+    if v[1]["default"] not in (0, 0.0, False, -1, "hard", "smoothstep"):
+        # `-1` 也算「关」：段号族的关档一律用 -1（`ref_anchor_stage` / `voice_anchor_stage`），
+        # 与 0 同义（都不生效），只是语义上"不指定"比"第 0 段"更准确。
         _ok_d = False
         print("      · %s 默认=%r" % (k, v[1]["default"]))
 ck("D1 CopyBridge：**新件**在默认模式下不生效（既有项豁免）", _ok_d)
@@ -856,23 +858,26 @@ ck("K14b 去 priming 抬升交叉窗最静点（编码器 33ms 静音被丢掉�
 # K15 —— 2026-09-19 深夜：mask_mode 生产/对照/实验分型（防产线再误跑）
 _mm = N.H3RelayCopyBridge.INPUT_TYPES()["optional"]["mask_mode"]
 _tt = _mm[1]["tooltip"]
-ck("K15 mask_mode 分型写进 tooltip（生产/对照/实验三档 + 2026-09-19 修正结论）",
-   "生产档" in _tt and "对照档" in _tt and "实验档" in _tt
-   # 2026-09-19：旧断言查 "0.0407 vs 0.0402"（「ramp 与 hard 等同」）——该结论已用
-   # **看不见跳帧的指标集**测出，已作废并从 tooltip 撤下。改查修正后的结论。
-   and "2026-09-19 修正" in _tt and "取景被改写" in _tt
+ck("K15 mask_mode 分型写进 tooltip（五档都说到 + 推荐档 + 修正后的结论）",
+   # 2026-10-13 文案重写：不再用内部记号（生产档/对照档/实验档 + 日期 + 指标名），
+   # 改成用户读得懂的说法。判据同步改成**查语义**，不查内部记号。
+   all(m in _tt for m in ("hard", "taper", "ramp", "blend", "window"))
+   and "推荐" in _tt and "默认" in _tt
+   and "取景可能被改写" in _tt and "四个非 hard 档都会跳" in _tt
    and _mm[0] == ["hard", "taper", "ramp", "blend", "window"]   # 枚举只追加、不插队（保护 widgets_values）
    and _mm[1]["default"] == "hard")
 _opt_cb = N.H3RelayCopyBridge.INPUT_TYPES()["optional"]
-ck("K15b 掩码族专属参数全部带档位标签",
-   all("taper 专属" in _opt_cb[k][1]["tooltip"] for k in ("taper_tokens", "seam_min"))
-   and all("ramp 专属" in _opt_cb[k][1]["tooltip"] for k in ("ramp_top", "ramp_tokens"))
-   and all("blend 专属" in _opt_cb[k][1]["tooltip"] for k in ("blend_top", "blend_tokens")))
+ck("K15b 掩码族专属参数全部点明「只在哪一档生效」（改档位名必须同步这里）",
+   # 2026-10-13：标签从内部记号（🔴实验档 X 专属）改成用户说法（仅 X 档）。
+   all("仅 taper 档" in _opt_cb[k][1]["tooltip"] for k in ("taper_tokens", "seam_min"))
+   and all("仅 ramp 档" in _opt_cb[k][1]["tooltip"] for k in ("ramp_top", "ramp_tokens"))
+   and all("仅 blend 档" in _opt_cb[k][1]["tooltip"] for k in ("blend_top", "blend_tokens"))
+   and all("仅 window 档" in _opt_cb[k][1]["tooltip"] for k in ("window_top", "window_shape")))
 
 # K16 —— 2026-09-19 深夜：settle_auto 自适应糊区补偿（方向二「观测—校正闭环」落地）
 _optP16 = N.H3RelayPost.INPUT_TYPES()["optional"]
-ck("K16 settle_auto 槽：默认 0、紧邻 settle_sharpen、tooltip 含「亏空/自适应/弃权」",
-   _optP16["settle_auto"][1]["default"] == 0.0
+ck("K16 settle_auto 槽：默认 0.5（2026-10-14 从 0 改）、紧邻 settle_sharpen、tooltip 含「亏空/自适应/弃权」",
+   _optP16["settle_auto"][1]["default"] == 0.5
    and list(_optP16).index("settle_auto") == list(_optP16).index("settle_sharpen") + 1
    and "亏空" in _optP16["settle_auto"][1]["tooltip"]
    and "自适应" in _optP16["settle_auto"][1]["tooltip"]
@@ -943,8 +948,13 @@ ck("L1 H3RelayAudioSeam 已注册（8 节点）+ 显示名以 🔗 开头",
    and N.NODE_DISPLAY_NAME_MAPPINGS["H3RelayAudioSeam"].startswith("🔗")
    and len(N.NODE_CLASS_MAPPINGS) == 8,
    "%d 节点" % len(N.NODE_CLASS_MAPPINGS))
-ck("L2 默认全关（patch=0 / tile=0 / fade=0.25）+ OUTPUT_NODE（否则第 1 段床源永不落盘）",
-   _ol["patch_seconds"][1]["default"] == 0.0 and _ol["tile_seconds"][1]["default"] == 0.0
+ck("L2 默认：patch=1.2（头部补丁默认开）/ tile=0 / fade=0.25 + OUTPUT_NODE（否则第 1 段床源永不落盘）",
+   # 2026-10-13：`patch_seconds` 默认 0 → 1.2。理由是它自己的 tooltip 写着「建议 2.0」却默认关
+   #   ⇒ 每个新工作流都从「音频每段重启一次」开始。取 1.2 而不是 2.0：与出词侧
+   #   「段首前 1.2s 无词」的纪律对齐，且 `patch_guard` 默认开还会兜一层。
+   #   ⚠ 副作用（已写进 CHANGES 迁移说明）：段号 ≥1 而上一段音频不在盘上 ⇒ 现在**报错**，
+   #     不再静默直通（原来那条路会静默产出一段不连续的音频）。
+   abs(_ol["patch_seconds"][1]["default"] - 1.2) < 1e-9 and _ol["tile_seconds"][1]["default"] == 0.0
    and abs(_ol["fade_seconds"][1]["default"] - 0.25) < 1e-9
    and N.H3RelayAudioSeam.OUTPUT_NODE is True)
 
@@ -1057,7 +1067,7 @@ ck("L12 docs/10 §7.2 判据能力边界与兜底措施在位（能量型边界 
 # H3h V3 机检的「节点数 / input 数 / 项数」在 4 个文件里的一致（2026-09-25 新增）
 # ============================================================================
 # 🔴 为什么现在才能加：过去 CI 与本机被当成"节点数不同"（一处数字表达不了两种环境）
-#   ⇒ 只能人工维持 ⇒ 实测漂成一组偏小的数字（真值是 8 节点 / 127 个 input）。
+#   ⇒ 只能人工维持 ⇒ 实测漂成一组偏小的数字（真值是 8 节点 / 129 个 input）。
 #   实测那个前提**是错的**：宿主 ComfyUI 自带注册 `latent_upscale_models`（`folder_paths.py:43`）
 #   ⇒ `H3RelayLatentUpscale.INPUT_TYPES()` 永不抛错 ⇒ 永不被 V3 entrypoint 的逐节点容错跳过
 #   ⇒ 两边恒等 ⇒ 这组数字终于可机检。
@@ -1066,7 +1076,7 @@ ck("L12 docs/10 §7.2 判据能力边界与兜底措施在位（能量型边界 
 #   ImportError ⇒ 穿透 ⇒ INPUT_TYPES 抛 ⇒ 逐节点容错跳过 Upscale）—— 而 CI 抛的是 RuntimeError、
 #   被 `_upscaler_module()` 吞掉 ⇒ CI 一直是 8 节点。⇒ 旧文档把一个人造态写成了"CI 的环境"。
 #   根因已在 `nodes.py::_comfy_registry` 修掉（先扫 sys.modules；再 import 且兜住任何异常）
-#   ⇒ 现在**两条路都吐 8 节点 / 127 input / 72 项**，`(7, *)` 那些合法配对随之作废。
+#   ⇒ 现在**两条路都吐 8 节点 / 129 input / 72 项**，`(7, *)` 那些合法配对随之作废。
 # ⚠️ 正则刻意收窄，避免误伤：
 #   · 节点数**只在"同一行还有 input"时**才认（README 里"3 节点/18 节点/45 节点"是别的意思）
 #   · 更正说明里**不许复述旧数字**（历史留在 CHANGES.md 与本地审核文档里）
@@ -1084,7 +1094,7 @@ def _run_v3(ci_env: bool):
     ``sys.modules`` **不跨进程** —— 父进程设了它，子进程看不到；于是"本地复现"会变成空话，
     只在另一条路径上才出现的问题**本地永远发现不了**（2026-09-29 就是这么红的：
     `节点数真值 7 不在声明 [8, 9] 里`）。
-    ⚠️ 2026-10-07 起两条路径**数字相同**（8 节点 / 127 input / 72 项）—— 因为
+    ⚠️ 2026-10-07 起两条路径**数字相同**（8 节点 / 129 input / 72 项）—— 因为
     `_comfy_registry()` 的 ImportError 穿透已堵掉，"7 节点"那一档不再存在。
     本函数**照旧两边都跑**：数字相同不代表**路径**相同，而路径才是会各自腐烂的东西。
     """
@@ -1174,8 +1184,10 @@ for _nm, _st in (("input", _decl_in), ("节点数", _decl_nd), ("项数", _decl_
 #      常量两侧覆盖法：本机跑验到 (8,116) 与 (7,103)，CI 跑验到 (7,103)；两者合起来覆盖全部两项。
 #   ⚠️ 只扫 `_v3_docs`（4 个声明文件）：`exp/`、`LOCAL-*.md`、tests 注释里的是**历史数字**，
 #      它们本来就该保持旧值（改它们反而抹掉历史），不纳入。
-_V3_LEGIT_PAIRS = [(8, 127)]            # (节点数, input 数) —— 2026-10-07 收敛成一个
+_V3_LEGIT_PAIRS = [(8, 129)]            # (节点数, input 数) —— 2026-10-07 收敛成一个
 #   2026-10-12：124 → 127（「潜空间分块放大」加 3 个空间分块参数）。
+#   2026-10-13：127 → 128（「复合桥」加 `voice_anchor_stage`，声锚免接线档）。
+#   2026-10-14：128 → 129（「复合桥」加 `exp_anchor`，实验层总开关）。
 # 🔴 以前这里是**成对**的（每个数字两档：(7, N) / (8, N+1)），因为当时认为"CI 少一个节点"。
 #   2026-10-07 查明那一档是人造态、且已根修 ⇒ **`(7, *)` 全部删掉**。
 #   为什么必须删：留着它 = 允许文档里写一个**现在不可能出现**的配对，
@@ -1660,15 +1672,21 @@ _dead_tips = sorted(_i18n_tips - _all_used)
 ck("H3p-i18n 悬浮提示里没有**死条目**（键不是任何节点的参数 ⇒ 改名后忘了删）",
    not _dead_tips, "死条目 %d 个：%s" % (len(_dead_tips), _dead_tips[:8]))
 
-# 🔴 每条必须**两种语言都齐**（只有中文 = 英文界面下露中文，本项就是治这个）
-_incomplete = []
+# 🔴 2026-10-13 架构变更：**中文只有一个源 = 后端 `nodes.py` 的 tooltip 原文**。
+#    本表**只存 `en`**；留 `zh` 就是又把"两套中文说法"这条路打开了（历史上两边漂开过）。
+#    ⇒ 判据：每条必须有 `en`，且**不许有 `zh`**；切中文时前端回落后端原文（`tipFor` 返 null）。
+_incomplete, _has_zh = [], []
 for _k, _v in re.findall(r'^\s{4}"([^"]+)":\s*\{(.*?)\n\s{4}\},', _i18n_src, re.M | re.S):
     if _k not in _i18n_tips:
         continue
-    if not re.search(r"\bzh:\s*\"", _v) or not re.search(r"\ben:\s*\"", _v):
+    if not re.search(r"\ben:\s*\"", _v):
         _incomplete.append(_k)
-ck("H3p-i18n 每条悬浮提示都**中英俱全**（只有一边 = 另一种界面下露错语言）",
-   not _incomplete, "缺语言的条目 %d 个：%s" % (len(_incomplete), _incomplete[:8]))
+    if re.search(r"\bzh:\s*\"", _v):
+        _has_zh.append(_k)
+ck("H3p-i18n 每条悬浮提示都有 `en`（缺 = 英文界面下露中文）",
+   not _incomplete, "缺 en 的条目 %d 个：%s" % (len(_incomplete), _incomplete[:8]))
+ck("H3p-i18n 表里**不许再有 `zh`**（中文单源在后端 ⇒ 不可能出现两套中文说法）",
+   not _has_zh, "带 zh 的条目 %d 个：%s" % (len(_has_zh), _has_zh[:8]))
 
 # 🔴 提示**不得写进工作流 JSON**：`applyLang` 必须写 `w.tooltip`（前端只序列化 `value`
 #    ⇒ 提示不进 JSON）。本项**只正面断言"写了 w.tooltip"**，是全链路的必要条件 ——

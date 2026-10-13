@@ -57,7 +57,7 @@
 | **J1** | hygiene | 存量工作流无『输出数组过期』的节点 | — | — |
 | **J3** | hygiene | custom_nodes 无「同包第二份副本」 | — | — |
 | **L1** | contract | H3RelayAudioSeam 已注册 | — | — |
-| **L2** | contract | 默认全关 | — | — |
+| **L2** | contract | 默认：patch=1.2 | — | — |
 | **L3** | contract | patch=0 ⇒ 音频逐位直通 | — | — |
 | **L4** | contract | 长度守恒 + N 之后逐位不动 | — | — |
 | **L5** | contract | 替换区 = 床源尾部窗 × 单一增益 | — | — |

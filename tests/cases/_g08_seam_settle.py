@@ -194,9 +194,9 @@ except Exception as e:
 # 11.5~11.8 0.6.7 词分发 / 自动拼接的**接口契约**（默认关 = 老图逐位不变）
 for _w in ("prompts", "prompt_target", "auto_concat", "concat_name"):
     check("11.5 %s 作为可选 widget 存在" % _w, _w in opt)
-check("11.6 默认档 = 老行为（prompts 空、auto_concat 关、成片名空）",
+check("11.6 默认档（prompts 空、成片名空；auto_concat 自 2026-10-14 起默认开）",
       opt["prompts"][1].get("default") == "" and opt["prompts"][1].get("multiline") is True
-      and opt["auto_concat"][1].get("default") is False
+      and opt["auto_concat"][1].get("default") is True
       and opt["concat_name"][1].get("default") == "",
       "prompts.default=%r multiline=%r auto_concat.default=%r"
       % (opt["prompts"][1].get("default"), opt["prompts"][1].get("multiline"),

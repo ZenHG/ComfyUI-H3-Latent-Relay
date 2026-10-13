@@ -19,6 +19,30 @@
 
 ---
 
+## 0.6.34 — 2026-10-13
+
+**四件事：自相矛盾的默认值修了、声锚不用再接线、提示全重写成人话、实验功能有了看得见的开关。图、连线、图 JSON 都不用改；但请刷新浏览器页面。**
+
+- **音频缝的「头部补丁」默认打开（1.2 秒）**：以前默认关 ⇒ 每段环境声各起各的，成片听起来一段一段的。现在段首 1.2 秒换成上一段的环境声，台词守卫默认开着兜底。⚠ 段号 ≥1 而上一段音频不在盘上（片名填错 / 没跑过上一段）会**报错**并说明怎么办，不再悄悄产出不连续的音频。老工作流不受影响。
+- **声锚新增「只填段号」用法**：以前要搭 `LoadAudio + VAEEncodeAudio` 再拉一根线；现在填「声锚段号」就自动读那一段的音频，和外观锚一样。接线仍然优先。
+- **全部悬浮提示重写**，只讲三件事：它做什么、打开/调大会怎样、什么时候该调。去掉了开发记号、章节号、版本号；同一条提示不再有两套中文。标签也按同一张术语表统一了（48 条）并加机检。
+- **两个「好功能默认关」打开了**：段头糊区补偿（`settle_auto`，默认 0.5，不糊的帧不动）与连跑完自动拼成片（`auto_concat`，默认开）。
+- **实验功能有了看得见的开关**：新增「实验开关」选择器，管住原先只能靠 run 目录配置文件的「按人累积音色 / 时不变历史锚」。默认 `auto` = 与旧版逐位一致 ⇒ 老配置不受影响；`off` = 彻底关；选对应档 = 强制开（缺配置文件直接报错）。
+
+**升级动作**：不用改任何东西；装完刷新浏览器页面（F5）。
+
+<!-- EN -->
+**Four changes: a self-contradictory default fixed, the voice anchor needs no wiring, every tooltip rewritten in plain language, and the experiments now have a visible switch. No graph, wiring or JSON changes — but refresh the browser page.**
+
+- **The audio seam's head patch is on by default (1.2 s)**: it used to be off, so each segment restarted its own ambience and the film sounded stitched. The first 1.2 s now takes the previous segment's ambience, with the dialogue guard as a backstop. ⚠ From segment 2 on, if the previous audio is not on disk the node errors out and says what to do, instead of quietly producing discontinuous audio. Existing graphs are unaffected.
+- **The voice anchor works without wiring**: enter a stage number and that segment's audio is read automatically, like the appearance anchor. A wired input still wins.
+- **Every tooltip rewritten** to answer three questions: what it does, what turning it on or raising it changes, and when to adjust it. Development markers, section numbers and version numbers are gone, and labels now follow one fixed glossary.
+- **Two features that shipped switched off are now on**: soft-zone compensation at the head (`settle_auto`, 0.5) and auto-joining segments into one film when a chain run finishes (`auto_concat`).
+- **The experiments now have a visible switch**: one selector governs the two features that previously needed a config file in the run directory (per-speaker voice accumulation / the time-invariant history anchor). Default `auto` is bit-identical to the old behaviour; `off` disables them; naming a feature forces it on.
+
+**Action required**: nothing. Refresh the browser page (F5) after installing.
+
+
 ## 0.6.33 — 2026-10-12
 
 🔴 **图、连线、参数都不用改，但要刷新浏览器页面。**
