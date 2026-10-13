@@ -503,17 +503,18 @@ check("C1.4 关闸（两闸=0）⇒ 小阶跃也修（旧行为可复现）",
       not torch.equal(_o_off, _z_mid) and float(_o_off[0].mean()) > float(_z_mid[0].mean()),
       "修后 %.4f（原 %.4f）" % (float(_o_off[0].mean()), float(_z_mid[0].mean())))
 
-# C1.5 走向外推：guide 是 0.20→0.24 的爬升 ⇒ 目标取外推值 0.25，不是末帧 0.24
+# C1.5 走向外推（w=0.5、欠程 0.04、外推 0.05）：缝最小化采信外推 ⇒ 修正量大于末帧档
 _ramp = torch.stack([(torch.full((_HW[0], _HW[1], 3), 0.20 + 0.01 * _i)
                       + torch.randn(_HW[0], _HW[1], 3, generator=torch.Generator().manual_seed(11 + _i)) * 0.002)
                      for _i in range(5)]).clamp(0.0, 1.0)          # [5,H,W,3]
 _z_ramp = _head(0.20, noise=0.002, n=6, seed=31)
-_o_ramp = CORE.match_prev_stats(_z_ramp, _ramp, frames=6, weight=1.0)
-_o_last = CORE.match_prev_stats(_z_ramp, _ramp[-1:], frames=6, weight=1.0)   # 只给末帧
-check("C1.5 走向外推：目标 = 外推一帧（0.25）而非末帧（0.24）⇒ 修正量更大",
-      float(_o_ramp[0].mean()) > float(_o_last[0].mean()) + 0.005
-      and abs(float(_o_ramp[0].mean()) - 0.25) < 0.006,
-      "多帧 %.4f vs 末帧 %.4f（期望 ≈0.25 / ≈0.24）"
+_o_ramp = CORE.match_prev_stats(_z_ramp, _ramp, frames=6, weight=0.5)
+_o_last = CORE.match_prev_stats(_z_ramp, _ramp[-1:], frames=6, weight=0.5)   # 只给末帧
+check("C1.5 走向外推（欠程、w=0.5）：外推采信 ⇒ 修正量大于末帧档",
+      abs(float(_o_ramp[0].mean()) - 0.225) < 0.002
+      and abs(float(_o_last[0].mean()) - 0.220) < 0.002
+      and float(_o_ramp[0].mean()) > float(_o_last[0].mean()) + 0.003,
+      "多帧 %.4f（期望≈0.225） vs 末帧 %.4f（期望≈0.220）"
       % (float(_o_ramp[0].mean()), float(_o_last[0].mean())))
 
 # C1.6 单帧 guide 逐位同旧版（手算旧公式当基准 —— 改机理的回归锁）
@@ -597,6 +598,48 @@ check("A1.3 钉住区发软（对比度×0.5）+ 塌陷-恢复 ⇒ 锐度路仍�
 # A1.4 全程软钉住、无切换无塌陷 ⇒ 0（不误伤）
 _s4, _, _ = CORE.detect_settle(_soft_seam(switch_at=60, wobble=1.5), 22)
 check("A1.4 全程软钉住、无切换点 ⇒ 0（不误伤）", _s4 == 0, "settle=%d" % _s4)
+
+# ============================================================================
+print()
+print("=" * 78)
+print("C1b｜外推双护栏（趋势显著性 + 缝最小化选目标）—— 2026-10-14 真实缝实测后加")
+print("=" * 78)
+
+# C1.7 趋势闸：尾部**无真趋势**（逐帧均值随机抖动 ±0.004，LS 拟合出假斜率）
+#   ⇒ 外推被闸挡下，多帧目标退化为末帧（与只给末帧的修正量一致）
+_g_jitter = torch.stack([torch.full((_HW[0], _HW[1], 3), 0.30 + _j)
+                         for _j in (0.003, -0.004, 0.002, -0.001, 0.004, -0.003,
+                                    0.001, -0.002, 0.003, -0.004, 0.002, 0.000)]).clamp(0.0, 1.0)
+_z_j = _head(0.295, noise=0.001, n=6, seed=41)
+_o_j = CORE.match_prev_stats(_z_j, _g_jitter, frames=6, weight=0.5)
+_o_j_last = CORE.match_prev_stats(_z_j, _g_jitter[-1:], frames=6, weight=0.5)
+_dj = float(_o_j[0].mean()) - float(_z_j[0].mean())
+_djl = float(_o_j_last[0].mean()) - float(_z_j[0].mean())
+check("C1.7 趋势闸：无趋势尾部（假斜率）⇒ 多帧目标退化为末帧（修正量一致）",
+      abs(_dj - _djl) < 0.001 and abs(_dj) > 0.001,
+      "多帧修正 %.4f vs 末帧修正 %.4f（都应有 ≈0.5×0.005 的修正）" % (_dj, _djl))
+
+# C1.8 缝最小化·采信：父段上行（0.20→0.31）+ 子段欠程（0.30）⇒ 外推采信，阶跃抹平
+_ramp_up = torch.stack([(torch.full((_HW[0], _HW[1], 3), 0.20 + 0.01 * _i)
+                         + torch.randn(_HW[0], _HW[1], 3,
+                                       generator=torch.Generator().manual_seed(51 + _i)) * 0.0005)
+                        for _i in range(12)]).clamp(0.0, 1.0)
+_z_short = _head(0.30, noise=0.0005, n=6, seed=52)
+_o_up = CORE.match_prev_stats(_z_short, _ramp_up, frames=6, weight=0.5)
+_o_up_last = CORE.match_prev_stats(_z_short, _ramp_up[-1:], frames=6, weight=0.5)
+check("C1.8 缝最小化·采信：上行父段+欠程子段 ⇒ 外推把阶跃抹平（末帧只能修一半）",
+      abs(float(_o_up[0].mean()) - 0.31) < 0.002
+      and abs(float(_o_up_last[0].mean()) - 0.305) < 0.002,
+      "外推 %.4f（期望≈0.31） vs 末帧 %.4f（期望≈0.305）"
+      % (float(_o_up[0].mean()), float(_o_up_last[0].mean())))
+
+# C1.9 缝最小化·拒信：父段上行 + 子段**超过**走向（0.33）⇒ 外推会放大阶跃 ⇒ 退末帧
+_z_over = _head(0.33, noise=0.0005, n=6, seed=53)
+_o_ov = CORE.match_prev_stats(_z_over, _ramp_up, frames=6, weight=0.5)
+_o_ov_last = CORE.match_prev_stats(_z_over, _ramp_up[-1:], frames=6, weight=0.5)
+check("C1.9 缝最小化·拒信：子段超过走向 ⇒ 外推拒信、退末帧（不放大阶跃）",
+      abs(float(_o_ov[0].mean()) - float(_o_ov_last[0].mean())) < 0.001,
+      "多帧 %.4f vs 末帧 %.4f（应一致）" % (float(_o_ov[0].mean()), float(_o_ov_last[0].mean())))
 
 # ============================================================================
 print()

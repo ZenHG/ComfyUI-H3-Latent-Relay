@@ -280,10 +280,13 @@ def load_av_latent(path: str):
 
 
 def read_av_latent_meta(path: str) -> dict:
-    """只读边车的**头 metadata**（不加载 video/audio 两个大张量）。
+    """只读边车的**头 metadata**（不实例化 video/audio 张量）。
 
     B1 谱系簿记的读取侧：断点续跑换源、拼片选段、事后复现时，
-    「这个文件是谁、在哪一版、承接哪一段」不必先读十几 MB 的 latent。
+    「这个文件是谁、在哪一版、承接哪一段」不必为它构造 NestedTensor。
+    ⚠ 2026-10-14 实测修正：safetensors mmap 下全量 `load_file` 同样不物化数据
+    ⇒ 计时与全量加载**基本无差**（本机热缓存甚至更慢）——本函数的价值在谱系本身
+    与「扫描器不碰张量对象」的干净 API，**不在速度**；冷缓存/网络盘未测。
     旧 format 1 头（无谱系键）同样可读 ⇒ 向后兼容。
     """
     from safetensors import safe_open

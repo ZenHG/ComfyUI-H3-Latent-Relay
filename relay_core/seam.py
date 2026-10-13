@@ -446,35 +446,57 @@ MATCH_PREV_STEP_FLOOR: float = 0.6 / 255.0
 # ③ 外推取父段尾部几帧（obvpm FIT=12）：TrimAV 调用点传钉住区末尾这么多帧
 #    （拷贝桥下 = 上段真实尾部；cond 桥下是本段重画——该路线本项应保持 0）。
 MATCH_PREV_GUIDE_FIT: int = 12
+# ④ 趋势显著性闸（2026-10-14 真实缝实测后加）：外推量须超过「尾部自身帧间
+#    噪声 ×3」且超过地板才采信——否则尾部「走向」是噪声，外推会把目标推离
+#    缝的真正另一半。实测（18 条真实缝，33b 验收轮 + 追痕 18 段实跑）：
+#    外推Δ中位 0.0026 / 最大 0.0091，多数超过缝阶跃本身（0.0001–0.0041）；
+#    无此闸时新修正在 2/18 条缝上把阶跃放大（0.0012→0.0030）。
+MATCH_PREV_TREND_OVER_NOISE: float = 3.0
+MATCH_PREV_TREND_FLOOR: float = 0.6 / 255.0
+# ⑤ 单调性护栏：外推目标若比末帧离段头更远 ⇒ 修正会放大阶跃 ⇒ 退回末帧
+#    （见 match_prev_stats 内实现；实测 33b 缝无此护栏时无闸臂 0.0012→0.0030）。
 
 
-def _guide_stats(g: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-    """guide 的 (mu_t, sd_t)：**多帧 ⇒ 均值按走向外推一帧、标准差取窗内聚合**；
+def _guide_stats(g: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """guide 的 (mu_t, sd_t, mu_last)：**多帧 ⇒ 均值按走向外推一帧、标准差取窗内聚合**；
     单帧/三维 ⇒ 与该帧自身的均值/标准差（逐位同旧版）。
 
     levellock 纪律②：拿父段**末帧**当目标，会在父段合法走进阴影时把子段「修」回
     旧色档；正解是用末若干帧的走向外推一帧。对比度是慢变量，不玩外推——
     取窗内逐帧方差的均值（K=1 时退化为该帧标准差，与旧版一致）。
+
+    🔴 趋势显著性闸（纪律④，2026-10-14 真实缝实测后加）：外推量不超过
+    「尾部**拟合残差**噪声 ×3」且不超过地板 ⇒ **不外推，用末帧**。实测 18 条真实缝的
+    外推Δ多数超过缝阶跃本身 ⇒ 不设此闸时外推会把修正目标推离缝的真正另一半。
+    父段真在走（强趋势、残差小）时外推照常采信。``mu_last`` 一并返回，供调用方做
+    缝最小化选目标（纪律⑤）。
     """
     if g.dim() == 3:
-        return g.mean(dim=(0, 1)), g.std(dim=(0, 1))
+        return g.mean(dim=(0, 1)), g.std(dim=(0, 1)), g.mean(dim=(0, 1))
     k = int(g.shape[0])
     if k <= 1:
         f = g[0]
-        return f.mean(dim=(0, 1)), f.std(dim=(0, 1))
+        return f.mean(dim=(0, 1)), f.std(dim=(0, 1)), f.mean(dim=(0, 1))
     flat = g.reshape(k, -1, int(g.shape[-1])).float()     # [K, HW, C]
     means = flat.mean(dim=1)                              # [K, C]
     sd_t = flat.var(dim=1, unbiased=False).mean(dim=0).clamp_min(1e-6).sqrt()
+    last = means[-1]
     x = torch.arange(k, dtype=torch.float32, device=g.device)
     xm = x.mean()
     denom = float(((x - xm) ** 2).sum())
     if denom <= 0.0:
-        mu_t = means[-1]
-    else:
-        ym = means.mean(dim=0)                            # [C]
-        slope = ((x - xm).view(-1, 1) * (means - ym)).sum(dim=0) / denom
-        mu_t = (ym + slope * (float(k) - float(xm))).clamp(0.0, 1.0)
-    return mu_t, sd_t
+        return last, sd_t, last
+    ym = means.mean(dim=0)                                # [C]
+    slope = ((x - xm).view(-1, 1) * (means - ym)).sum(dim=0) / denom
+    mu_ext = (ym + slope * (float(k) - float(xm))).clamp(0.0, 1.0)
+    # 尾部「走向」稳不稳 = **拟合残差**的帧间噪声（不是原始帧间差——那会把趋势
+    # 本身算成噪声，干净斜坡永远过不了自己的闸；2026-10-14 实测发现并修正）。
+    resid = means - (ym.view(1, -1) + slope.view(1, -1) * (x - xm).view(-1, 1))
+    tail_noise = float((resid[1:] - resid[:-1]).abs().mean(dim=1).median())
+    lead_ok = (mu_ext - last).abs() > max(
+        MATCH_PREV_TREND_OVER_NOISE * tail_noise, MATCH_PREV_TREND_FLOOR)
+    mu_t = torch.where(lead_ok, mu_ext, last)
+    return mu_t, sd_t, last
 
 
 def _head_noise(src: torch.Tensor) -> float:
@@ -516,6 +538,15 @@ def match_prev_stats(images: torch.Tensor, guide: torch.Tensor,
 
     **去向预测**：guide 传多帧时按帧均值序列外推一帧当目标、对比度取窗内聚合
     （父段合法走进阴影不被「修」回旧色档）；单帧 guide 逐位同旧版。
+    🔴 **趋势显著性闸**：外推量不超过「尾部帧间噪声 ×3」且不超过地板 ⇒ 不外推、
+    用末帧（2026-10-14 真实缝实测：不设此闸时外推会把目标推离缝的另一半分、
+    18 条里 2 条阶跃被放大）。父段真在走时外推照常采信。
+    🔴 **单调性护栏**：外推目标比末帧离段头更远 ⇒ 退回末帧——修正的唯一目的
+    是缩小可见阶跃，反向即自我否定（chroma 噪声拟合假趋势的实证见 CHANGES ⑬）。
+    🔴 **缝最小化选目标**（纪律⑤，替代上面的单调性护栏）：逐通道比较「末帧」与
+    「外推」两个目标的修正后阶跃，只采信更小的 ⇒ 多帧 guide 永不放大阶跃。
+    （2026-10-14 实测：18 条真实缝上外推无必然收益；无此护栏时无闸臂在 33b
+    缝上把 0.0012 放大成 0.0030。）
 
     **帧数守恒、不动音频、零采样开销。**
     """
@@ -541,8 +572,18 @@ def match_prev_stats(images: torch.Tensor, guide: torch.Tensor,
 
     mu_s = ref.mean(dim=(0, 1, 2))                 # [C]
     sd_s = ref.std(dim=(0, 1, 2)).clamp_min(1e-6)
-    mu_t, sd_t = _guide_stats(guide.to(images.dtype))   # 多帧：均值外推 + 对比度聚合
+    mu_t, sd_t, mu_last = _guide_stats(guide.to(images.dtype))   # 多帧：均值外推 + 对比度聚合
     sd_t = sd_t.clamp_min(1e-6)
+
+    # —— 缝最小化选目标（纪律⑤，2026-10-14 真实缝实测后加）——
+    # 缝的真正两侧 = 父段**末帧** ↔ 子段首帧；外推是「假想的下一帧」。逐通道比较
+    # 两个目标的「修正后阶跃」，只采信更小的那个 ⇒ 多帧 guide **永不放大阶跃**。
+    # 实测（18 条真实缝，33b 验收轮 + 追痕实跑）：外推无一次必然收益；无此护栏时
+    # 无闸臂在 33b 缝上把 0.0012 放大成 0.0030（chroma 噪声拟合出 0.0079 假趋势）。
+    _a = mu_last - mu_s                       # 既有阶跃（子段首帧 vs 父段末帧）
+    _b = mu_t - mu_s                          # 外推目标对应的修正量
+    _w = float(weight)
+    mu_t = torch.where((_a - _w * _b).abs() < (_a - _w * _a).abs(), mu_t, mu_last)
 
     gain = (sd_t / sd_s).clamp(1.0 / float(gain_max), float(gain_max))
     offs = (mu_t - mu_s).clamp(-float(offset_max), float(offset_max))
