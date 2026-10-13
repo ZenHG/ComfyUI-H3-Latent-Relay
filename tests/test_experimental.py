@@ -454,6 +454,91 @@ finally:
 # ============================================================================
 print()
 print("=" * 78)
+print("C1｜跨段统计匹配升「levellock 纪律」：噪声闸 + 走向外推（单帧逐位同旧版）")
+print("=" * 78)
+
+_HW = (12, 14)
+_g1 = torch.rand(1, _HW[0], _HW[1], 3) * 0.40 + 0.30      # guide（上段末帧）≈0.50
+
+
+def _head(level, noise=0.002, n=6, seed=5):
+    """相关段头：同一电平 + 逐帧小噪声（真实视频帧间差 ≪ 逐帧独立噪声）。"""
+    _g = torch.Generator().manual_seed(seed)
+    return (torch.full((n, _HW[0], _HW[1], 3), float(level))
+            + torch.randn(n, _HW[0], _HW[1], 3, generator=_g) * float(noise)).clamp(0.0, 1.0)
+
+
+# C1.1 对照：大阶跃（0.17 ≫ 帧间噪声 ×3）⇒ 照修（回归：闸不挡该修的）。
+#   ⚠ 期望值受**偏移护栏**约束：offs 截到 ±0.06 ⇒ 电平最多走 0.06（到 ≈0.39），
+#   到不了 guide 的 0.50 —— 这是设计行为（19.1b 同款判据）。
+_z_big = _head(0.33)
+_o_big = CORE.match_prev_stats(_z_big, _g1, frames=6, weight=1.0)
+_moved = float(_o_big[0].mean()) - float(_z_big[0].mean())
+check("C1.1 大阶跃照修（闸不挡该修的）：首帧电平向 guide 走 ≈offset_max",
+      0.05 < _moved < 0.07,
+      "修后 %.4f（原 %.4f，走 %.4f；guide %.4f 被偏移护栏截在 0.06）"
+      % (float(_o_big[0].mean()), float(_z_big[0].mean()), _moved, float(_g1[0].mean())))
+
+# C1.2 噪声闸（比值部分）：阶跃 0.003 > 地板 0.6/255，但 < 帧间噪声 ×3 ⇒ 逐位不动
+_g_mid = torch.full((1, _HW[0], _HW[1], 3), 0.306)       # guide 紧贴子段电平
+_z_mid = _head(0.303)
+_o_mid = CORE.match_prev_stats(_z_mid, _g_mid, frames=6, weight=1.0)
+_dmid = (_z_mid[1:].float() - _z_mid[:-1].float()).abs().mean(dim=(1, 2, 3))
+check("C1.2 噪声闸：阶跃 < 帧间噪声×3 ⇒ 原样返回（失败安全，逐位不动）",
+      torch.equal(_o_mid, _z_mid),
+      "阶跃≈0.003 vs 噪声×3≈%.4f" % (3.0 * float(_dmid.median())))
+
+# C1.3 噪声闸（地板部分）：阶跃 0.001 < 地板 0.6/255，帧间噪声≈0 ⇒ 不动
+_g_tiny = torch.full((1, _HW[0], _HW[1], 3), 0.302)
+_z_tiny = _head(0.301, noise=0.0)
+_o_tiny = CORE.match_prev_stats(_z_tiny, _g_tiny, frames=6, weight=1.0)
+check("C1.3 噪声闸地板：阶跃 < 0.6/255 ⇒ 不动（静头不修）",
+      torch.equal(_o_tiny, _z_tiny),
+      "阶跃≈0.001 vs 地板 %.5f" % CORE.MATCH_PREV_STEP_FLOOR)
+
+# C1.4 关闸复旧：两闸填 0 ⇒ 小阶跃也修（旧行为可复现，escape hatch）
+_o_off = CORE.match_prev_stats(_z_mid, _g_mid, frames=6, weight=1.0,
+                               step_over_noise=0.0, step_floor=0.0)
+check("C1.4 关闸（两闸=0）⇒ 小阶跃也修（旧行为可复现）",
+      not torch.equal(_o_off, _z_mid) and float(_o_off[0].mean()) > float(_z_mid[0].mean()),
+      "修后 %.4f（原 %.4f）" % (float(_o_off[0].mean()), float(_z_mid[0].mean())))
+
+# C1.5 走向外推：guide 是 0.20→0.24 的爬升 ⇒ 目标取外推值 0.25，不是末帧 0.24
+_ramp = torch.stack([(torch.full((_HW[0], _HW[1], 3), 0.20 + 0.01 * _i)
+                      + torch.randn(_HW[0], _HW[1], 3, generator=torch.Generator().manual_seed(11 + _i)) * 0.002)
+                     for _i in range(5)]).clamp(0.0, 1.0)          # [5,H,W,3]
+_z_ramp = _head(0.20, noise=0.002, n=6, seed=31)
+_o_ramp = CORE.match_prev_stats(_z_ramp, _ramp, frames=6, weight=1.0)
+_o_last = CORE.match_prev_stats(_z_ramp, _ramp[-1:], frames=6, weight=1.0)   # 只给末帧
+check("C1.5 走向外推：目标 = 外推一帧（0.25）而非末帧（0.24）⇒ 修正量更大",
+      float(_o_ramp[0].mean()) > float(_o_last[0].mean()) + 0.005
+      and abs(float(_o_ramp[0].mean()) - 0.25) < 0.006,
+      "多帧 %.4f vs 末帧 %.4f（期望 ≈0.25 / ≈0.24）"
+      % (float(_o_ramp[0].mean()), float(_o_last[0].mean())))
+
+# C1.6 单帧 guide 逐位同旧版（手算旧公式当基准 —— 改机理的回归锁）
+# ⚠ stats_frames 默认 1 ⇒ 源侧统计量只取**紧贴缝那一帧**（src[:1]），不是整个作用区。
+_z6 = _head(0.26, noise=0.002, n=6, seed=7)
+_src = _z6.float()
+_k = 6
+_ref = _src[:1]                                       # stats_frames=1：首帧
+_mu_s = _ref.mean(dim=(0, 1, 2))
+_sd_s = _ref.std(dim=(0, 1, 2)).clamp_min(1e-6)
+_tgt = _g1[0].to(_z6.dtype).float()
+_mu_t = _tgt.mean(dim=(0, 1))
+_sd_t = _tgt.std(dim=(0, 1)).clamp_min(1e-6)
+_gain = (_sd_t / _sd_s).clamp(1.0 / 1.15, 1.15)
+_offs = (_mu_t - _mu_s).clamp(-0.06, 0.06)
+_corr = (_src[:_k] - _mu_s) * _gain + _mu_s + _offs
+_w = torch.linspace(1.0, 0.0, _k).view(_k, 1, 1, 1)
+_exp = torch.cat([(_src[:_k] + _w * (_corr - _src[:_k])).clamp(0.0, 1.0).to(_z6.dtype),
+                  _z6[_k:]], dim=0)
+check("C1.6 单帧 guide 逐位同旧版（手算旧公式基准）",
+      torch.equal(CORE.match_prev_stats(_z6, _g1, frames=6, weight=1.0), _exp), "")
+
+# ============================================================================
+print()
+print("=" * 78)
 print("结果：通过 %d / 失败 %d" % (len(PASS), len(FAIL)))
 if FAIL:
     print("失败项：")

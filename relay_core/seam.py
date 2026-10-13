@@ -432,6 +432,57 @@ MATCH_PREV_OFF_MAX: float = 0.06   # 逐通道偏移上限（μt−μs 截断）
 #   我们要的目标函数是「**首帧 ≈ guide**」，不是「段头均值 ≈ guide」。
 #   设 0 可回退旧口径（仅作对照，勿用于产线）。
 MATCH_PREV_STATS_FRAMES: int = 1
+# —— levellock 纪律（借鉴 obvpm 2026-09 实测：38 个 parent→child 缝，step 中位 2.87
+#    vs 帧间噪声中位 0.44，≈6×；同一 parent 的四个独立 take 开头 +3.78/+3.18/+3.38/+3.59
+#    ⇒ 是模型偏置不是采样噪声，reroll 治不好）——
+# ① 噪声闸：step 不超过「局部帧间噪声 3 倍」且不超过地板就**原样返回**。
+#    obvpm 原话：低于它「没什么可修」，硬修只会给缝添一道自己的慢漂移。
+#    ⚠ H 仓是 0-1 浮点域，obvpm 的地板 0.6 是 0-255 域 ⇒ 按 /255 折。
+MATCH_PREV_STEP_OVER_NOISE: float = 3.0
+MATCH_PREV_STEP_FLOOR: float = 0.6 / 255.0
+# ② 去向预测：guide 带多帧时逐通道对帧均值序列拟合直线、外推到**末帧之后一帧**
+#    （父段合法「走进阴影」时不被「修」回旧色档）；单帧 guide 退化为该帧本身
+#    ⇒ 与旧版逐位一致（单帧路径）。
+# ③ 外推取父段尾部几帧（obvpm FIT=12）：TrimAV 调用点传钉住区末尾这么多帧
+#    （拷贝桥下 = 上段真实尾部；cond 桥下是本段重画——该路线本项应保持 0）。
+MATCH_PREV_GUIDE_FIT: int = 12
+
+
+def _guide_stats(g: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    """guide 的 (mu_t, sd_t)：**多帧 ⇒ 均值按走向外推一帧、标准差取窗内聚合**；
+    单帧/三维 ⇒ 与该帧自身的均值/标准差（逐位同旧版）。
+
+    levellock 纪律②：拿父段**末帧**当目标，会在父段合法走进阴影时把子段「修」回
+    旧色档；正解是用末若干帧的走向外推一帧。对比度是慢变量，不玩外推——
+    取窗内逐帧方差的均值（K=1 时退化为该帧标准差，与旧版一致）。
+    """
+    if g.dim() == 3:
+        return g.mean(dim=(0, 1)), g.std(dim=(0, 1))
+    k = int(g.shape[0])
+    if k <= 1:
+        f = g[0]
+        return f.mean(dim=(0, 1)), f.std(dim=(0, 1))
+    flat = g.reshape(k, -1, int(g.shape[-1])).float()     # [K, HW, C]
+    means = flat.mean(dim=1)                              # [K, C]
+    sd_t = flat.var(dim=1, unbiased=False).mean(dim=0).clamp_min(1e-6).sqrt()
+    x = torch.arange(k, dtype=torch.float32, device=g.device)
+    xm = x.mean()
+    denom = float(((x - xm) ** 2).sum())
+    if denom <= 0.0:
+        mu_t = means[-1]
+    else:
+        ym = means.mean(dim=0)                            # [C]
+        slope = ((x - xm).view(-1, 1) * (means - ym)).sum(dim=0) / denom
+        mu_t = (ym + slope * (float(k) - float(xm))).clamp(0.0, 1.0)
+    return mu_t, sd_t
+
+
+def _head_noise(src: torch.Tensor) -> float:
+    """段头区域的帧间噪声：逐帧 mean|Δ| 的**中位数**（0-1 域）。不足 2 帧 ⇒ 0。"""
+    if int(src.shape[0]) < 2:
+        return 0.0
+    d = (src[1:] - src[:-1]).abs().mean(dim=(1, 2, 3))
+    return float(d.median())
 
 
 def match_prev_stats(images: torch.Tensor, guide: torch.Tensor,
@@ -439,7 +490,9 @@ def match_prev_stats(images: torch.Tensor, guide: torch.Tensor,
                      weight: float = MATCH_PREV_WEIGHT,
                      gain_max: float = MATCH_PREV_GAIN_MAX,
                      offset_max: float = MATCH_PREV_OFF_MAX,
-                     stats_frames: int = MATCH_PREV_STATS_FRAMES) -> torch.Tensor:
+                     stats_frames: int = MATCH_PREV_STATS_FRAMES,
+                     step_over_noise: float = MATCH_PREV_STEP_OVER_NOISE,
+                     step_floor: float = MATCH_PREV_STEP_FLOOR) -> torch.Tensor:
     """跨段统计匹配：把 ``images`` 开头 ``frames`` 帧的色档/曝光对齐到 ``guide``（上段末帧）。
 
     逐通道 ``out = (x − μs)/σs · σt + μt``，再按**缝端最强 → 尾端 0**的线性权重与
@@ -458,6 +511,11 @@ def match_prev_stats(images: torch.Tensor, guide: torch.Tensor,
       · 逐通道增益 ``σt/σs`` 截断到 ``[1/gain_max, gain_max]``
       · 逐通道偏移 ``μt−μs`` 截断到 ``±offset_max``
       · 画布不一致 / 权重 ≤0 / 空输入 ⇒ **原样返回**（安全兜底）
+      · **噪声闸**：step 不超过「帧间噪声 × ``step_over_noise``」且不超过
+        ``step_floor`` ⇒ 原样返回（没什么可修就不修；两闸填 0 = 关闸复旧）
+
+    **去向预测**：guide 传多帧时按帧均值序列外推一帧当目标、对比度取窗内聚合
+    （父段合法走进阴影不被「修」回旧色档）；单帧 guide 逐位同旧版。
 
     **帧数守恒、不动音频、零采样开销。**
     """
@@ -470,17 +528,12 @@ def match_prev_stats(images: torch.Tensor, guide: torch.Tensor,
     if k <= 0:
         return images
 
-    g = guide
-    if g.dim() == 4:
-        g = g[0]                                   # [H,W,C]
-    if tuple(g.shape[:2]) != tuple(images.shape[1:3]):
+    if tuple(guide.shape[-3:-1]) != tuple(images.shape[1:3]):
         return images                              # 画布不一致 → 不动刀
+    if int(guide.shape[-1]) != int(images.shape[-1]):
+        return images                              # 通道数不符 → 不动刀
 
     src = images[:k].float()                       # [k,H,W,C]
-    tgt = g.to(images.dtype).float()               # [H,W,C]
-    c = src.shape[-1]
-    if tgt.shape[-1] != c:
-        return images
 
     # 统计量的**取样窗**：默认只取紧贴缝的一帧（与单帧 guide 同口径）。
     _sf = int(stats_frames)
@@ -488,11 +541,19 @@ def match_prev_stats(images: torch.Tensor, guide: torch.Tensor,
 
     mu_s = ref.mean(dim=(0, 1, 2))                 # [C]
     sd_s = ref.std(dim=(0, 1, 2)).clamp_min(1e-6)
-    mu_t = tgt.mean(dim=(0, 1))                    # [C]
-    sd_t = tgt.std(dim=(0, 1)).clamp_min(1e-6)
+    mu_t, sd_t = _guide_stats(guide.to(images.dtype))   # 多帧：均值外推 + 对比度聚合
+    sd_t = sd_t.clamp_min(1e-6)
 
     gain = (sd_t / sd_s).clamp(1.0 / float(gain_max), float(gain_max))
     offs = (mu_t - mu_s).clamp(-float(offset_max), float(offset_max))
+
+    # —— levellock 纪律①：噪声闸（失败安全）——
+    # step（缝上的阶跃）不超过「局部帧间噪声 × step_over_noise」且不超过地板
+    # ⇒ 没什么可修，原样返回（逐位不动）。两个闸都填 0 = 关闸（旧行为）。
+    _step = float((mu_t - mu_s).abs().max())
+    _noise = _head_noise(src)
+    if _step <= max(float(step_floor), float(step_over_noise) * _noise):
+        return images
 
     corr = (src - mu_s) * gain + mu_s + offs
     w = torch.linspace(float(weight), 0.0, k, device=images.device,

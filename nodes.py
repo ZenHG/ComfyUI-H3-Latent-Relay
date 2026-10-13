@@ -927,7 +927,7 @@ class H3RelayTrimAV:
                 #   ⚠ 铁律：新 widget 一律**追加在 optional 末位**（旧工作流取值不前移）。
                 "match_prev": ("FLOAT", {"advanced": True,
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "【按需开】跨段统计匹配：把段头的色档/曝光分布对齐到上段末帧。\n只对齐统计量、不复制姿态 ⇒ 无重影。\n0（默认）= 关；建议从 0.5 起。",
+                    "tooltip": "【按需开】跨段统计匹配：把段头的色档/曝光分布对齐到上段尾部走向。\n只对齐统计量、不复制姿态 ⇒ 无重影。\n目标取上段末几帧的外推，不是单帧。\n默认开噪声闸：阶跃不超过帧间噪声×3 时不动手，避免修噪声。\n0（默认）= 关；建议从 0.5 起。",
                 }),
                 "match_prev_frames": ("INT", {"advanced": True,
                     "default": 12, "min": 1, "max": 96, "step": 1,
@@ -1154,10 +1154,14 @@ class H3RelayTrimAV:
         #   ⚠ 两者**作用域重叠**（都是段头↔上段末帧）⇒ 建议二选一，同时开需自行确认不过修。
         #   ⚠ 必须放在 lowfreq_pull **之前**：先对齐分布，再修低频残差。
         if float(match_prev) > 0.0 and pin >= 1:
-            out = CORE.match_prev_stats(out, images[pin - 1], int(match_prev_frames),
-                                        float(match_prev), float(match_prev_gain_max),
-                                        float(match_prev_offset_max))
-            post_note += ("\n           ✦ **跨段统计匹配**：开头 %d 帧的色档/曝光分布对齐上段末帧"
+            # guide 取钉住区末尾最多 FIT 帧：拷贝桥下 = 上段**真实**尾部 ⇒ 可按「走向」
+            # 外推一帧当目标（父段合法走进阴影不被修回旧色档）；cond 桥下是本段重画
+            # ⇒ 该路线本项应保持 0（见 match_prev tooltip）。
+            out = CORE.match_prev_stats(
+                out, images[max(0, pin - CORE.MATCH_PREV_GUIDE_FIT):pin],
+                int(match_prev_frames), float(match_prev),
+                float(match_prev_gain_max), float(match_prev_offset_max))
+            post_note += ("\n           ✦ **跨段统计匹配**：开头 %d 帧的色档/曝光分布对齐上段尾部走向"
                           "（强度 %.2f / 增益上限 %.2f / 偏移上限 %.3f）——只对齐统计量，不复制姿态 ⇒ 无重影。"
                           % (int(match_prev_frames), float(match_prev), float(match_prev_gain_max),
                              float(match_prev_offset_max)))
@@ -1832,7 +1836,7 @@ class H3RelayPost:
                 # —— 组 1：跨段色档/曝光对齐（缝的另一侧 = guide）——
                 "match_prev": ("FLOAT", {
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "【按需开，默认 0】跨段统计匹配。\n把段头的色档/曝光分布（逐通道均值 + 标准差）对齐到 guide。\n只对齐统计量、不复制姿态 ⇒ 无重影。需要 guide。\n⚠ 走 Latent 桥请保持 0：那条路的 guide 只是近似，对齐它反而更差。\n⚠ 还要勾选下面的跨段总闸。",
+                    "tooltip": "【按需开，默认 0】跨段统计匹配。\n把段头的色档/曝光分布（逐通道均值 + 标准差）对齐到 guide。\n只对齐统计量、不复制姿态 ⇒ 无重影。需要 guide。\n⚠ 走 Latent 桥请保持 0：那条路的 guide 只是近似，对齐它反而更差。\n⚠ 还要勾选下面的跨段总闸。\n默认开噪声闸：阶跃小就不动手，避免修噪声。",
                 }),
                 "match_prev_frames": ("INT", {"advanced": True,
                     "default": 12, "min": 1, "max": 96, "step": 1,
