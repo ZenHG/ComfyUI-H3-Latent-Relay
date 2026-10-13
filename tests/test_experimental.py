@@ -389,6 +389,71 @@ check("0.6.28 VA 契约：`nodes.py` 把 VA 的 notes 拼进节点 `report`（�
 # ============================================================================
 print()
 print("=" * 78)
+print("B1｜边车谱系簿记（头 metadata format 1→2；旧文件向后兼容）")
+print("=" * 78)
+
+_bdir = _tempfile.mkdtemp(prefix="h3relay_b1_")
+try:
+    _lat = make_latent(22, seed=7)          # 22 帧 = 7 token（合法网格）
+    _p2 = os.path.join(_bdir, "stage_00001.safetensors")
+    CORE.save_av_latent(_lat, _p2, note="b1 用例",
+                        lineage={"run_id": "myfilm", "stage_index": 1,
+                                 "parent_stage": 0, "pack": "0.6.33"})
+    _m2 = CORE.read_av_latent_meta(_p2)
+    check("B1.1 头含谱系键（run/stage/父段/pack）且 format=2",
+          _m2.get("format") == 2 and _m2.get("run_id") == "myfilm"
+          and _m2.get("stage_index") == 1 and _m2.get("parent_stage") == 0
+          and _m2.get("pack") == "0.6.33",
+          "format=%s run=%s stage=%s 父段=%s pack=%s" % (
+              _m2.get("format"), _m2.get("run_id"), _m2.get("stage_index"),
+              _m2.get("parent_stage"), _m2.get("pack")))
+    check("B1.2 头 shapes 与 latent 实际一致（raw_frames 可从头推导）",
+          _m2.get("shapes") == [list(t.shape) for t in CORE.streams_from_latent(_lat)],
+          "shapes=%s" % (_m2.get("shapes"),))
+
+    _p0 = os.path.join(_bdir, "stage_00000.safetensors")
+    CORE.save_av_latent(_lat, _p0, lineage={"run_id": "myfilm", "stage_index": 0,
+                                            "parent_stage": "", "pack": "0.6.33"})
+    _m0 = CORE.read_av_latent_meta(_p0)
+    check("B1.3 首段父段记空串（不编造 −1）", _m0.get("parent_stage") == "",
+          "parent_stage=%r" % (_m0.get("parent_stage"),))
+
+    _p1 = os.path.join(_bdir, "stage_00002.safetensors")
+    CORE.save_av_latent(_lat, _p1)            # 旧调用方：不传 lineage
+    _m1 = CORE.read_av_latent_meta(_p1)
+    _back = CORE.load_av_latent(_p1)
+    check("B1.4 不传 lineage（旧调用方）⇒ 无谱系键，但照存照读且往返逐位相同",
+          "run_id" not in _m1 and _m1.get("format") == 2
+          and torch.equal(_back["samples"].tensors[0], _lat["samples"].tensors[0])
+          and torch.equal(_back["samples"].tensors[1], _lat["samples"].tensors[1]),
+          "键=%s" % sorted(_m1.keys()))
+
+    # 旧 format 1 文件（0.6.33 部署副本写的）手写一个 ⇒ 新读取方必须能读
+    from safetensors.torch import save_file as _sf
+    _pold = os.path.join(_bdir, "stage_00003.safetensors")
+    _parts = CORE.streams_from_latent(_lat)
+    _told = {"streams.video": _parts[0].contiguous(),
+             "streams.audio": _parts[1].contiguous()}
+    _mold = {"format": 1, "streams": ["video", "audio"],
+             "shapes": [list(t.shape) for t in _parts], "note": "旧格式"}
+    _told[CORE._LATENT_META_KEY] = torch.frombuffer(
+        bytearray(_json.dumps(_mold, ensure_ascii=False).encode("utf-8")), dtype=torch.uint8)
+    _sf(_told, _pold)
+    _mold_back = CORE.read_av_latent_meta(_pold)
+    _back_old = CORE.load_av_latent(_pold)
+    check("B1.5 旧 format 1 文件：新读取方照读（向后兼容），load 往返逐位相同",
+          _mold_back.get("format") == 1 and "run_id" not in _mold_back
+          and torch.equal(_back_old["samples"].tensors[0], _lat["samples"].tensors[0]),
+          "format=%s note=%s" % (_mold_back.get("format"), _mold_back.get("note")))
+finally:
+    try:
+        _shutil.rmtree(_bdir)
+    except OSError:
+        pass
+
+# ============================================================================
+print()
+print("=" * 78)
 print("结果：通过 %d / 失败 %d" % (len(PASS), len(FAIL)))
 if FAIL:
     print("失败项：")

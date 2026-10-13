@@ -260,6 +260,20 @@ executed}`）。此前没认这条 ⇒ 状态机仍在 `armed()`（等一轮跑�
 - `tools/review_050.py`、`smoke_nodes`、`assert_default_exit`、`test_v3_schema`、
   `test_experimental`、`check_ui_workflow`、`en_sync` 全绿（数字四处已同步）。
 
+### ⑩ 边车谱系簿记 v1（B1，**副本侧开发轮 · 未发布**）
+
+**改了什么**：`stage_NNNNN.safetensors` 的头 metadata 从 `format 1` 升到 `format 2`，新增结构谱系键
+`run_id` / `stage_index` / `parent_stage`（= 段号−1，首段空串）/ `pack`（包版本）。
+新增只读侧 `relay_core.read_av_latent_meta()`（不加载 latent 大张量）。**纯附加、零行为变化**：
+旧版读新文件按 JSON 键取用、多出的键被忽略；旧 format 1 文件新读取方照读（均有断言）。
+
+**为什么**：断点续跑换源、拼片选段、事后复现时「这一文件是谁在哪一版写下」不再只能靠文件名约定
+（调研结论：obvpm 的 mctx 内容寻址做不到——本包不拥有 MP4 保存节点；run 内相对谱系是可做的部分）。
+
+**要不要动你的配置**：不用。图 / 连线 / 参数全不动；`Latent Save` 的日志多一行头摘要。
+
+**已知限制**：pin / settle / 提示词摘要不在头里（那些数据在别的节点上，本期不猜）⇒ v2。
+
 ---
 
 ## 0.6.32 — 2026-10-08

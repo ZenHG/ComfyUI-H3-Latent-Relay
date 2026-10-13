@@ -204,8 +204,14 @@ def audio_tail_from_latent(
 _LATENT_META_KEY = "relay_kit_meta"
 
 
-def save_av_latent(latent: Any, path: str, note: str = "") -> str:
-    """把 H3 的 AV latent 落盘，供下一段当 context_latent 读回。"""
+def save_av_latent(latent: Any, path: str, note: str = "",
+                   lineage: Dict[str, Any] | None = None) -> str:
+    """把 H3 的 AV latent 落盘，供下一段当 context_latent 读回。
+
+    ``lineage``（B1 谱系簿记）：写进头 metadata 的结构谱系（run_id / stage_index /
+    parent_stage / pack 等）。**纯附加**——读取方按 JSON 键取用，多出的键被忽略
+    ⇒ 旧版部署副本读 format 2 文件不坏；旧 format 1 文件（无谱系键）也照读。
+    """
     from safetensors.torch import save_file
 
     parts = streams_from_latent(latent)
@@ -223,11 +229,14 @@ def save_av_latent(latent: Any, path: str, note: str = "") -> str:
             tc = tc.cpu()
         tensors["streams." + name] = tc.contiguous()
     meta = {
-        "format": 1,
+        "format": 2,   # 2 = 带头谱系簿记（B1）；1 = 旧版（无谱系键）。读取方兼容两者
         "streams": names,
         "shapes": [list(t.shape) for t in parts],
         "note": str(note),
     }
+    if lineage:
+        for _k, _v in lineage.items():
+            meta[str(_k)] = _v
     # UTF-8 字节流：note 含中文时 ord(c) 会超 uint8 直接崩，必须先 encode
     meta_bytes = json.dumps(meta, ensure_ascii=False).encode("utf-8")
     tensors[_LATENT_META_KEY] = torch.frombuffer(bytearray(meta_bytes), dtype=torch.uint8)
@@ -268,6 +277,21 @@ def load_av_latent(path: str):
     else:  # pragma: no cover
         samples = parts
     return {"samples": samples}
+
+
+def read_av_latent_meta(path: str) -> dict:
+    """只读边车的**头 metadata**（不加载 video/audio 两个大张量）。
+
+    B1 谱系簿记的读取侧：断点续跑换源、拼片选段、事后复现时，
+    「这个文件是谁、在哪一版、承接哪一段」不必先读十几 MB 的 latent。
+    旧 format 1 头（无谱系键）同样可读 ⇒ 向后兼容。
+    """
+    from safetensors import safe_open
+    with safe_open(path, framework="pt", device="cpu") as f:
+        if _LATENT_META_KEY not in f.keys():
+            raise ValueError("%s 不是本工具写的 AV latent（缺少元数据）。" % path)
+        raw = bytes(f.get_tensor(_LATENT_META_KEY).tolist())
+    return json.loads(raw.decode("utf-8"))
 
 
 def trim_head_frames(images: torch.Tensor, frames: int) -> torch.Tensor:

@@ -181,6 +181,25 @@ def _audio_stage_path(run_id: str, stage_index: int) -> str:
     return os.path.join(os.path.dirname(p), "audio_%05d.safetensors" % int(stage_index))
 
 
+def _stage_lineage(run_id: str, stage_index: int) -> dict:
+    """边车头**谱系簿记**（B1）：run 内相对谱系 + 包版本。
+
+    只记本节点确实知道的事实：run_id / 段号 / 父段（= 段号−1；首段记空串，不编造 −1）。
+    pin / settle / 提示词在别的节点上，本期不猜（v2 待 optional 输入或 Chain 清单）。
+    """
+    try:
+        from . import __version__ as _pack_ver
+    except Exception:
+        _pack_ver = "unknown"
+    idx = int(stage_index)
+    return {
+        "run_id": str(run_id),
+        "stage_index": idx,
+        "parent_stage": (idx - 1) if idx > 0 else "",
+        "pack": str(_pack_ver),
+    }
+
+
 def _progress_path(run_id: str) -> str:
     """连跑进度文件：与段文件**同目录**（`output/relay_kit/<run_id>/_progress.json`）。
 
@@ -720,11 +739,15 @@ class H3RelayLatentSave:
     @_node_errors("run_id")
     def save(self, latent, run_id, stage_index, note=""):
         path = _stage_path(run_id, stage_index)
-        CORE.save_av_latent(latent, path, note=note)
+        lineage = _stage_lineage(run_id, stage_index)
+        CORE.save_av_latent(latent, path, note=note, lineage=lineage)
         size_mb = os.path.getsize(path) / 1024 ** 2
         print(
-            "[H3 Relay] 已存 stage %d → %s (%.1f MB)\n            %s"
-            % (int(stage_index), path, size_mb, CORE.describe_latent(latent))
+            "[H3 Relay] 已存 stage %d → %s (%.1f MB)\n            %s\n            头：run=%s 父段=%s pack=%s"
+            % (int(stage_index), path, size_mb, CORE.describe_latent(latent),
+               lineage["run_id"],
+               ("stage %d" % lineage["parent_stage"]) if lineage["parent_stage"] != "" else "无（首段）",
+               lineage["pack"])
         )
         return (latent, path)
 
