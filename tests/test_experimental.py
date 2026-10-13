@@ -539,6 +539,68 @@ check("C1.6 单帧 guide 逐位同旧版（手算旧公式基准）",
 # ============================================================================
 print()
 print("=" * 78)
+print("A1｜软保持 × 沉降检测交互（台架证明免疫 + 软保持簿记建档）")
+print("=" * 78)
+
+
+def _soft_seam(n=60, pin=22, switch_at=25, wobble=1.5, seed=3):
+    """软保持档 decode 近似：[0,switch_at) 复现区带逐帧 harmonize 噪声
+    （内部帧差 ≈1.13×wobble、纹理完好）；switch_at 起不同纹理新内容（硬跳）。"""
+    g = torch.Generator().manual_seed(seed)
+    texA = 100.0 + torch.rand(8, 8, 3, generator=g) * 40.0
+    texB = 160.0 + torch.rand(8, 8, 3, generator=g) * 40.0
+    im = torch.zeros(n, 8, 8, 3)
+    for i in range(n):
+        if i < switch_at:
+            im[i] = texA + (i % 3) * 3.0 + torch.randn(8, 8, 3, generator=g) * float(wobble)
+        else:
+            im[i] = texB + (i % 3) * 3.0
+    return im
+
+
+def _soft_blur(n=40, pin=22, soft=0.5, blur=(22, 28), seed=7):
+    """钉住区**发软**（对比度 ×soft）+ 塌陷-恢复型沉降（blur_seg 的软钉住版）。"""
+    g = torch.Generator().manual_seed(seed)
+    texA = 100.0 + torch.rand(8, 8, 3, generator=g) * 40.0
+    texB = 100.0 + 20.0 + (torch.rand(8, 8, 3, generator=g) - 0.5) * 2 * 15.0
+    meanA = float(texA.mean())
+    im = torch.zeros(n, 8, 8, 3)
+    for i in range(n):
+        if i < pin:
+            im[i] = meanA + (texA - meanA) * float(soft) + (i % 3) * 3.0
+        elif blur[0] <= i < blur[1]:
+            im[i] = meanA
+        else:
+            im[i] = texB + (i % 3) * 3.0
+    return im
+
+
+# A1.1 软钉住（内部帧差 ≈1.7）+ 硬跳 ⇒ 仍检出切换点（settle ≥ 1）
+_s1, _v1, _b1 = CORE.detect_settle(_soft_seam(wobble=1.5), 22)
+check("A1.1 软钉住（内部帧差抬高）+ 硬跳 ⇒ 仍检出切换点",
+      1 <= _s1 <= CORE.MAX_SETTLE, "settle=%d val=%.1f base=%.2f" % (_s1, _v1, _b1))
+
+# A1.2 极端 wobble（钉住区逐帧噪声 σ=20/255）⇒ 检测器**弃权**（settle=0）
+#   🔴 2026-10-13 实测边界：σ≤12/255 仍检出（A1.1 同构造）；σ≥20/255 弃权——
+#   机理：验身基准 = max(钉住区锐度, 体区锐度)，钉住区被噪声抬高 ⇒ 干净新内容相对
+#   「发塌」⇒ 跳点被否。**弃权是失败安全方向**（回到「只裁钉住区」的旧默认，
+#   绝不错裁），真实 ramp 的 harmonize 远达不到这个噪声级。
+_s2, _, _ = CORE.detect_settle(_soft_seam(wobble=20.0), 22)
+check("A1.2 极端钉住区抖动（σ≥20/255）⇒ 弃权 0 而非错裁（失败安全边界）",
+      _s2 == 0, "settle=%d" % _s2)
+
+# A1.3 软钉住（对比度减半）+ 塌陷-恢复 ⇒ 锐度路双基准仍量出
+_s3, _, _ = CORE.detect_settle(_soft_blur(soft=0.5), 22)
+check("A1.3 钉住区发软（对比度×0.5）+ 塌陷-恢复 ⇒ 锐度路仍量出（双基准生效）",
+      1 <= _s3 <= CORE.MAX_SETTLE, "settle=%d" % _s3)
+
+# A1.4 全程软钉住、无切换无塌陷 ⇒ 0（不误伤）
+_s4, _, _ = CORE.detect_settle(_soft_seam(switch_at=60, wobble=1.5), 22)
+check("A1.4 全程软钉住、无切换点 ⇒ 0（不误伤）", _s4 == 0, "settle=%d" % _s4)
+
+# ============================================================================
+print()
+print("=" * 78)
 print("结果：通过 %d / 失败 %d" % (len(PASS), len(FAIL)))
 if FAIL:
     print("失败项：")
