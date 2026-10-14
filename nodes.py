@@ -1836,7 +1836,7 @@ class H3RelayPost:
                 # —— 组 1：跨段色档/曝光对齐（缝的另一侧 = guide）——
                 "match_prev": ("FLOAT", {
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "【按需开，默认 0】跨段统计匹配。\n把段头的色档/曝光分布（逐通道均值 + 标准差）对齐到 guide。\n只对齐统计量、不复制姿态 ⇒ 无重影。需要 guide。\n⚠ 走 Latent 桥请保持 0：那条路的 guide 只是近似，对齐它反而更差。\n⚠ 还要勾选下面的跨段总闸。\n默认开噪声闸：阶跃小就不动手，避免修噪声。",
+                    "tooltip": "【按需开，默认 0】跨段统计匹配。\n把段头的色档/曝光分布对齐到 guide。\n只对齐统计量、不复制姿态 ⇒ 无重影。需要 guide。\n⚠ 走 Latent 桥请保持 0：那条路的 guide 只是近似，对齐它反而更差。\n⚠ 还要勾选下面的跨段总闸。\n默认开噪声闸：阶跃小就不动手。",
                 }),
                 "match_prev_frames": ("INT", {"advanced": True,
                     "default": 12, "min": 1, "max": 96, "step": 1,
