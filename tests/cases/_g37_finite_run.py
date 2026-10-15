@@ -9,17 +9,11 @@
 #   但不是本文件定义的。
 
 # ============================================================================
-# 第 37 组：无头连跑（0.6.36）—— 服务端展开图的构建与校验
+# 第 37 组：无头连跑 Finite Run（0.6.36）—— 展开图结构 / 链接 / 校验（零 GPU）
 #
-# 背景：多段连跑原来只能靠前端 Chain（queuePrompt 状态机）⇒ 脚本/API 用户拿不到，
-#   且状态机有已知 bug 类。⏩ Finite Run 把整条连跑展开成一张无环图，宿主一次执行完。
-#   展开机制 = ComfyUI 公开能力（`enable_expand` + expand 图），编排全部复用已有节点。
-#
-# 本组锁三件事（全部零 GPU、零模型）：
-#   ① **图结构**：每段 11 个节点、链接端点逐一正确（接错槽 = 静默坏片）；
-#   ② **逐段参数**：段号/词块/种子/run_id 在展开图里逐位正确；
-#   ③ **建图期校验**：所有能在烧卡前说清的错误都在建图期 raise（失败要早、要响）。
-# 真实出片正确性（缝观感/音画同步/内存）**不在本组范围** —— 需 GPU + 人眼，见文档边界。
+# 锁三件事：① 图结构（每段 11 节点、链接端点逐一正确 —— 接错槽 = 静默坏片）；
+# ② 逐段参数（段号/词块/种子/run_id）逐位一致；③ 建图期校验（烧卡前 raise）。
+# 真实出片正确性（缝观感/音画同步/内存）不在本组范围 —— 需 GPU + 人眼。
 # ============================================================================
 
 print()
@@ -206,3 +200,14 @@ expect_raise("37.46 画面规格不符 ⇒ raise（不学核心节点静默拉�
 expect_raise("37.47 音频采样率不符 ⇒ raise",
              lambda: _JV().join(_imgs, {"waveform": torch.zeros(1, 1, 5), "sample_rate": 16000},
                                 _imgs_acc, _aud_acc), "采样率")
+
+# 37.48 防回归（2026-10-16 审核抓出的真 bug）：可选链接槽（image/voice_anchor）不接线时
+#   宿主整个键都不传 ⇒ 签名必须给默认值，否则直接 TypeError（t2v 模式被堵死）。
+_raw48 = _FR().run(model="M", clip="C", vae="V", audio_vae="AV", sampler="S", sigmas="G",
+                   prompt="词", prompts="", segments=1, seed=0, run_id="r", width=608,
+                   height=1056, length=124, context_frames=22, mask_mode="hard",
+                   pin_audio=True)
+check("37.48 不接 image/voice_anchor 直接调 run() 不炸（可选链接槽有默认值）",
+      isinstance(_raw48, dict) and "expand" in _raw48, type(_raw48).__name__)
+check("37.49 报告里带「每段词」来源行（哪来的词写进 report，不猜）",
+      "每段词" in _raw48["result"][3], _raw48["result"][3].splitlines()[-1][:60])

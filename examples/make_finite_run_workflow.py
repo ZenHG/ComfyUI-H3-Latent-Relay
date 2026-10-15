@@ -4,24 +4,17 @@
 # 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 """make_finite_run_workflow.py — 生成「⏩ Finite Run 无头连跑」演示工作流。
 
-【为什么单独一个生成器（而不是并进 make_minimal_workflow.py）】
-那个生成器从**正在运行的 ComfyUI** 的 `/object_info` 读官方节点 schema。本图的官方节点
-（加载器 / KSamplerSelect / BasicScheduler / CreateVideo / SaveVideo）编码**逐字照抄
-随包发布的两份示例**（它们本身就是服务端生成、且过过 `check_ui_workflow` 的）⇒ 不需要
-起服务就能重建；本生成器只动态推导**本包节点**（⏩ Finite Run）的槽位 —— 它的参数会随
-版本增长，槽位顺序必须以本地 `nodes.py` 的 `INPUT_TYPES()` 为唯一真相源
-（手写 widgets_values 错位的教训见 CHANGES 0.2.1）。
+与 make_minimal_workflow.py 分开：那个要**运行中的 ComfyUI** 提供官方节点 schema；
+本图的官方节点编码逐字照抄随包两份示例（服务端生成、过过 check_ui_workflow）⇒ 不起
+服务就能重建。本生成器只动态推导**本包节点**的槽位 —— 参数会随版本增长，槽位顺序以
+本地 `nodes.py` 的 `INPUT_TYPES()` 为唯一真相源（手写 widgets_values 会错位，
+教训见 CHANGES 0.2.1）。
 
-【生成的是什么】
-    UNETLoader / CLIPLoader / VAELoader×2 → LoadImage（首帧，可拔）
-    → KSamplerSelect + BasicScheduler（采样两件套，各段共用）
-    → ⏩ H3 Relay · Finite Run（内部展开 N 段：ImageToVideo → LatentLoad → CopyBridge
-       → 采样 → LatentSave → 解码 → TrimAV → JoinAV）
-    → CreateVideo → SaveVideo（一条成片）
+生成：加载器×4 → LoadImage（可拔）→ KSamplerSelect + BasicScheduler
+      → ⏩ Finite Run（内部展开 N 段）→ CreateVideo → SaveVideo。
 
-【用法】
-    python examples/make_finite_run_workflow.py                # 写到 examples/finite_run_ui.json
-    python tools/check_ui_workflow.py examples/finite_run_ui.json   # 复核（必须 0 问题）
+    python examples/make_finite_run_workflow.py
+    python tools/check_ui_workflow.py examples/finite_run_ui.json   # 必须 0 问题
 """
 from __future__ import annotations
 

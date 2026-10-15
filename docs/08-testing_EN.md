@@ -33,7 +33,7 @@ namespace** — the same globals and the same order as the single-file flat scri
 fixtures shared across groups remain visible. ⚠️ Case file names start with `_`, so `pytest tests/`
 does **not** collect them separately (otherwise every assertion would run twice).
 
-**672 assertions, zero GPU, no model loading**, covering thirty-seven aspects:
+**674 assertions, zero GPU, no model loading**, covering thirty-seven aspects:
 
 ### Counting and declaration discipline (the two notes from former README §8, moved in with the slimming)
 
@@ -44,7 +44,7 @@ does **not** collect them separately (otherwise every assertion would run twice)
   the other two drifted for a long time unnoticed).
 - ⚠️ **When writing a correction note, do not restate the old wrong number** — that pollutes the regexes
   of the machine checks above.
-- This file's line "672 assertions / thirty-seven aspects" + the `| 21 |` row of the table below are
+- This file's line "674 assertions / thirty-seven aspects" + the `| 21 |` row of the table below are
   machine-checked by **H3c** (since 2026-09-30; after the README slimming the criterion moved from the
   README to this file).
 

@@ -49,7 +49,7 @@
           "en": "Repository layout",
           "mode": "condensed",
           "h_en": "eab8f5a7b838258a",
-          "h_src": "62774b041d1849e0",
+          "h_src": "0be48fbdc4ca1674",
           "seeded": "by-position"
         },
         {
@@ -72,14 +72,14 @@
           "zh": "文档索引",
           "en": "Documentation index",
           "mode": "condensed",
-          "h_en": "cd28aecfc53fd69e",
-          "h_src": "9a9c4cde95600ed6",
+          "h_en": "6e8fc407707ee010",
+          "h_src": "9e0986c10b0ac4a3",
           "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-10-16",
-      "src_sha": "b114850602fabfc1"
+      "src_sha": "084e10514fe2f275"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -432,8 +432,8 @@
           "zh": "单测（零 GPU、秒级）",
           "en": "Unit tests (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "1ff3ad47522669a9",
-          "h_src": "c3155226647310bc",
+          "h_en": "f6069083edb257c1",
+          "h_src": "274a6eb5d79932be",
           "seeded": "by-position"
         },
         {
@@ -471,7 +471,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-16",
-      "src_sha": "09b5a5d1b22d021f"
+      "src_sha": "1540bbe819a400e1"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",

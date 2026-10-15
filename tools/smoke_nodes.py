@@ -240,8 +240,7 @@ def main() -> int:
     ck("H3RelayFiniteRun result 4 路且第 4 路是报告字面量",
        len(_raw.get("result") or ()) == 4 and isinstance(_raw["result"][3], str))
     ck("H3RelayFiniteRun 输出链接指向末段节点",
-       _raw["result"][0] == ["smoke_prefix.seg1_samp", 0]
-       or (isinstance(_raw["result"][0], list) and _raw["result"][0][0].endswith("seg1_samp")),
+       isinstance(_raw["result"][0], list) and _raw["result"][0][0].endswith("seg1_samp"),
        str(_raw["result"][0]))
 
     print("\n── 6. 反证：缺上一段必须报错（不能静默出坏片） ──")

@@ -2405,13 +2405,9 @@ class H3RelayAudioSeam:
 class H3RelayJoinAV:
     """🧩 H3 Relay · Join AV——把「本段裁后画面/音频」接到累计后面，拼成一条。
 
-    为什么不用核心自带的批处理节点：那个节点在规格不符时**静默拉伸/补边**
-    （把小图放大去凑大图）⇒ 规格对不上时看到的是「被拉变形的接缝」而不是报错。
-    本节点规格不符**直接报错**（宁可不拼，也不出悄悄变形的片子）。
-
-    两个用法：
-      · 手动：VAEDecode → Trim AV → 本节点（首段不接累计），一级级接下去；
-      · 自动：⏩ Finite Run 的展开图里每段末尾各有一个本节点（首段不接累计）。
+    为什么不用核心自带的批处理节点：那个节点规格不符时**静默拉伸/补边**（把小图
+    放大去凑大图）⇒ 看到的是「被拉变形的接缝」而不是报错。本节点规格不符直接报错
+    （宁可不拼，也不出悄悄变形的片子）。手动连拼与 ⏩ Finite Run 展开图都用它。
     """
 
     @classmethod
@@ -2490,18 +2486,12 @@ class H3RelayJoinAV:
 class H3RelayFiniteRun:
     """⏩ H3 Relay · Finite Run——**一次提交**跑完 N 段（服务端展开，无头可用）。
 
-    它是什么：把「第 1..N 段」整条连跑展开成一张无环图，宿主一次执行完 ⇒
-      · 不用前端按钮、不用逐段手改段号（脚本/API 用户与画布用户同一套实现）；
-      · 每段之间读上一段落盘文件续接（和手动连跑同一条链、同一批节点）。
+    把「第 1..N 段」整条连跑展开成一张无环图，宿主一次执行完：不用前端按钮、不用
+    逐段手改段号（脚本/API 与画布同一套实现），每段读上一段落盘文件续接（和手动
+    连跑同一条链、同一批节点）。展开图里全部是已有节点，算法零重写。
 
-    展开图里**全部是已有节点**（算法零重写）：每段一条
-    ImageToVideo → LatentLoad → CopyBridge → 采样三件套 → LatentSave →
-    VAEDecode/VAEDecodeAudio → TrimAV → JoinAV。
-
-    ⚠ 边界（诚实声明）：
-      · 各段用**同一张首帧图、同一个种子、同一段长**（与手动连跑的语义一致）；
-      · 不含音频缝补丁与画质域后处理节点（要那些请用手动连跑，逐段接）；
-      · 合并输出是**一条驻留内存的张量**，长片先小分辨率试两段。
+    ⚠ 边界（诚实声明）：各段用**同一张首帧图、同一个种子、同一段长**（与手动连跑
+    同语义）；不含音频缝补丁与画质域后处理节点；合并输出是**一条驻留内存的张量**。
     """
 
     # V3 外壳据此开启 enable_expand（V1 出口无需声明，返回 expand 字典即生效）。
@@ -2600,26 +2590,26 @@ class H3RelayFiniteRun:
     )
 
     @_node_errors("run_id", "segments")
-    def run(self, model, clip, vae, audio_vae, sampler, sigmas, image,
-            prompt, prompts, segments, seed, run_id, width, height, length,
-            context_frames, mask_mode, pin_audio, voice_anchor=None, note=""):
-        """建图并返回展开图（本方法**不采样**，只编排；执行由宿主对展开图进行）。"""
-        # ① 建图期硬校验：任何 GPU 工作开始之前把错误说清
-        CORE.validate_finite_params(
-            segments=segments, seed=seed, run_id=run_id,
-            context_frames=context_frames, mask_mode=mask_mode,
-            length=length, width=width, height=height)
-        blocks, _pnote = CORE.resolve_finite_prompts(prompt, prompts, segments)
-        # ② 前缀：宿主在执行本节点前已设好默认前缀（以本节点 id 为根）⇒ 唯一
+    def run(self, model, clip, vae, audio_vae, sampler, sigmas, image=None,
+            prompt="", prompts="", segments=2, seed=0, run_id="relay",
+            width=1344, height=768, length=124, context_frames=22,
+            mask_mode="hard", pin_audio=True, voice_anchor=None, note=""):
+        """建图并返回展开图（本方法**不采样**，只编排；执行由宿主对展开图进行）。
+
+        可选链接槽（image / voice_anchor）不接线时宿主整个键都不传 ⇒ 必须给默认值。
+        硬校验在 ``build_finite_graph`` 里（唯一的门），烧卡前说清。
+        """
+        blocks, pnote = CORE.resolve_finite_prompts(prompt, prompts, segments)
+        # 前缀由宿主在执行本节点前设好（以本节点 id 为根）⇒ 唯一
         from comfy_execution.graph_utils import GraphBuilder
-        prefix = GraphBuilder.alloc_prefix()
-        graph, outputs, _rep = CORE.build_finite_graph(
-            prefix=prefix, segments=segments, blocks=blocks, seed=seed,
-            run_id=run_id, note=note, width=width, height=height, length=length,
-            context_frames=context_frames, mask_mode=mask_mode, pin_audio=pin_audio,
-            model=model, clip=clip, vae=vae, audio_vae=audio_vae, image=image,
-            sampler=sampler, sigmas=sigmas, voice_anchor=voice_anchor)
-        # ③ V1 出口：expand 图 + result（输出可以是 [展开图节点 id, 输出位] 链接）
+        graph, outputs, report = CORE.build_finite_graph(
+            prefix=GraphBuilder.alloc_prefix(), segments=segments, blocks=blocks,
+            seed=seed, run_id=run_id, note=note, width=width, height=height,
+            length=length, context_frames=context_frames, mask_mode=mask_mode,
+            pin_audio=pin_audio, model=model, clip=clip, vae=vae, audio_vae=audio_vae,
+            image=image, sampler=sampler, sigmas=sigmas, voice_anchor=voice_anchor)
+        outputs[3] = report + "\n" + pnote
+        # V1 出口：expand 图 + result（输出可以是 [展开图节点 id, 输出位] 链接）
         return {"expand": graph, "result": tuple(outputs)}
 
 
