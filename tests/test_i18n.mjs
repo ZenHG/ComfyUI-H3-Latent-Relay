@@ -311,9 +311,51 @@ check("5.3 英文态回落显示原值（不留中文钩子）",
         `label=${bz.widgets[0].label}`);
 }
 
+// ---- 10.5 标题**兜底**：打开工作流后 title 被写回，也必须换语言 ----
+// 🔴 2026-10-16 浏览器实测发现的真 bug：`app.loadGraphData()`（打开工作流）在
+//    `onNodeCreated` **之后**才把 JSON 里的 `title` 写回节点，而之后没有任何事件触发重刷
+//    ⇒ 英文用户「打开一个工作流」看到中文节点名（按钮英文、标题中文，同节点两套语言）。
+//    修法 = 帧级兜底里也纠正 title（`swapTitle` 幂等且只换默认前缀 ⇒ 不碰用户自定义标题）。
+{
+    // 10.5.1 swapTitle 的三种形态（这是兜底安全性的依据）
+    check("10.5.1 `swapTitle` 幂等且只换前缀：中文形态→英文、英文形态→原样、自定义→不碰",
+        swapTitle("🔗 H3 Relay · 连跑控制（说明）", "H3RelayChain", "en")
+            === "🔗 H3 Relay · Chain（说明）"
+        && swapTitle("🔗 H3 Relay · Chain（说明）", "H3RelayChain", "en")
+            === "🔗 H3 Relay · Chain（说明）"                       // 幂等
+        && swapTitle("我自己写的标题", "H3RelayChain", "en") === "我自己写的标题"
+        && swapTitle("🔗 H3 Relay · 连跑控制（说明）", "H3RelayChain", "zh")
+            === "🔗 H3 Relay · 连跑控制（说明）",
+        swapTitle("🔗 H3 Relay · 连跑控制（说明）", "H3RelayChain", "en"));
+
+    // 10.5.2 兜底语义本身：节点 title 处于「另一种语言形态」时必须被纠正
+    //     （用与 guardPass 同一表达式，别在两处各写一份判据）
+    const fixTitle = (title, type, L) => swapTitle(title, type, L);
+    check("10.5.2 兜底判据：处于中文形态的 title 在 en 下会被纠正（打开工作流的场景）",
+        fixTitle("🔗 H3 Relay · 连跑控制（词分发）", "H3RelayChain", "en")
+            === "🔗 H3 Relay · Chain（词分发）"
+        && fixTitle("🔗 H3 Relay · 读上段潜空间（stage-1）", "H3RelayLatentLoad", "en")
+            === "🔗 H3 Relay · Latent Load（stage-1）",
+        fixTitle("🔗 H3 Relay · 连跑控制（词分发）", "H3RelayChain", "en"));
+
+    // 10.5.3 反向：用户自定义标题在两种语言下都不许被碰（铁律三）
+    check("10.5.3 铁律三：用户自定义标题在 en/zh 下都原样返回",
+        fixTitle("我的桥", "H3RelayChain", "en") === "我的桥"
+        && fixTitle("我的桥", "H3RelayChain", "zh") === "我的桥"
+        && fixTitle("读上段终态latent(stage-1)", "H3RelayLatentLoad", "en")
+            === "读上段终态latent(stage-1)",
+        "自定义标题必须原样");
+    // 空标题是**另一种**故意行为：直接填当前语言译文（画布上很常见），不是"原样返回"
+    check("10.5.4 空标题 ⇒ 填当前语言译文（与 10.5.3 的「自定义不碰」是两回事）",
+        fixTitle("", "H3RelayChain", "en") === "🔗 H3 Relay · Chain"
+        && fixTitle("", "H3RelayChain", "zh") === "🔗 H3 Relay · 连跑控制"
+        && fixTitle(null, "H3RelayChain", "en") === "🔗 H3 Relay · Chain",
+        fixTitle("", "H3RelayChain", "en"));
+}
+
 // ---- 11. 自引用：ci.yml / docs/08 的期望数 == 本文件实跑 ----
 {
-    const EXPECTED_CHECKS = 37;                 // 含本行这条自检自己（pass 在本行执行时还没算上自己 ⇒ 比的是 pass+1）
+    const EXPECTED_CHECKS = 41;                 // 含本行这条自检自己（pass 在本行执行时还没算上自己 ⇒ 比的是 pass+1）
     const root = fileURLToPath(new URL("..", import.meta.url));
     const decl = [];
     for (const rel of [".github/workflows/ci.yml", "docs/08-testing.md"]) {

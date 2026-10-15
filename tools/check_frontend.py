@@ -23,6 +23,7 @@
 - **F1** 未翻译的可见中文**只许减不许增**（基线在 `UNTRANSLATED_BASELINE`，翻一条就减 1）
 - **F2** `H3_TIPS` 的英文形状：无全角括号 / 无汉字 / `]` 后**留一个空格**
 - **F3** 中英**行数**一致（不等 ⇒ 必须在 `EXEMPT` 里写明理由）
+- **F4** 示例图里本包节点的 `title` **可被 i18n 换前缀**（空 / 等于默认 / 带默认前缀）
 
 ## 用法
 
@@ -266,6 +267,47 @@ def en_tips():
     return out
 
 
+def f4_example_titles():
+    """示例图里本包节点的 `title` 必须**可被 i18n 换前缀**。
+
+    为什么要它（2026-10-16 浏览器实测发现）：`fullflow` 示例图有 5 个节点用的是**旧命名**
+    （`读上段终态latent(stage-1)` / `复合桥:拷贝上段尾22帧+钉帧` / `Chain(词分发+自动拼接)` …），
+    不带默认标题前缀 ⇒ `swapTitle` 按**铁律三**（不许覆盖用户自定义标题）原样保留
+    ⇒ **英文用户打开自带示例图看到 5 个中文节点名**。
+    这类问题只有真开浏览器才看得见 ⇒ 用机检把它堵在「改示例图」那一刻。
+    """
+    import glob
+    import json
+    # 默认标题（与 web/relay_kit_i18n.js 的 H3_NODES 同源 —— 从那里读，不手抄第二份）
+    js = read(I18N_JS)
+    i = js.index("export const H3_NODES = {")
+    j = js.index("};", i)
+    defaults = {m.group(1): (m.group(2), m.group(3)) for m in
+                re.finditer(r'(H3Relay\w+): \{ zh: "([^"]*)", en: "([^"]*)" \}', js[i:j])}
+    bad, total = [], 0
+    for path in sorted(glob.glob(os.path.join(KIT, "examples", "*.json"))):
+        try:
+            data = json.loads(read(path))
+        except Exception as e:
+            bad.append((os.path.basename(path), "?", "JSON 解析失败：%s" % e))
+            continue
+        for nd in data.get("nodes", []):
+            t = nd.get("type", "")
+            if t not in defaults:
+                continue
+            total += 1
+            ti = nd.get("title")
+            if ti is None or ti == "":
+                continue                      # 没写 title ⇒ 用默认 ⇒ 能换
+            zh, en = defaults[t]
+            if ti == zh or ti == en:
+                continue                      # 就是默认 ⇒ 能换
+            if ti.startswith((zh, en)):
+                continue                      # 带默认前缀 ⇒ swapTitle 的 startsWith 分支能换
+            bad.append((os.path.basename(path), t, ti))
+    return bad, total
+
+
 def f3_alignment():
     """中英行数不等（且不在豁免表里）的条目。"""
     zh, en = zh_tips(), en_tips()
@@ -308,6 +350,17 @@ def main():
     else:
         print("     ✅ 无全角括号 / 无汉字 / `]` 后都留了空格")
 
+    bad4, n4 = f4_example_titles()
+    print("\n[F4] 示例图节点 title 可换前缀（%d 个本包节点）" % n4)
+    if bad4:
+        fails.append("F4 示例图 title 不可换 %d 个" % len(bad4))
+        for f, t, ti in bad4[:10]:
+            print("     🔴 %s ｜ %s：%r" % (f, t, ti))
+        print("     修法：改成「默认标题 + （说明）」的形式（空 title 或等于默认也行）——")
+        print("     否则 `swapTitle` 按**铁律三**不动它 ⇒ 英文用户打开示例图看到中文节点名。")
+    else:
+        print("     ✅ 全部可换（空 / 默认 / 带默认前缀）")
+
     bad3, n3 = f3_alignment()
     print("\n[F3] 中英行数一致（%d 条；豁免 %d 条）" % (n3, len(EXEMPT_ALIGN)))
     if bad3:
@@ -323,7 +376,7 @@ def main():
     if fails:
         print("结果：失败 %d 项 —— %s" % (len(fails), "；".join(fails)))
         return 1
-    print("结果：通过 3 / 失败 0")
+    print("结果：通过 4 / 失败 0")
     print("=" * 78)
     return 0
 

@@ -78,7 +78,7 @@ python tests/test_relay_core.py
 ```bash
 node tests/test_prompt_dispatch.mjs      # 期望 49/0
 node tests/test_audio_ref_budget.mjs     # 期望 47/0
-node tests/test_i18n.mjs                 # 期望 37/0
+node tests/test_i18n.mjs                 # 期望 41/0
 python tools/check_frontend.py           # 期望 通过 3 / 失败 0（前端静态一致性，零浏览器）
 ```
 

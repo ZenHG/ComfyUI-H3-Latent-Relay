@@ -93,7 +93,7 @@ does **not** collect them separately (otherwise every assertion would run twice)
 ```bash
 node tests/test_prompt_dispatch.mjs      # expected 49/0
 node tests/test_audio_ref_budget.mjs     # expected 47/0
-node tests/test_i18n.mjs                 # expected 37/0
+node tests/test_i18n.mjs                 # expected 41/0
 python tools/check_frontend.py           # expected 3 pass / 0 fail (front-end static consistency, no browser)
 ```
 

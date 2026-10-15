@@ -78,7 +78,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-15",
+      "stamped": "2026-10-16",
       "src_sha": "3f7e7c7fdbf83d53"
     },
     "docs/01-mechanism.md": {
@@ -166,7 +166,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-15",
+      "stamped": "2026-10-16",
       "src_sha": "06ca2288755a21d0"
     },
     "docs/02-parameters.md": {
@@ -190,7 +190,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-15",
+      "stamped": "2026-10-16",
       "src_sha": "2b6cd3118cc63bbf"
     },
     "docs/03-sampling-and-design.md": {
@@ -222,7 +222,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-15",
+      "stamped": "2026-10-16",
       "src_sha": "e0c4d1c18fb4b8e2"
     },
     "docs/04-canvas-and-widgets.md": {
@@ -238,7 +238,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-15",
+      "stamped": "2026-10-16",
       "src_sha": "d39be80cc6d876ab"
     },
     "docs/05-troubleshooting.md": {
@@ -294,7 +294,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-15",
+      "stamped": "2026-10-16",
       "src_sha": "9115e791360e9ca7"
     },
     "docs/06-continuity-scripting.md": {
@@ -318,7 +318,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-15",
+      "stamped": "2026-10-16",
       "src_sha": "c046d84ff172f569"
     },
     "docs/07-chain.md": {
@@ -406,7 +406,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-15",
+      "stamped": "2026-10-16",
       "src_sha": "3535e5cb93b77c91"
     },
     "docs/08-testing.md": {
@@ -432,8 +432,8 @@
           "zh": "前端纯函数的单测（node 跑、零依赖）",
           "en": "Unit tests for front-end pure functions (run by node, zero dependencies)",
           "mode": "full",
-          "h_en": "3270d64ac7c1d33c",
-          "h_src": "fcbb891282d79490",
+          "h_en": "3a798446a9e1e0de",
+          "h_src": "f041ef331700f436",
           "seeded": "by-position"
         },
         {
@@ -470,8 +470,8 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-15",
-      "src_sha": "5e4804359cf98264"
+      "stamped": "2026-10-16",
+      "src_sha": "ce3240b97b065aaa"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",
@@ -526,7 +526,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-15",
+      "stamped": "2026-10-16",
       "src_sha": "6886d24ff831c09b"
     },
     "docs/10-audio-seam-and-concat.md": {
@@ -590,7 +590,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-15",
+      "stamped": "2026-10-16",
       "src_sha": "068491bc51cdce1e"
     }
   }

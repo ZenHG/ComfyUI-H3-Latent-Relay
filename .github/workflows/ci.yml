@@ -18,7 +18,7 @@
 #   ·  期望 49/0  tests/test_prompt_dispatch.mjs  前端纯函数（词分发 + run_id 同步 + 阶段表对账）（node）
 #   ·  期望 29/0  tests/test_run_id_parity.mjs   run_id 同步的跨层对账（与 Python 第 34 组共用一份 fixture）（node）
 #   ·  期望 47/0  tests/test_audio_ref_budget.mjs  前端纯函数（音频参考额度：3 槽 + 本包 1）（node）
-#   ·  期望 37/0  tests/test_i18n.mjs            前端纯函数（画布中英切换：标签 + 悬浮提示）（node）
+#   ·  期望 41/0  tests/test_i18n.mjs            前端纯函数（画布中英切换：标签 + 悬浮提示）（node）
 # 改动后若这些数字变了，请同步 CONTRIBUTING.md「方面数/断言数」、tests 头注释 **以及本文件**。
 # ⚠️ 本文件曾是**已知盲区**（自己漂移过：停在 384；`assert_default_exit` 的期望值与第 11 行
 #    自相矛盾 3/3 vs 4/4；`review_050` 的执行行写 82 而真值 83）。2026-09-25 已收口：
@@ -192,7 +192,7 @@ jobs:
       #    追加的额度提示；③ 枚举白名单外的值被猜译（模型文件名翻了 = 找不到文件）。
       #    三条都不会报错，只有单测能拦。
       - name: Canvas i18n (node)
-        run: node tests/test_i18n.mjs   # 期望 37/0
+        run: node tests/test_i18n.mjs   # 期望 41/0
 
       # 🔴 2026-09-30 新增：**真的构建一次分发集**（此前它零 CI 覆盖）。
       #    为什么必须进 CI：用户下载的就是 `dist/` 那个 zip —— 打包器坏了、或

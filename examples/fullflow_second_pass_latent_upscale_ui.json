@@ -1514,7 +1514,7 @@
           "links": []
         }
       ],
-      "title": "读上段终态latent(stage-1)",
+      "title": "🔗 H3 Relay · 读上段潜空间（读上一段的终态 latent，stage-1）",
       "properties": {
         "Node name for S&R": "H3RelayLatentLoad",
         "ue_properties": {
@@ -1817,7 +1817,7 @@
           ]
         }
       ],
-      "title": "复合桥:拷贝上段尾22帧+钉帧",
+      "title": "🔗 H3 Relay · 复合桥（拷贝上段尾 22 帧 + 钉住区帧）",
       "properties": {
         "Node name for S&R": "H3RelayCopyBridge",
         "ue_properties": {
@@ -2012,7 +2012,7 @@
           "links": null
         }
       ],
-      "title": "Chain(词分发+自动拼接)",
+      "title": "🔗 H3 Relay · 连跑控制（词分发 + 跑完自动拼成片）",
       "properties": {
         "Node name for S&R": "H3RelayChain",
         "ue_properties": {
@@ -2730,7 +2730,7 @@
           "links": []
         }
       ],
-      "title": "H仓适配器:拆包→逐块调上游3D放大→回包(零去噪,块数自选)",
+      "title": "🔍 H3 Relay · 潜空间分块放大（本仓适配器：拆包 → 逐块调上游 3D 放大 → 回包，零去噪、块数自选）",
       "properties": {
         "Node name for S&R": "H3RelayLatentUpscale",
         "ue_properties": {
@@ -3063,7 +3063,7 @@
           ]
         }
       ],
-      "title": "TrimAV:头22帧音视频同裁",
+      "title": "🔗 H3 Relay · 裁重叠（头 22 帧音视频同裁）",
       "properties": {
         "Node name for S&R": "H3RelayTrimAV",
         "ue_properties": {
