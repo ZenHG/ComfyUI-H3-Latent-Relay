@@ -314,6 +314,147 @@ const SKIP = (why) => {
         ok('解除冲突后 Run 能排队', false, '宿主队列本来就不空，跳过（避免干扰别人的跑批）');
     }
 
+    // ---- 6.5 切到英文后，画布上的**可见文本**必须真的变成英文 --------------
+    // 🔴 为什么必须有这一段（2026-10-16 实测，两类 bug 都是这样漏过去的）：
+    //   前面 1~5 段断言的是「按钮**点了不出错**」与「run_id 钩子在不在」—— 它们全是
+    //   **行为**判据，一条都不看「**渲染出来的是什么语言**」。结果这两类 bug 全绿：
+    //     ① `app.loadGraphData()` 晚于 `onNodeCreated` 把 JSON 的 title 写回节点，
+    //        之后没人再刷 ⇒ 英文界面同一个节点「按钮英文、标题中文」；
+    //     ② 示例图节点用旧命名、不带默认标题前缀 ⇒ `swapTitle` 按铁律三正确地不动它
+    //        ⇒ 英文用户打开自带示例图看到中文节点名。
+    //   ⇒ 这两条都不是「函数错」，是「没人再调它」和「数据旧」⇒ 只能**读真实渲染文本**才看得见。
+    // ⚠️ 判据只盯**本包画出来的那部分**（Chain 按钮 label / 本包节点 title），
+    //    绝不碰宿主自己的 UI（菜单、侧栏、官方节点名）—— 那不是本包的责任范围。
+    console.log('\n[6] 切英文后，画布上的可见文本真的变英文');
+    {
+        // 英文用户的真实入口：写 localStorage 覆盖层 + 刷新（点节点里那个 DOM 切换条
+        // 是**节点内的自定义 widget**，用选择器点不可靠 ⇒ 不走那条路）。
+        await page.evaluate(() => localStorage.setItem('h3relay_lang', 'en'));
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 90000 });
+        for (let i = 0; i < 40; i++) {
+            if (await page.evaluate(() => !!(window.app && window.app.canvas))) break;
+            await page.waitForTimeout(1000);
+        }
+        await page.evaluate(async (t) => { await window.app.loadGraphData(JSON.parse(t), true, false, 'smoke-en'); }, wfText);
+        await page.waitForTimeout(6000);
+
+        const seen = await page.evaluate(() => {
+            const g = window.app.graph;
+            if (!g || !g._nodes) return null;
+            const chain = g._nodes.find((n) => n.type === 'H3RelayChain');
+            if (!chain) return null;
+            // 本包节点 = 图上所有 H3Relay* 节点（只看 title，不管宿主节点）
+            const titles = g._nodes
+                .filter((n) => String(n.type).startsWith('H3Relay'))
+                .map((n) => ({ type: n.type.replace('H3Relay', ''), title: String(n.title || '') }));
+            return {
+                buttons: (chain.widgets || [])
+                    .filter((w) => w.type === 'button')
+                    .map((w) => String(w.label || w.name || '')),
+                titles,
+            };
+        });
+        if (!seen) {
+            await browser.close();
+            SKIP('切英文后图里没有 Chain 节点 —— 检查 examples/');
+        }
+
+        // 6.1 七个按钮：渲染文本里不许有汉字
+        const badBtn = seen.buttons.filter((t) => /[\u4e00-\u9fff]/.test(t));
+        ok('切英文后 7 个按钮的渲染文本不含汉字',
+            seen.buttons.length === 7 && badBtn.length === 0,
+            badBtn.length ? '含汉字的：' + badBtn.join(' / ') : '实得 ' + seen.buttons.length + ' 个');
+
+        // 6.2 每个按钮都真的换成了英文（逐条点名，别只报"有几个不对"）
+        const EN_OF = {
+            Run: 'Run', Approve: 'Approve', 连跑: 'Chain', 续跑: 'Resume',
+            Stop: 'Stop', 拼成一条: 'Join', Reset: 'Reset',
+        };
+        const stillZh = seen.buttons.filter((t) => !/[A-Za-z]/.test(t));
+        ok('切英文后每个按钮都含英文字母（不是原样中文）',
+            stillZh.length === 0,
+            stillZh.length ? '仍是纯中文的：' + stillZh.join(' / ') : '全部含英文');
+        // 🔴 逐条判据必须是「**不含汉字**」，不是「含英文字母」—— 变异测试实测：
+        //    中文标签里往往嵌着英文残片（`Run` / `Approve` / `Stop` / `Reset` / `segments`），
+        //    「含 A-Za-z」这条会把它们**误判为已翻译**（变异态下 7 条里只报出 1 条）。
+        for (const [zhFrag, enFrag] of Object.entries(EN_OF)) {
+            const hit = seen.buttons.find((t) => t.includes(zhFrag) || t.includes(enFrag));
+            ok(`按钮「${zhFrag}」在英文界面下不含汉字`,
+                !!hit && !/[\u4e00-\u9fff]/.test(hit),
+                hit ? '含汉字：' + hit : '（没找到对应按钮）');
+        }
+
+        // 6.3 本包节点标题的**默认前缀**必须处于当前语言。
+        //     🔴 判据为什么不是"整条标题无汉字"：默认标题后面那截括号说明是**示例图作者 /
+        //        用户自己写的话**（例：`🔗 H3 Relay · Chain（词分发 + 跑完自动拼成片）`），
+        //        按铁律三必须原样保留 ⇒ 要求整条无汉字会**误报**（第一版就是这么写错的，
+        //        一次报出 6 个全是对的场景）。
+        //     ✅ 正确判据 = 「没有任何标题**还停在中文默认前缀**上」—— 这正是本轮修掉的那个 bug
+        //        （`loadGraphData` 把 JSON 的 title 写回后没人再刷 ⇒ 标题停在中文形态）。
+        //     判据不循环：拿**服务端实际发出的** H3_NODES 当规格，不用被测的 swapTitle 自己说话。
+        // ⚠️ 在 **Node 侧**取（page.request），别在 page.evaluate 里用页面 fetch ——
+        //    宿主/扩展可能包装过 fetch（实测报 `r.ok is not a function`）。
+        let servedJs = '';
+        try {
+            const rr = await page.request.get(BASE + '/extensions/ComfyUI-H3-Latent-Relay/relay_kit_i18n.js', { timeout: 15000 });
+            servedJs = rr.ok() ? await rr.text() : '';
+        } catch (e) { servedJs = ''; }
+        const ZH_PREFIX = {}, EN_PREFIX = {};
+        for (const m of servedJs.matchAll(/(H3Relay\w+): \{ zh: "([^"]+)", en: "([^"]+)" \}/g)) {
+            ZH_PREFIX[m[1]] = m[2];
+            EN_PREFIX[m[1]] = m[3];
+        }
+        const nSpec = Object.keys(ZH_PREFIX).length;
+        ok('能从服务端读到 H3_NODES 规格（' + nSpec + ' 个节点）', nSpec >= 8, '实得 ' + nSpec + ' 个');
+        const stuckZh = seen.titles.filter((t) => {
+            const zh = ZH_PREFIX['H3Relay' + t.type];
+            return zh && t.title.startsWith(zh);     // 还停在中文默认前缀上
+        });
+        ok('切英文后没有标题停在中文默认前缀上（本轮修的那个 bug）',
+            stuckZh.length === 0,
+            stuckZh.length ? '停在中文的：' + stuckZh.map((t) => t.type + '=' + t.title).join(' / ') : '');
+        // 反向：带默认前缀的应当已经换成英文前缀（证明不是"全都判为自定义"而漏放）
+        //   ⚠️ 判据取**服务端规格里的 en 默认标题**，不用正则猜（`\u{...}` 在无 u flag 的正则里无效）
+        const enPrefixed = seen.titles.filter((t) => {
+            const en = EN_PREFIX['H3Relay' + t.type];
+            return en && t.title.startsWith(en);
+        });
+        ok('切英文后带默认前缀的标题已换成英文前缀',
+            enPrefixed.length >= 1 && stuckZh.length === 0,
+            '英文前缀的：' + enPrefixed.length + ' 个 ｜ 中文前缀的：' + stuckZh.length + ' 个'
+            + ' ｜ 两者都算不上的（用户自定义，铁律三保留）：'
+            + seen.titles.filter((t) => {
+                const zh = ZH_PREFIX['H3Relay' + t.type], en = EN_PREFIX['H3Relay' + t.type];
+                return !(zh && t.title.startsWith(zh)) && !(en && t.title.startsWith(en));
+            }).length + ' 个');
+
+        // 6.4 反向：铁律三 —— 用户自定义标题不许被语言切换改掉。
+        //      先手动把标题改成一句纯中文自定义，切一次语言，它必须原样不动。
+        const CUSTOM = '我自己写的桥标题';
+        await page.evaluate((t) => {
+            const g = window.app.graph;
+            const n = g._nodes.find((x) => x.type === 'H3RelayCopyBridge');
+            if (n) n.title = t;
+        }, CUSTOM);
+        await page.waitForTimeout(2500);                 // 帧级兜底至少跑几帧
+        const kept = await page.evaluate(() => {
+            const n = window.app.graph._nodes.find((x) => x.type === 'H3RelayCopyBridge');
+            return n ? String(n.title) : null;
+        });
+        ok('铁律三：用户自定义标题不被语言切换改写', kept === CUSTOM,
+            '实得 ' + JSON.stringify(kept));
+
+        // 切回中文，免得后面几段（虽然它们在前面已经跑完）或下一次运行受污染
+        await page.evaluate(() => localStorage.setItem('h3relay_lang', 'zh'));
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 90000 });
+        for (let i = 0; i < 40; i++) {
+            if (await page.evaluate(() => !!(window.app && window.app.canvas))) break;
+            await page.waitForTimeout(1000);
+        }
+        await page.evaluate(async (t) => { await window.app.loadGraphData(JSON.parse(t), true, false, 'smoke-zh'); }, wfText);
+        await page.waitForTimeout(4000);
+    }
+
     // ---- 7. 全程没有未捕获异常 ------------------------------------------
     console.log('\n[5] 全程');
     ok('全程无未捕获 JS 异常', pageErrors.length === 0, JSON.stringify(pageErrors.slice(0, 3)));

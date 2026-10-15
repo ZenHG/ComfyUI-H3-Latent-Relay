@@ -313,11 +313,17 @@ function guardPass() {
                     w.tooltip = w.__h3I18nWantTip;
                 }
             } catch (e) { /* 单格失败不影响其它 */ }
-            // 🔴 2026-10-16：标题也要兜底。浏览器实测的坑 —— `app.loadGraphData()`
-            //    （打开工作流）是在 `onNodeCreated` **之后**才把 JSON 里的 `title` 写回节点的，
-            //    而之后**没有任何事件**触发重刷 ⇒ 英文用户「打开一个工作流」看到中文节点名
-            //    （按钮是英文的，标题是中文的，同一节点上两套语言）。
-            //    为什么安全：`swapTitle` **幂等**且只换「默认标题前缀」，认不出的（用户自己写的）
+            // 标题兜底（2026-10-16 加）。
+            // ⚠️ **诚实标注**：变异测试（把这一段注掉）下 `ui_smoke` 第 6 段**仍然全过**
+            //    ⇒ 它在**当前前端版本、当前路径上无影响** —— 因为 `app.loadGraphData()`
+            //    会触发 `onGraphChanged` ⇒ `setup()` 里挂的 `safeApply()` 已经把标题刷对了。
+            //    ⇒ 这一段是**防御性冗余**，不是"修了一个 bug"。（我一度以为它是修 bug，
+            //      后来发现那个"bug"是探针自己造成的：litegraph 的 `graph.onGraphChanged`
+            //      是**赋值**式 API，探针注册计数器时把 i18n 的 `safeApply` 回调**覆盖**了。）
+            //    保留理由：① 成本只是一次字符串 startsWith 比对；② 覆盖「某些前端版本
+            //    不触发 onGraphChanged」的情形（本仓踩过同类：`nodeCreated` 那个扩展点
+            //    在本机前端上根本不被调用，见 LOCAL 规范 §二·A）。
+            // 🔴 为什么安全：`swapTitle` **幂等**且只换「默认标题前缀」，认不出的（用户自己写的）
             //    原样返回 ⇒ 用户自定义标题一个字节都不会被碰（铁律三）。
             try {
                 const wt = swapTitle(n.title, n.type, L);
