@@ -349,8 +349,17 @@ Three boundaries: ① it must be lower than this segment's index (the anchor mus
 🔴 **Consequence**: if you fill all 3 slots and then connect a voice anchor ⇒ the model side sees **4** audio references.
 The model **takes them all** (no error), but it **exceeds the official convention and we have not measured it** ⇒ this is "we let you go out of bounds", and it must be stated proactively:
 
-- **On the canvas**: the bridge node's **title** directly carries a line `⚠ 音频参考 4 个（官方上限 3）…` (not a tooltip, not the console
-  — many users do not read logs). The number comes from counting the **connected** slots of `ref_audios.ref_audio_N` in your reference node.
+- **On the canvas**: the bridge node's **title** carries a **short badge** (not a tooltip, not the console
+  — many users do not read logs). 🔴 The badge holds only "symbol + digits": the title is **plain text** and is
+  rewritten repeatedly ⇒ long sentences do not fit, and `**` would show up as literal asterisks.
+  The number comes from counting the **connected** slots of `ref_audios.ref_audio_N` in your reference node. Four forms:
+
+  | Badge | Meaning |
+  |---|---|
+  | `refs n/3` | budget full (`n` = your usage + this pack's fixed 1) |
+  | `⚠ refs n/3` | **over**: the model does not block it, but it exceeds the official convention and is untested ⇒ to free a slot, reduce the official `ref_audio` slots |
+  | `⚠ refs ?` | the reference node's input table cannot be read (host node present, structure does not match) ⇒ must **not** be treated as 0 |
+  | `⚠ <Audio n> follows wiring order: …` | when slots are non-contiguous, the `<Audio j>` you write in the prompt follows **wiring order**, not the slot number |
 - **In the report**: `relay_core.count_official_audio_refs` gives the authoritative number (script/API users look here).
 - ⚠ **This pack's 1 has no "completely off" switch** (without a voice anchor it uses the previous stage's tail window) ⇒
   to really return to the official budget, the only way is to **reduce the reference node's `ref_audio` slots yourself**.

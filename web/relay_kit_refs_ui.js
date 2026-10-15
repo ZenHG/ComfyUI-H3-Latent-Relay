@@ -20,6 +20,8 @@ import { app } from "../../scripts/app.js";
 import {
     REF_HOST, countRefAudioSlots, refBudgetFromScan, isScanUnknown, budgetTitle,
 } from "./relay_kit_refs.js";
+// 角标里那句「按接线顺序」是双语的 ⇒ 需要当前语言（i18n_ui 不反向依赖本文件，无环）。
+import { currentLang, LANG_EVENT } from "./relay_kit_i18n_ui.js";
 
 const BRIDGE = "H3RelayCopyBridge";
 
@@ -54,7 +56,7 @@ function refreshTitles() {
     for (const node of nodes) {
         if (!node || node.type !== BRIDGE) continue;
         const stage = bridgeStageIndex(node);
-        const budget = unknownScan ? null : refBudgetFromScan(scan, stage);
+        const budget = unknownScan ? null : refBudgetFromScan(scan, stage, currentLang());
         if (budget == null) unknown += 1;
         else if (budget.over) flagged += 1;
         // 未知 ⇒ 传 -1（纯函数据此写「⚠ 额度未知」）；已知 ⇒ 传**扫描到的原始占用数**。
@@ -104,6 +106,11 @@ app.registerExtension({
                 app.graph.onGraphChanged(() => safeRefresh());
             }
         } catch (e) { /* 图 API 变了 ⇒ 靠 nodeCreated 那条路 */ }
+        // 🔴 角标里那句「按接线顺序」是**双语**的 ⇒ 切语言必须重算一次标题，
+        //    否则切完还挂着上一种语言的角标（要等下一次图变化才刷）。
+        try {
+            globalThis.addEventListener?.(LANG_EVENT, () => safeRefresh());
+        } catch (e) { /* 没有 window（单测环境）⇒ 无所谓 */ }
         // 🔴 `setup()` 可能早于「工作流加载完成」（那时 `_nodes` 还空）⇒ 补几拍重算。
         //    不补 = 打开工作流后提示根本不出现（静默失效）。三拍覆盖"本地快 / 远端慢"两档。
         safeRefresh();

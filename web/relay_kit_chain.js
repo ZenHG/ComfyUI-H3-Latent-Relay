@@ -146,6 +146,21 @@ import { splitPromptBlocks, collectStageIds } from "./relay_kit_prompt.js";
 import {
     isRunIdType, runIdSpec, resolveRunId, planRunIdSync, describeRunIdConflict,
 } from "./relay_kit_sync.js";
+// 🔴 0.6.34：运行期文案（阶段徽标 / 状态格 / 通知）要跟语言走 ⇒ 需要当前语言。
+//    `relay_kit_i18n_ui.js` 只依赖 `app.js` 与 `relay_kit_i18n.js`，**不反向依赖本文件** ⇒ 无环。
+import { currentLang } from "./relay_kit_i18n_ui.js";
+// 按钮词表（纯模块，无 app.js 依赖）—— 建按钮时就要用它写 `label`，见 `addBtn`。
+import { btnLabel } from "./relay_kit_i18n.js";
+
+/**
+ * 运行期文案：中文原文 + 英文。英文缺省时回落中文（宁缺勿错）。
+ *
+ * 🔴 为什么不走 `H3_TIPS` 那类词表：这些文案**带变量**（段号 / 名字 / 错误信息），
+ *    键没法是整串；而且它们是**瞬时状态**、不进任何文件 ⇒ 就地写两份最不容易漂。
+ */
+function T(zh, en) {
+    try { return (currentLang() === "en" && en) ? en : zh; } catch (e) { return zh; }
+}
 
 /** litegraph 的节点模式：0 = Always（启用），4 = Bypass（旁路）。 */
 const MODE_ALWAYS = 0;
@@ -171,6 +186,10 @@ const MODE_BYPASS = 4;
  * 字段：`required` = 必须**恰好 1 个**（否则连跑无从下手）；`liveOnly` = 是否只算启用中的
  *   （「Latent Load」与「Audio Seam」都要管被旁路的：前者旁路会让提交校验失败，Chain 要反向接管）。
  */
+// ⚠️ 段类标签（`label`）会进**报错文案**（`runIdNodeName` / `pairError`）。那几条消息
+//    目前仍是中文（见任务 #7）⇒ **现在不能**给它做双语：英文界面下会变成
+//    「找到 bridge×1 / save×1，需要恰好各 1 个」这种中英混排，比全中文更差。
+//    ⇒ 等那一轮把消息一起翻了，再加 `labelEn` 与取值函数。
 const STAGE_TYPES = [
     { type: "H3RelayCopyBridge", label: "桥", required: true, liveOnly: true,
       missing: "「Copy Bridge」" },
@@ -190,15 +209,21 @@ const STAGE_TYPES = [
 //   ① 节点**标题栏顶部的状态色带 + 阶段文字**（canvas 绘制，见 `drawPhaseBadge`）；
 //   ② `status` 格文字前的**阶段字形**（🟦/🟩/🟥…，见 `say`）；
 //   ③ **按钮文字**（点击瞬间换「⏳ …已点击」，连跑中换带进度条的文案，见 `flashPressed`）。
+// ⚠️ `label` 会画进**节点标题栏**（`drawPhaseBadge`）⇒ 英文界面下不能是中文。
 const PHASES = {
-    idle: { glyph: "⚪", color: null, label: "空闲" },
-    queued: { glyph: "🟦", color: "#2563eb", label: "已排队" },
-    running: { glyph: "🟩", color: "#16a34a", label: "连跑中" },
-    done: { glyph: "✅", color: "#0891b2", label: "完成" },
-    stopped: { glyph: "🟧", color: "#d97706", label: "已停止" },
-    warn: { glyph: "⚠️", color: "#d97706", label: "需处理" },
-    error: { glyph: "🟥", color: "#dc2626", label: "出错" },
+    idle: { glyph: "⚪", color: null, label: "空闲", labelEn: "idle" },
+    queued: { glyph: "🟦", color: "#2563eb", label: "已排队", labelEn: "queued" },
+    running: { glyph: "🟩", color: "#16a34a", label: "连跑中", labelEn: "chaining" },
+    done: { glyph: "✅", color: "#0891b2", label: "完成", labelEn: "done" },
+    stopped: { glyph: "🟧", color: "#d97706", label: "已停止", labelEn: "stopped" },
+    warn: { glyph: "⚠️", color: "#d97706", label: "需处理", labelEn: "needs action" },
+    error: { glyph: "🟥", color: "#dc2626", label: "出错", labelEn: "error" },
 };
+
+/** 阶段文字按当前语言取（画布绘制路径，每帧调用 ⇒ 不做缓存）。 */
+function phaseLabel(p) {
+    return T(p.label, p.labelEn);
+}
 
 /** litegraph 标题栏高度（跨版本取值；取不到按 30）。 */
 function titleHeight() {
@@ -230,7 +255,7 @@ function drawPhaseBadge(ctx, node, phase) {
     ctx.fillRect(0, -5, w, 5);
     // ② 阶段文字右对齐在标题栏里；**放不下就不画**（标题长的节点上绝不叠字）。
     ctx.font = "bold 12px sans-serif";
-    const badge = `${p.glyph} ${p.label}`;
+    const badge = `${p.glyph} ${phaseLabel(p)}`;
     const bw = ctx.measureText(badge).width + 10;
     ctx.font = "bold 14px sans-serif";              // 与 litegraph 的 NODE_TEXT_SIZE 同档（宁大勿小）
     const tw = ctx.measureText(String(node?.title ?? "")).width;
@@ -881,7 +906,8 @@ async function queuePrompt(chainNode, state, stage) {
         // 顺序也天然按段号排；push 会把重跑的段算成两段、拼出一条带重复的片。
         // 🔴 0.6.18：记录是 `{id, seq}`（`seq` = 属于第几轮）—— 拼接时用它标"这一段来自更早一轮"。
         if (id && state) state.stageIds[stage] = { id, seq: state.runSeq };
-        say(chainNode, state, "queued", `已排队，采样中…（第 ${stage + 1} 段）`);
+        say(chainNode, state, "queued",
+            T(`已排队，采样中…（第 ${stage + 1} 段）`, `queued, sampling… (segment ${stage + 1})`));
         // 🔴 0.6.13 修（2026-09-28 实测：新版前端 app.queuePrompt 返回 **true**，
         //   旧版返回 {prompt_id}，都没有统一形状）：旧代码 `return id` ⇒ boolean 返回时
         //   恒为 null ⇒ 连跑 handler 的 `if (ok === null) state.mode = "idle"` 把状态机
@@ -889,7 +915,9 @@ async function queuePrompt(chainNode, state, stage) {
         //   排队失败的信号是**异常**（下方 catch 已转 ⚠ status）；`res === false` 也算失败。
         //   拿不到 prompt_id 就不记 stageIds ⇒ 拼接自动走「按最近 N 段落盘记录」的兜底路。
         if (res === false) {
-            say(chainNode, state, "error", "排队被宿主拒了（app.queuePrompt 返回 false）⇒ 没有排队。");
+            say(chainNode, state, "error",
+                T("排队被宿主拒了（app.queuePrompt 返回 false）⇒ 没有排队。",
+                  "the host rejected the queue call (app.queuePrompt returned false) ⇒ nothing was queued."));
             return null;
         }
         // 排队**成功** ⇒ 本组进入「等一轮跑完」态：`stepDone()` 只认置位后的收尾信号，
@@ -978,8 +1006,10 @@ function promptOutputLinked(chainNode) {
 function nodeHintOnce(state, chainNode) {
     if (!state || state.hinted || promptOutputLinked(chainNode)) return "";
     state.hinted = true;
-    return "｜ ⚠ 建议接线：把本节点 `prompt` 输出接到出词节点的 `prompt` 输入" +
-        "（这样脚本提交 JSON 也能自动换词；现在这条老路只有画布能用）";
+    return T("｜ ⚠ 建议接线：把本节点 `prompt` 输出接到出词节点的 `prompt` 输入"
+        + "（这样脚本提交 JSON 也能自动换词；现在这条老路只有画布能用）",
+        "｜ ⚠ Suggested wiring: connect this node's `prompt` output to the prompt node's "
+        + "`prompt` input (so a scripted JSON run also rotates prompts; the old path is canvas-only)");
 }
 
 /**
@@ -1123,13 +1153,16 @@ async function startStage(node, state, stage, label, pair) {
         return null;
     }
     const note = restored.length
-        ? `｜ 已恢复「Latent Load」#${restored.join("、")} 为启用（旁路它会导致提交校验失败）`
+        ? T(`｜ 已恢复「Latent Load」#${restored.join("、")} 为启用（旁路它会导致提交校验失败）`,
+            `｜ re-enabled "Latent Load" #${restored.join(", ")} (bypassing it fails the submit check)`)
         : "";
     const dropNote = dropped.length
-        ? `｜已丢弃第 ${dropped.join("、")} 段的旧记录（本轮从第 ${stage + 1} 段重跑）`
+        ? T(`｜已丢弃第 ${dropped.join("、")} 段的旧记录（本轮从第 ${stage + 1} 段重跑）`,
+            `｜ dropped stale records for segment ${dropped.join(", ")} (this run restarts from ${stage + 1})`)
         : "";
     say(node, state, "queued",
-        `${label}：stage=${stage} 排队中…` + withMsg(d.message) + note + dropNote
+        T(`${label}：stage=${stage} 排队中…`, `${label}: stage=${stage} queueing…`)
+        + withMsg(d.message) + note + dropNote
         + stageNote(pair) + nodeHintOnce(state, node));
     return queuePrompt(node, state, stage);
 }
@@ -1137,7 +1170,7 @@ async function startStage(node, state, stage, label, pair) {
 /** 状态行里点明**实际被驱动了段号的节点**（漏驱动哪一类，一眼能看出来）。 */
 function stageNote(pair) {
     const ids = (pair?.stageNodes ?? []).map((n) => `#${n.id}`);
-    return ids.length ? `｜段号同步 ${ids.join("、")}` : "";
+    return ids.length ? T(`｜段号同步 ${ids.join("、")}`, `｜stage synced ${ids.join(", ")}`) : "";
 }
 
 /** 拼接成片（走后端 /h3relay/concat；包内实现，不依赖外部 ffmpeg）。 */
@@ -1223,17 +1256,18 @@ async function concatFilm(chainNode, state, auto = false) {
         //   （命中了哪几段 / 走了哪条选段路），真错因在第 2 行起、以 🔴 开头。
         //   旧代码把它当"失败原因"显示 ⇒ 用户看到的是一句**看着像成功**的话
         //   （实测 GG 看到的是"失败：回扫 history：…"），真错因只在控制台里。
-        const rep = String(data.report || data.error || "拼接失败");
+        const rep = String(data.report || data.error || T("拼接失败", "join failed"));
         const lines = rep.split("\n").map((s) => s.trim()).filter(Boolean);
         const head = lines[0] || rep;
         const why = lines.find((s) => s.includes("🔴")) || lines[1] || head;
         const first = data.ok ? head : why;
-        const resultText = data.ok ? (data.out || "(路径见控制台)") : `失败：${first}`;
+        const resultText = data.ok ? (data.out || T("(路径见控制台)", "(path in the console)"))
+                                   : T(`失败：${first}`, `failed: ${first}`);
         setWidgetValue(chainNode, "concat_result", resultText);
         say(chainNode, state, data.ok ? "done" : "error",
-            data.ok ? `拼接成功：${resultText}` : first);
-        notifyUser(data.ok ? "🎬 拼接完成" : "⚠ 拼接失败",
-                   data.ok ? `成片：${resultText}` : first,
+            data.ok ? T(`拼接成功：${resultText}`, `joined: ${resultText}`) : first);
+        notifyUser(data.ok ? T("🎬 拼接完成", "🎬 Join finished") : T("⚠ 拼接失败", "⚠ Join failed"),
+                   data.ok ? T(`成片：${resultText}`, `film: ${resultText}`) : first,
                    data.ok ? "success" : "error");
         console.info("[H3 Relay Chain] 拼接完整报告：\n" + rep);
     } catch (err) {
@@ -1264,7 +1298,7 @@ async function startChainRun(node, state, pair, label = "连跑", note = "") {
             const msg = `画布段号已在第 ${start + 1} 段，而 segments=${seg} 表示「跑到第 ${seg} 段」`
                 + ` ⇒ 目标已经跑过。要接着跑，把 segments 改成 ${start + 1} 或更大。`;
             say(node, state, "warn", msg);
-            notifyUser("⏩ 连跑没有排队", msg, "warn");
+            notifyUser(T("⏩ 连跑没有排队", "⏩ Chain did not queue"), msg, "warn");
             return false;
         }
         // 🔴 预检 B：有限段模式下，把会跑到的**最后一段**提前验词——
@@ -1277,7 +1311,7 @@ async function startChainRun(node, state, pair, label = "连跑", note = "") {
                     + ` ⇒ 第 ${blocks.length + 1} 段起没有对应词。`
                     + `要么补齐到 ${seg} 块，要么把 segments 改成 ${blocks.length}（= 跑到第 ${blocks.length} 段）。`;
                 say(node, state, "warn", msg);
-                notifyUser("⏩ 连跑没有排队", msg, "warn");
+                notifyUser(T("⏩ 连跑没有排队", "⏩ Chain did not queue"), msg, "warn");
                 return false;
             }
         }
@@ -1295,8 +1329,11 @@ async function startChainRun(node, state, pair, label = "连跑", note = "") {
     state.sawMine = false;
     state.awaiting = false;   // 由 queuePrompt 成功后再置位
     say(node, state, "running",
-        `${label}开始：${seg <= 0 ? "一直跑（∞）" : `跑到第 ${seg} 段（本轮 ${state.remaining} 段）`}`
-        + `，首段排队中…` + (note ? `｜${note}` : ""));
+        T(`${label}开始：${seg <= 0 ? "一直跑（∞）" : `跑到第 ${seg} 段（本轮 ${state.remaining} 段）`}`
+            + "，首段排队中…",
+          `${label} started: ${seg <= 0 ? "run forever (∞)" : `up to segment ${seg} (${state.remaining} this run)`}`
+            + ", queueing the first segment…")
+        + (note ? `｜${note}` : ""));
     state.onStageChanged?.();          // 按钮立刻变「⏳ 连跑中 …」（明显反馈）
     let ok = null;
     try {
@@ -1331,7 +1368,8 @@ function refreshChainLabel(state, node) {
         const total = seg > 0 ? Math.max(0, seg - start0) : 0;
         const doneN = total > 0 ? Math.max(0, total - state.remaining) : 0;
         const pos = seg > 0 ? `${bar(total ? doneN / total : 1)} ${doneN}/${total}` : "∞";
-        text = `⏳ 连跑中 ${pos}${state.lastProgress ? " · " + state.lastProgress : ""}`;
+        text = T(`⏳ 连跑中 ${pos}${state.lastProgress ? " · " + state.lastProgress : ""}`,
+                 `⏳ chaining ${pos}${state.lastProgress ? " · " + state.lastProgress : ""}`);
     }
     if (w.label === text) return;
     w.label = text;
@@ -1346,12 +1384,22 @@ function refreshChainLabel(state, node) {
  */
 function flashPressed(node, w, label) {
     if (!w) return;
-    const token = `⏳ ${label} · 已点击`;
-    w.label = token;
+    // 🔴 2026-10-15：`· 已点击` 去掉了 —— 那是**中文**，而本包现在支持中英切换，
+    //    闪一下的文案不该只有中文。`⏳` 前缀本身就是「点到了」的答案（文字变了）。
+    //    同时：英文界面下 `label` 是**英文**（`applyLang` 已写过），所以 token 跟着语言走。
+    const shown = w.label || label;
+    const token = `⏳ ${shown}`;
+    const want = w.__h3I18nWant;                 // 本包管这一格时 = 期望标签；否则 undefined
+    w.__h3I18nWant = token;                      // 🔴 闪的这 700ms 里**接管**帧级兜底，
+    w.label = token;                             //    否则 `guardPass` 每帧把它写回 ⇒ 闪不出来
     node.setDirtyCanvas?.(true, false);
     setTimeout(() => {
-        if (w.label !== token) return;          // 已被状态机接管 ⇒ 不抢
-        w.label = label;
+        // 🔴 标记必须**无条件**还回去 —— 2026-10-15 修：原先「已被状态机接管」那条早退
+        //    把它跳过了 ⇒ 标记永远停在闪的 token 上 ⇒ `guardPass` **每帧**把按钮文字写回
+        //    「⏳ …」，把连跑进度（`⏳ 连跑中 1/3`）盖掉。还标记与改文字是两件事，别绑一起。
+        if (want == null) delete w.__h3I18nWant; else w.__h3I18nWant = want;
+        if (w.label !== token) return;           // 已被状态机接管 ⇒ 不抢它的文字
+        w.label = want ?? label;
         node.setDirtyCanvas?.(true, false);
     }, 700);
 }
@@ -1692,8 +1740,10 @@ app.registerExtension({
                     this.remaining = 0;
                     this.onStageChanged();
                     say(node, this, "stopped",
-                        "队列已被清空（Clear queue / 删除排队项）：本段**没有跑**，段号保持当前值 —— "
-                        + "点「▶ Run」或「⏭ 续跑」重跑这一段即可。");
+                        T("队列已被清空（Clear queue / 删除排队项）：本段**没有跑**，段号保持当前值 —— "
+                            + "点「▶ Run」或「⏭ 续跑」重跑这一段即可。",
+                          "the queue was cleared (Clear queue / delete): this segment did **not** run and "
+                            + "the stage number is unchanged — click Run or Resume to run it again."));
                 },
 
                 onExecutionError() {
@@ -1702,7 +1752,8 @@ app.registerExtension({
                     this.awaiting = false;
                     this.onStageChanged();
                     say(node, this, "error",
-                        "执行出错，连跑已停（stage_index 保持当前值，可直接重跑）。");
+                        T("执行出错，连跑已停（stage_index 保持当前值，可直接重跑）。",
+                          "execution failed, chaining stopped (stage_index unchanged; you can re-run it)."));
                 },
 
                 /**
@@ -1723,9 +1774,12 @@ app.registerExtension({
                     this.remaining = 0;
                     this.onStageChanged();
                     say(node, this, "stopped",
-                        (stage == null ? "已被官方停止（Stop / 取消）"
-                                       : `已被官方停止（Stop / 取消）：第 ${stage} 段没跑完`)
-                        + "。段号保持当前值，这一段没有落盘 —— 点「▶ Run」或「⏭ 续跑」重跑这一段即可。");
+                        T((stage == null ? "已被官方停止（Stop / 取消）"
+                                         : `已被官方停止（Stop / 取消）：第 ${stage} 段没跑完`)
+                            + "。段号保持当前值，这一段没有落盘 —— 点「▶ Run」或「⏭ 续跑」重跑这一段即可。",
+                          (stage == null ? "stopped by the host (Stop / cancel)"
+                                         : `stopped by the host (Stop / cancel): segment ${stage} did not finish`)
+                            + ". The stage number is unchanged and nothing was saved — click Run or Resume to retry."));
                 },
 
                 /** `progress` = 采样步数（**每步都触发** ⇒ 走节流）。 */
@@ -1733,7 +1787,7 @@ app.registerExtension({
                     if (this.mode !== "chain") return;
                     const v = Number(detail?.value ?? 0), m = Number(detail?.max ?? 0);
                     if (!m) return;
-                    this.lastProgress = `采样 ${v}/${m}`;
+                    this.lastProgress = T(`采样 ${v}/${m}`, `sampling ${v}/${m}`);
                     this.paint();
                 },
 
@@ -1750,7 +1804,9 @@ app.registerExtension({
                         // 否则色带会一直停在「🟦 已排队」，用户以为还在跑。
                         if (this.awaiting && this.phase === "queued") {
                             this.awaiting = false;
-                            say(node, this, "done", "这一段跑完了（▶ / ✔ 单段模式）。");
+                            say(node, this, "done",
+                                T("这一段跑完了（▶ / ✔ 单段模式）。",
+                                  "this segment finished (single-segment mode)."));
                         }
                         return;
                     }
@@ -1778,7 +1834,8 @@ app.registerExtension({
                         this.mode = "idle";
                         this.onStageChanged();          // 按钮还原（明显反馈）
                         say(node, this, "done",
-                            `连跑结束，当前段号 ${done}（已落盘，可直接继续 Approve）。`);
+                            T(`连跑结束，当前段号 ${done}（已落盘，可直接继续 Approve）。`,
+                              `chaining finished at segment ${done} (saved; you can Approve again).`));
                         if (widgetValue(node, "auto_concat", false)) concatFilm(node, this, true);
                         return;
                     }
@@ -1795,7 +1852,8 @@ app.registerExtension({
                     }
                     setStageAll(node, pair, next);
                     say(node, this, "running",
-                        `连跑中：第 ${next + 1} 段排队…（剩余 ${infinite ? "∞" : this.remaining}）`
+                        T(`连跑中：第 ${next + 1} 段排队…（剩余 ${infinite ? "∞" : this.remaining}）`,
+                          `chaining: queueing segment ${next + 1}… (${infinite ? "∞" : this.remaining} left)`)
                         + withMsg(d.message));
                     queuePrompt(node, this, next).catch(() => (this.mode = "idle"));
                 },
@@ -1839,8 +1897,9 @@ app.registerExtension({
                     if (debounce) {
                         const now = Date.now();
                         if (now - lastClick < 400) {
-                            say(node, state, "warn", `「${label}」在 0.4 秒内被点了两次 ⇒ `
-                                + "第二次已忽略（防白跑一轮）。");
+                            say(node, state, "warn",
+                                T(`「${label}」在 0.4 秒内被点了两次 ⇒ 第二次已忽略（防白跑一轮）。`,
+                                  `"${label}" was clicked twice within 0.4 s ⇒ the second click was ignored.`));
                             return;
                         }
                         lastClick = now;
@@ -1850,6 +1909,13 @@ app.registerExtension({
                 };
                 w = node.addWidget("button", label, null, guard(node, label, run),
                                    { serialize: false });
+                // 🔴 建的时候就按当前语言写 `label`（`name` 仍是中文标签、一字不动）。
+                //    为什么不能只靠 `applyLang`：它也在 `onNodeCreated` 里跑，谁包谁**取决于
+                //    扩展加载顺序** ⇒ 顺序不利时 `applyLang` 先跑、按钮后建 ⇒ 整块按钮停在中文，
+                //    而且要等下一次图变化/补刷才修（「绿着但坏」那一类）。
+                //    这里写死 + `applyLang` 事后刷 = 两条路都通，与加载顺序无关。
+                const bl0 = btnLabel(label, currentLang());
+                if (bl0 != null) { w.label = bl0; w.__h3I18nWant = bl0; }
                 state.btns[label] = w;
                 // 🔴 0.6.33：「整行可点」兜底要按**首个字形**找到这个回调（见 btnByGlyph）。
                 state.btnByGlyph.set(firstGlyph(label), run);
@@ -1860,7 +1926,9 @@ app.registerExtension({
                 const pair = findPair(node);
                 if (!pair) return;
                 if (state.mode === "chain") {          // 防误点：连跑中再点 Run 会把状态机打回 idle
-                    say(node, state, "warn", "正在连跑中 —— 先点「⏹ Stop」，或等这一段跑完。");
+                    say(node, state, "warn",
+                        T("正在连跑中 —— 先点「⏹ Stop」，或等这一段跑完。",
+                          "already chaining — click Stop first, or wait for this segment to finish."));
                     return;
                 }
                 if (!runIdPreflight(node, state)) return;   // 0.6.19：名字不一致不许排队
@@ -1874,8 +1942,10 @@ app.registerExtension({
                 const pair = findPair(node);
                 if (!pair) return;
                 if (state.mode === "chain") {
-                    say(node, state, "warn", "正在连跑中 —— 段号会自动推进，不用点 Approve。"
-                        + "想停下来点「⏹ Stop」。");
+                    say(node, state, "warn",
+                        T("正在连跑中 —— 段号会自动推进，不用点 Approve。想停下来点「⏹ Stop」。",
+                          "already chaining — the stage advances by itself, no need to Approve. "
+                            + "Click Stop to stop."));
                     return;
                 }
                 if (!runIdPreflight(node, state)) return;   // 0.6.19：名字不一致不许排队
@@ -1964,9 +2034,11 @@ app.registerExtension({
                     state.mode = "idle";
                     state.awaiting = false;
                     state.onStageChanged();
-                    say(node, state, "stopped", "已请求停止：当前采样跑完后不再推进。");
+                    say(node, state, "stopped",
+                        T("已请求停止：当前采样跑完后不再推进。",
+                          "stop requested: no further segments after the current run finishes."));
                 } else {
-                    say(node, state, "idle", "当前没有在连跑。");
+                    say(node, state, "idle", T("当前没有在连跑。", "not chaining right now."));
                 }
             }, { debounce: false });
 
@@ -1979,7 +2051,9 @@ app.registerExtension({
                 if (!pair) return;
                 setStageAll(node, pair, 0);
                 state.stageIds = [];
-                say(node, state, "idle", "已归 0：下一段将作为第 1 段（不续接，只落盘）。");
+                say(node, state, "idle",
+                    T("已归 0：下一段将作为第 1 段（不续接，只落盘）。",
+                      "reset to 0: the next run is segment 1 (no continuation, save only)."));
             }, { debounce: false });
 
             return r;

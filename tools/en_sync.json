@@ -16,8 +16,8 @@
           "zh": "核心功能",
           "en": "Core features",
           "mode": "condensed",
-          "h_en": "2a41f2a16bb3059f",
-          "h_src": "617f27360365b39c",
+          "h_en": "4246a4c6c2fee280",
+          "h_src": "ce34036bd0bddf05",
           "seeded": "by-position"
         },
         {
@@ -72,14 +72,14 @@
           "zh": "文档索引",
           "en": "Documentation index",
           "mode": "condensed",
-          "h_en": "a80646bf9671516e",
-          "h_src": "e23b202e4620a070",
+          "h_en": "438244fe50805779",
+          "h_src": "bf48293b8b3ef423",
           "seeded": "by-position"
         }
       ],
       "acks": [],
-      "stamped": "2026-10-14",
-      "src_sha": "e16b77323bccbe98"
+      "stamped": "2026-10-15",
+      "src_sha": "3f7e7c7fdbf83d53"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -166,7 +166,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-14",
+      "stamped": "2026-10-15",
       "src_sha": "06ca2288755a21d0"
     },
     "docs/02-parameters.md": {
@@ -190,7 +190,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-14",
+      "stamped": "2026-10-15",
       "src_sha": "2b6cd3118cc63bbf"
     },
     "docs/03-sampling-and-design.md": {
@@ -222,7 +222,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-14",
+      "stamped": "2026-10-15",
       "src_sha": "e0c4d1c18fb4b8e2"
     },
     "docs/04-canvas-and-widgets.md": {
@@ -238,7 +238,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-14",
+      "stamped": "2026-10-15",
       "src_sha": "d39be80cc6d876ab"
     },
     "docs/05-troubleshooting.md": {
@@ -294,7 +294,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-14",
+      "stamped": "2026-10-15",
       "src_sha": "9115e791360e9ca7"
     },
     "docs/06-continuity-scripting.md": {
@@ -318,7 +318,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-14",
+      "stamped": "2026-10-15",
       "src_sha": "c046d84ff172f569"
     },
     "docs/07-chain.md": {
@@ -400,14 +400,14 @@
           "zh": "声锚（voice_anchor，0.6.19）：跨说话人续接时锁定音色",
           "en": "Voice anchor (voice_anchor, 0.6.19): lock timbre when continuing across speakers",
           "mode": "full",
-          "h_en": "649f783ffdfbd87c",
-          "h_src": "29984df3c30dbbe3",
+          "h_en": "33ca5a1ac75acc7b",
+          "h_src": "c421988947806cbb",
           "seeded": "by-position"
         }
       ],
       "acks": [],
-      "stamped": "2026-10-14",
-      "src_sha": "4c54359bbd0fed87"
+      "stamped": "2026-10-15",
+      "src_sha": "3535e5cb93b77c91"
     },
     "docs/08-testing.md": {
       "en": "docs/08-testing_EN.md",
@@ -432,8 +432,16 @@
           "zh": "前端纯函数的单测（node 跑、零依赖）",
           "en": "Unit tests for front-end pure functions (run by node, zero dependencies)",
           "mode": "full",
-          "h_en": "bf95359397b71fc5",
-          "h_src": "de61fcc64ef17bf2",
+          "h_en": "3270d64ac7c1d33c",
+          "h_src": "fcbb891282d79490",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "🔴 改前端之后的必跑清单（2026-10-15 立，有实测依据）",
+          "en": "🔴 Checklist after changing the front-end (established 2026-10-15, from measurements)",
+          "mode": "full",
+          "h_en": "ca28cc020f32a010",
+          "h_src": "cc307f99abb8ead0",
           "seeded": "by-position"
         },
         {
@@ -462,8 +470,8 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-14",
-      "src_sha": "98a9c283f7a606d3"
+      "stamped": "2026-10-15",
+      "src_sha": "5e4804359cf98264"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",
@@ -518,7 +526,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-14",
+      "stamped": "2026-10-15",
       "src_sha": "6886d24ff831c09b"
     },
     "docs/10-audio-seam-and-concat.md": {
@@ -582,7 +590,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-14",
+      "stamped": "2026-10-15",
       "src_sha": "068491bc51cdce1e"
     }
   }

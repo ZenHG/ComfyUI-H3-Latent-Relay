@@ -17,8 +17,8 @@
 #                                          import"无关（原因见下方「为什么 V3 机检只有一个数」）
 #   ·  期望 49/0  tests/test_prompt_dispatch.mjs  前端纯函数（词分发 + run_id 同步 + 阶段表对账）（node）
 #   ·  期望 29/0  tests/test_run_id_parity.mjs   run_id 同步的跨层对账（与 Python 第 34 组共用一份 fixture）（node）
-#   ·  期望 45/0  tests/test_audio_ref_budget.mjs  前端纯函数（音频参考额度：3 槽 + 本包 1）（node）
-#   ·  期望 33/0  tests/test_i18n.mjs            前端纯函数（画布中英切换：标签 + 悬浮提示）（node）
+#   ·  期望 47/0  tests/test_audio_ref_budget.mjs  前端纯函数（音频参考额度：3 槽 + 本包 1）（node）
+#   ·  期望 37/0  tests/test_i18n.mjs            前端纯函数（画布中英切换：标签 + 悬浮提示）（node）
 # 改动后若这些数字变了，请同步 CONTRIBUTING.md「方面数/断言数」、tests 头注释 **以及本文件**。
 # ⚠️ 本文件曾是**已知盲区**（自己漂移过：停在 384；`assert_default_exit` 的期望值与第 11 行
 #    自相矛盾 3/3 vs 4/4；`review_050` 的执行行写 82 而真值 83）。2026-09-25 已收口：
@@ -132,6 +132,11 @@ jobs:
           # 悬浮提示文案机检（2026-10-13 加）：结构 + 内容 + 禁用词 + 中英一一对应。
           # 🔴 为什么要进 CI：文案是"改一个字就回退"的东西，只在本地跑等于没跑。
           python tools/check_tooltips.py                                             # 期望 1217/0
+          # 前端静态一致性（2026-10-15 加）：只做**中英两侧对读**才看得见的 3 件事 ——
+          # 🔴 为什么必须进 CI：2026-10-15 实测，本地全套 15/15 + review_050 119/0 +
+          #    check_tooltips 1217/0 **同时全绿**时，这三类问题一个都没被拦：
+          #    英文提示落后于中文 / 英文里混全角【】/ web/*.js 新写的可见中文。
+          python tools/check_frontend.py                                             # 期望 通过 3 / 失败 0
 
       # 默认出口 = V3（2026-09-24 从 v1 切过来）。**必须单跑一个进程**：
       # test_v3_schema 会把 H3RELAY_NODE_API 写死成 v3，同进程里验不出"默认"。
@@ -179,7 +184,7 @@ jobs:
       #    `ref_audios.ref_audio_0`（⇒ 计数恒 0 ⇒ 越界警告永不出现）；② 标题后缀不幂等
       #    （⇒ 每次刷新把后缀再叠一遍）。两者都不会报错，只有单测能拦。
       - name: Audio ref budget (node)
-        run: node tests/test_audio_ref_budget.mjs   # 期望 45/0
+        run: node tests/test_audio_ref_budget.mjs   # 期望 47/0
 
       # 中英切换（0.6.28 新增；纯函数在 web/relay_kit_i18n.js，与浏览器跑同一份）。
       # 🔴 为什么必须进 CI：这组的核心是**静默失效**回归 —— ① 改 `name` 而不是 `label`
@@ -187,7 +192,7 @@ jobs:
       #    追加的额度提示；③ 枚举白名单外的值被猜译（模型文件名翻了 = 找不到文件）。
       #    三条都不会报错，只有单测能拦。
       - name: Canvas i18n (node)
-        run: node tests/test_i18n.mjs   # 期望 33/0
+        run: node tests/test_i18n.mjs   # 期望 37/0
 
       # 🔴 2026-09-30 新增：**真的构建一次分发集**（此前它零 CI 覆盖）。
       #    为什么必须进 CI：用户下载的就是 `dist/` 那个 zip —— 打包器坏了、或

@@ -21,26 +21,30 @@
 
 ## 0.6.34 — 2026-10-13
 
-**四件事：自相矛盾的默认值修了、声锚不用再接线、提示全重写成人话、实验功能有了看得见的开关。图、连线、图 JSON 都不用改；但请刷新浏览器页面。**
+**默认值修了矛盾、声锚不用接线、提示重写成人话、实验功能有了开关、落盘文件带上来龙去脉。图、连线、图 JSON 都不用改；但请刷新浏览器页面。**
 
-- **音频缝的「头部补丁」默认打开（1.2 秒）**：以前默认关 ⇒ 每段环境声各起各的，成片听起来一段一段的。现在段首 1.2 秒换成上一段的环境声，台词守卫默认开着兜底。⚠ 段号 ≥1 而上一段音频不在盘上（片名填错 / 没跑过上一段）会**报错**并说明怎么办，不再悄悄产出不连续的音频。老工作流不受影响。
-- **声锚新增「只填段号」用法**：以前要搭 `LoadAudio + VAEEncodeAudio` 再拉一根线；现在填「声锚段号」就自动读那一段的音频，和外观锚一样。接线仍然优先。
-- **全部悬浮提示重写**，只讲三件事：它做什么、打开/调大会怎样、什么时候该调。去掉了开发记号、章节号、版本号；同一条提示不再有两套中文。标签也按同一张术语表统一了（48 条）并加机检。
-- **两个「好功能默认关」打开了**：段头糊区补偿（`settle_auto`，默认 0.5，不糊的帧不动）与连跑完自动拼成片（`auto_concat`，默认开）。
-- **实验功能有了看得见的开关**：新增「实验开关」选择器，管住原先只能靠 run 目录配置文件的「按人累积音色 / 时不变历史锚」。默认 `auto` = 与旧版逐位一致 ⇒ 老配置不受影响；`off` = 彻底关；选对应档 = 强制开（缺配置文件直接报错）。
+- **音频缝的「头部补丁」默认打开（1.2 秒）**：以前默认关 ⇒ 每段环境声各起各的；现在段首 1.2 秒用上一段的环境声，台词守卫兜底。⚠ 段号 ≥1 而上一段音频不在盘上（片名填错 / 没跑过）会**报错**并说明怎么办。老工作流不受影响。
+- **声锚可以「只填段号」**：以前要搭两个节点再拉一根线；现在填「声锚段号」就自动读那段音频。接线仍然优先。
+- **全部悬浮提示重写**：只讲它做什么、打开会怎样、什么时候该调；同一条提示不再有两套中文。标签也按同一张术语表统一（48 条）并加机检。
+- **两个「好功能默认关」打开了**：段头糊区补偿（`settle_auto` 0.5，不糊的帧不动）与连跑完自动拼成片（`auto_concat`）。
+- **实验功能有了看得见的开关**：原先只能靠 run 目录的配置文件。默认 `auto` = 与旧版逐位一致 ⇒ 老配置不受影响；`off` = 彻底关；选对应档 = 强制开。
+- **落盘文件带上了来龙去脉**：每段 latent 头里记下片名 / 段号 / 上一段（`format 2`）。**纯附加**：旧版读新文件、新版读旧文件都照读。
+- **跨段统计匹配更保守**：缝的差异小于噪声时**不再去修**，修时也**不放大差异**。噪声大的片段头可能不再被修，那是设计。
 
 **升级动作**：不用改任何东西；装完刷新浏览器页面（F5）。
 
 <!-- EN -->
-**Four changes: a self-contradictory default fixed, the voice anchor needs no wiring, every tooltip rewritten in plain language, and the experiments now have a visible switch. No graph, wiring or JSON changes — but refresh the browser page.**
+**Self-contradictory defaults fixed, the voice anchor needs no wiring, every tooltip rewritten in plain language, the experiments got a switch, and saved files carry their lineage. No graph or JSON changes — but refresh the browser page.**
 
-- **The audio seam's head patch is on by default (1.2 s)**: it used to be off, so each segment restarted its own ambience and the film sounded stitched. The first 1.2 s now takes the previous segment's ambience, with the dialogue guard as a backstop. ⚠ From segment 2 on, if the previous audio is not on disk the node errors out and says what to do, instead of quietly producing discontinuous audio. Existing graphs are unaffected.
-- **The voice anchor works without wiring**: enter a stage number and that segment's audio is read automatically, like the appearance anchor. A wired input still wins.
-- **Every tooltip rewritten** to answer three questions: what it does, what turning it on or raising it changes, and when to adjust it. Development markers, section numbers and version numbers are gone, and labels now follow one fixed glossary.
-- **Two features that shipped switched off are now on**: soft-zone compensation at the head (`settle_auto`, 0.5) and auto-joining segments into one film when a chain run finishes (`auto_concat`).
-- **The experiments now have a visible switch**: one selector governs the two features that previously needed a config file in the run directory (per-speaker voice accumulation / the time-invariant history anchor). Default `auto` is bit-identical to the old behaviour; `off` disables them; naming a feature forces it on.
+- **The audio seam's head patch is on by default (1.2 s)**: it used to be off, so each segment restarted its own ambience. The head 1.2 s now takes the previous segment's ambience, dialogue guard as a backstop. ⚠ From segment 2 on, a missing previous audio errors out instead of quietly producing discontinuous audio. Existing graphs are unaffected.
+- **The voice anchor takes a stage number alone**: it used to need two nodes and a wire. A wired input wins.
+- **Every tooltip rewritten**: what it does, what turning it on changes, when to adjust it. No parameter has two Chinese wordings any more; labels follow one 48-entry glossary, machine-checked.
+- **Two features that shipped off are now on**: head soft-zone compensation (`settle_auto` 0.5, clear frames untouched) and auto-joining at the end of a chain run (`auto_concat`).
+- **The experiments have a visible switch**: previously only a config file in the run directory. Default `auto` is bit-identical to the old behaviour; `off` disables them; naming one forces it on.
+- **Saved latents carry their lineage**: each stage file's header records film name, stage, and parent stage (`format 2`). Purely additive: both directions still read.
+- **Cross-segment matching is more conservative**: differences below the noise floor are no longer corrected, and a correction never amplifies the step. A noisy head may go uncorrected — by design.
 
-**Action required**: nothing. Refresh the browser page (F5) after installing.
+**Action required**: nothing; refresh the browser page (F5).
 
 
 ## 0.6.33 — 2026-10-12

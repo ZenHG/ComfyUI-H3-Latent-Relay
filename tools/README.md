@@ -1,6 +1,6 @@
 # tools — 自检与合规取证
 
-**18 个脚本**：**13 个自检/取证**（零 GPU、秒级，提 PR 前至少跑前四个）+ 拼接 CLI（给不开画布的用户）+ 打包器（产出最小分发集）+ 发布器（两个渠道成对发布 + 交叉验证）+ 声库采集器（多说话人长片的声锚）+ **浏览器冒烟门**（`ui_smoke.cjs`，**只能在有活宿主的机器上跑**）。
+**20 个脚本**：**15 个自检/取证**（零 GPU、秒级，提 PR 前至少跑前四个）+ 拼接 CLI（给不开画布的用户）+ 打包器（产出最小分发集）+ 发布器（两个渠道成对发布 + 交叉验证）+ 声库采集器（多说话人长片的声锚）+ **浏览器冒烟门**（`ui_smoke.cjs`，**只能在有活宿主的机器上跑**）。
 
 ## 三档：本地 / CI / 只能宿主 + 浏览器
 
@@ -57,10 +57,17 @@ cmd 用 `set PYTHONPATH=\nonexistent`（同一行内跑，别开新窗口）。
 | `env_matrix.py` | **环境矩阵复跑**：同一批闸在 3 个合成环境（干净 / 脏 `PYTHONPATH` / 空 `PYTHONPATH`）下各跑一遍，要求结果**逐项相同**。为什么要有：本仓最高频的返工病因就是「**判据 / 工具只在一种环境下被验证过**」（`CONTRIBUTING.md` 坑⑨，实测 15 次）—— `tools/user_smoke.py` 2026-10-07 的 bug 正是它。⚠️ **只覆盖有确定期望的环境轴**：`COMFYUI_PATH` **没进来**（它对某些闸是**必需**的，那是设计意图；要收它就得配「合法差异」白名单，而白名单本身会腐 —— **宁可不做**） | 退出码 `0` | `python tools/env_matrix.py`（`--gate <名>` 只跑一条） |
 | `scan_expression_overlap.py` | 🔍 **合规取证**：与第三方包逐函数「表达层重合」扫描 | 人工判读（**只报数、不定性**） | `python tools/scan_expression_overlap.py <对方仓库路径>` |
 | `verify_rewrite_equivalence.py` | 🔍 **合规取证**：三簇重写前后**逐位等价**差分验证（旧实现从 `git show <rev>` 捞，不手工转录） | **137/0**（⚠️ 该工具**不在 CI 里**：2026-10-07 实测它此前**根本跑不起来**（命名空间手写清单漏了 `apply_relay` 的两个依赖），而文档一直写着 137/0。本次修三处：`--old-rev` 自动定位 + 命名空间自动补齐 + **契约补上 0.6.23 新增的「音频参考说明 note」**，并加了内容校验 —— 比原来的「只数条数」更严） | `python tools/verify_rewrite_equivalence.py` |
+| `deploy_live_check.py` | **部署活体验证**（2026-10-14 加，被 `sync_deploy_check.py` 调用）：字节一致 ≠ 生效。
+    问一次活宿主的 `/h3relay/health`，把 `version` 与仓库 `__version__` 比：**不一致 ⇒ 退出 1（红）**，
+    因为新 widget / 新 tooltip / `health.version` 都在**宿主内存**里，光同步文件改不到 ⇒ 画布上看不见新东西。
+    问不到宿主 ⇒ 只提醒、退出 0（那种环境判不了，不记失败）。背景：10-14 我只 curl 静态 JS 就宣称
+    「前端零重启即生效」——那只是**文件已就位**这个前置条件，不是前端行为验证。 |
 | `sync_deploy_check.py` | **部署副本同步**：比对 `custom_nodes` 下的副本与指定提交的**提交态**（忽略 CRLF 行尾差异） | 全 `OK` | `python tools/sync_deploy_check.py <副本目录>` |
 | `assert_default_exit.py` | **默认出口断言**：不设 `H3RELAY_NODE_API` 时必须走 V3（`NODE_CLASS_MAPPINGS is None` + `comfy_entrypoint` 可调用 + `WEB_DIRECTORY` 在 + **V3 `get_node_list()` 注册的节点集合 == `nodes.py` 的键集合**）。为什么需要：2026-09-24 默认从 v1 切到 v3，而**转移前那套测试全都在验 v1 或强制 v3，没有任何一条断言锁住"默认"** | **5/5** | `COMFYUI_PATH=<根> python tools/assert_default_exit.py` |
 | `ci_env_repro.py` | **在本机造出「没有宿主注册表」那条路径**跑任意校验脚本（`sys.modules["nodes"] = None`）。为什么需要：只跑本机**证明不了另一条代码路径也没问题** —— 2026-09-29 就这么放过一次 CI 红。⚠️ 2026-10-07 起它造的这条路**数字与直跑相同**了（那个「7 节点」是它自己造出来的**人造态**，已根修），**但它照旧值得跑**：数字相同 ≠ 路径相同 | 被跑脚本的退出码直传 | `python tools/ci_env_repro.py tests/test_v3_schema.py` |
+| `check_frontend.py` | **前端静态一致性**（2026-10-15 加）：只做三件**中英两侧对读**才看得见的事 —— ① `web/*.js` 里**未翻译的可见中文**（`<=` 基线，**只许减不许增**；`T(中文, 英文)` 覆盖的与 `console.*` 开发者日志不算）② `H3_TIPS` 英文形状（无全角 `【】`、无汉字、`]` 后**留一个空格**）③ 中英**行数**一致（不等必须在 `EXEMPT_ALIGN` 里写明理由）。为什么要有：2026-10-15 实测 —— 本地全套 15/15、`review_050` 119/0、`check_tooltips` 全过（1217 项）时，这三类问题**一个都没被拦**（英文提示落后于中文、英文里混全角括号、新写的可见中文） | **通过 3 / 失败 0** | `python tools/check_frontend.py` |
 | `en_sync.py` | **英文文档同步闸**：中文 = 源、`*_EN.md` = 派生物 ⇒ 节级 hash 比对。**源里新增的节默认必须译**（未登记即红；跳译要 `--omit` 写理由）。`--apply` 只重写**机械面**（版本号 / 文件头标记 / 索引缺行）、`--brief` 出增量翻译任务书交给译者或 LLM、`--ack` 暂缓**带期限**。**刻意不机翻**：机翻会静默改掉数字与标识符，而机检只扫中文源 ⇒ 英文版成监管盲区 | 退出码 `0`（不一致 `1`、**闸失效 `2`**） | `python tools/en_sync.py`（另有 `--status` / `--brief 7.3` / `--apply` / `--stamp`） |
+| `user_smoke.py` | **外部开源用户视角冒烟**（`git clone` 那条渠道）：按 `git ls-files` 复制干净副本 ⇒ 两个出口注册同一批节点 / `INPUT_TYPES()` 可求值 / 前端 JS 在位 / **模块零外泄**；再从 `dist/` 真跑一次节点方法 | **10/0** | `COMFYUI_PATH=<根> python tools/user_smoke.py` |
 
 **拼接 CLI（不是自检工具，给用户用）**
 
@@ -93,7 +100,6 @@ cmd 用 `set PYTHONPATH=\nonexistent`（同一行内跑，别开新窗口）。
 | 脚本 | 干什么 | 怎么跑 |
 |---|---|---|
 | `voice_bank.py` | **从已渲染段采集「某角色的声锚」**，喂给 Copy Bridge 的可选输入 `voice_anchor`（跨说话人续接锁定音色，见 [`docs/07`](../docs/07-chain.md) §声锚）。有声检测（≥0.6 s）+ 峰值归一 0.9 + 声库 `voices.json`（**首个稳定锚锁定复用**，手动 `<角色名>.wav` 永远优先）。可选 **ASR 台词守卫**：装了 `funasr` 才启用（验台词 CER ≤ 0.35 + 逐字时间戳精确裁锚）；没装 ⇒ 打印警告后回退纯能量法，**零额外依赖**。另有 **`advise`**（一段内多人时算「该不该接锚 / 该接谁」——规则 = 锚给**缝上第一个开口说话的人**；同人续接不必接、换人才必须接）与 **`selftest`**（说话人解析规则的自检，可证伪） | `python tools/voice_bank.py collect <段产物.mp4> --name <角色名> --bank <声库目录> [--line "台词原文"]`（另有 `lookup` / `list` / `advise` / `selftest`） |
-| `user_smoke.py` | **外部开源用户视角冒烟**（`git clone` 那条渠道）：按 `git ls-files` 复制干净副本 ⇒ 两个出口注册同一批节点 / `INPUT_TYPES()` 可求值 / 前端 JS 在位 / **模块零外泄**；再从 `dist/` 真跑一次节点方法 | **10/0** | `COMFYUI_PATH=<根> python tools/user_smoke.py` |
 
 前四个失败时会以非零退出码退出（CI 直接可用），见 `.github/workflows/ci.yml`。
 

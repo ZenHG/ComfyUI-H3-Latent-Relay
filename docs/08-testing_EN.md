@@ -92,8 +92,9 @@ does **not** collect them separately (otherwise every assertion would run twice)
 
 ```bash
 node tests/test_prompt_dispatch.mjs      # expected 49/0
-node tests/test_audio_ref_budget.mjs     # expected 45/0
-node tests/test_i18n.mjs                 # expected 33/0
+node tests/test_audio_ref_budget.mjs     # expected 47/0
+node tests/test_i18n.mjs                 # expected 37/0
+python tools/check_frontend.py           # expected 3 pass / 0 fail (front-end static consistency, no browser)
 ```
 
 Covers the pure functions in `web/` that **run the same copy as the browser**, plus two sets of **static
@@ -151,6 +152,59 @@ failure):
 > ⇒ that batch of functions (`detectPromptTargets` / `resolveTarget` / `writePrompt` / `describeTarget`)
 > and their assertions were removed together — so this page no longer has the two items "prompt-slot
 > detection / the three `prompt_target` spellings".
+
+## 🔴 Checklist after changing the front-end (established 2026-10-15, from measurements)
+
+Front-end changes share one property: **every existing check can be green at the same time while the
+English UI is still wrong**. Measured on 2026-10-15: with the one-command suite 15/15,
+`review_050` 119/0 and `check_tooltips` 1217 items **all green at once**, none of the three classes
+below was caught (all three were found by eye):
+
+| What was missed | Why the existing checks cannot see it |
+|---|---|
+| The English tooltip **lagged behind the Chinese** (the Chinese became "trend extrapolation + noise gate", the English still stated the old behaviour) | `check_tooltips` C5 only checks that an `en` **exists**, not that it says the same thing |
+| English tooltips mixed in **full-width `【】`** (129/129) | C5's "no Chinese" regex only scans `[\u4e00-\u9fff]` — it **cannot see `【】`** |
+| **Newly written visible Chinese** in `web/*.js` (7 buttons / status text / title suffix) | no check looks at the **string literals** in `web/*.js` |
+
+⇒ After a front-end change, run these five steps in order. Steps 1–4 are machine work (step 4
+includes 1–3); **step 5 cannot be reached by a machine**:
+
+| # | Step | Command | Expected |
+|---|---|---|---|
+| 1 | **Static: read the two languages side by side** | `python tools/check_frontend.py` | 3 pass / 0 fail |
+| 2 | Pure-function behaviour | `node tests/test_i18n.mjs` · `node tests/test_audio_ref_budget.mjs` | all pass (37 · 47 assertions) |
+| 3 | Tooltip wording rules | `python tools/check_tooltips.py` | all pass (1217 items) |
+| 4 | **One-command suite** (includes 1–3) | run the machine's own `h3relay_check_all.py` (in a tools directory **outside the repo**) | all pass |
+
+### 🔴 Step 5: the live three (mandatory after a front-end change — do not skip)
+
+"Local green" only proves that **the copy inside the repo** is right. What the user sees is served
+by the host from **a different copy**.
+
+1. **Sync the copy**: `cp` file by file (never `cp -r`). **The target directory is whatever the host
+   actually reads** — check `comfyui_base` from `curl -s 127.0.0.1:8188/h3relay/health`.
+   🔴 **Never trust a path hard-coded in any document**: measured 2026-10-15, this machine has
+   **two** ComfyUI installs and the host reads the one **the document does not mention** ⇒
+   following the document meant not a single symbol changed on the server, and the round was wasted.
+2. **Restart the host** (required if `nodes.py` changed; for `web/*.js`-only changes a browser
+   `F5` is still required).
+3. **Verify that the server really changed** — not by file timestamps but by **the bytes the host
+   actually serves**:
+
+   ```bash
+   curl -s 127.0.0.1:8188/extensions/ComfyUI-H3-Latent-Relay/relay_kit_i18n.js | grep -c '<a symbol that only exists in the changed code>'
+   ```
+
+   A `0` means **stop**: first find out which copy the host is reading.
+   (the machine's own one-command suite has **no** such step — it needs a **live host**.)
+
+### Step 6: human eyes (the tier no machine reaches)
+
+After `F5`, **switch to EN** and inspect: ① node titles (including the phase badge) ② the Chain
+node's 7 buttons ③ tooltips (should read `[Wiring] …`) ④ the bridge node title's budget badge
+(`refs n/3`). This repo has **no browser automation in CI** (`tools/ui_smoke.cjs` needs a live host
+plus a browser and is **deliberately excluded**) ⇒ this tier is **human-only**; never read steps 1–4
+being green as "the front-end is fine".
 
 ## V3 shell and default exit (zero GPU, seconds)
 
