@@ -30,13 +30,13 @@ under `output/relay_kit/<run_id>/`). Mechanism and measurements: [`docs/01`](doc
 
 ## Core features
 
-**8 nodes in three layers — a minimal workflow only needs the first 3**:
+**10 nodes in three layers — a minimal workflow only needs the first 3**:
 
 | Layer | Nodes | Notes |
 |---|---|---|
 | **Required 3** | LatentSave · CopyBridge (composite) · TrimAV | without them it is not continuation |
-| **Optional 4** | Post · AudioSeam · Chain · LatentUpscale | independent; **off by default = bit-exact pass-through** |
-| **Manual routing only 1** | LatentLoad | the bridge fetches the source from disk itself; connect this only to **override the source** |
+| **Optional 5** | Post · AudioSeam · Chain · LatentUpscale · FiniteRun | independent; **off by default = bit-exact pass-through** (Finite Run is the server-side twin of the chain) |
+| **Manual routing only 2** | LatentLoad · JoinAV | the bridge fetches the source from disk itself; Join AV is only for hand-joining a few segments in-graph |
 
 | Node (canvas name) | What it does |
 |---|---|
@@ -48,6 +48,8 @@ under `output/relay_kit/<run_id>/`). Mechanism and measurements: [`docs/01`](doc
 | 🔗 **H3 Relay · Audio Seam** | **audio domain**: extends the previous segment's ambience into this segment's head, **length-preserving** (zero A/V shift); off by default |
 | 🔍 **H3 Relay · Latent Upscale** | **picture domain · latent level**: unpack the AV-packed latent → tile through a learned 3D upscaler → repack. **Zero denoising, not one frame moved in time, audio carried back untouched** (needs an optional upstream dependency — see Install) |
 | 🔗 **H3 Relay · Chain** | auto-run controller: advances stage numbers and queues; since 0.6.7 it also **rotates prompts** (`prompts` split on `---`) and **concatenates** (🧩) |
+| 🧩 **H3 Relay · Join AV** | **in-graph join**: append this segment's trimmed images/audio to the accumulated ones (spec mismatches error out instead of being silently stretched) |
+| ⏩ **H3 Relay · Finite Run** | **server-side expansion**: run N segments in one submission (no frontend buttons; scripts/API and canvas share one implementation). Per segment: ImageToVideo → LatentLoad → CopyBridge → sampling → LatentSave → decode → TrimAV → JoinAV |
 
 > **Three domains — do not mix them up:** timeline = `H3RelayTrimAV` (frozen) / picture = `H3RelayPost` /
 > audio = `H3RelayAudioSeam`.
@@ -87,9 +89,9 @@ name because the registry forbids "ComfyUI" in a pack name.
 
 **Restart the ComfyUI backend afterwards** (ComfyUI-Manager → *Restart*; otherwise restart the Python
 process) — refreshing the browser alone does not load new nodes. Search the node list for `🔗 H3 Relay` (7)
-+ `🔍 H3 Relay · Latent Upscale` to see all 8.
++ `🔍 H3 Relay · Latent Upscale` + `🧩 H3 Relay · Join AV` + `⏩ H3 Relay · Finite Run` to see all 10.
 
-**Optional: only needed for 🔍 latent tile upscaling** (not installing it does not affect the other 7
+**Optional: only needed for 🔍 latent tile upscaling** (not installing it does not affect the other 9
 nodes; using it then raises an error naming the repository and the weights):
 
 ```bash
@@ -352,7 +354,7 @@ Implementation details and more (**audio-reference budget**, BGM, emotion, multi
 ### Node Chinese/EN toggle (0.6.28, **canvas button**)
 
 Every node of this pack now carries a small 「**中 / EN**」 button: one click switches the titles, parameter
-labels, port names and **hover tooltips** of **all 8 nodes** between Chinese and English (dropdowns show
+labels, port names and **hover tooltips** of **all 10 nodes** between Chinese and English (dropdowns show
 Chinese while their **stored value stays untouched**).
 
 - It **follows the official language setting by default** (Settings → `Language`, i.e.
@@ -406,12 +408,12 @@ Details and the word table: [`docs/04`](docs/04-canvas-and-widgets_EN.md) §Node
 ComfyUI-H3-Latent-Relay/
 ├── __init__.py            # entry point: /h3relay/concat route, V1/V3 exit selection, startup banner
 ├── relay_core/            # business core (single source of truth, 11-file package): timing grid / copy bridge / TrimAV / AudioSeam / concat
-├── nodes.py               # node layer (the 8 nodes' inputs, outputs and human-readable reports)
+├── nodes.py               # node layer (the 10 nodes' inputs, outputs and human-readable reports)
 ├── layout_contract.py     # layout contract: pass through + leave a trace when upstream is missing, raise only on a real mismatch
 ├── v3/                    # V3 shell (io.ComfyNode + comfy_entrypoint); V1 goes through NODE_CLASS_MAPPINGS
 ├── exp/history_anchor_v2/ # E1' time-invariant history anchor (top-level import ⇒ required; inert without _tiha.json)
 ├── web/                   # front-end JS: the 🧩 concat button, Chain panel, `run_id` one-field-syncs-the-group, **the node Chinese/EN toggle** (canvas only)
-├── examples/              # two openable workflows: minimal continuation (21 nodes) and full flow (47 nodes)
+├── examples/              # three openable workflows: minimal continuation (21 nodes), full flow (47 nodes) and the headless run (11 nodes)
 ├── docs/                  # deep docs 01–10 (mechanism / parameters / sampling / canvas / troubleshooting / scripting / chain / tests / metrics / audio)
 ├── tests/                 # offline self-test (zero GPU): 625 assertions + V3 parity + prompt-dispatch pure functions
 ├── tools/                 # self-checks / forensic tools / concat CLI / bundler (incl. the en_sync docs gate)
@@ -490,7 +492,7 @@ The Chinese documents are the source of truth; `README_EN.md` and the English `d
 | [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md) · 🇬🇧 [English](docs/05-troubleshooting_EN.md) | **complete troubleshooting table** · **FAQ** · workflow-file self-check · API submission |
 | [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md) · 🇬🇧 [English](docs/06-continuity-scripting_EN.md) | prompt-side discipline: head padding · dialogue-safe timing · last-frame anchor chaining |
 | [`docs/07-chain.md`](docs/07-chain.md) · 🇬🇧 [English](docs/07-chain_EN.md) | the Chain auto-run controller (prompts / concat / resume) |
-| [`docs/08-testing.md`](docs/08-testing.md) · 🇬🇧 [English](docs/08-testing_EN.md) | offline self-test: 36 assertion groups (625 assertions) · tool inventory |
+| [`docs/08-testing.md`](docs/08-testing.md) · 🇬🇧 [English](docs/08-testing_EN.md) | offline self-test: 37 assertion groups (672 assertions) · tool inventory |
 | [`docs/09-metrics.md`](docs/09-metrics.md) · 🇬🇧 [English](docs/09-metrics_EN.md) | reference ranges for observables (DTW residual / appearance drift) · self-calibration |
 | 🇨🇳 [`docs/10-audio-seam-and-concat.md`](docs/10-audio-seam-and-concat.md) | **audio seam & multi-segment concatenation** — Chinese only for now: seam conventions and tuning guide · **dialogue protection** · criterion limits · track levels · sidecars · **script usage without the canvas** |
 | [`RELEASE-NOTES.md`](RELEASE-NOTES.md) | **user-facing release notes** (bilingual, one section per version) · **read this before upgrading** |

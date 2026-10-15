@@ -24,13 +24,13 @@ anchor 与采样 latent 不同源（会漂）、只能锚第 0 帧。本包直�
 
 ## 核心功能
 
-**8 个节点分三层 —— 一个最小工作流只用得到前 3 个**：
+**10 个节点分三层 —— 一个最小工作流只用得到前 3 个**：
 
 | 层 | 节点 | 说明 |
 |---|---|---|
 | **必备 3** | Latent 存 · 拷贝桥（复合桥）· 裁重叠 | 少一个就不叫续接 |
-| **可选 4** | 后处理 Post · 音频缝 · 连跑 Chain · Latent Upscale | 各自独立、**默认全关 = 逐位直通** |
-| **手动接线才用 1** | Latent 读 | 桥自己会从磁盘取源；只在要**显式换源**时才手动接 |
+| **可选 5** | 后处理 Post · 音频缝 · 连跑 Chain · Latent Upscale · Finite Run | 各自独立、**默认全关 = 逐位直通**（Finite Run 是连跑的服务端版） |
+| **手动接线才用 2** | Latent 读 · Join AV | 桥自己会从磁盘取源；Join AV 只在图内手拼几条时用 |
 
 | 节点 | 作用 |
 |---|---|
@@ -42,6 +42,8 @@ anchor 与采样 latent 不同源（会漂）、只能锚第 0 帧。本包直�
 | 🔗 **H3 Relay · Audio Seam** | **音频域**：把上一段环境声补进本段头部，**长度守恒**（零 A/V 位移），默认关 |
 | 🔍 **H3 Relay · Latent Upscale** | **画质域 · latent 层**：拆 AV 打包 latent → 逐块过学习式 3D 放大器 → 回包。**零去噪、时间维一帧不动、音频原样带回**（需可选上游依赖，见 §安装） |
 | 🔗 **H3 Relay · Chain** | 自动连跑控制器：自动推进段号并排队；0.6.7 起还能**换词**（`prompts` 按 `---` 分块）与**拼片**（🧩） |
+| 🧩 **H3 Relay · Join AV** | **张量域拼条**：本段裁后画面/音频接到累计后面出一条（规格不符直接报错，不静默拉伸） |
+| ⏩ **H3 Relay · Finite Run** | **服务端展开**：一次提交跑完 N 段（无需前端按钮；脚本/API 与画布走同一套节点）。每段链 = ImageToVideo → LatentLoad → CopyBridge → 采样 → LatentSave → 解码 → TrimAV → JoinAV |
 
 > **三个域别混挂**：时间轴 = `H3RelayTrimAV`（冻结）／画质域 = `H3RelayPost`／音频域 = `H3RelayAudioSeam`。
 >
@@ -79,7 +81,7 @@ git clone https://github.com/ZenHG/ComfyUI-H3-Latent-Relay.git
 包名不允许带 "ComfyUI"。
 
 **装完必须重启 ComfyUI 后端**（ComfyUI-Manager 点 *Restart*；没装就重启 Python 进程）——
-仅刷新浏览器不会加载新节点。节点列表里搜 `🔗 H3 Relay`（7 个）+ `🔍 H3 Relay · Latent Upscale` 即为全部 8 个。
+仅刷新浏览器不会加载新节点。节点列表里搜 `🔗 H3 Relay`（7 个）+ `🔍 H3 Relay · Latent Upscale` + `🧩 H3 Relay · Join AV` + `⏩ H3 Relay · Finite Run` 即为全部 10 个。
 
 **可选：用 🔍 H3 Relay · Latent Upscale 才需要装**（不装不影响其他 7 个节点，用时会报一条写明仓库与权重地址的错）：
 
@@ -304,7 +306,7 @@ python tools/voice_bank.py advise --bank <声库> --prompt-file 段N.md --prev-f
 
 ### 节点中英切换（0.6.28，**画布按钮**）
 
-每个本包节点上多一个「**中 / EN**」按钮：点一下，**本包 8 个节点**的标题、参数标签、
+每个本包节点上多一个「**中 / EN**」按钮：点一下，**本包 10 个节点**的标题、参数标签、
 端口名、**鼠标悬浮提示**一起切成中文 / 英文（下拉框显示中文、**存档值不变**）。
 
 - **默认跟随官方语言设置**（设置 → `Language`，即 `Comfy.Locale`）⇒ 界面是英文就别把节点翻成中文；
@@ -346,14 +348,14 @@ python tools/voice_bank.py advise --bank <声库> --prompt-file 段N.md --prev-f
 ComfyUI-H3-Latent-Relay/
 ├── __init__.py            # 包入口：注册 /h3relay/concat 路由、选 V1/V3 出口、启动横幅
 ├── relay_core/            # 业务内核（唯一真相源，11 文件包）：时序网格 / 拷贝桥 / 裁重叠 / 音频缝 / 拼接
-├── nodes.py               # 节点层（8 个节点的输入输出与人话报告），直接 import relay_core
+├── nodes.py               # 节点层（10 个节点的输入输出与人话报告），直接 import relay_core
 ├── layout_contract.py     # 布局契约：找不到上游时放行 + 留痕，只在真的不一致时 raise
 ├── v3/                    # V3 外壳（io.ComfyNode + comfy_entrypoint）；V1 走 NODE_CLASS_MAPPINGS
 ├── exp/history_anchor_v2/ # E1' 时不变历史锚（顶层 import ⇒ 必需；无 _tiha.json 即不生效）
 ├── web/                   # 前端 JS：🧩 拼接按钮、Chain 面板、`run_id` 一处改全组、**节点中英切换按钮**（画布用；脚本用户见 docs/10 §7.4）
-├── examples/              # 两个可直接打开的工作流：最小续接（21 节点）与全流程（47 节点）
+├── examples/              # 三个可直接打开的工作流：最小续接（21 节点）/ 全流程（47 节点）/ 无头连跑（11 节点）
 ├── docs/                  # 深度文档 01–10（原理 / 参数 / 采样链 / 画布 / 排障 / 脚本 / Chain / 测试 / 观测 / 音频）
-├── tests/                 # 离线自测（零 GPU）：625 项断言 + V3 逐字段 + 词分发纯函数
+├── tests/                 # 离线自测（零 GPU）：672 项断言 + V3 逐字段 + 词分发纯函数
 ├── tools/                 # 自检 / 取证 / 拼接 CLI / 打包器（含英文文档同步闸 en_sync.py）
 ├── licenses/              # 随包分发的第三方许可全文
 ├── dist/                  # 打包器的产出（最小分发集 + zip，不入库）
@@ -422,7 +424,7 @@ ComfyUI-H3-Latent-Relay/
 | [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md) · 🇬🇧 [`_EN`](docs/05-troubleshooting_EN.md) | **完整排障表** · **常见疑问 FAQ** · 工作流文件自检 · API 提交 |
 | [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md) · 🇬🇧 [`_EN`](docs/06-continuity-scripting_EN.md) | 出词纪律：段首缓冲 · 台词安全时刻 · 末帧锚链 · 音频缝配套 |
 | [`docs/07-chain.md`](docs/07-chain.md) · 🇬🇧 [`_EN`](docs/07-chain_EN.md) | Chain 自动连跑（换词 / 拼片 / 断点续跑） |
-| [`docs/08-testing.md`](docs/08-testing.md) · 🇬🇧 [`_EN`](docs/08-testing_EN.md) | 离线自测：36 组断言明细（625 项）· 工具清单 |
+| [`docs/08-testing.md`](docs/08-testing.md) · 🇬🇧 [`_EN`](docs/08-testing_EN.md) | 离线自测：37 组断言明细（672 项）· 工具清单 |
 | [`docs/09-metrics.md`](docs/09-metrics.md) · 🇬🇧 [`_EN`](docs/09-metrics_EN.md) | 观测量参考区间（DTW 残留 / 外观漂移）· 怎么自校准 |
 | [`docs/10-audio-seam-and-concat.md`](docs/10-audio-seam-and-concat.md) · 🇬🇧 [`_EN`](docs/10-audio-seam-and-concat_EN.md) | **音频缝与多段拼接**：缝的口径与调参指南 · **台词保护** · 判据能力边界 · 音轨档位 · 边车 · **不开画布的脚本用法** |
 | [`RELEASE-NOTES.md`](RELEASE-NOTES.md) | **面向用户的发布说明**（中英双语，一版一节）· **升级前先看这个** |

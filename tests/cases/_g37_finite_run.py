@@ -1,0 +1,208 @@
+# -*- coding: utf-8 -*-
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 ComfyUI-H3-Latent-Relay contributors
+# 第三方出处与许可见 THIRD-PARTY-NOTICES.md
+#
+# ruff: noqa: F821  —— 本分片**不是独立模块**（与 `tests/cases/` 其余分片同款）：
+#   由 `tests/test_relay_core.py` 用 `exec(compile(src, path, "exec"), globals())`
+#   顺序执行 ⇒ `check` / `expect_raise` / `CORE` / `NODES` / `os` / `sys` 都看得见，
+#   但不是本文件定义的。
+
+# ============================================================================
+# 第 37 组：无头连跑（0.6.36）—— 服务端展开图的构建与校验
+#
+# 背景：多段连跑原来只能靠前端 Chain（queuePrompt 状态机）⇒ 脚本/API 用户拿不到，
+#   且状态机有已知 bug 类。⏩ Finite Run 把整条连跑展开成一张无环图，宿主一次执行完。
+#   展开机制 = ComfyUI 公开能力（`enable_expand` + expand 图），编排全部复用已有节点。
+#
+# 本组锁三件事（全部零 GPU、零模型）：
+#   ① **图结构**：每段 11 个节点、链接端点逐一正确（接错槽 = 静默坏片）；
+#   ② **逐段参数**：段号/词块/种子/run_id 在展开图里逐位正确；
+#   ③ **建图期校验**：所有能在烧卡前说清的错误都在建图期 raise（失败要早、要响）。
+# 真实出片正确性（缝观感/音画同步/内存）**不在本组范围** —— 需 GPU + 人眼，见文档边界。
+# ============================================================================
+
+print()
+print("=" * 78)
+print("### 第 37 组：无头连跑 Finite Run（展开图构建 + 校验 + 拼条节点）")
+print("=" * 78)
+
+_G = CORE  # 本组大量访问 finite 命名空间下的函数（已由 relay_core 再导出）
+
+
+def _build(n=3, **kw):
+    """构造一张展开图；返回 (graph, outputs, report)。"""
+    blocks, _note = _G.resolve_finite_prompts(kw.pop("prompt", "基础词"), kw.pop("prompts", ""), n)
+    args = {
+        "prefix": "t.", "segments": n, "blocks": blocks, "seed": 7, "run_id": "demo",
+        "note": "", "width": 608, "height": 1056, "length": 124, "context_frames": 22,
+        "mask_mode": "hard", "pin_audio": True,
+        "model": "MODEL", "clip": "CLIP", "vae": "VAE", "audio_vae": "AVAE",
+        "image": "IMAGE", "sampler": "SAMPLER", "sigmas": "SIGMAS",
+    }
+    args.update(kw)
+    return _G.build_finite_graph(**args)
+
+
+def _cls_of(graph, suffix):
+    """取某个段角色节点的 class_type（找不到 ⇒ None）。"""
+    for nid, node in graph.items():
+        if nid.endswith(suffix):
+            return node["class_type"]
+    return None
+
+
+def _inputs_of(graph, suffix):
+    for nid, node in graph.items():
+        if nid.endswith(suffix):
+            return node["inputs"]
+    return None
+
+
+# ---------------------------------------------------------------------------
+print("[1] 图结构：每段 11 个节点、角色齐全")
+# ---------------------------------------------------------------------------
+_g3, _o3, _r3 = _build(3)
+check("37.1 3 段 = 33 个节点（每段 11 个）",
+      len(_g3) == 33 == _G.finite_graph_node_count(3), "得到 %d" % len(_g3))
+check("37.2 段 0 十种角色 class_type 全部正确",
+      all(_cls_of(_g3, "seg0_" + r) == t for r, t in [
+          ("i2v", "MiniMaxH3ImageToVideo"), ("load", "H3RelayLatentLoad"),
+          ("bridge", "H3RelayCopyBridge"), ("noise", "RandomNoise"),
+          ("guider", "BasicGuider"), ("samp", "SamplerCustomAdvanced"),
+          ("save", "H3RelayLatentSave"), ("vdec", "VAEDecode"),
+          ("adec", "VAEDecodeAudio"), ("trim", "H3RelayTrimAV"),
+          ("join", "H3RelayJoinAV")]))
+_g1, _o1, _r1 = _build(1)
+check("37.3 1 段 = 11 个节点（无累计链）", len(_g1) == 11, "得到 %d" % len(_g1))
+
+# ---------------------------------------------------------------------------
+print("[2] 链接端点：接错槽 = 静默坏片，逐一锁死")
+# ---------------------------------------------------------------------------
+_b0 = _inputs_of(_g3, "seg0_bridge")
+check("37.4 桥的 latent ← ImageToVideo 第 2 路（目标 latent）",
+      _b0["latent"] == ["t.seg0_i2v", 1], str(_b0["latent"]))
+check("37.5 桥的 context_latent ← LatentLoad 第 1 路",
+      _b0["context_latent"] == ["t.seg0_load", 0], str(_b0["context_latent"]))
+check("37.6 桥的 conditioning ← ImageToVideo 第 1 路（复合桥接法）",
+      _b0["conditioning"] == ["t.seg0_i2v", 0], str(_b0["conditioning"]))
+_g0 = _inputs_of(_g3, "seg0_guider")
+check("37.7 引导器的 conditioning ← 桥第 4 路（钉帧后的 conditioning）",
+      _g0["conditioning"] == ["t.seg0_bridge", 3], str(_g0["conditioning"]))
+_s0 = _inputs_of(_g3, "seg0_samp")
+check("37.8 采样器 latent_image ← 桥第 1 路（桥后 latent）",
+      _s0["latent_image"] == ["t.seg0_bridge", 0], str(_s0["latent_image"]))
+check("37.9 采样器 noise/guider/sampler/sigmas 四槽齐全",
+      _s0["noise"] == ["t.seg0_noise", 0] and _s0["guider"] == ["t.seg0_guider", 0]
+      and _s0["sampler"] == "SAMPLER" and _s0["sigmas"] == "SIGMAS")
+_sv0 = _inputs_of(_g3, "seg0_save")
+check("37.10 落盘的 latent ← 采样输出第 1 路",
+      _sv0["latent"] == ["t.seg0_samp", 0], str(_sv0["latent"]))
+_t0 = _inputs_of(_g3, "seg0_trim")
+check("37.11 TrimAV 的 trim_frames ← 桥第 3 路（全自动，不手填）",
+      _t0["trim_frames"] == ["t.seg0_bridge", 2], str(_t0["trim_frames"]))
+check("37.12 TrimAV 的 images/audio ← 两路解码",
+      _t0["images"] == ["t.seg0_vdec", 0] and _t0["audio"] == ["t.seg0_adec", 0])
+_j1 = _inputs_of(_g3, "seg1_join")
+check("37.13 第 2 段拼条接上一段 JoinAV 的两路输出",
+      _j1["images_acc"] == ["t.seg0_join", 0] and _j1["audio_acc"] == ["t.seg0_join", 1])
+_j0 = _inputs_of(_g3, "seg0_join")
+check("37.14 首段拼条**不接**累计（两个 acc 键都不在场）",
+      "images_acc" not in _j0 and "audio_acc" not in _j0)
+check("37.15 外层输出 = 末段采样 latent + 末段 JoinAV 两路 + 报告字面量",
+      _o3[0] == ["t.seg2_samp", 0] and _o3[1] == ["t.seg2_join", 0]
+      and _o3[2] == ["t.seg2_join", 1] and isinstance(_o3[3], str) and len(_o3) == 4)
+
+# ---------------------------------------------------------------------------
+print("[3] 逐段参数：段号 / 词块 / 种子 / run_id 在展开图里逐位正确")
+# ---------------------------------------------------------------------------
+_gb, _ob, _rb = _build(3, prompt="共用词", prompts="词一\n---\n词二\n---\n词三")
+_i2v = [n["inputs"]["prompt"] for nid, n in sorted(_gb.items()) if nid.endswith("_i2v")]
+check("37.16 每段各喂各的词块（第 k 块喂第 k 段）", _i2v == ["词一", "词二", "词三"], str(_i2v))
+_st = [n["inputs"]["stage_index"] for nid, n in sorted(_gb.items())
+       if nid.endswith("_bridge")]
+check("37.17 桥/落盘的段号逐段 +1（0 起算）", _st == [0, 1, 2], str(_st))
+_sv = [n["inputs"]["stage_index"] for nid, n in sorted(_gb.items())
+       if nid.endswith("_save")]
+check("37.18 落盘段号与桥一致（接力棒对得上）", _sv == [0, 1, 2], str(_sv))
+_ns = {n["inputs"]["noise_seed"] for nid, n in _gb.items() if nid.endswith("_noise")}
+check("37.19 所有段同一个种子（与画布连跑同语义）", _ns == {7}, str(_ns))
+_rid = {n["inputs"]["run_id"] for nid, n in _gb.items()
+        if nid.endswith(("_load", "_save", "_bridge"))}
+check("37.20 run_id 在 读/桥/落盘 三处一字不差", _rid == {"demo"}, str(_rid))
+_cf = {n["inputs"]["context_frames"] for nid, n in _gb.items() if nid.endswith("_bridge")}
+check("37.21 所有段同一个钉住窗", _cf == {22}, str(_cf))
+_gs, _os2, _rs2 = _build(2, prompt="只有一份词")
+_i2v2 = [n["inputs"]["prompt"] for nid, n in sorted(_gs.items()) if nid.endswith("_i2v")]
+check("37.22 prompts 留空 ⇒ 每段都用同一份 prompt（不换词老行为）",
+      _i2v2 == ["只有一份词", "只有一份词"], str(_i2v2))
+_bl, _note = _G.resolve_finite_prompts("p", "a\n---\nb\n---\nc\n---\nd", 2)
+check("37.23 词块多于段数 ⇒ 只取前 N 块并说明", _bl == ["a", "b"] and "多出" in _note,
+      "%s / %s" % (_bl, _note))
+
+# ---------------------------------------------------------------------------
+print("[4] 可选槽：不接就不写进图（不塞空值）")
+# ---------------------------------------------------------------------------
+_gv, _ov, _rv = _build(2, image=None, voice_anchor=None)
+check("37.24 不接首帧图 ⇒ ImageToVideo 无 first_frame 键（纯文生成模式）",
+      all("first_frame" not in n["inputs"] for nid, n in _gv.items() if nid.endswith("_i2v")))
+check("37.25 不接声锚 ⇒ 桥无 voice_anchor 键",
+      all("voice_anchor" not in n["inputs"] for nid, n in _gv.items() if nid.endswith("_bridge")))
+_gw, _ow, _rw = _build(2, voice_anchor="ANCHOR")
+check("37.26 接声锚 ⇒ 每段桥都带同一个声锚",
+      all(n["inputs"].get("voice_anchor") == "ANCHOR"
+          for nid, n in _gw.items() if nid.endswith("_bridge")))
+
+# ---------------------------------------------------------------------------
+print("[5] 建图期校验：能在烧卡前说清的错误绝不留给采样器")
+# ---------------------------------------------------------------------------
+expect_raise("37.27 segments=0 ⇒ raise", lambda: _build(0), "至少为 1")
+expect_raise("37.28 segments=65 ⇒ raise（一次展开的节点数护栏）", lambda: _build(65), "上限")
+expect_raise("37.29 词块不够 ⇒ raise（不静默复用）", lambda: _build(3, prompts="只有一块"), "补齐")
+expect_raise("37.30 多段但 run_id 空 ⇒ raise（第 2 段起要读盘）",
+             lambda: _build(2, run_id="  "), "run_id")
+expect_raise("37.31 词与 prompts 全空 ⇒ raise", lambda: _build(1, prompt="  ", prompts=""), "没有词")
+expect_raise("37.32 钉住窗不在 5+17k 栅格 ⇒ raise", lambda: _build(1, context_frames=20), "合法窗")
+expect_raise("37.33 mask_mode 非法 ⇒ raise", lambda: _build(1, mask_mode="taper2"), "只认")
+expect_raise("37.34 length<5 ⇒ raise", lambda: _build(1, length=3), "至少 5")
+expect_raise("37.35 width 非 16 倍数 ⇒ raise", lambda: _build(1, width=600), "16 的倍数")
+expect_raise("37.36 seed 为负 ⇒ raise", lambda: _build(1, seed=-1), "不能为负")
+check("37.37 单段 + 空 run_id **不** raise（首段无需读上一段）",
+      _build(1, run_id="")[1][0] == ["t.seg0_samp", 0])
+
+# ---------------------------------------------------------------------------
+print("[6] 节点层契约：V3_EXPAND / 输入槽 / 拼条节点行为")
+# ---------------------------------------------------------------------------
+_FR = NODES.H3RelayFiniteRun
+check("37.38 FiniteRun 标了 V3_EXPAND（V3 外壳据此开 enable_expand）",
+      getattr(_FR, "V3_EXPAND", False) is True)
+_it = _FR.INPUT_TYPES()
+check("37.39 输入槽 20 个（16 必填 + 4 可选）",
+      len(_it["required"]) == 16 and len(_it["optional"]) == 4,
+      "必填 %d / 可选 %d" % (len(_it["required"]), len(_it["optional"])))
+check("37.40 四路输出（末段 latent / 画面 / 音频 / 报告）",
+      _FR.RETURN_TYPES == ("LATENT", "IMAGE", "AUDIO", "STRING")
+      and _FR.RETURN_NAMES == ("last_latent", "images", "audio", "report"))
+check("37.41 链接型输入全在 optional（必填链接会堵掉纯文生成/不换词/不用声锚）",
+      list(_it["optional"]) == ["image", "prompts", "voice_anchor", "note"]
+      and all(t in ("IMAGE", "LATENT") for t in
+              (_it["optional"]["image"][0], _it["optional"]["voice_anchor"][0])))
+
+_JV = NODES.H3RelayJoinAV
+_imgs = torch.zeros(2, 4, 4, 3)
+_imgs_acc = torch.ones(3, 4, 4, 3)
+_aud = {"waveform": torch.zeros(1, 1, 5), "sample_rate": 32000}
+_aud_acc = {"waveform": torch.ones(1, 1, 7), "sample_rate": 32000}
+_ji, _ja, _jr = _JV().join(_imgs, _aud, _imgs_acc, _aud_acc)
+check("37.42 JoinAV 画面沿 batch 维拼（3+2=5 帧）", tuple(_ji.shape) == (5, 4, 4, 3),
+      str(tuple(_ji.shape)))
+check("37.43 JoinAV 音频沿时间拼（7+5=12 样本）",
+      tuple(_ja["waveform"].shape) == (1, 1, 12) and _ja["sample_rate"] == 32000)
+check("37.44 JoinAV 报告说明拼了几帧", "5 帧" in _jr and "12 样本" in _jr, _jr[:60])
+_ji0, _ja0, _jr0 = _JV().join(_imgs, _aud)
+check("37.45 JoinAV 首段（无累计）原样透传", _ji0 is _imgs and _ja0 is _aud)
+expect_raise("37.46 画面规格不符 ⇒ raise（不学核心节点静默拉伸）",
+             lambda: _JV().join(torch.zeros(2, 8, 4, 3), _aud, _imgs_acc, _aud_acc), "拒绝拼接")
+expect_raise("37.47 音频采样率不符 ⇒ raise",
+             lambda: _JV().join(_imgs, {"waveform": torch.zeros(1, 1, 5), "sample_rate": 16000},
+                                _imgs_acc, _aud_acc), "采样率")

@@ -812,9 +812,9 @@ ck("K12b 逐层审计：报告含「↳ …后：段头亮度 … 高频 …」"
 
 # K13~K14 —— 2026-09-19：拼接**复合在第 8 节点内**（不新增轮子；本仓作者 指令）
 _SeamNode = N.H3RelayAudioSeam
-ck("K13 AudioSeam 第 3 路输出 joined + 拼接旋钮折叠（复合而非新节点；当时 7 个，0.6.8 起 8 个）",
+ck("K13 AudioSeam 第 3 路输出 joined + 拼接旋钮折叠（复合而非新节点；当时 7 个，0.6.8 起 8 个，0.6.36 起 10 个）",
    _SeamNode.RETURN_NAMES == ("audio", "report", "joined")
-   and len(N.NODE_CLASS_MAPPINGS) == 8
+   and len(N.NODE_CLASS_MAPPINGS) == 10
    and all(_SeamNode.INPUT_TYPES()["optional"][k][1].get("advanced")
            for k in ("join_curve", "join_prime_ms", "join_cross_ms")))
 _srq = 32000
@@ -943,10 +943,10 @@ import tempfile as _tf
 
 _it_l = N.H3RelayAudioSeam.INPUT_TYPES()
 _ol = _it_l["optional"]
-ck("L1 H3RelayAudioSeam 已注册（8 节点）+ 显示名以 🔗 开头",
+ck("L1 H3RelayAudioSeam 已注册（10 节点）+ 显示名以 🔗 开头",
    N.NODE_CLASS_MAPPINGS.get("H3RelayAudioSeam") is N.H3RelayAudioSeam
    and N.NODE_DISPLAY_NAME_MAPPINGS["H3RelayAudioSeam"].startswith("🔗")
-   and len(N.NODE_CLASS_MAPPINGS) == 8,
+   and len(N.NODE_CLASS_MAPPINGS) == 10,
    "%d 节点" % len(N.NODE_CLASS_MAPPINGS))
 ck("L2 默认：patch=1.2（头部补丁默认开）/ tile=0 / fade=0.25 + OUTPUT_NODE（否则第 1 段床源永不落盘）",
    # 2026-10-13：`patch_seconds` 默认 0 → 1.2。理由是它自己的 tooltip 写着「建议 2.0」却默认关
@@ -1184,7 +1184,8 @@ for _nm, _st in (("input", _decl_in), ("节点数", _decl_nd), ("项数", _decl_
 #      常量两侧覆盖法：本机跑验到 (8,116) 与 (7,103)，CI 跑验到 (7,103)；两者合起来覆盖全部两项。
 #   ⚠️ 只扫 `_v3_docs`（4 个声明文件）：`exp/`、`LOCAL-*.md`、tests 注释里的是**历史数字**，
 #      它们本来就该保持旧值（改它们反而抹掉历史），不纳入。
-_V3_LEGIT_PAIRS = [(8, 129)]            # (节点数, input 数) —— 2026-10-07 收敛成一个
+_V3_LEGIT_PAIRS = [(10, 153)]           # (节点数, input 数) —— 2026-10-07 收敛成一个
+#   2026-10-15：8→10 / 129→153（新增 Join AV 4 参 + Finite Run 20 参；见 §H3h 下行注释）
 #   2026-10-12：124 → 127（「潜空间分块放大」加 3 个空间分块参数）。
 #   2026-10-13：127 → 128（「复合桥」加 `voice_anchor_stage`，声锚免接线档）。
 #   2026-10-14：128 → 129（「复合桥」加 `exp_anchor`，实验层总开关）。

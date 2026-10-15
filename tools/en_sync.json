@@ -16,8 +16,8 @@
           "zh": "核心功能",
           "en": "Core features",
           "mode": "condensed",
-          "h_en": "2a41f2a16bb3059f",
-          "h_src": "617f27360365b39c",
+          "h_en": "0afdf15030545ac2",
+          "h_src": "72bcbe58de93830f",
           "seeded": "by-position"
         },
         {
@@ -32,24 +32,24 @@
           "zh": "安装",
           "en": "Install",
           "mode": "condensed",
-          "h_en": "eb99bf82ac4716c3",
-          "h_src": "bd5fcf457a23abf7",
+          "h_en": "be0f1da177f355ab",
+          "h_src": "da524eba69cc7736",
           "seeded": "by-position"
         },
         {
           "zh": "使用方法",
           "en": "Usage",
           "mode": "condensed",
-          "h_en": "d831f4fa5af10086",
-          "h_src": "c91f8acaad04b704",
+          "h_en": "9d32e3e9362c20ef",
+          "h_src": "a0a472357fbee5f5",
           "seeded": "by-position"
         },
         {
           "zh": "目录结构",
           "en": "Repository layout",
           "mode": "condensed",
-          "h_en": "513ef4bde24c8d0f",
-          "h_src": "dbad652f81283ad3",
+          "h_en": "eab8f5a7b838258a",
+          "h_src": "62774b041d1849e0",
           "seeded": "by-position"
         },
         {
@@ -72,14 +72,14 @@
           "zh": "文档索引",
           "en": "Documentation index",
           "mode": "condensed",
-          "h_en": "a80646bf9671516e",
-          "h_src": "e23b202e4620a070",
+          "h_en": "cd28aecfc53fd69e",
+          "h_src": "9a9c4cde95600ed6",
           "seeded": "by-position"
         }
       ],
       "acks": [],
-      "stamped": "2026-10-14",
-      "src_sha": "e16b77323bccbe98"
+      "stamped": "2026-10-16",
+      "src_sha": "b114850602fabfc1"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -166,7 +166,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-14",
+      "stamped": "2026-10-16",
       "src_sha": "06ca2288755a21d0"
     },
     "docs/02-parameters.md": {
@@ -190,7 +190,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-14",
+      "stamped": "2026-10-16",
       "src_sha": "2b6cd3118cc63bbf"
     },
     "docs/03-sampling-and-design.md": {
@@ -222,7 +222,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-14",
+      "stamped": "2026-10-16",
       "src_sha": "e0c4d1c18fb4b8e2"
     },
     "docs/04-canvas-and-widgets.md": {
@@ -232,14 +232,14 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "full",
-          "h_en": "f86aa38e1ffac72e",
-          "h_src": "d39be80cc6d876ab",
+          "h_en": "df77ca798a328945",
+          "h_src": "db0d87958d3a1d35",
           "seeded": "by-position"
         }
       ],
       "acks": [],
-      "stamped": "2026-10-14",
-      "src_sha": "d39be80cc6d876ab"
+      "stamped": "2026-10-16",
+      "src_sha": "db0d87958d3a1d35"
     },
     "docs/05-troubleshooting.md": {
       "en": "docs/05-troubleshooting_EN.md",
@@ -264,16 +264,16 @@
           "zh": "🔧 工作流文件被改坏的自检（随包工具）",
           "en": "🔧 Self-check for a corrupted workflow file (bundled tool)",
           "mode": "full",
-          "h_en": "ad9dd488d9f3e01b",
-          "h_src": "8b292d45855ef871",
+          "h_en": "7e36a09f9c5af0a3",
+          "h_src": "fbc30074c0c407fa",
           "seeded": "by-position"
         },
         {
           "zh": "🤖 API 提交（脚本 / 程序化）",
           "en": "🤖 API submission (script / programmatic)",
           "mode": "full",
-          "h_en": "a6a55a54b7add1f1",
-          "h_src": "c9e291adb616865a",
+          "h_en": "87cb17fc53f859c3",
+          "h_src": "f5b4e48432500b5a",
           "seeded": "by-position"
         },
         {
@@ -294,8 +294,8 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-14",
-      "src_sha": "9115e791360e9ca7"
+      "stamped": "2026-10-16",
+      "src_sha": "e81fe8e3d1216b5c"
     },
     "docs/06-continuity-scripting.md": {
       "en": "docs/06-continuity-scripting_EN.md",
@@ -318,7 +318,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-14",
+      "stamped": "2026-10-16",
       "src_sha": "c046d84ff172f569"
     },
     "docs/07-chain.md": {
@@ -346,6 +346,14 @@
           "mode": "full",
           "h_en": "f1aa3af18a5dab6d",
           "h_src": "34f9c858377bb240",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "⏩ Finite Run：一次提交跑完 N 段（无头连跑，0.6.36）",
+          "en": "⏩ Finite Run: run N segments in one submission (headless, 0.6.36)",
+          "mode": "full",
+          "h_en": "580dd9b1050444f8",
+          "h_src": "056669564e043de5",
           "seeded": "by-position"
         },
         {
@@ -406,8 +414,8 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-14",
-      "src_sha": "4c54359bbd0fed87"
+      "stamped": "2026-10-16",
+      "src_sha": "1461be845b2e1443"
     },
     "docs/08-testing.md": {
       "en": "docs/08-testing_EN.md",
@@ -424,8 +432,8 @@
           "zh": "单测（零 GPU、秒级）",
           "en": "Unit tests (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "fb0d655106b8bb6a",
-          "h_src": "52852aa71be0eec9",
+          "h_en": "1ff3ad47522669a9",
+          "h_src": "c3155226647310bc",
           "seeded": "by-position"
         },
         {
@@ -433,37 +441,37 @@
           "en": "Unit tests for front-end pure functions (run by node, zero dependencies)",
           "mode": "full",
           "h_en": "bf95359397b71fc5",
-          "h_src": "de61fcc64ef17bf2",
+          "h_src": "ac4544aa09506807",
           "seeded": "by-position"
         },
         {
           "zh": "V3 外壳与默认出口（零 GPU、秒级）",
           "en": "V3 shell and default exit (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "bbc588b394eaad60",
-          "h_src": "169054ee6948161a",
+          "h_en": "f0a4090979bb71b7",
+          "h_src": "690296785e9d1ded",
           "seeded": "by-position"
         },
         {
           "zh": "tools/ 下的其他自检（完整清单见 [`tools/README.md`](../tools/README.md)）",
           "en": "Other self-checks under tools/ (full list in [`tools/README.md`](../tools/README.md))",
           "mode": "full",
-          "h_en": "9ddbe70059149d81",
-          "h_src": "20da02d69e5873fe",
+          "h_en": "86530d8be1b99626",
+          "h_src": "0f63081858ad5cd2",
           "seeded": "by-position"
         },
         {
           "zh": "最小可运行分发集（给用户/分发用，不是开发件）",
           "en": "Minimal runnable distribution set (for users/distribution, not a development artifact)",
           "mode": "full",
-          "h_en": "e47c8cba40f06ba1",
-          "h_src": "5e68cf32dd2fb165",
+          "h_en": "c99a771a6d40c169",
+          "h_src": "d91c303d6267d278",
           "seeded": "by-position"
         }
       ],
       "acks": [],
-      "stamped": "2026-10-14",
-      "src_sha": "98a9c283f7a606d3"
+      "stamped": "2026-10-16",
+      "src_sha": "09b5a5d1b22d021f"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",
@@ -518,7 +526,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-14",
+      "stamped": "2026-10-16",
       "src_sha": "6886d24ff831c09b"
     },
     "docs/10-audio-seam-and-concat.md": {
@@ -582,7 +590,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-14",
+      "stamped": "2026-10-16",
       "src_sha": "068491bc51cdce1e"
     }
   }

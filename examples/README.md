@@ -4,6 +4,7 @@
 |---|---|---|
 | `minimal_relay_official.json` | 第 2 段要接对**哪些线**（全官方节点 + 本包） | 21 节点 |
 | `fullflow_second_pass_latent_upscale_ui.json` | **一采 → 🔍 H3 Relay · Latent Upscale → 二采 → 续接** 整条链路怎么接 | 47 节点 |
+| `finite_run_ui.json` | **一次提交跑完 N 段**（⏩ Finite Run 无头连跑，脚本/API 与画布同一套节点） | 11 节点 |
 
 ## `minimal_relay_official.json`
 
@@ -132,6 +133,35 @@
 前端那条"替你写词格"的老路**已删除**，不接这根线会被当场拦下）；
 ③ 落盘从 `VHS_VideoCombine` 换成官方 `CreateVideo + SaveVideo`（理由见上）；
 ④ 补上 `🔗 H3 Relay · Post`（默认直通 ⇒ 与不接逐位等价，但示例图该让 8 个节点都在场）。
+
+## `finite_run_ui.json`
+
+**⏩ H3 Relay · Finite Run（无头连跑）**：一次提交跑完 N 段 —— 没有前端按钮、没有逐段手改段号，
+脚本/API 用户与画布用户走**同一套节点**（铁律一）。
+
+```
+UNETLoader / CLIPLoader / VAELoader×2 → LoadImage（首帧，可拔）
+   → KSamplerSelect + BasicScheduler（采样两件套，各段共用）
+   → ⏩ H3 Relay · Finite Run（内部展开 N 段）
+   → CreateVideo → SaveVideo（一条成片）
+```
+
+内部展开的每段链（本包不重写算法，全是已有节点）：
+
+```
+MiniMaxH3ImageToVideo → H3RelayLatentLoad → H3RelayCopyBridge → RandomNoise
+   → BasicGuider → SamplerCustomAdvanced → H3RelayLatentSave
+   → VAEDecode / VAEDecodeAudio → H3RelayTrimAV → H3RelayJoinAV
+```
+
+**怎么用**：① `prompts` 里用单独一行 `---` 把各段词分开（第 1 块喂第 1 段；块数不够会直接报错）；
+② `segments` = 要跑的段数，`run_id` 必填（各段中间文件靠它定位）；③ 首帧图可拔（不接 = 纯文生成视频），
+各段共用同一张图（与画布连跑同语义）；④ 跑完得到「末段 latent + 拼成一条的画面/音频 + report」，
+各段中间文件在 `output/relay_kit/<run_id>/stage_NNNNN.safetensors`。
+
+> ⚠ **两条边界（诚实声明）**：合并输出是**一条驻留内存的张量**（段数多/分辨率高时先小分辨率试两段）；
+> 音频缝补丁与画质域后处理节点**不在**展开图内（要那些请用画布连跑逐段接）。
+> 重新生成：`python examples/make_finite_run_workflow.py`。
 
 ## `make_minimal_workflow.py`
 

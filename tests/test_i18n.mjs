@@ -185,8 +185,8 @@ check("5.3 英文态回落显示原值（不留中文钩子）",
         if (!v || !v.zh || !v.en) bad.push(`${k}`);
     }
     check("8.1 词表里没有空项 / 漏语言 / zh==en 的条目", bad.length === 0, bad.slice(0, 5).join(","));
-    check("8.2 八个节点的标题词条齐全（少一个就有一个节点切不了）",
-        Object.keys(H3_NODES).length === 8, String(Object.keys(H3_NODES).length));
+    check("8.2 十个节点的标题词条齐全（少一个就有一个节点切不了）",
+        Object.keys(H3_NODES).length === 10, String(Object.keys(H3_NODES).length));
     check("8.3 语言键与事件名带包前缀（**不与别的包共用**，免得互相覆盖 localStorage）",
         LANG_KEY === "h3relay_lang" && LANG_EVENT === "h3relay:lang-changed"
         && LANG_KEY !== "xh_node_lang" && LANG_EVENT !== "xh:lang-changed");

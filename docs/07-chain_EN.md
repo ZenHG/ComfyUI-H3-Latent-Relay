@@ -123,6 +123,58 @@ Japanese cel-shaded 2D animation… [Shot 1] medium close-up, Yuki and Kara grap
   (both the node and the self-check tools call it; cross-language consistency is locked by both sides reading `tests/prompt_blocks_cases.json`),
   unit test: `node tests/test_prompt_dispatch.mjs`.
 
+## ⏩ Finite Run: run N segments in one submission (headless, 0.6.36)
+
+`⏩ H3 Relay · Finite Run` is the **server-side twin of Chain**: Chain drives stage numbers with
+frontend buttons and queues segment by segment; Finite Run **expands the whole run into one
+acyclic graph** that the host executes in a single pass — no frontend buttons, no manual stage
+edits, and **scripts / API users share one node implementation with canvas users** (iron rule #1).
+
+**Everything inside the expanded graph is an existing node** (zero algorithm re-implementation;
+one chain per segment):
+
+```
+MiniMaxH3ImageToVideo → H3RelayLatentLoad → H3RelayCopyBridge → RandomNoise
+  → BasicGuider → SamplerCustomAdvanced → H3RelayLatentSave
+  → VAEDecode / VAEDecodeAudio → H3RelayTrimAV → H3RelayJoinAV
+```
+
+**Wiring** (only these on the outside; the rest lives inside the expanded graph):
+
+| Wire | Notes |
+|---|---|
+| `model` / `clip` / `vae` / `audio_vae` | the last stage of the model chain + both VAEs (shared by every segment) |
+| `sampler` / `sigmas` | KSamplerSelect + BasicScheduler (one shared pair) |
+| `image` (optional) | first frame of segment 1; **every segment uses the same image** (same as Chain). Unwired = text-to-video only |
+| `prompt` / `prompts` | fill `prompt` for one shared text; fill `prompts` for per-segment text (split on a line of `---`, block k feeds segment k) |
+| `segments` / `seed` / `run_id` | segment count (1..64) / one seed for all segments / film name (required for multi-segment) |
+| `width` / `height` / `length` | picture size (multiples of 16) and frames per segment (all segments equal) |
+| `context_frames` / `mask_mode` / `pin_audio` | same meaning as on the copy bridge (one set for every segment) |
+| `voice_anchor` (optional) | voice anchor; one shared anchor. Unwired = the previous segment's own audio tail |
+
+**Build-time validation** (before any GPU work): fewer prompt blocks than segments / multi-segment
+with an empty `run_id` / `context_frames` off the 5+17k grid / illegal `mask_mode` / `length` < 5 /
+picture not a multiple of 16 / negative `seed` — all error out immediately, nothing burns.
+
+**Division of labour with Chain** (both paths coexist, not mutually exclusive):
+
+| | Chain (canvas) | Finite Run (headless) |
+|---|---|---|
+| driver | frontend buttons + queuePrompt state machine | server-side expansion, one submission |
+| re-roll after per-segment review | ✅ natural (▶ runs again, same stage file overwritten) | ❌ one shot (a redo reruns everything) ⇒ v2 `from_segment` |
+| audio-seam patch / picture-domain post | ✅ per segment | ❌ not in the expanded graph |
+| first-frame image | one image (Chain never touches image nodes) | one image |
+| concat into a film | file-domain stream copy (🧩 button / `auto_concat`) | tensor-domain JoinAV (one encode) |
+| resume from progress | ✅ `_progress.json` + ⏭ resume | ❌ |
+
+**Known boundaries (stated honestly)**: the merged output is **one in-memory tensor** (for many
+segments / high resolution, try two segments at low resolution first); AudioSeam and Post are not
+included; this round is **zero-GPU verified** (machine checks only prove graph structure and that
+the reused nodes behave unchanged) ⇒ seam look, A/V sync and memory peak await real acceptance.
+Example: `examples/finite_run_ui.json`.
+
+---
+
 ## Concat into a film: one click in the pack, no external ffmpeg
 
 **The stage list does not guess filenames**: the front end hands the backend each stage's `prompt_id` returned by `queuePrompt`,

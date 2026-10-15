@@ -71,6 +71,8 @@ export const H3_NODES = {
     H3RelayAudioSeam: { zh: "🔗 H3 Relay · 音频缝", en: "🔗 H3 Relay · Audio Seam" },
     H3RelayChain: { zh: "🔗 H3 Relay · 连跑控制", en: "🔗 H3 Relay · Chain" },
     H3RelayLatentUpscale: { zh: "🔍 H3 Relay · 潜空间分块放大", en: "🔍 H3 Relay · Latent Upscale" },
+    H3RelayJoinAV: { zh: "🧩 H3 Relay · 图内拼条", en: "🧩 H3 Relay · Join AV" },
+    H3RelayFiniteRun: { zh: "⏩ H3 Relay · 无头连跑", en: "⏩ H3 Relay · Finite Run" },
 };
 
 // ---------------------------------------------------------------------------
@@ -117,6 +119,21 @@ export const H3_WIDGETS = {
     trim_frames: { zh: "裁剪帧数", en: "trim frames" },
     fps: { zh: "帧率", en: "fps" },
     audio: { zh: "音频", en: "audio" },
+    // 图内拼条 / 无头连跑
+    images_acc: { zh: "累计图像", en: "accumulated images" },
+    audio_acc: { zh: "累计音频", en: "accumulated audio" },
+    model: { zh: "模型", en: "model" },
+    clip: { zh: "文本编码器", en: "clip" },
+    vae: { zh: "视频 VAE", en: "video VAE" },
+    audio_vae: { zh: "音频 VAE", en: "audio VAE" },
+    sampler: { zh: "采样器", en: "sampler" },
+    sigmas: { zh: "噪声表", en: "sigmas" },
+    image: { zh: "首帧图", en: "first frame" },
+    prompt: { zh: "提示词", en: "prompt" },
+    width: { zh: "宽", en: "width" },
+    height: { zh: "高", en: "height" },
+    length: { zh: "帧数", en: "length" },
+    seed: { zh: "随机种子", en: "seed" },
     settle_frames: { zh: "沉降帧数", en: "settle frames" },
     seam_ghost: { zh: "缝帧重影", en: "seam ghost" },
     seam_ghost_alpha: { zh: "重影强度", en: "ghost strength" },
@@ -604,6 +621,80 @@ export const H3_TIPS = {
     "H3RelayCopyBridge.exp_anchor": {
         en: "【Experiment · default auto】One switch for the two conditioning experiments: per-speaker voice accumulation, and the time-invariant history anchor.\n· auto (default) = the old behaviour: read the run-directory config files, on if present.\n· off = off for good (ignored and reported). The rest = explicitly on; a missing file errors out.\n⚠ Both are untested experiments."
     },
+    // ===== 图内拼条（Join AV）=====
+    "H3RelayJoinAV.images": {
+        en: "【Wiring】From Trim AV's image output (the overlap head is already trimmed).",
+    },
+    "H3RelayJoinAV.audio": {
+        en: "【Wiring】From Trim AV's audio output, trimmed with the pictures so A/V stay in sync.",
+    },
+    "H3RelayJoinAV.images_acc": {
+        en: "【Accumulated images】The images accumulated so far.\nLeave unwired for the first segment; from segment 2 on, wire the previous Join AV's images output.",
+    },
+    "H3RelayJoinAV.audio_acc": {
+        en: "【Accumulated audio】The audio accumulated so far; used together with the accumulated images.",
+    },
+    // ===== 无头连跑（Finite Run）=====
+    "H3RelayFiniteRun.model": {
+        en: "【Wiring】The last stage of your model chain (amplifier / LoRA patches all sit before it).",
+    },
+    "H3RelayFiniteRun.clip": {
+        en: "【Wiring】The CLIP loader output; every segment's prompt is encoded with it.",
+    },
+    "H3RelayFiniteRun.vae": {
+        en: "【Wiring】The video VAE, used to encode and decode pictures.",
+    },
+    "H3RelayFiniteRun.audio_vae": {
+        en: "【Wiring】The audio VAE, used to encode and decode sound.",
+    },
+    "H3RelayFiniteRun.sampler": {
+        en: "【Wiring】The sampler picker (e.g. euler); shared by every segment.",
+    },
+    "H3RelayFiniteRun.sigmas": {
+        en: "【Wiring】The sigma schedule (steps and scheduler); shared by every segment.",
+    },
+    "H3RelayFiniteRun.image": {
+        en: "【First frame】The first frame of segment 1; every segment uses the same image.\nLeave it unwired = text-to-video only.",
+    },
+    "H3RelayFiniteRun.prompt": {
+        en: "【One prompt for every segment】Fill this when all segments share one prompt.\nFor per-segment prompts use the `prompts` field below.",
+    },
+    "H3RelayFiniteRun.prompts": {
+        en: "【Per-segment prompts】Split blocks with a line of three or more dashes; block 1 feeds segment 1.\nToo few blocks ⇒ it errors out instead of quietly running fewer segments.",
+    },
+    "H3RelayFiniteRun.segments": {
+        en: "【How many segments】How many segments this single submission runs.\n3 = run from segment 1 through segment 3. Match it with the `prompts` block count.",
+    },
+    "H3RelayFiniteRun.seed": {
+        en: "【Seed】Every segment uses the same seed.\n0 is the common fixed value; submit again for a different one.",
+    },
+    "H3RelayFiniteRun.run_id": {
+        en: "【Film name】A name for this film, e.g. myfilm or ep01.\nEvery segment's files and reading the previous one are located by it; required for multi-segment runs.",
+    },
+    "H3RelayFiniteRun.width": {
+        en: "【Width】A multiple of 16; use the same number as your prompt node.",
+    },
+    "H3RelayFiniteRun.height": {
+        en: "【Height】A multiple of 16; use the same number as your prompt node.",
+    },
+    "H3RelayFiniteRun.length": {
+        en: "【Frames per segment】24 fps, so 124 frames is about 5 seconds.\nAll segments are the same length (same as the manual chain).",
+    },
+    "H3RelayFiniteRun.context_frames": {
+        en: "【Copy window】How many frames are pinned from the previous segment's tail.\nOnly 5/22/39/56/73/90/107/124 are legal; a longer window is steadier at the seam.",
+    },
+    "H3RelayFiniteRun.mask_mode": {
+        en: "【Mask mode】hard = the pinned zone is snapped back every step (recommended, default).\ntaper / ramp / blend / window are experiment modes, for comparing against old results only.",
+    },
+    "H3RelayFiniteRun.pin_audio": {
+        en: "【Pin audio】On (default) = the previous segment's audio tail is pinned in too.\nOff = each segment generates its own audio; the seam may sound disconnected.",
+    },
+    "H3RelayFiniteRun.voice_anchor": {
+        en: "【Voice anchor】The audio anchor of this segment's speaker; all segments share one.\nUnwired = use the previous segment's own audio tail.",
+    },
+    "H3RelayFiniteRun.note": {
+        en: "【Note】A note written into every segment's sidecar, e.g. \"22-frame window v2\".",
+    },
 };
 
 // ---------------------------------------------------------------------------
@@ -622,6 +713,7 @@ export const H3_SLOTS = {
     prev_tail: { zh: "上段末帧", en: "prev tail" },
     joined: { zh: "拼接结果", en: "joined" },
     prompt: { zh: "提示词", en: "prompt" },
+    last_latent: { zh: "末段潜空间", en: "last latent" },
 };
 
 // ---------------------------------------------------------------------------

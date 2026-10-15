@@ -67,7 +67,7 @@ python tools/check_ui_workflow.py --all
 python tools/check_ui_workflow.py /path/to/ComfyUI/user/default/workflows/xxx.json
 ```
 
-**The schema comes from two places** (since 2026-09-19): **this pack's 8 nodes are now read from the
+**The schema comes from two places** (since 2026-09-19): **this pack's 10 nodes are now read from the
 in-pack `nodes.py`**, and only the other nodes go through the running ComfyUI's `/object_info`; it also
 reports "the definition the server loaded disagrees with the code". **A server that cannot be reached is
 not fatal**: this pack's nodes are still validated, only the non-pack nodes are marked "not checked".
@@ -87,7 +87,7 @@ it with the front-end archive position by position.
 
 ## 🤖 API submission (script / programmatic)
 
-This pack's 8 nodes **can all be submitted through the `/prompt` API** (the same set of nodes as the UI
+This pack's 10 nodes **can all be submitted through the `/prompt` API** (the same set of nodes as the UI
 graph, with no UI-only logic). Three routes:
 
 1. **Front-end export**: ComfyUI menu "Workflow → Export (API)" gives the API format (each node is

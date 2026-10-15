@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 ComfyUI-H3-Latent-Relay contributors
 # 第三方出处与许可见 THIRD-PARTY-NOTICES.md
-"""8 个节点的 V3 外壳。
+"""10 个节点的 V3 外壳。
 
 每个外壳只有两件事：``define_schema``（**从 V1 类自动生成**）与 ``execute``（转调 V1 实现）。
 业务逻辑一行不重写 ⇒ V3 迁移的风险全部集中在"协议转换"这一薄层，算法层零改动。
@@ -84,6 +84,22 @@ class H3RelayChain(_Shell):
     _V1_NAME = "H3RelayChain"
 
 
+class H3RelayJoinAV(_Shell):
+    """🧩 H3 Relay · Join AV：把本段裁后画面/音频接到累计后面（张量域拼条）。"""
+
+    _V1_NAME = "H3RelayJoinAV"
+
+
+class H3RelayFiniteRun(_Shell):
+    """⏩ H3 Relay · Finite Run：一次提交跑完 N 段（服务端展开，无头可用）。
+
+    ⚠️ 与另外 9 个外壳的差别：本节点 **V3_EXPAND=True** ⇒ ``define_schema`` 自动带上
+    ``enable_expand=True``（``v1_inputs`` 之类照旧从 V1 类生成，不手写）。
+    """
+
+    _V1_NAME = "H3RelayFiniteRun"
+
+
 # 注册顺序与 V1 的 NODE_CLASS_MAPPINGS 一致（非必需，便于人工双向核对）
 NODES = [
     H3RelayLatentUpscale,
@@ -94,4 +110,6 @@ NODES = [
     H3RelayPost,
     H3RelayAudioSeam,
     H3RelayChain,
+    H3RelayJoinAV,
+    H3RelayFiniteRun,
 ]

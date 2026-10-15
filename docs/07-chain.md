@@ -116,6 +116,54 @@ H3RelayChain.prompt ──► 出词节点的 prompt 输入
   （节点与自检工具都调它，跨语言一致性由 `tests/prompt_blocks_cases.json` 两侧共读锁定），
   单测：`node tests/test_prompt_dispatch.mjs`。
 
+## ⏩ Finite Run：一次提交跑完 N 段（无头连跑，0.6.36）
+
+`⏩ H3 Relay · Finite Run` 是 Chain 的**服务端孪生**：Chain 靠前端按钮推进段号再逐段排队；
+Finite Run 把整条连跑**展开成一张无环图**，宿主一次执行完 —— 没有前端按钮、没有逐段手改段号，
+**脚本 / API 用户与画布用户走同一套节点**（铁律一）。
+
+**展开图里全部是已有节点**（算法零重写；每段一条链）：
+
+```
+MiniMaxH3ImageToVideo → H3RelayLatentLoad → H3RelayCopyBridge → RandomNoise
+  → BasicGuider → SamplerCustomAdvanced → H3RelayLatentSave
+  → VAEDecode / VAEDecodeAudio → H3RelayTrimAV → H3RelayJoinAV
+```
+
+**接线**（外层只接这些，其余在展开图内部）：
+
+| 接什么 | 说明 |
+|---|---|
+| `model` / `clip` / `vae` / `audio_vae` | 模型链最后一级 + 两个 VAE（各段共用） |
+| `sampler` / `sigmas` | KSamplerSelect + BasicScheduler（各段共用同一个） |
+| `image`（可选） | 第 1 段首帧；**各段共用同一张**（与 Chain 同语义）。不接 = 纯文生成视频 |
+| `prompt` / `prompts` | 只跑一种内容填 `prompt`；每段不同词填 `prompts`（单独一行 `---` 分块，第 k 块喂第 k 段） |
+| `segments` / `seed` / `run_id` | 段数（1..64）/ 种子（各段同一个）/ 片子名（多段必填） |
+| `width` / `height` / `length` | 画面尺寸（16 的倍数）与每段帧数（所有段一样长） |
+| `context_frames` / `mask_mode` / `pin_audio` | 与拷贝桥同义（每段都用这套） |
+| `voice_anchor`（可选） | 声锚；各段共用同一个。不接 = 用上一段自己的音频尾 |
+
+**建图期校验**（任何 GPU 工作开始之前）：词块数 < 段数 / 多段但 `run_id` 空 /
+`context_frames` 不在 5+17k 栅格 / `mask_mode` 非法 / `length` < 5 / 画面非 16 倍数 /
+`seed` 为负 —— 全部当场报错，不烧卡。
+
+**与 Chain 的分工**（两条路并存，不互斥）：
+
+| | Chain（画布） | Finite Run（无头） |
+|---|---|---|
+| 驱动 | 前端按钮 + queuePrompt 状态机 | 服务端展开，一次提交 |
+| 逐段目检后重染 | ✅ 天然支持（▶ 再跑一遍覆盖同段号） | ❌ 一次提交跑完（要重来得整条重跑）⇒ v2 `from_segment` |
+| 音频缝补丁 / 画质域后处理 | ✅ 逐段可接 | ❌ 不在展开图内 |
+| 段首帧图 | 同一张（Chain 不碰图节点） | 同一张 |
+| 拼成片 | 文件域流拷贝（🧩 按钮 / `auto_concat`） | 张量域 JoinAV（一次编码出成片） |
+| 断点续跑 | ✅ `_progress.json` + ⏭ 续跑 | ❌ |
+
+**已知边界**（诚实声明）：合并输出是**一条驻留内存的张量**（段数多 / 分辨率高时先小分辨率试两段）；
+不含 AudioSeam / Post；本轮**零 GPU 验证**（机检只证图结构与复用件行为不变）⇒ 缝观感 /
+音画同步 / 内存峰值待真机验收。示例：`examples/finite_run_ui.json`。
+
+---
+
 ## 拼接成片：包内一键，不依赖外部 ffmpeg
 
 **段清单不猜文件名**：前端把每段 `queuePrompt` 回来的 `prompt_id` 交给后端，

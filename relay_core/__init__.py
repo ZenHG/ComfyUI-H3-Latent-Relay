@@ -342,6 +342,10 @@ from .upscale import (
 # —— prompt：词分发（连跑时「第 k 段喂第 k 块词」）。
 from .prompt import (PROMPT_SEPARATOR_MIN_DASHES, _lines_like_js, pick_prompt_block, split_prompt_blocks)
 
+# —— finite：服务端「一次提交跑完 N 段」的展开图构建（纯函数，节点侧只做编排）。
+from .finite import (FINITE_MAX_SEGMENTS, FinitePlanError, build_finite_graph,
+                     finite_graph_node_count, resolve_finite_prompts, validate_finite_params)
+
 __all__ = [
     "ADVISE_WITHIN",
     "ANALYSIS_SHORT_SIDE",
@@ -404,9 +408,11 @@ __all__ = [
     "BLUR_RECOVER_RATIO",
     "BLUR_ZONE_RATIO",
     "BOUNDARY_JUMP_WARN",
+    "FINITE_MAX_SEGMENTS",
     "FPS",
     "FRAME_PER_TOKEN",
     "FRAME_RESCALE",
+    "FinitePlanError",
     "GRADE_DEV_FLOOR",
     "GRADE_DEV_Z",
     "GUIDE_RUNS",
@@ -538,6 +544,7 @@ __all__ = [
     "build_anchor_ref",
     "build_bed",
     "build_continue_latent",
+    "build_finite_graph",
     "concat_mp4_segments",
     "count_official_audio_refs",
     "declick_gate",
@@ -551,6 +558,7 @@ __all__ = [
     "dtw_residual",
     "find_head_jump",
     "find_nonvoiced_bed_window",
+    "finite_graph_node_count",
     "graph_downstream_rank",
     "head_metrics",
     "head_repeat_dtw",
@@ -574,6 +582,7 @@ __all__ = [
     "pixel_frames",
     "plan_relay",
     "plan_run_id_sync",
+    "resolve_finite_prompts",
     "resolve_run_id",
     "prefix_blend_weights",
     "prefix_ramp_weights",
@@ -612,6 +621,7 @@ __all__ = [
     "UPSCALE_TILE_FEATHER_DEFAULT",
     "UPSCALE_TILE_OVERLAP_DEFAULT",
     "_core_window_1d",
+    "validate_finite_params",
     "video_from_latent",
     "video_tail_from_latent",
 ]
@@ -644,6 +654,7 @@ _SUBMODULES = (
     "concat",
     "upscale",
     "prompt",
+    "finite",
 )
 
 # 名字 -> **定义它的**子模块（用于回查归属；`__setattr__` 用的是 `_HOLDERS`）
@@ -929,6 +940,13 @@ _OWNER = {
     "_lines_like_js": "prompt",
     "pick_prompt_block": "prompt",
     "split_prompt_blocks": "prompt",
+    # finite
+    "FINITE_MAX_SEGMENTS": "finite",
+    "FinitePlanError": "finite",
+    "build_finite_graph": "finite",
+    "finite_graph_node_count": "finite",
+    "resolve_finite_prompts": "finite",
+    "validate_finite_params": "finite",
 }
 
 # 名字 -> **所有持有它的**子模块（属主 + 用 `from .X import name` 拷了副本的）

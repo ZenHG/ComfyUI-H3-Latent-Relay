@@ -42,6 +42,16 @@ _TYPES = {
     "AUDIO": io.Audio,
     "MASK": io.Mask,
     "CONDITIONING": io.Conditioning,
+    # —— 2026-10-15 补（⏩ Finite Run 的接线槽：模型链四件套 + 采样两件套）。
+    #    不补的后果不是报错而是**静默降级**：未知类型会走 io.Custom 兜底，
+    #    那种"自定义类型"槽在画布上接不了标准节点的输出 ⇒ 功能看起来在场、其实接不上。
+    "MODEL": io.Model,
+    "CLIP": io.Clip,
+    "VAE": io.Vae,
+    "SAMPLER": io.Sampler,
+    "SIGMAS": io.Sigmas,
+    "NOISE": io.Noise,
+    "GUIDER": io.Guider,
 }
 
 # V1 选项键 → V3 构造参数名（值语义相同）。
@@ -140,6 +150,11 @@ def schema_from_v1(v1_cls) -> "io.Schema":
         description=getattr(v1_cls, "DESCRIPTION", "") or "",
         # V1 的 OUTPUT_NODE=True（LatentSave / AudioSeam）→ V3 is_output_node
         is_output_node=bool(getattr(v1_cls, "OUTPUT_NODE", False)),
+        # 服务端展开节点（⏩ Finite Run）：V1 类上标 V3_EXPAND=True ⇒ V3 同步开。
+        # ⚠️ 两边必须同时开：只开一边的后果是**静默失效** —— V1 出口下图能展开、
+        #    V3 出口下 NodeOutput 带 expand 会被宿主以「该节点不可展开」为由拒绝
+        #    （comfy_api 的 _io.py 对 expand 与 enable_expand 的配对有硬校验）。
+        enable_expand=bool(getattr(v1_cls, "V3_EXPAND", False)),
         inputs=v1_inputs(v1_cls.INPUT_TYPES()),
         outputs=v1_outputs(getattr(v1_cls, "RETURN_TYPES", ()),
                            getattr(v1_cls, "RETURN_NAMES", ())),
@@ -151,6 +166,9 @@ def node_output(raw):
 
     * 裸 tuple                            → ``io.NodeOutput(*raw)``
     * ``{"ui": {K: [...]}, "result": r}`` → ``io.NodeOutput(*r, ui={K: [...]})``
+    * ``{"expand": 图, "result": r}``     → ``io.NodeOutput(*r, expand=图)``
+      （⏩ Finite Run：服务端展开。宿主把图注册为临时节点并入当次 prompt 执行，
+      外层输出可以是 ``[临时节点 id, 输出位]`` 链接 —— 与 V1 出口同构。）
     * ``None`` / ``{}``（无输出节点）      → ``io.NodeOutput()``
 
     ``ui`` 用**原始 UI 字典**（官方允许：``io.NodeOutput(ui={"images": results})``）。
@@ -162,10 +180,15 @@ def node_output(raw):
     """
     if raw is None or raw == {}:
         return io.NodeOutput()
-    if isinstance(raw, dict) and "ui" in raw:
+    if isinstance(raw, dict) and ("ui" in raw or "expand" in raw):
         res = raw.get("result")
         res = res if isinstance(res, tuple) else (() if res is None else (res,))
-        return io.NodeOutput(*res, ui=raw["ui"])
+        kw = {}
+        if "ui" in raw:
+            kw["ui"] = raw["ui"]
+        if "expand" in raw:
+            kw["expand"] = raw["expand"]
+        return io.NodeOutput(*res, **kw)
     res = raw if isinstance(raw, tuple) else (raw,)
     return io.NodeOutput(*res)
 

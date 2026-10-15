@@ -18,7 +18,7 @@
 1. **显式清单**（`MANIFEST_RUNTIME` 等）：人可读、带「为什么」的注释；
 2. **交叉校验**：静态推导「从入口出发真正会被 import 的本包文件」，**必须与清单的运行组逐一相等**
    ⇒ 将来有人新增模块却忘了改清单，这里会**当场报错**；
-3. **自验**（`--verify`）：把产出目录当**独立包**加载，断言 8 个节点齐全、
+3. **自验**（`--verify`）：把产出目录当**独立包**加载，断言 10 个节点齐全、
    默认出口 V3、`WEB_DIRECTORY` 有前端文件、关键特性仍在，并断言
    **加载过程中没有任何模块来自原仓**（证明这份副本自足）。
 
@@ -66,6 +66,8 @@ MANIFEST_RUNTIME = [
     "relay_core/concat.py",
     "relay_core/upscale.py",
     "relay_core/prompt.py",
+    # 2026-10-15：无头连跑的展开图构建（nodes.py 的 Finite Run 走它；纯函数、零新依赖）
+    "relay_core/finite.py",
     "nodes.py",
     # nodes.py 直接 import 的契约模块
     "layout_contract.py",
@@ -402,7 +404,7 @@ def verify_bundle(bundle_dir, expect_source=KIT):
     if getattr(pkg, "NODE_API_FALLBACK_REASON", None):
         print("        ⚠️ 回退原因：%s" % pkg.NODE_API_FALLBACK_REASON)
 
-    # —— 8 个节点：**分两层判**（2026-09-30 修）——
+    # —— 10 个节点：**分两层判**（2026-09-30 修；2026-10-15 随新节点 8→10）——
     # 🔴 原来只有一条 `len(nodes) == 8` ⇒ **CI（CPU-only torch）必红**：放大节点的 INPUT_TYPES
     #    要走宿主注册表，宿主 GPU 探测抛 `AssertionError: Torch not compiled with CUDA enabled`
     #    ⇒ 该节点 schema 建不出来 ⇒ V3 entrypoint 逐节点容错跳过 ⇒ 本环境只能建出 7 个。
@@ -411,9 +413,9 @@ def verify_bundle(bundle_dir, expect_source=KIT):
     #    "本环境能构造出几个 schema" 只作信息（只有 0 个才是真问题）。
     _v3mod = importlib.import_module("bundle_under_test.v3.nodes_v3")
     _declared = list(getattr(_v3mod, "NODES", []) or [])
-    print("   [%s] 分发集代码里定义了 %d 个节点（期望 8；**与运行环境无关**）"
-          % ("OK" if len(_declared) == 8 else "FAIL", len(_declared)))
-    bad += (len(_declared) != 8)
+    print("   [%s] 分发集代码里定义了 %d 个节点（期望 10；**与运行环境无关**）"
+          % ("OK" if len(_declared) == 10 else "FAIL", len(_declared)))
+    bad += (len(_declared) != 10)
 
     nodes = _nodes_of(pkg)
     _note = ""
