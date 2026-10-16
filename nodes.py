@@ -1557,7 +1557,10 @@ class H3RelayCopyBridge:
     )
 
     @_node_errors("context_frames", "mask_mode", "run_id", "voice_anchor_stage", "exp_anchor")
-    def bridge(self, latent, context_latent, context_frames,
+    # 🔴 0.6.37：`context_latent` 在 schema 里已是 **optional** ⇒ 这里**必须**给默认值。
+    #    不给的后果：用户不接线时宿主**整个键都不传** ⇒ TypeError（实测栽过一次）。
+    #    同一个坑在 `H3RelayFiniteRun.image` 上踩过（0.6.36）—— 已由机检 C6 兜住。
+    def bridge(self, latent, context_latent=None, context_frames=22,
                mask_mode="hard", taper_tokens=4, seam_min=0.10, pin_audio=True,
                ramp_top=0.25, ramp_tokens=0,
                blend_top=CORE.SEAM_BLEND_TOP, blend_tokens=0,

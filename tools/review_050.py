@@ -156,6 +156,36 @@ ck("C5b 复合桥族紧随掩码族之后（追加，未插队）",
        "ref_anchor_stage", "ref_anchor_frames"],
    "实际 = %s" % _cb[len(_CB_HEAD):len(_CB_HEAD) + 6])
 
+# 🆕 C6（2026-10-16）：**optional 的链接型输入，Python 参数必须有默认值**。
+#   动机：这是同一个坑的**第二次** —— `H3RelayFiniteRun.image`（0.6.36）与
+#   `H3RelayCopyBridge.context_latent`（0.6.37）都是「schema 里 optional 但 Python 参数
+#   没默认值」。后果：用户不接线时宿主**整个键都不传** ⇒ TypeError；而**零 GPU 单测全绿**
+#   （单测总是显式传 None ⇒ 覆盖不到「宿主不传键」这条路径）。
+import inspect
+
+_loose_opt = []
+for _cn6, _cls6 in N.NODE_CLASS_MAPPINGS.items():
+    _opt6 = _cls6.INPUT_TYPES().get("optional") or {}
+    if not _opt6:
+        continue
+    try:
+        _sig6 = inspect.signature(getattr(_cls6, _cls6.FUNCTION))
+    except (TypeError, ValueError):
+        continue
+    _def6 = {q.name for q in _sig6.parameters.values()
+             if q.default is not inspect.Parameter.empty
+             or q.kind in (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL)}
+    for _nm6, _sp6 in _opt6.items():
+        _t6 = _sp6[0] if isinstance(_sp6, tuple) else _sp6
+        if isinstance(_t6, list) or _t6 in ("INT", "FLOAT", "STRING", "BOOLEAN"):
+            continue                      # widget 型：宿主一定会传值
+        if _nm6 not in _def6:
+            _loose_opt.append("%s.%s" % (_cn6, _nm6))
+ck("C6 每个 optional 的**链接型**输入都有 Python 默认值"
+   "（不给 ⇒ 用户不接线时宿主不传键 ⇒ TypeError；image 与 context_latent 都栽过）",
+   not _loose_opt, str(_loose_opt))
+
+
 print()
 print("=" * 78)
 print("D. 默认全关（不接线时行为不变）")

@@ -456,8 +456,8 @@
           "zh": "tools/ 下的其他自检（完整清单见 [`tools/README.md`](../tools/README.md)）",
           "en": "Other self-checks under tools/ (full list in [`tools/README.md`](../tools/README.md))",
           "mode": "full",
-          "h_en": "a88c4d944b783512",
-          "h_src": "3753ddff9b388ffe",
+          "h_en": "f33704ee23794cb6",
+          "h_src": "421541005ff08b60",
           "seeded": "by-position"
         },
         {
@@ -471,7 +471,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-16",
-      "src_sha": "2c18718d4a0b999f"
+      "src_sha": "5e0d878ec2b75b4a"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",
