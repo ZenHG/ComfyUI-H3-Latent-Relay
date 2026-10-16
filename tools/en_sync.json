@@ -352,8 +352,8 @@
           "zh": "⏩ Finite Run：一次提交跑完 N 段（无头连跑，0.6.36）",
           "en": "⏩ Finite Run: run N segments in one submission (headless, 0.6.36)",
           "mode": "full",
-          "h_en": "7037a15e67cbec42",
-          "h_src": "e6c8748875dc7eb7",
+          "h_en": "73dc34c0b7998d18",
+          "h_src": "944b2abbb231bc1a",
           "seeded": "by-position"
         },
         {
@@ -415,7 +415,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-16",
-      "src_sha": "a53063813b273bf4"
+      "src_sha": "5e569c90a9c61b7c"
     },
     "docs/08-testing.md": {
       "en": "docs/08-testing_EN.md",

@@ -180,8 +180,14 @@ always the *looser* one — it never falsely rejects.
 448×768 / 39 frames each / window 22 / 8 steps ⇒ **success**, the film is **56 frames**
 (= 39 + 39 − 22, matching the bridge's trim arithmetic frame by frame), audio 2.334 s ≈ picture
 2.333 s, both sidecars with lineage headers; single-segment t2v (no first-frame image) also
-succeeded; the before-queueing rejection ran **not a single node**. Re-running the same graph after
-the code change produced a film with **the identical md5** (fixed seed ⇒ zero behaviour change).
+succeeded; the before-queueing rejection ran **not a single node**.
+
+**Reproducibility**: the pipeline is **deterministic** — repeated runs of the same graph give
+bit-identical safetensors stream tensors / h264 elementary stream / decoded audio, and segment 0 of a
+2-segment run is bit-identical to a single-segment run (adding a second segment perturbs the first by
+**zero bits**). ⚠️ **Never judge determinism by file-level md5**: the mp4 container carries a `prompt`
+metadata tag, PNGs carry the workflow text block, and sidecars carry a metadata bucket — any input
+change moves the file md5 while the content may be identical.
 
 **Known boundaries (stated honestly)**: the merged output is **one in-memory tensor** (for many
 segments / high resolution, try two segments at low resolution first); AudioSeam and Post are not
