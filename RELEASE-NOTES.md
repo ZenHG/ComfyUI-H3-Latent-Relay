@@ -19,6 +19,29 @@
 
 ---
 
+## 0.6.35 — 2026-10-16
+
+**英文界面下 Chain 的 7 个按钮此前整块是中文，桥节点标题挂着一行长中文警告。这一版都改对了，并把「切英文后画布上真的是英文」做成自动断言。**
+
+- **Chain 的 7 个按钮跟着语言走**：切英文显示 `▶ Run (run the current segment once)` 这类；切回中文原样。点起来的反应不变。
+- **桥节点标题的额度角标改短**：一长段中文（`⚠ 音频参考 4 个（官方上限 3）：你的 3 + 本包 1。模型不拦…`）改成 `⚠ refs 4/3`。三种形态（用满 / 越界 / 读不到）含义不变，长解释挪进提示（悬停 `音频参考窗` 那格）。
+- **英文提示开头改成 `[Wiring] Take …`**（原用全角 `【…】`，英文里是排版异物）；另修 3 处**英文还写着旧口径**的提示（`TrimAV` / `Post` 跨段匹配、CopyBridge 实验开关）。
+- **示例图 `fullflow` 的 5 个节点标题改了写法**：旧名切英文也不变；现在是「默认名 + （说明）」，名字那半跟着语言走。接线、参数、槽位**一个字节没动**。
+**升级动作**：不用改任何东西；装完刷新浏览器页面（F5）。切语言开关即可看到英文按钮。
+
+<!-- EN -->
+
+**The Chain node's 7 buttons used to stay entirely in Chinese on the English UI, and the bridge title carried a long Chinese warning. Both are fixed, and "after switching to English, the canvas really is English" is now an automated assertion.**
+
+- **The Chain node's 7 buttons follow the language.** In English: `▶ Run (run the current segment once)`; back in Chinese they are as before. Clicking behaves the same.
+- **The bridge title's audio-reference badge is much shorter.** A long Chinese sentence (`⚠ 音频参考 4 个（官方上限 3）：…`) became `⚠ refs 4/3` — three forms (full / over / unreadable), same meaning. The long explanation moved into the tooltip (hover `Audio reference window`).
+- **English tooltips now open with `[Wiring] Take …`** instead of full-width `【…】`. Three tooltips whose English still described the **old** behaviour are corrected (`TrimAV` / `Post` cross-segment matching, CopyBridge experiment switch).
+- **The `fullflow` example's 5 node titles were rewritten** from old names that never changed with the language into `default name + (explanation)`, so the name part now follows the language. Wiring, parameters and widget slots are **untouched**.
+
+**Action required**: nothing; refresh the browser page (F5). Use the language switch to see the English buttons.
+
+---
+
 ## 0.6.34 — 2026-10-13
 
 **默认值修了矛盾、声锚不用接线、提示重写成人话、实验功能有了开关、落盘文件带上来龙去脉。图、连线、图 JSON 都不用改；但请刷新浏览器页面。**

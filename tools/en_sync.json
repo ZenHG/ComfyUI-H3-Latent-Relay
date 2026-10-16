@@ -8,8 +8,8 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "condensed",
-          "h_en": "d941307882463221",
-          "h_src": "80b6ee69917a6e3a",
+          "h_en": "31b887682ff0cb7a",
+          "h_src": "7089eca418bf6246",
           "seeded": "by-position"
         },
         {
@@ -79,7 +79,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-16",
-      "src_sha": "3f7e7c7fdbf83d53"
+      "src_sha": "a8d2bfbf028b7847"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
