@@ -34,7 +34,7 @@
 **The Chain node's 7 buttons used to stay entirely in Chinese on the English UI, and the bridge title carried a long Chinese warning. Both are fixed, and "after switching to English, the canvas really is English" is now an automated assertion.**
 
 - **The Chain node's 7 buttons follow the language.** In English: `▶ Run (run the current segment once)`; back in Chinese they are as before. Clicking behaves the same.
-- **The bridge title's audio-reference badge is much shorter.** A long Chinese sentence (`⚠ 音频参考 4 个（官方上限 3）：…`) became `⚠ refs 4/3` — three forms (full / over / unreadable), same meaning. The long explanation moved into the tooltip (hover `Audio reference window`).
+- **The bridge title's audio-reference badge is much shorter.** The old badge was a full sentence of Chinese spelling out the audio-reference count and the official limit; it is now the compact `⚠ refs 4/3` — three forms (full / over / unreadable), same meaning. The long explanation moved into the tooltip (hover `Audio reference window`).
 - **English tooltips now open with `[Wiring] Take …`** instead of full-width `【…】`. Three tooltips whose English still described the **old** behaviour are corrected (`TrimAV` / `Post` cross-segment matching, CopyBridge experiment switch).
 - **The `fullflow` example's 5 node titles were rewritten** from old names that never changed with the language into `default name + (explanation)`, so the name part now follows the language. Wiring, parameters and widget slots are **untouched**.
 
