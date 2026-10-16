@@ -81,6 +81,20 @@ _readme_flat = _readme.replace("*", "").replace("`", "")
 _miss_rm = [n for n in _reg if N.NODE_DISPLAY_NAME_MAPPINGS[n] not in _readme_flat]
 ck("A3 README 节点表含全部节点（去 markdown 后按显示名查）", not _miss_rm, "缺=%s" % _miss_rm)
 
+# 🆕 A3b（2026-10-16）：README 顶部那句「**N 个节点分三层**」是**手写的数字** —— A3 只查
+#   「表里有没有全部节点」，查不到「数字对不对」⇒ 加节点时漏改过一次（README 写 10、
+#   代码 11，而全套套件仍全绿）。这条把那个数字钉到代码上。
+_md_n = re.search(r"\*\*(\d+) 个节点分三层", _readme)
+ck("A3b README 声明的节点数 == len(NODE_CLASS_MAPPINGS)（手写数字必须跟代码走）",
+   _md_n is not None and int(_md_n.group(1)) == len(N.NODE_CLASS_MAPPINGS),
+   "README=%s ｜ 代码=%d" % (_md_n.group(1) if _md_n else "读不到", len(N.NODE_CLASS_MAPPINGS)))
+# 🆕 A3c（2026-10-16）：EN README 的节点表**此前没有任何机检** ⇒ 实测漏过一整行
+#   （中文 README 加了 Seed from Video，英文停在旧版）。这里按**英文显示名**查。
+_en_flat = (Path(os.path.join(KIT, "README_EN.md")).read_text(encoding="utf-8")
+            .replace("*", "").replace("`", ""))
+_miss_en = [n for n in _reg if N.NODE_DISPLAY_NAME_MAPPINGS[n] not in _en_flat]
+ck("A3c README_EN 节点表含全部节点（按英文显示名查）", not _miss_en, "缺=%s" % _miss_en)
+
 print()
 print("=" * 78)
 print("B. 返回契约：RETURN_TYPES 长度 == 所有 return 的路数")
@@ -130,14 +144,17 @@ _cb = list(N.H3RelayCopyBridge.INPUT_TYPES()["optional"])
 _MASK_FAMILY = ["mask_mode", "taper_tokens", "seam_min", "pin_audio", "ramp_top",
                 "ramp_tokens", "anchor_latent", "anchor_blend",
                 "blend_top", "blend_tokens", "blend_shape", "window_top", "window_shape"]
+# 0.6.37：`context_latent` 由 required 迁入 optional 最前（桥改成自己取上一段）⇒
+#   掩码族的起点往后挪一格。族的**相对顺序**没变，只是前面多了 context 族。
+_CB_HEAD = ["context_latent"] + _MASK_FAMILY
 ck("C5 CopyBridge：掩码族参数连续，且其后只允许追加新族",
-   _cb[:len(_MASK_FAMILY)] == _MASK_FAMILY,
-   "前 %d = %s" % (len(_MASK_FAMILY), _cb[:len(_MASK_FAMILY)]))
+   _cb[:len(_CB_HEAD)] == _CB_HEAD,
+   "前 %d = %s" % (len(_CB_HEAD), _cb[:len(_CB_HEAD)]))
 ck("C5b 复合桥族紧随掩码族之后（追加，未插队）",
-   _cb[len(_MASK_FAMILY):len(_MASK_FAMILY) + 6]
+   _cb[len(_CB_HEAD):len(_CB_HEAD) + 6]
    == ["conditioning", "run_id", "stage_index", "ref_anchor_latent",
        "ref_anchor_stage", "ref_anchor_frames"],
-   "实际 = %s" % _cb[len(_MASK_FAMILY):len(_MASK_FAMILY) + 6])
+   "实际 = %s" % _cb[len(_CB_HEAD):len(_CB_HEAD) + 6])
 
 print()
 print("=" * 78)

@@ -5,6 +5,7 @@
 | `minimal_relay_official.json` | 第 2 段要接对**哪些线**（全官方节点 + 本包） | 21 节点 |
 | `fullflow_second_pass_latent_upscale_ui.json` | **一采 → 🔍 H3 Relay · Latent Upscale → 二采 → 续接** 整条链路怎么接 | 47 节点 |
 | `finite_run_ui.json` | **一次提交跑完 N 段**（⏩ Finite Run 无头连跑，脚本/API 与画布同一套节点） | 11 节点 |
+| `seed_from_video_ui.json` | **从一段已有视频起段、再往外接**（🔗 Seed from Video → 桥 → 裁重叠 → 拼成一条） | 20 节点 |
 
 ## `minimal_relay_official.json`
 
@@ -134,6 +135,32 @@
 ③ 落盘从 `VHS_VideoCombine` 换成官方 `CreateVideo + SaveVideo`（理由见上）；
 ④ 补上 `🔗 H3 Relay · Post`（默认直通 ⇒ 与不接逐位等价，但示例图该让 8 个节点都在场）。
 
+## `seed_from_video_ui.json`
+
+**🔗 H3 Relay · Seed from Video —— 从一段已有视频起段，再往外接，最后拼成一条无缝成片。**
+
+```
+LoadVideo（一段已有视频）→ GetVideoComponents ─┬→ 🔗 Seed from Video（编码成第 0 段边车）
+                                              └→ 🧩 Join AV（源帧，作为累计的起点）
+PrimitiveStringMultiline（续接词）→ MiniMaxH3ImageToVideo ─┐
+🔗 Seed from Video 的输出 ──────────────────────────────┴→ 🔗 Copy Bridge（钉住上一段尾部）
+   → KSampler → 🔗 Latent Save → VAEDecode / VAEDecodeAudio
+   → 🔗 Trim AV（裁掉重叠头）→ 🧩 Join AV → CreateVideo → SaveVideo
+```
+
+**怎么用**：① `LoadVideo` 里选一段**已有视频**（示例写的是 `1.mp4`，换成你自己的）；
+② `width` / `height` 要和 `MiniMaxH3 ImageToVideo` **填同一个数**（桥拒跨分辨率）；
+③ 词**按续接写**：开头直接接住上一段结尾的动作与机位，**一段只放一个机位** —— 要换机位就放在
+段边界，别让模型在段中段硬切（实测：段内要求换机位会得到一次 5.4× 的硬切）；
+④ `run_id` 换片子必须换名字。
+
+**产出**：源帧（39）＋ 本段裁后（73 − 22）＝ **90 帧 @24fps = 3.75 s** 一条成片；
+各段边车在 `output/relay_kit/<run_id>/stage_NNNNN.safetensors`。
+
+> 桥的 `context_latent` 在示例里接的是 `Seed from Video` 的输出（保证它先执行）。**这根线也可以拔掉**
+> —— 桥会按 `run_id` + 段号−1 自己从磁盘取（0.6.37 起）。
+> 重新生成：`python examples/make_seed_from_video_workflow.py`。
+
 ## `finite_run_ui.json`
 
 **⏩ H3 Relay · Finite Run（无头连跑）**：一次提交跑完 N 段 —— 没有前端按钮、没有逐段手改段号，
@@ -149,7 +176,7 @@ UNETLoader / CLIPLoader / VAELoader×2 → LoadImage（首帧，可拔）
 内部展开的每段链（本包不重写算法，全是已有节点）：
 
 ```
-MiniMaxH3ImageToVideo → H3RelayLatentLoad → H3RelayCopyBridge → RandomNoise
+MiniMaxH3ImageToVideo → H3RelayCopyBridge → RandomNoise
    → BasicGuider → SamplerCustomAdvanced → H3RelayLatentSave
    → VAEDecode / VAEDecodeAudio → H3RelayTrimAV → H3RelayJoinAV
 ```

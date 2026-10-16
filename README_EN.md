@@ -30,13 +30,18 @@ under `output/relay_kit/<run_id>/`). Mechanism and measurements: [`docs/01`](doc
 
 ## Core features
 
-**10 nodes in three layers — a minimal workflow only needs the first 3**:
+**11 nodes in three layers — a minimal workflow only needs the first 3**:
 
 | Layer | Nodes | Notes |
 |---|---|---|
 | **Required 3** | LatentSave · CopyBridge (composite) · TrimAV | without them it is not continuation |
-| **Optional 5** | Post · AudioSeam · Chain · LatentUpscale · FiniteRun | independent; **off by default = bit-exact pass-through** (Finite Run is the server-side twin of the chain) |
-| **Manual routing only 2** | LatentLoad · JoinAV | the bridge fetches the source from disk itself; Join AV is only for hand-joining a few segments in-graph |
+| **Optional 6** | Post · AudioSeam · Chain · LatentUpscale · FiniteRun · SeedFromVideo | independent; **off by default = bit-exact pass-through** (Finite Run is the server-side twin of the chain; Seed from Video only when you start from an existing clip) |
+| **Manual routing only 2** | LatentLoad · JoinAV | the bridge **fetches the source from disk by film name + stage** (since 0.6.37) ⇒ wire LatentLoad only to **override** the source; Join AV only for hand-joining a few segments in-graph |
+> **Which of the two “runs” to pick**: `Chain` (canvas) = inspect each segment, re-roll the same stage if you
+> dislike it, attach the audio-seam or picture-domain nodes per segment; `Finite Run` (headless) = run N segments
+> in one submission, scripts and API on the same nodes, but **no per-stage re-roll**. Both coexist.
+
+| Node (canvas name) | What it does |
 
 | Node (canvas name) | What it does |
 |---|---|
@@ -49,7 +54,8 @@ under `output/relay_kit/<run_id>/`). Mechanism and measurements: [`docs/01`](doc
 | 🔍 **H3 Relay · Latent Upscale** | **picture domain · latent level**: unpack the AV-packed latent → tile through a learned 3D upscaler → repack. **Zero denoising, not one frame moved in time, audio carried back untouched** (needs an optional upstream dependency — see Install) |
 | 🔗 **H3 Relay · Chain** | auto-run controller: advances stage numbers and queues; since 0.6.7 it also **rotates prompts** (`prompts` split on `---`) and **concatenates** (🧩) |
 | 🧩 **H3 Relay · Join AV** | **in-graph join**: append this segment's trimmed images/audio to the accumulated ones (spec mismatches error out instead of being silently stretched) |
-| ⏩ **H3 Relay · Finite Run** | **server-side expansion**: run N segments in one submission (no frontend buttons; scripts/API and canvas share one implementation). Per segment: ImageToVideo → LatentLoad → CopyBridge → sampling → LatentSave → decode → TrimAV → JoinAV |
+| ⏩ **H3 Relay · Finite Run** | **server-side expansion**: run N segments in one submission (no frontend buttons; scripts/API and canvas share one implementation). Per segment: ImageToVideo → CopyBridge → sampling → LatentSave → decode → TrimAV → JoinAV (the previous segment is fetched by the bridge itself) |
+| 🔗 **H3 Relay · Seed from Video** | **entry point**: encode an **existing video clip** into the stage-1 (seed) sidecar; later segments then continue outward as usual. Blocks three traps for you: the temporal lattice (5+17k frames), the canvas lattice (multiples of 16) and A/V equal length (trim tail / zero-pad / silent seed) |
 
 > **Three domains — do not mix them up:** timeline = `H3RelayTrimAV` (frozen) / picture = `H3RelayPost` /
 > audio = `H3RelayAudioSeam`.
@@ -354,7 +360,7 @@ Implementation details and more (**audio-reference budget**, BGM, emotion, multi
 ### Node Chinese/EN toggle (0.6.28, **canvas button**)
 
 Every node of this pack now carries a small 「**中 / EN**」 button: one click switches the titles, parameter
-labels, port names and **hover tooltips** of **all 10 nodes** between Chinese and English (dropdowns show
+labels, port names and **hover tooltips** of **all 11 nodes** between Chinese and English (dropdowns show
 Chinese while their **stored value stays untouched**).
 
 - It **follows the official language setting by default** (Settings → `Language`, i.e.
@@ -408,7 +414,7 @@ Details and the word table: [`docs/04`](docs/04-canvas-and-widgets_EN.md) §Node
 ComfyUI-H3-Latent-Relay/
 ├── __init__.py            # entry point: /h3relay/concat route, V1/V3 exit selection, startup banner
 ├── relay_core/            # business core (single source of truth, 11-file package): timing grid / copy bridge / TrimAV / AudioSeam / concat
-├── nodes.py               # node layer (the 10 nodes' inputs, outputs and human-readable reports)
+├── nodes.py               # node layer (the 11 nodes' inputs, outputs and human-readable reports)
 ├── layout_contract.py     # layout contract: pass through + leave a trace when upstream is missing, raise only on a real mismatch
 ├── v3/                    # V3 shell (io.ComfyNode + comfy_entrypoint); V1 goes through NODE_CLASS_MAPPINGS
 ├── exp/history_anchor_v2/ # E1' time-invariant history anchor (top-level import ⇒ required; inert without _tiha.json)

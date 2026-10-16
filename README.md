@@ -24,28 +24,31 @@ anchor 与采样 latent 不同源（会漂）、只能锚第 0 帧。本包直�
 
 ## 核心功能
 
-**10 个节点分三层 —— 一个最小工作流只用得到前 3 个**：
+**11 个节点分三层 —— 一个最小工作流只用得到前 3 个**：
 
 | 层 | 节点 | 说明 |
 |---|---|---|
 | **必备 3** | Latent 存 · 拷贝桥（复合桥）· 裁重叠 | 少一个就不叫续接 |
 | **可选 6** | 后处理 Post · 音频缝 · 连跑 Chain · Latent Upscale · Finite Run · Seed from Video | 各自独立、**默认全关 = 逐位直通**（Finite Run 是连跑的服务端版；Seed from Video 只在「从已有视频起段」时用） |
-| **手动接线才用 2** | Latent 读 · Join AV | 桥自己会从磁盘取源；Join AV 只在图内手拼几条时用 |
+| **手动接线才用 2** | Latent 读 · Join AV | 桥**自己会按片名 + 段号从磁盘取源**（0.6.37 起）⇒ Latent 读 只在**显式换源**时才接；Join AV 只在图内手拼几条时用 |
 
 | 节点 | 作用 |
 |---|---|
 | 🔗 **H3 Relay · Latent Save** | 本段采样后把 AV latent 落盘到 `output/relay_kit/<run_id>/stage_NNNNN.safetensors` |
 | 🔗 **H3 Relay · Latent Load** | 读回上一段（段号 −1），断点续跑可指定 `explicit_path` 换源 |
-| 🔗 **H3 Relay · Copy Bridge（复合桥）** | 上一段尾 AV latent **逐位拷贝**进本段初始 latent + 噪声掩码（钉住区不重绘）；接 `[16] conditioning` 时**并联**钉帧（管取景）。`mask_mode` 默认 `hard` |
+| 🔗 **H3 Relay · Copy Bridge（复合桥）** | 上一段尾 AV latent **逐位拷贝**进本段初始 latent + 噪声掩码（钉住区不重绘）；接 `[16] conditioning` 时**并联**钉帧（管取景）。`mask_mode` 默认 `hard`。**上一段不必手接**：留空即按 `run_id` + 段号−1 自取（0.6.37 起） |
 | 🔗 **H3 Relay · Trim AV** | 裁掉本段头部的重生成帧（**音画同裁**）——不裁就会在拼接处重播/跳变；`[3]` 输出 `prev_tail` |
 | 🔗 **H3 Relay · Post** | **画质域**：跨段统计匹配 / 低频残差 / 色调 / 反卷积 / 高频迁移 / 糊区锐化，全部默认关 |
 | 🔗 **H3 Relay · Audio Seam** | **音频域**：把上一段环境声补进本段头部，**长度守恒**（零 A/V 位移），默认关 |
 | 🔍 **H3 Relay · Latent Upscale** | **画质域 · latent 层**：拆 AV 打包 latent → 逐块过学习式 3D 放大器 → 回包。**零去噪、时间维一帧不动、音频原样带回**（需可选上游依赖，见 §安装） |
 | 🔗 **H3 Relay · Chain** | 自动连跑控制器：自动推进段号并排队；0.6.7 起还能**换词**（`prompts` 按 `---` 分块）与**拼片**（🧩） |
 | 🧩 **H3 Relay · Join AV** | **张量域拼条**：本段裁后画面/音频接到累计后面出一条（规格不符直接报错，不静默拉伸） |
-| ⏩ **H3 Relay · Finite Run** | **服务端展开**：一次提交跑完 N 段（无需前端按钮；脚本/API 与画布走同一套节点）。每段链 = ImageToVideo → LatentLoad → CopyBridge → 采样 → LatentSave → 解码 → TrimAV → JoinAV |
+| ⏩ **H3 Relay · Finite Run** | **服务端展开**：一次提交跑完 N 段（无需前端按钮；脚本/API 与画布走同一套节点）。每段链 = ImageToVideo → CopyBridge → 采样 → LatentSave → 解码 → TrimAV → JoinAV（上一段由桥自取） |
 | 🔗 **H3 Relay · Seed from Video** | **入口**：把**一段已有视频**编码成第 1 段（种子段）的边车，之后各段照常往外接。自动挡三处坑：时序栅格（5+17k 帧）、画布栅格（16 的倍数）、音画等长（裁尾/补零/静音种子） |
 
+> **两个「连跑」怎么选**：`Chain`（画布）= 逐段目检、不满意可重染同段号、能逐段接音频缝与画质域后处理；
+> `Finite Run`（无头）= 一次提交跑完 N 段、脚本与 API 走同一套节点，但**没有逐段重染**。两条路并存、不互斥。
+>
 > **三个域别混挂**：时间轴 = `H3RelayTrimAV`（冻结）／画质域 = `H3RelayPost`／音频域 = `H3RelayAudioSeam`。
 >
 > 节点标签自 **0.6.18** 起是**纯英文**；中文术语 ↔ 标签的对照表见

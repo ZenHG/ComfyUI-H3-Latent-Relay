@@ -125,10 +125,11 @@ Finite Run 把整条连跑**展开成一张无环图**，宿主一次执行完 �
 **展开图里全部是已有节点**（算法零重写；每段一条链）：
 
 ```
-MiniMaxH3ImageToVideo → H3RelayLatentLoad → H3RelayCopyBridge → RandomNoise
+MiniMaxH3ImageToVideo → H3RelayCopyBridge → RandomNoise
   → BasicGuider → SamplerCustomAdvanced → H3RelayLatentSave
   → VAEDecode / VAEDecodeAudio → H3RelayTrimAV → H3RelayJoinAV
 ```
+（上一段由桥**自取**：留空 context_latent 即按 `run_id` + 段号−1 从磁盘读，0.6.37 起）
 
 **接线**（外层只接这些，其余在展开图内部）：
 

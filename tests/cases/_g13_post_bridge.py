@@ -393,11 +393,12 @@ okC, outN = arity(NODES.H3RelayCopyBridge, {"latent": av_latent(12, seed=8),
 check("14.12 节点返回 3 路（latent/report/trim）", okC, "实得 %d" % len(outN))
 check("14.13 节点 trim 输出 = 22", int(outN[2]) == 22)
 _it = NODES.H3RelayCopyBridge.INPUT_TYPES()
-check("14.14 节点注册 + required 键序 + optional 末位（追加铁律）",
+check("14.14 节点注册 + required 键序 + optional 前段（0.6.37 起 context_latent 迁入 optional）",
       "H3RelayCopyBridge" in NODES.NODE_CLASS_MAPPINGS
-      and list(_it["required"]) == ["latent", "context_latent", "context_frames"]
-      and list(_it["optional"])[:4] == ["mask_mode", "taper_tokens", "seam_min", "pin_audio"]
-      and list(_it["optional"])[4:6] == ["ramp_top", "ramp_tokens"],
+      and list(_it["required"]) == ["latent", "context_frames"]
+      and list(_it["optional"])[:5] == ["context_latent", "mask_mode", "taper_tokens",
+                                        "seam_min", "pin_audio"]
+      and list(_it["optional"])[5:7] == ["ramp_top", "ramp_tokens"],
       "required=%s optional=%s" % (list(_it["required"]), list(_it["optional"])))
 
 # —— 14.15/14.16 掩码语义钉子（2026-09-15）——

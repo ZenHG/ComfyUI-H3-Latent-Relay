@@ -234,8 +234,8 @@ def main() -> int:
     ck("H3RelayFiniteRun 返回 expand + result 两键",
        isinstance(_raw, dict) and "expand" in _raw and "result" in _raw,
        "键 = %s" % (sorted(_raw) if isinstance(_raw, dict) else type(_raw).__name__))
-    ck("H3RelayFiniteRun 展开图 = 2 段 × 11 节点",
-       isinstance(_raw.get("expand"), dict) and len(_raw["expand"]) == 22,
+    ck("H3RelayFiniteRun 展开图 = 2 段 × 10 节点（上一段由桥自取，不再手接 Latent Load）",
+       isinstance(_raw.get("expand"), dict) and len(_raw["expand"]) == 20,
        "节点数 %s" % len(_raw.get("expand") or {}))
     ck("H3RelayFiniteRun result 4 路且第 4 路是报告字面量",
        len(_raw.get("result") or ()) == 4 and isinstance(_raw["result"][3], str))

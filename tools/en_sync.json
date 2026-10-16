@@ -16,8 +16,8 @@
           "zh": "核心功能",
           "en": "Core features",
           "mode": "condensed",
-          "h_en": "0afdf15030545ac2",
-          "h_src": "5f99e270aecdb7ac",
+          "h_en": "e5ea3a5e14a5514a",
+          "h_src": "9c8dc3ecf1474684",
           "seeded": "by-position"
         },
         {
@@ -40,7 +40,7 @@
           "zh": "使用方法",
           "en": "Usage",
           "mode": "condensed",
-          "h_en": "9d32e3e9362c20ef",
+          "h_en": "333e0358d5580cef",
           "h_src": "a0a472357fbee5f5",
           "seeded": "by-position"
         },
@@ -48,7 +48,7 @@
           "zh": "目录结构",
           "en": "Repository layout",
           "mode": "condensed",
-          "h_en": "eab8f5a7b838258a",
+          "h_en": "4f55a20af4ef2bbd",
           "h_src": "602837e860cd959a",
           "seeded": "by-position"
         },
@@ -79,7 +79,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-16",
-      "src_sha": "3452126a1617b026"
+      "src_sha": "1ecbcba5dd6f9001"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -352,8 +352,8 @@
           "zh": "⏩ Finite Run：一次提交跑完 N 段（无头连跑，0.6.36）",
           "en": "⏩ Finite Run: run N segments in one submission (headless, 0.6.36)",
           "mode": "full",
-          "h_en": "73dc34c0b7998d18",
-          "h_src": "944b2abbb231bc1a",
+          "h_en": "6659cc19275f8f9d",
+          "h_src": "366ec9f9363b38b2",
           "seeded": "by-position"
         },
         {
@@ -415,7 +415,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-16",
-      "src_sha": "5e569c90a9c61b7c"
+      "src_sha": "36360221aad894e7"
     },
     "docs/08-testing.md": {
       "en": "docs/08-testing_EN.md",
@@ -432,8 +432,8 @@
           "zh": "单测（零 GPU、秒级）",
           "en": "Unit tests (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "a4efea45cbe5ab31",
-          "h_src": "6afc54933571a0e1",
+          "h_en": "e488a04320a83675",
+          "h_src": "d988a44b2c597575",
           "seeded": "by-position"
         },
         {
@@ -456,8 +456,8 @@
           "zh": "tools/ 下的其他自检（完整清单见 [`tools/README.md`](../tools/README.md)）",
           "en": "Other self-checks under tools/ (full list in [`tools/README.md`](../tools/README.md))",
           "mode": "full",
-          "h_en": "dbe559661371fdac",
-          "h_src": "dfd8e541041bdf0b",
+          "h_en": "a88c4d944b783512",
+          "h_src": "3753ddff9b388ffe",
           "seeded": "by-position"
         },
         {
@@ -471,7 +471,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-16",
-      "src_sha": "086c08b6ed7201b6"
+      "src_sha": "2c18718d4a0b999f"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",

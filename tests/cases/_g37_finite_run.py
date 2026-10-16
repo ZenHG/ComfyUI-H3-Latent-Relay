@@ -11,7 +11,7 @@
 # ============================================================================
 # 第 37 组：无头连跑 Finite Run（0.6.36）—— 展开图结构 / 链接 / 校验（零 GPU）
 #
-# 锁三件事：① 图结构（每段 11 节点、链接端点逐一正确 —— 接错槽 = 静默坏片）；
+# 锁三件事：① 图结构（每段 10 节点、链接端点逐一正确 —— 接错槽 = 静默坏片）；
 # ② 逐段参数（段号/词块/种子/run_id）逐位一致；③ 建图期校验（烧卡前 raise）。
 # 真实出片正确性（缝观感/音画同步/内存）不在本组范围 —— 需 GPU + 人眼。
 # ============================================================================
@@ -54,21 +54,21 @@ def _inputs_of(graph, suffix):
 
 
 # ---------------------------------------------------------------------------
-print("[1] 图结构：每段 11 个节点、角色齐全")
+print("[1] 图结构：每段 10 个节点、角色齐全")
 # ---------------------------------------------------------------------------
 _g3, _o3, _r3 = _build(3)
-check("37.1 3 段 = 33 个节点（每段 11 个）",
-      len(_g3) == 33 == _G.finite_graph_node_count(3), "得到 %d" % len(_g3))
-check("37.2 段 0 十种角色 class_type 全部正确",
+check("37.1 3 段 = 30 个节点（每段 10 个；上一段由桥自取，手接的 Latent Load 已去掉）",
+      len(_g3) == 30 == _G.finite_graph_node_count(3), "得到 %d" % len(_g3))
+check("37.2 段 0 九种角色 class_type 全部正确",
       all(_cls_of(_g3, "seg0_" + r) == t for r, t in [
-          ("i2v", "MiniMaxH3ImageToVideo"), ("load", "H3RelayLatentLoad"),
+          ("i2v", "MiniMaxH3ImageToVideo"),
           ("bridge", "H3RelayCopyBridge"), ("noise", "RandomNoise"),
           ("guider", "BasicGuider"), ("samp", "SamplerCustomAdvanced"),
           ("save", "H3RelayLatentSave"), ("vdec", "VAEDecode"),
           ("adec", "VAEDecodeAudio"), ("trim", "H3RelayTrimAV"),
           ("join", "H3RelayJoinAV")]))
 _g1, _o1, _r1 = _build(1)
-check("37.3 1 段 = 11 个节点（无累计链）", len(_g1) == 11, "得到 %d" % len(_g1))
+check("37.3 1 段 = 10 个节点（无累计链）", len(_g1) == 10, "得到 %d" % len(_g1))
 
 # ---------------------------------------------------------------------------
 print("[2] 链接端点：接错槽 = 静默坏片，逐一锁死")
@@ -76,8 +76,8 @@ print("[2] 链接端点：接错槽 = 静默坏片，逐一锁死")
 _b0 = _inputs_of(_g3, "seg0_bridge")
 check("37.4 桥的 latent ← ImageToVideo 第 2 路（目标 latent）",
       _b0["latent"] == ["t.seg0_i2v", 1], str(_b0["latent"]))
-check("37.5 桥的 context_latent ← LatentLoad 第 1 路",
-      _b0["context_latent"] == ["t.seg0_load", 0], str(_b0["context_latent"]))
+check("37.5 桥**不接** context_latent（上一段由桥按 run_id + 段号−1 自取）",
+      "context_latent" not in _b0, str(_b0.get("context_latent", "已删除")))
 check("37.6 桥的 conditioning ← ImageToVideo 第 1 路（复合桥接法）",
       _b0["conditioning"] == ["t.seg0_i2v", 0], str(_b0["conditioning"]))
 _g0 = _inputs_of(_g3, "seg0_guider")
@@ -122,7 +122,7 @@ check("37.18 落盘段号与桥一致（接力棒对得上）", _sv == [0, 1, 2]
 _ns = {n["inputs"]["noise_seed"] for nid, n in _gb.items() if nid.endswith("_noise")}
 check("37.19 所有段同一个种子（与画布连跑同语义）", _ns == {7}, str(_ns))
 _rid = {n["inputs"]["run_id"] for nid, n in _gb.items()
-        if nid.endswith(("_load", "_save", "_bridge"))}
+        if nid.endswith(("_save", "_bridge"))}
 check("37.20 run_id 在 读/桥/落盘 三处一字不差", _rid == {"demo"}, str(_rid))
 _cf = {n["inputs"]["context_frames"] for nid, n in _gb.items() if nid.endswith("_bridge")}
 check("37.21 所有段同一个钉住窗", _cf == {22}, str(_cf))
@@ -255,3 +255,47 @@ check("37.61 报错首行点出节点名与关键入参",
       _e60.splitlines()[0][:70])
 check("37.62 报错全文里带上人话原因（不许 splitlines 截断）",
       "块词" in _e60, _e60.splitlines()[1][:60])
+
+# ---------------------------------------------------------------------------
+print("[9] 桥自取 context（0.6.37 免接线）：接了就照接、没接就自取、取不到就 raise")
+# ---------------------------------------------------------------------------
+import shutil as _sh2
+import tempfile as _tf2
+
+_BRG = NODES.H3RelayCopyBridge
+_OLD_SP = NODES._stage_path
+_TMP2 = _tf2.mkdtemp(prefix="h3auto_")
+NODES._stage_path = lambda rid, idx: os.path.join(_TMP2, str(rid),
+                                                  "stage_%05d.safetensors" % int(idx))
+
+
+def _lat(t=12, a=48, seed=0):
+    g = torch.Generator().manual_seed(seed)
+    return {"samples": CORE._nested_pair(torch.rand(1, 4, t, 8, 8, generator=g),
+                                         torch.rand(1, 2, 2, a, generator=g))}
+
+
+_lt = _lat(seed=11)
+_o1 = _BRG().bridge(_lt, None, 22, run_id="auto", stage_index=0)
+check("37.70 不接 context_latent + 段号 0 ⇒ 直通（trim=0、原样返回）",
+      _o1[0] is _lt and int(_o1[2]) == 0 and "直通" in _o1[1], "trim=%s" % _o1[2])
+
+try:
+    _BRG().bridge(_lt, None, 22, run_id="auto", stage_index=1)
+    check("37.71 不接 + 段号 1 + 落盘文件不存在 ⇒ raise", False, "竟然没抛")
+except RuntimeError as _e:
+    check("37.71 不接 + 段号 1 + 落盘文件不存在 ⇒ raise（不许静默直通）",
+          "静默直通" in str(_e) and "自取" in str(_e), str(_e).splitlines()[0][:60])
+
+_sv2 = NODES.H3RelayLatentSave()
+getattr(_sv2, NODES.H3RelayLatentSave.FUNCTION)(_lat(seed=12), "auto", 0, "auto seed")
+_o2 = _BRG().bridge(_lat(seed=13), None, 22, run_id="auto", stage_index=1)
+check("37.72 不接 + 段 0 已落盘 ⇒ 桥自取成功（trim=22，与接线同结果）",
+      int(_o2[2]) == 22, "trim=%s" % _o2[2])
+
+_o3 = _BRG().bridge(_lat(seed=13), _lat(seed=12), 22, run_id="auto", stage_index=1)
+check("37.73 接了 context_latent ⇒ 以接线为准（自取不介入，存量图逐位不变）",
+      int(_o3[2]) == 22, "trim=%s" % _o3[2])
+
+NODES._stage_path = _OLD_SP
+_sh2.rmtree(_TMP2, ignore_errors=True)

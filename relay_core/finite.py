@@ -15,9 +15,9 @@ TimelineDirector 的 ``MiniMaxH3FiniteSegmentSampler``（GPL-3.0）**只借鉴�
 思路，不搬代码**（干净室）。
 
 展开图里全部是**已有节点**（别写第二套；算法零重写，本模块只做编排与校验）。
-每段 k（0 起算）一条链，共 11 个节点：
+每段 k（0 起算）一条链，共 10 个节点（上一段由桥**自取**，不再手接「Latent Load」）：
 
-    MiniMaxH3ImageToVideo → H3RelayLatentLoad → H3RelayCopyBridge → RandomNoise
+    MiniMaxH3ImageToVideo → H3RelayCopyBridge → RandomNoise
     → BasicGuider → SamplerCustomAdvanced → H3RelayLatentSave
     → VAEDecode / VAEDecodeAudio → H3RelayTrimAV → H3RelayJoinAV
 
@@ -38,7 +38,7 @@ from .prompt import split_prompt_blocks
 FINITE_MAX_SEGMENTS = 64
 
 #: 每段节点数（上面链路里数出来的；改链路必须同步这个数）。
-_NODES_PER_SEGMENT = 11
+_NODES_PER_SEGMENT = 10
 
 
 class FinitePlanError(ValueError):
@@ -228,7 +228,7 @@ def build_finite_graph(
 
     for k in range(n):
         tag = prefix + "seg%d_" % k
-        i2v, load, bridge = tag + "i2v", tag + "load", tag + "bridge"
+        i2v, bridge = tag + "i2v", tag + "bridge"
         noise, guider, samp = tag + "noise", tag + "guider", tag + "samp"
         save, vdec, adec = tag + "save", tag + "vdec", tag + "adec"
         trim, join = tag + "trim", tag + "join"
@@ -242,14 +242,12 @@ def build_finite_graph(
             i2v_inputs["first_frame"] = image
         graph[i2v] = {"class_type": "MiniMaxH3ImageToVideo", "inputs": i2v_inputs}
 
-        # ② 读上一段（k=0 交空上下文 ⇒ 桥自动直通，与画布第 1 段同行为）
-        graph[load] = {"class_type": "H3RelayLatentLoad",
-                       "inputs": {"run_id": rid, "stage_index": k}}
+        # ② 上一段 latent **不接了** —— 桥自己按 run_id + 段号−1 从磁盘取（0.6.37 起免接线）。
+        #    k=0 时没有上一段 ⇒ 桥自动直通，与画布第 1 段同行为。
 
         # ③ 拷贝桥：latent 钉住 + conditioning 钉帧（复合桥，最小示例同款接法）
         bridge_inputs: Dict[str, Any] = {
             "latent": [i2v, 1],
-            "context_latent": [load, 0],
             "context_frames": int(context_frames),
             "mask_mode": str(mask_mode),
             "pin_audio": bool(pin_audio),
@@ -294,7 +292,8 @@ def build_finite_graph(
 
     report = (
         "一次提交展开 %d 段（seed=%d，run_id=%s，context_frames=%d，mask_mode=%s）。\n"
-        "每段链：ImageToVideo → LatentLoad → CopyBridge → 采样 → LatentSave → 解码 → TrimAV → JoinAV。\n"
+        "每段链：ImageToVideo → CopyBridge → 采样 → LatentSave → 解码 → TrimAV → JoinAV"
+        "（上一段由桥自取，不再手接 Latent Load）。\n"
         "边车：output/relay_kit/%s/stage_%05d..%05d（含谱系头）。\n"
         "⚠ 合并输出驻留内存：%d 段全画面在一条张量里，长片先小分辨率验证。"
         % (n, int(seed), rid or "（空）", int(context_frames), str(mask_mode),

@@ -134,10 +134,11 @@ edits, and **scripts / API users share one node implementation with canvas users
 one chain per segment):
 
 ```
-MiniMaxH3ImageToVideo → H3RelayLatentLoad → H3RelayCopyBridge → RandomNoise
+MiniMaxH3ImageToVideo → H3RelayCopyBridge → RandomNoise
   → BasicGuider → SamplerCustomAdvanced → H3RelayLatentSave
   → VAEDecode / VAEDecodeAudio → H3RelayTrimAV → H3RelayJoinAV
 ```
+(the previous segment is fetched by the bridge itself since 0.6.37)
 
 **Wiring** (only these on the outside; the rest lives inside the expanded graph):
 
