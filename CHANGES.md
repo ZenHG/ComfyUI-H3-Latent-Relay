@@ -184,7 +184,7 @@
 `settle_frames` 行、README 的参数表与「接缝十二条」第 6 条都从「一律保持 0」改成
 「同机位 0 / 换镜 -1」；Trim AV 与 Finite Run 两条 tooltip（中英）同步。
 
-**顺带修的两处**：
+**顺带修的三处**：
 
 - `H3RelayFiniteRun` 的 `DESCRIPTION` 还写着「ImageToVideo → **LatentLoad** → CopyBridge」
   —— 0.6.37 起展开图里已经没有那个节点了（每段 11→10）。文案与实现漂了三个提交。
@@ -192,11 +192,15 @@
   「目录名 != 本仓目录名」当排除条件，隐含假设「仓目录与部署副本同名」。改成按**身份**排除
   （`H3RELAY_DEPLOY` 指到它，或它的 `nodes.py` 与仓内一字不差）⇒ 同一份代码不可能覆盖任何定义，
   而 2026-09-17 那起**旧版副本**事故仍会红（已做双向变异测试）。
+- **多轮审核抓出的第 4 处**：`settle_frames` 显式传 `None` 时抛裸 `TypeError`
+  （`int(None)`），而同函数的 `run_id` / `note` 早就约定「None ⇒ 取默认」⇒ 已对齐，并加回归锁。
 
-**新断言**（`tests/cases/_g37_finite_run.py`，第 37 组新增 37.63–37.72 共 10 条）：
+**新断言**（`tests/cases/_g37_finite_run.py`，第 37 组新增 37.63–37.72 共 11 条）：
 默认 0 逐位不变 / `-1` 与 `N` 每段都带 / 越界与非整数 raise / 写进 report /
-入队前门不接管它 / 节点层 `run()` 直通 / TrimAV 的 widget 上界 == `SETTLE_CAP`。
-⇒ `tests/test_relay_core.py` 断言数 **691 → 701**，V3 逐字段比对的 input 数 **163 → 164**。
+入队前门不接管它 / 节点层 `run()` 直通 / **`None` ⇒ 默认 0**（多轮审核抓出：脚本侧显式传
+`None` 时旧写法在 `int(None)` 上抛裸 `TypeError`，而同函数的 `run_id` / `note` 早就约定
+None ⇒ 取默认）/ TrimAV 的 widget 上界 == `SETTLE_CAP`。
+⇒ `tests/test_relay_core.py` 断言数 **691 → 702**，V3 逐字段比对的 input 数 **163 → 164**。
 
 **要不要动你的配置**：不用（默认值与旧行为一致）。⚠ 仍需**刷新浏览器页面**（新增一个 widget）。
 

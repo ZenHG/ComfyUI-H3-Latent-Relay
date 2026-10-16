@@ -432,8 +432,8 @@
           "zh": "单测（零 GPU、秒级）",
           "en": "Unit tests (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "7d695cad34e3d9fd",
-          "h_src": "35e0e7d1918b1c0c",
+          "h_en": "a76a03dccd603754",
+          "h_src": "587f580647335e2f",
           "seeded": "by-position"
         },
         {
@@ -471,7 +471,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-17",
-      "src_sha": "90d9e2881e59d75d"
+      "src_sha": "341684a7fd91779e"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",

@@ -281,6 +281,13 @@ expect_raise("37.68 settle_frames 超过 SETTLE_CAP ⇒ raise（对齐 TrimAV �
              lambda: _build(1, settle_frames=CORE.SETTLE_CAP + 1), "settle_frames")
 expect_raise("37.69 settle_frames 非整数 ⇒ raise",
              lambda: _build(1, settle_frames="自动"), "settle_frames")
+# 37.63b None ⇒ 取默认 0（与同函数里 run_id/note 的 None 惯例一致）。
+#   为什么单锁：脚本侧显式传 None 时，旧写法会在 int(None) 上抛**裸 TypeError**
+#   （不是 FinitePlanError，也没有「该填什么」的说明）⇒ 调用方看到一句看不懂的崩。
+_gn1, _on1, _rn1 = _build(2, settle_frames=None)
+check("37.63b settle_frames=None ⇒ 取默认 0（不抛裸 TypeError）",
+      {n["inputs"].get("settle_frames") for nid, n in _gn1.items()
+       if nid.endswith("_trim")} == {0} and "settle_frames=0" in _rn1)
 #   入队前那道门**不**接 settle_frames：它由宿主 schema 的 min/max 把关（-1..SETTLE_CAP），
 #   这里多判一次只会造出第二套边界 ⇒ 只要它不因为不认识这个参数而崩就行。
 check("37.70 入队前校验不认识 settle_frames 也不崩（边界归宿主 schema 管）",

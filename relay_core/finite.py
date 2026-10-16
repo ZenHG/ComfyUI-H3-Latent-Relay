@@ -232,6 +232,9 @@ def build_finite_graph(
         raise FinitePlanError(
             "内部错误：词块数 %d 与段数 %d 不一致（应由 resolve_finite_prompts 保证）。"
             % (len(blocks), int(segments)))
+    # None ⇒ 取默认（与下面 rid / nt 同一惯例）：脚本侧显式传 None 不该炸成 TypeError。
+    if settle_frames is None:
+        settle_frames = 0
     # 校验放这里（唯一的门）：节点与测试都走本函数 ⇒ 烧卡前的错误拦截对所有调用方生效。
     validate_finite_params(segments=segments, seed=seed, run_id=run_id,
                            context_frames=context_frames, mask_mode=mask_mode,
