@@ -24,7 +24,7 @@ process**, and both `test_relay_core` and `test_experimental` insert **this pack
 **our own copy** (a shadow module) ⇒ it once landed in **63/0 · 7 nodes**. **The root cause is fixed**
 (`nodes.py::_comfy_registry` no longer lets an ImportError escape — see the "V3 field-by-field parity"
 section), so the shadow module **no longer affects whether a node is present** and `pytest tests/` now
-directly reports `72/0 · 8 nodes`.
+directly reports `79/0 · 9 nodes`.
 
 **The assertion body is split by group** into `tests/cases/` (seven `_g*.py` files).
 `tests/test_relay_core.py` keeps only the file header / root discovery / `check()` / **case execution** /
@@ -157,7 +157,7 @@ failure):
 
 Front-end changes share one property: **every existing check can be green at the same time while the
 English UI is still wrong**. Measured on 2026-10-15: with the one-command suite 15/15,
-`review_050` 120/0 and `check_tooltips` 1216 items **all green at once**, none of the four classes
+`review_050` 121/0 and `check_tooltips` 1308 items **all green at once**, none of the four classes
 below was caught (all four were found by eye):
 
 | What was missed | Why the existing checks cannot see it |
@@ -174,7 +174,7 @@ includes 1–3); **step 5 cannot be reached by a machine**:
 |---|---|---|---|
 | 1 | **Static: read the two languages side by side** | `python tools/check_frontend.py` | 5 pass / 0 fail |
 | 2 | Pure-function behaviour | `node tests/test_i18n.mjs` · `node tests/test_audio_ref_budget.mjs` | all pass (47 · 47 assertions) |
-| 3 | Tooltip wording rules | `python tools/check_tooltips.py` | all pass (1216 items; **H4h** watches this number) |
+| 3 | Tooltip wording rules | `python tools/check_tooltips.py` | all pass (1308 items; **H4h** watches this number) |
 | 4 | **One-command suite** (includes 1–3) | run the machine's own `h3relay_check_all.py` (in a tools directory **outside the repo**) | all pass |
 
 ### 🔴 Step 5: the live three (mandatory after a front-end change — do not skip)
@@ -210,7 +210,7 @@ being green as "the front-end is fine".
 ## V3 shell and default exit (zero GPU, seconds)
 
 ```bash
-COMFYUI_PATH=<root> python tests/test_v3_schema.py      # expected 72/0 (8 nodes / 129 inputs; same tier with or without the host registry)
+COMFYUI_PATH=<root> python tests/test_v3_schema.py      # expected 79/0 (9 nodes / 139 inputs; same tier with or without the host registry)
 COMFYUI_PATH=<root> python tools/assert_default_exit.py  # expected 5/5
 ```
 
@@ -247,7 +247,7 @@ wrong slot in the parameter table means **the user's parameters are silently shi
 > ⚠️ **Do not simulate "no registry" by "just removing the upstream node from the registry"** — that
 >   reproduces "host installed, upstream pack not installed", which **is still 8 nodes**. To reproduce
 >   "no host registry": set `sys.modules["nodes"] = None` then run the test (tool version
->   `tools/ci_env_repro.py`) ⇒ **also 72/0 · 8 nodes**.
+>   `tools/ci_env_repro.py`) ⇒ **also 79/0 · 9 nodes**.
 > This set of numbers is machine-checked by `tools/review_050.py`'s **H3h** (semantics = "the current
 > environment's true value must appear in the declared set").
 
@@ -275,7 +275,7 @@ real problem on its very first run** (in CI the V3 exit actually could not load)
 
 | Tool | What it judges | Expected |
 |---|---|---|
-| `tools/review_050.py` | doc–code consistency (node list / parameter table / assertion count / version / **all** example-graph slots (I1-I4: slots / node counts / widget markers) / **the three iron rules** / **the L13 English-doc sync gate** / **the H3j smoke expected values** / **H3k registry metadata** / **H3l release policy present** / **H3m no credential literals** / **H3n i18n word-table completeness** / **H3p bilingual tooltip completeness** / **H3q JS comma expression** / **H3r i18n anti-overwrite guard** / **H3s link endpoint field compat** / **H3t official locale entry** / **H3o dangling doc references** / **H3u registry package file count (true value)** / **H3v tools script count (true value)** / **H3w untracked files** /  **H3x `setdefault` to `PYTHONPATH`** / **H3y tools script registry** / **H3z release.py flags complete** / **H4a explicit env for Python children** / **H4b criterion-table self-check** / **H4c ledger consistency** / **H4d JS expected values (true value)** / **H4e dist whitelist (true value)** / **H4f `SIM115` blind spot** / **H4g artifacts carry no bytecode or symlinks / **H4h `check_tooltips` item-count truth**) | **120/0** |
+| `tools/review_050.py` | doc–code consistency (node list / parameter table / assertion count / version / **all** example-graph slots (I1-I4: slots / node counts / widget markers) / **the three iron rules** / **the L13 English-doc sync gate** / **the H3j smoke expected values** / **H3k registry metadata** / **H3l release policy present** / **H3m no credential literals** / **H3n i18n word-table completeness** / **H3p bilingual tooltip completeness** / **H3q JS comma expression** / **H3r i18n anti-overwrite guard** / **H3s link endpoint field compat** / **H3t official locale entry** / **H3o dangling doc references** / **H3u registry package file count (true value)** / **H3v tools script count (true value)** / **H3w untracked files** /  **H3x `setdefault` to `PYTHONPATH`** / **H3y tools script registry** / **H3z release.py flags complete** / **H4a explicit env for Python children** / **H4b criterion-table self-check** / **H4c ledger consistency** / **H4d JS expected values (true value)** / **H4e dist whitelist (true value)** / **H4f `SIM115` blind spot** / **H4g artifacts carry no bytecode or symlinks**) | **121/0** |
 | `tools/smoke_nodes.py` | node-layer functional smoke test (the seven continuation items really run once; 🔍 the upscale node needs upstream weights and is not in the smoke test) | **16/0** |
 | `tools/assert_default_exit.py` | default exit = V3 (contract 2 + behaviour 3; includes **the node set V3 actually registers**) | **5/5** |
 | `tools/sync_deploy_check.py` | the deployed copy matches the commit state of the given commit | all `OK` |

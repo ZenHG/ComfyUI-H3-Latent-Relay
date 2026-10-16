@@ -84,6 +84,12 @@ class H3RelayChain(_Shell):
     _V1_NAME = "H3RelayChain"
 
 
+class H3RelaySeedFromVideo(_Shell):
+    """🔗 H3 Relay · Seed from Video：把一段已有视频变成第 0 段（种子段）。"""
+
+    _V1_NAME = "H3RelaySeedFromVideo"
+
+
 # 注册顺序与 V1 的 NODE_CLASS_MAPPINGS 一致（非必需，便于人工双向核对）
 NODES = [
     H3RelayLatentUpscale,
@@ -94,4 +100,5 @@ NODES = [
     H3RelayPost,
     H3RelayAudioSeam,
     H3RelayChain,
+    H3RelaySeedFromVideo,
 ]

@@ -51,6 +51,7 @@ export const RUN_ID_TYPES = [
     { type: "H3RelayLatentLoad", label: "读上段 latent" },
     { type: "H3RelayTrimAV", label: "裁重叠" },
     { type: "H3RelayAudioSeam", label: "音频缝" },
+    { type: "H3RelaySeedFromVideo", label: "视频起段" },
 ];
 
 const RUN_ID_TYPE_SET = new Set(RUN_ID_TYPES.map((s) => s.type));

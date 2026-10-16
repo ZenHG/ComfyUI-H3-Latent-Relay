@@ -76,6 +76,33 @@ def snap_guide_run(n: int) -> int:
     return 0
 
 
+def frame_grid_floor(n: int) -> int:
+    """≤ n 的最大**段长档**（5+17k）；不足 5 帧返回 0。
+
+    用途：把**外部来源**的视频接到 H3 上时，源帧数几乎不可能落在网格上。
+
+    🔴 为什么必须是**粗档** 5+17k、而不是 ``FRAME_PER_TOKEN`` 的**全部**前缀和
+    （1,5,9,13,17,**18**,22,…）：粗档 ⇔ ``latent_t ≡ 2 (mod 5)``，
+    而桥有一条**相位硬约束** —— 尾段起点必须落在周期位置 0
+    （见 `bridge.py` 的「尾段起点非 5 对齐 ⇒ raise」）。细档会让 ``latent_t − 尾段步数``
+    不整除 5 ⇒ **桥当场 raise**。所以这里只认粗档。
+
+    档位由 ``FRAME_PER_TOKEN`` 推导（``epoch = 前两项之和``、``cycle = 全周期和``），
+    **不硬编码 5 / 17**：上游改常量时自动跟随。
+    """
+    n = int(n)
+    epoch = sum(FRAME_PER_TOKEN[:2])      # 5  ← 前两项（1+4）
+    cycle = sum(FRAME_PER_TOKEN)          # 17 ← 一个完整周期
+    if n < epoch:
+        return 0
+    return int(epoch + cycle * ((n - epoch) // cycle))
+
+
+def audio_steps(n: int) -> int:
+    """像素帧数 → 音频 latent 步数（宿主 ``temporal_shape`` 的同款口径：``round(n/24*40)``）。"""
+    return int(round(int(n) * FRAME_RESCALE))
+
+
 def self_check() -> List[str]:
     """自洽性检查：GUIDE_RUNS 必须全部落在网格上。返回问题列表（空=通过）。"""
     bad = []

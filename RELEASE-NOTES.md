@@ -19,6 +19,28 @@
 
 ---
 
+## 0.6.37 — 2026-10-20
+
+**新增「视频起段」节点：你可以拿一段已有的视频当整条链的第 1 段，之后照常往外接。**
+
+- 以前本包只能从「自己生成的上一段」开始接，第 1 段必须是它生成的。现在**实拍、别人的成片、早先跑过的片段**都能当起点。
+- 它替你挡三件事：源视频帧数不在 H3 的时间栅格上（按帧尾裁到最近的合法档，裁掉几帧会写在报告里）；画布不是 16 的倍数或与后面各段不一致（**宽高填 0 就跟随源视频**）；源音轨和画面不等长（按画面长度裁尾或补零，没有音轨就给静音种子）。
+- **它拿不到源视频的帧率**，一律按 24 fps 处理。源不是 24 fps 的话，画面时长会跟着变——请先把源转成 24 fps 再喂进来；报告里会点名这一行。
+- 源很长时请先切段：视频编码是整段做的，显存峰值随帧数上涨。
+
+**升级动作**：无需改图或连线。旧图不引用这个节点，逐位不变。
+
+<!-- EN -->
+
+**New node, "Seed from Video": take an existing video as segment 1 of the whole chain, then continue outward as usual.**
+
+- Until now the chain could only start from a segment this pack had generated. Now **live footage, someone else's finished shot, or an earlier run** can all be the starting point.
+- It blocks three traps for you: source frame counts off the H3 temporal grid (it trims the tail to the nearest legal step and reports how many frames it dropped); a canvas that is not a multiple of 16 or does not match your later segments (**set width and height to 0 to follow the source video**); and source audio that does not match the picture length (trimmed or zero-padded, or a silent seed when there is no audio track).
+- **It cannot read the source frame rate** and always treats the frames as 24 fps. If your source is not 24 fps the picture duration will change — convert the source to 24 fps first; the report names this line.
+- Cut long sources into pieces first: video encoding is done in one pass, so peak VRAM grows with frame count.
+
+**Action required**: none. Existing graphs do not reference this node and are bit-identical.
+
 ## 0.6.36 — 2026-10-19
 
 **续接段忘了接「裁重叠」的帧数时，以前会悄悄一帧都不裁：接缝把上一段开头重播一遍，而所有检查都显示正常。这一版改成当场报错，并告诉你怎么接。**

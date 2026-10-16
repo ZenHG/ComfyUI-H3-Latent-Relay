@@ -10,7 +10,7 @@ not coupled to any third-party H3 node pack.
 
 | Item | Value |
 |---|---|
-| Version | **0.6.36** |
+| Version | **0.6.37** |
 | License | **MIT** (third-party attribution in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) |
 | Host | **ComfyUI ≥ 0.35.0 with MiniMax-H3 support** (the host itself is GPL-3.0, see License) |
 
@@ -35,7 +35,7 @@ under `output/relay_kit/<run_id>/`). Mechanism and measurements: [`docs/01`](doc
 | Layer | Nodes | Notes |
 |---|---|---|
 | **Required 3** | LatentSave · CopyBridge (composite) · TrimAV | without them it is not continuation |
-| **Optional 4** | Post · AudioSeam · Chain · LatentUpscale | independent; since **0.6.34** they are **no longer bit-exact pass-through by default** (Post's `settle_auto` and AudioSeam's `patch_seconds` ship switched on — see below) |
+| **Optional 5** | Post · AudioSeam · Chain · LatentUpscale · SeedFromVideo | independent; since **0.6.34** they are **no longer bit-exact pass-through by default** (Post's `settle_auto` and AudioSeam's `patch_seconds` ship switched on — see below) |
 | **Manual routing only 1** | LatentLoad | the bridge fetches the source from disk itself; connect this only to **override the source** |
 
 | Node (canvas name) | What it does |
@@ -47,6 +47,7 @@ under `output/relay_kit/<run_id>/`). Mechanism and measurements: [`docs/01`](doc
 | 🔗 **H3 Relay · Post** | **picture domain**: cross-segment statistics matching / low-frequency pull / tone / deconvolution / high-frequency transfer / blur-region sharpening; **`settle_auto` defaults to 0.5 since 0.6.34** (cures re-draw blur), the rest are off |
 | 🔗 **H3 Relay · Audio Seam** | **audio domain**: extends the previous segment's ambience into this segment's head, **length-preserving** (zero A/V shift); **on by default since 0.6.34** (`patch_seconds` 1.2; set `0` to disable) |
 | 🔍 **H3 Relay · Latent Upscale** | **picture domain · latent level**: unpack the AV-packed latent → tile through a learned 3D upscaler → repack. **Zero denoising, not one frame moved in time, audio carried back untouched** (needs an optional upstream dependency — see Install) |
+| 🔗 **H3 Relay · Seed from Video** | **entry point**: encodes **an existing video** into segment 1 (the seed segment) sidecar; later segments continue outward as usual. It blocks three traps for you: temporal grid (5+17k frames), canvas grid (multiples of 16), and A/V equal length (trim tail / zero-pad / silent seed) |
 | 🔗 **H3 Relay · Chain** | auto-run controller: advances stage numbers and queues; since 0.6.7 it also **rotates prompts** (`prompts` split on `---`) and **concatenates** (🧩) |
 
 > **Three domains — do not mix them up:** timeline = `H3RelayTrimAV` (frozen) / picture = `H3RelayPost` /
@@ -87,7 +88,7 @@ name because the registry forbids "ComfyUI" in a pack name.
 
 **Restart the ComfyUI backend afterwards** (ComfyUI-Manager → *Restart*; otherwise restart the Python
 process) — refreshing the browser alone does not load new nodes. Search the node list for `🔗 H3 Relay` (7)
-+ `🔍 H3 Relay · Latent Upscale` to see all 8.
++ `🔍 H3 Relay · Latent Upscale` to see all 9.
 
 **Optional: only needed for 🔍 latent tile upscaling** (not installing it does not affect the other 7
 nodes; using it then raises an error naming the repository and the weights):

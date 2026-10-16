@@ -77,6 +77,20 @@
 | ⚠️ 未决 | GPL-3.0 对"进程内 import 的插件"是否构成派生作品，**既无司法判例，也无 ComfyUI 官方书面确认**。插件耦合度比"跨进程 arm's length 通信"更紧，严格解释下存在被主张的空间。需要确定性的场景（企业合规审查 / 再分发）请自行取得法律意见 |
 | 更正记录 | 2026-09-19 之前本文件把宿主写成 **Apache-2.0 —— 那是错的**，现已更正；README「📄 许可与出处」同步 |
 
+### C-1. 🔍 2026-10-16 新增「视频起段」（`H3RelaySeedFromVideo`）的同源审计
+
+**这一节按 §一·B 的教训做**（那次重合证明「函数名交集为 0」**不是**同源判据）——
+故本次直接做**逐行文本比对**，不看函数名、不看结构：
+
+| 项 | 内容 |
+|---|---|
+| 该节点做什么 | 把一段**已有视频**编码成第 0 段的 AV latent 边车，之后各段照常续接。仅此一项，无新算法 |
+| 调用的宿主公开 API | `vae.encode()`（视频/音频 VAE）、`comfy.utils.common_upscale()`、`comfy.audio.resample()`、`comfy.nested_tensor.NestedTensor`。与核心节点 `VAEEncode` / `VAEEncodeAudio` / `LTXVConcatAVLatent` 用的是同一批 API —— 属 §一·C 的「运行时 import，非复制」范畴 |
+| 对照对象 | 宿主 `comfy_extras/nodes_minimax_h3.py`、`nodes_audio.py`、`comfy/sd.py`、`comfy/nested_tensor.py`，以及 **`comfyui-obvpm-timeline`**（GPL-3.0）与 **`ComfyUI-MiniMaxH3-TimelineDirector`**（GPL-3.0）的全部 `*.py` |
+| 判据 | 取该节点**非注释、≥15 字符**的每一行（共 128 行），在对照集合里逐字查找 |
+| 结果 | **命中 10 条，全部为不可版权的协议样板**：`def INPUT_TYPES(cls):`、`import comfy.audio` / `import comfy.nested_tensor` / `import comfy.utils`、`raise ValueError(`、`if audio is None:`、`"video_vae": ("VAE", {` 等输入声明行。**无任何一处表达层重合** |
+| 说明 | 「从一段已有视频出发往外接」这个**机制/想法**在 `obvpm` 与 TimelineDirector 里都存在（本包 2026-10-16 阅读其公开说明与源码后知悉）；按「机制不受版权保护、表达受保护」的口径，本包**只取想法**，实现为独立编写。⚠️ 后续若有人想「照着它的实现改」，先读 §一·B |
+
 ### D. ✅ 运行时**可选**依赖：`Comfyui_Minimax_h3_latent_Upscaler`（MIT）
 
 | 项 | 内容 |

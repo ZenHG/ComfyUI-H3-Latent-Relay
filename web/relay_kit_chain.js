@@ -169,12 +169,13 @@ const MODE_BYPASS = 4;
 /**
  * 带「本段段号」（`stage_index` widget）的节点类型 —— **单一真相源**。
  *
- * `nodes.py` 里声明了 `stage_index` 的一共**五处**，其中一处是 **Chain 自己**（由
- * `setStageAll()` 的 `setStage(chainNode, v)` 直接推进，**不进表**），其余四类走这张表 ——
+ * `nodes.py` 里声明了 `stage_index` 的一共**六处**：**Chain 自己**（由 `setStageAll()` 的
+ * `setStage(chainNode, v)` 直接推进，**不进表**）、**四类**走 `STAGE_TYPES`（随连跑推进）、
+ * 还有**一类**走 `STAGE_STATIC`（段号**必须固定**，见那张表的注释）——
  * **漏掉任何一类，那个节点就会永远以第 1 段自居**。
  *
  * 🔴 这个不变式由 `tests/test_prompt_dispatch.mjs` 的 **8.21** 与 `nodes.py` **双向对账**：
- *   `{声明了 stage_index 的类}` 必须 == `{Chain 自己}` ∪ `STAGE_TYPES`。
+ *   `{声明了 stage_index 的类}` 必须 == `{Chain 自己}` ∪ `STAGE_TYPES` ∪ `STAGE_STATIC`。
  *   ⚠ 此处**不写行号** —— 行号会随重构漂（本节原来那五行行号在 2026-10-07 拆包后**已经全错**，
  *   最远的一处差了 126 行；而没有任何东西会因此报红）。
  *
@@ -190,6 +191,18 @@ const MODE_BYPASS = 4;
 //    目前仍是中文（见任务 #7）⇒ **现在不能**给它做双语：英文界面下会变成
 //    「找到 bridge×1 / save×1，需要恰好各 1 个」这种中英混排，比全中文更差。
 //    ⇒ 等那一轮把消息一起翻了，再加 `labelEn` 与取值函数。
+/** 声明了 `stage_index` 但**不随连跑推进**的类（段号固定）。
+ *
+ * 🔴 为什么不干脆塞进 `STAGE_TYPES`：`H3RelaySeedFromVideo` 的段号 = **源视频在链里的位置**
+ *   （通常 0）。它一旦被推进，下一次连跑就会把同一段源视频**再编码一遍**、写到下一段的边号上
+ *   ⇒ 覆盖掉已生成段的边车，且那一段在成片里变成源视频的复制。
+ *   ⇒ 它必须固定。而**不变式仍要盖住它**（否则「新增带 stage_index 的节点被漏掉」的老病
+ *   就换到这张表上来犯）—— 故单列一表，由 test 8.21 与 nodes.py 对账。
+ */
+const STAGE_STATIC = [
+    { type: "H3RelaySeedFromVideo", label: "视频起段" },
+];
+
 const STAGE_TYPES = [
     { type: "H3RelayCopyBridge", label: "桥", required: true, liveOnly: true,
       missing: "「Copy Bridge」" },

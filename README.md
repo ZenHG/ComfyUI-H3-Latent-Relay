@@ -7,7 +7,7 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 
 | 项 | 值 |
 |---|---|
-| 版本 | **0.6.36** |
+| 版本 | **0.6.37** |
 | 许可 | **MIT**（第三方出处见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)） |
 | 宿主 | **ComfyUI ≥ 0.35.0，且带 MiniMax-H3 支持**（宿主自身为 GPL-3.0，见 §许可与出处） |
 
@@ -29,8 +29,8 @@ anchor 与采样 latent 不同源（会漂）、只能锚第 0 帧。本包直�
 | 层 | 节点 | 说明 |
 |---|---|---|
 | **必备 3** | Latent 存 · 拷贝桥（复合桥）· 裁重叠 | 少一个就不叫续接 |
-| **可选 4** | 后处理 Post · 音频缝 · 连跑 Chain · Latent Upscale | 各自独立；自 **0.6.34** 起**不再默认逐位直通**（Post 的 `settle_auto`、音频缝的 `patch_seconds` 默认开，见下） |
-| **手动接线才用 1** | Latent 读 | 桥自己会从磁盘取源；只在要**显式换源**时才手动接 |
+| **可选 5** | 后处理 Post · 音频缝 · 连跑 Chain · Latent Upscale · Seed from Video | 各自独立、**默认全关 = 逐位直通**（Seed from Video 只在「从已有视频起段」时用） |
+| **手动接线才用 1** | Latent 读 | 桥自己会从磁盘取源；只在**显式换源**时接 |
 
 | 节点 | 作用 |
 |---|---|
@@ -42,6 +42,7 @@ anchor 与采样 latent 不同源（会漂）、只能锚第 0 帧。本包直�
 | 🔗 **H3 Relay · Audio Seam** | **音频域**：把上一段环境声补进本段头部，**长度守恒**（零 A/V 位移）；**0.6.34 起默认开**（`patch_seconds` 1.2，填 `0` = 关） |
 | 🔍 **H3 Relay · Latent Upscale** | **画质域 · latent 层**：拆 AV 打包 latent → 逐块过学习式 3D 放大器 → 回包。**零去噪、时间维一帧不动、音频原样带回**（需可选上游依赖，见 §安装） |
 | 🔗 **H3 Relay · Chain** | 自动连跑控制器：自动推进段号并排队；0.6.7 起还能**换词**（`prompts` 按 `---` 分块）与**拼片**（🧩） |
+| 🔗 **H3 Relay · Seed from Video** | **入口**：把**一段已有视频**编码成第 1 段（种子段）的边车，之后各段照常往外接。自动挡三处坑：时序栅格（5+17k 帧）、画布栅格（16 的倍数）、音画等长（裁尾/补零/静音种子） |
 
 > **三个域别混挂**：时间轴 = `H3RelayTrimAV`（冻结）／画质域 = `H3RelayPost`／音频域 = `H3RelayAudioSeam`。
 >
@@ -79,7 +80,7 @@ git clone https://github.com/ZenHG/ComfyUI-H3-Latent-Relay.git
 包名不允许带 "ComfyUI"。
 
 **装完必须重启 ComfyUI 后端**（ComfyUI-Manager 点 *Restart*；没装就重启 Python 进程）——
-仅刷新浏览器不会加载新节点。节点列表里搜 `🔗 H3 Relay`（7 个）+ `🔍 H3 Relay · Latent Upscale` 即为全部 8 个。
+仅刷新浏览器不会加载新节点。节点列表里搜 `🔗 H3 Relay`（8 个）+ `🔍 H3 Relay · Latent Upscale` + `🧩 H3 Relay · Join AV` + `⏩ H3 Relay · Finite Run` 即为全部 11 个。
 
 **可选：用 🔍 H3 Relay · Latent Upscale 才需要装**（不装不影响其他 7 个节点，用时会报一条写明仓库与权重地址的错）：
 

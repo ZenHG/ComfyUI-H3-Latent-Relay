@@ -402,7 +402,7 @@ def verify_bundle(bundle_dir, expect_source=KIT):
     if getattr(pkg, "NODE_API_FALLBACK_REASON", None):
         print("        ⚠️ 回退原因：%s" % pkg.NODE_API_FALLBACK_REASON)
 
-    # —— 8 个节点：**分两层判**（2026-09-30 修）——
+    # —— 9 个节点：**分两层判**（2026-09-30 修；0.6.37 起 8→9）——
     # 🔴 原来只有一条 `len(nodes) == 8` ⇒ **CI（CPU-only torch）必红**：放大节点的 INPUT_TYPES
     #    要走宿主注册表，宿主 GPU 探测抛 `AssertionError: Torch not compiled with CUDA enabled`
     #    ⇒ 该节点 schema 建不出来 ⇒ V3 entrypoint 逐节点容错跳过 ⇒ 本环境只能建出 7 个。
@@ -411,9 +411,9 @@ def verify_bundle(bundle_dir, expect_source=KIT):
     #    "本环境能构造出几个 schema" 只作信息（只有 0 个才是真问题）。
     _v3mod = importlib.import_module("bundle_under_test.v3.nodes_v3")
     _declared = list(getattr(_v3mod, "NODES", []) or [])
-    print("   [%s] 分发集代码里定义了 %d 个节点（期望 8；**与运行环境无关**）"
-          % ("OK" if len(_declared) == 8 else "FAIL", len(_declared)))
-    bad += (len(_declared) != 8)
+    print("   [%s] 分发集代码里定义了 %d 个节点（期望 9；**与运行环境无关**）"
+          % ("OK" if len(_declared) == 9 else "FAIL", len(_declared)))
+    bad += (len(_declared) != 9)
 
     nodes = _nodes_of(pkg)
     _note = ""
