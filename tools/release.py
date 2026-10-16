@@ -47,6 +47,9 @@ from pathlib import Path
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REGISTRY_API = "https://api.comfy.org"
 TOKEN_FILE_DEFAULT = os.path.join(REPO, ".comfy_registry_token")
+# 提到**模块级**：原写法在 main() 里 `global GIT` ⇒ 别的模块 import 本文件直接调
+# `sync_deploy()`（铺部署镜像）会 NameError（2026-10-17 实测踩到）。解析顺序不变。
+GIT = os.environ.get("H3RELAY_GIT") or shutil.which("git") or "git"
 
 FAILED: list[str] = []
 # 🔴 命令回显要**脱敏**：`say("$ " + cmd)` 会把 `--token <PAT>` 原样打进日志/终端
@@ -726,9 +729,6 @@ def main() -> int:
         say("🔎 模式 = %s：① 前置 + 改动面%s。"
             % ("真发布（--go）" if a.go else "**预演**",
                " → push → 等 CI → Release → registry" if a.go else "（不推不发）"))
-
-    global GIT
-    GIT = os.environ.get("H3RELAY_GIT") or shutil.which("git") or "git"
 
     if a.set_token:
         return set_token()
