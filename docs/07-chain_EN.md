@@ -151,7 +151,24 @@ MiniMaxH3ImageToVideo → H3RelayCopyBridge → RandomNoise
 | `segments` / `seed` / `run_id` | segment count (1..64) / one seed for all segments / film name (required for multi-segment) |
 | `width` / `height` / `length` | picture size (multiples of 16) and frames per segment (all segments equal) |
 | `context_frames` / `mask_mode` / `pin_audio` | same meaning as on the copy bridge (one set for every segment) |
+| `settle_frames` | **trim policy**, sent down to Trim AV for every segment. Keep `0` for same-camera continuation; fill `-1` when the camera changes (see below) |
 | `voice_anchor` (optional) | voice anchor; one shared anchor. Unwired = the previous segment's own audio tail |
+
+**How to pick the settle mode** (real GPU, 0.6.38: three-point window sweep + all three auto
+values): `settle_frames` governs the **settle zone** — "after the pinned region the model
+replays a few frames of the previous segment".
+
+| Case | Value | Measured |
+|---|---|---|
+| same-camera continuation (one shot) | `0` (default) | seam jump 0.020 "barely noticeable"; trimming 16 frames instead gives 0.055 "a jump" |
+| camera change / cut | `-1` | the switch point is measured and trimmed past ⇒ the hard cut moves back to the **segment boundary**, pre-switch grade 0.0 dB, picture and audio switch together |
+
+⚠️ On a camera change, leaving it at `0`: the switch point is pushed **inside** the segment
+(measured: window 22 puts it at frame 10 of the segment), and the audio switches about
+**4.5 frames earlier** than the picture ⇒ a visible hard cut plus an audible A/V mismatch.
+⚠️ `-1` is not a free lunch: the auto value sometimes comes from a **grade-convergence tail**
+rather than a drag ⇒ it eats a few frames of new content. For exact control fill a fixed `N`.
+The criterion is always "where did the cut land", never "did auto mode run".
 
 **Two validation gates** (both are needed; the split is decided by what is visible *before*
 queueing):
@@ -192,7 +209,10 @@ change moves the file md5 while the content may be identical.
 
 **Known boundaries (stated honestly)**: the merged output is **one in-memory tensor** (for many
 segments / high resolution, try two segments at low resolution first); AudioSeam and Post are not
-included. ⚠️ **Still unverified**: seam look by human eye, ≥3 segments, memory peak on long films,
+included. The settle mode (`settle_frames`) is **trim policy** ⇒ it is sent down per segment, so
+script and canvas paths have the same capability; the remaining Trim AV picture-domain knobs
+(`match_prev` / `lowfreq_pull` / histogram / white balance…) stay canvas-chain only.
+⚠️ **Still unverified**: seam look by human eye, ≥3 segments, memory peak on long films,
 frame-by-frame comparison against canvas Chain. Example: `examples/finite_run_ui.json`.
 
 ---

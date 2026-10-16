@@ -864,8 +864,8 @@ class H3RelayTrimAV:
                 # ⚠ 新 widget 必须追加在**最后一个**：widgets_values 按位置对应，
                 #    插在中间会让旧工作流里它后面的取值整体错位（见 CHANGES 0.2.1）。
                 "settle_frames": ("INT", {
-                    "default": 0, "min": -1, "max": 36, "step": 1,
-                    "tooltip": "【保持 0】裁不裁「沉降区」：钉住区之后模型还会先复现上一段几帧。\n那几帧略糊，但裁它们正是缝处跳帧的源头（实测裁 0 帧跳 0.020、裁 16 帧 0.055）。\n· 0（默认）= 只裁钉住区，缝处无跳；-1 = 自动；N = 固定多裁 N 帧。",
+                    "default": 0, "min": -1, "max": CORE.SETTLE_CAP, "step": 1,
+                    "tooltip": "【按镜位选】同机位续接保持 0；换机位/换镜填 -1。\n那几帧略糊，但同机位下裁它们正是缝处跳帧的源头（实测裁 0 帧跳 0.020、裁 16 帧 0.055）。\n· 0（默认）= 只裁钉住区，缝处无跳；-1 = 自动量出切换点并裁过去（换镜时硬切才会退回段边界）；N = 固定多裁 N 帧。",
                 }),
                 # ⚠ 继续追加在**最后**（同上铁律）：缝帧重影，2026-09-15 新增。
                 #    🔴 默认 0（关）：数值上能压平最大单帧跳，但**观感实测更差**——
@@ -2525,6 +2525,7 @@ class H3RelayFiniteRun:
 
     ⚠ 边界（诚实声明）：各段用**同一张首帧图、同一个种子、同一段长**（与手动连跑
     同语义）；不含音频缝补丁与画质域后处理节点；合并输出是**一条驻留内存的张量**。
+    沉降档（``settle_frames``）是**裁量**不是后处理 ⇒ 随段下传，换镜续接时脚本侧也能设。
     """
 
     # V3 外壳据此开启 enable_expand（V1 出口无需声明，返回 expand 字典即生效）。
@@ -2610,6 +2611,16 @@ class H3RelayFiniteRun:
                     "default": "",
                     "tooltip": "【备注】写进每段中间文件的备注，比如「22 帧窗 v2」。",
                 }),
+                # ⚠ 新 widget 追加在**最后一个**（widgets_values 按位置对应，插中间会整体错位）。
+                #   它是**裁量**不是后处理 —— 画布链的「裁重叠」一直能设，脚本/API 侧漏了它
+                #   就等于「换镜续接时拿不到那个旋钮」（铁律一：UI 与 API 同一套能力）。
+                "settle_frames": ("INT", {
+                    "default": 0, "min": -1, "max": CORE.SETTLE_CAP, "step": 1,
+                    "tooltip": "【按镜位选】同机位续接保持 0；换机位/换镜填 -1。\n"
+                              "沉降区 = 钉住区之后模型复现上一段的那几帧。\n"
+                              "· 同机位：裁它们正是缝处跳帧的源头（实测 0 帧 0.020、16 帧 0.055）⇒ 保持 0；\n"
+                              "· 换机位：-1 自动把硬切退回段边界（实测三档全过）。",
+                }),
             },
         }
 
@@ -2619,7 +2630,8 @@ class H3RelayFiniteRun:
     CATEGORY = CATEGORY
     DESCRIPTION = (
         "一次提交跑完 N 段：服务端展开整条连跑图（无需前端按钮、无头可用）。\n"
-        "每段链：ImageToVideo → LatentLoad → CopyBridge → 采样 → LatentSave → 解码 → TrimAV → JoinAV。"
+        "每段链：ImageToVideo → CopyBridge → 采样 → LatentSave → 解码 → TrimAV → JoinAV"
+        "（上一段由桥自取，不手接 Latent Load）。"
     )
 
     # ⚠️ 参数表**必须**与 v3/nodes_v3.py 里 H3RelayFiniteRun.validate_inputs 同名同集
@@ -2646,7 +2658,8 @@ class H3RelayFiniteRun:
     def run(self, model, clip, vae, audio_vae, sampler, sigmas, image=None,
             prompt="", prompts="", segments=2, seed=0, run_id="relay",
             width=1344, height=768, length=124, context_frames=22,
-            mask_mode="hard", pin_audio=True, voice_anchor=None, note=""):
+            mask_mode="hard", pin_audio=True, voice_anchor=None, note="",
+            settle_frames=0):
         """建图并返回展开图（本方法**不采样**，只编排；执行由宿主对展开图进行）。
 
         可选链接槽（image / voice_anchor）不接线时宿主整个键都不传 ⇒ 必须给默认值。
@@ -2660,7 +2673,8 @@ class H3RelayFiniteRun:
             prefix=GraphBuilder.alloc_prefix(), segments=segments, blocks=blocks,
             seed=seed, run_id=run_id, note=note, width=width, height=height,
             length=length, context_frames=context_frames, mask_mode=mask_mode,
-            pin_audio=pin_audio, model=model, clip=clip, vae=vae, audio_vae=audio_vae,
+            settle_frames=settle_frames, pin_audio=pin_audio, model=model, clip=clip,
+            vae=vae, audio_vae=audio_vae,
             image=image, sampler=sampler, sigmas=sigmas, voice_anchor=voice_anchor)
         outputs[3] = report + "\n" + pnote
         # V1 出口：expand 图 + result（输出可以是 [展开图节点 id, 输出位] 链接）

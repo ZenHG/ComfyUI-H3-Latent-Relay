@@ -502,6 +502,14 @@
      "widget": {
       "name": "note"
      }
+    },
+    {
+     "name": "settle_frames",
+     "type": "INT",
+     "link": null,
+     "widget": {
+      "name": "settle_frames"
+     }
     }
    ],
    "outputs": [
@@ -545,7 +553,8 @@
     "hard",
     true,
     "日式赛璐璐 2D 动画，暖琥珀主光，超现实咖啡厨房。\n[Shot 1] 中近景，Yuki 与 Kara 近身缠斗，一记右直拳擦过耳侧，白发随拳风甩起……\n文字：全片画面无任何文字与符号。\noverall_soundscape: 拳风破空、拳掌相交的闷响、两人急促的呼吸、厨房低频底噪。无音乐。\n---\n承接上一段结尾：Yuki 收拳侧步，Kara 借势后撤撞上料理台，杯碟摇晃。\n[Shot 1] 同机位同光位，动作相位严格接住上一帧，不重新起手、不切镜。\n文字：全片画面无任何文字与符号。\noverall_soundscape: 杯碟碰撞、布料摩擦、两人呼吸渐稳、厨房低频底噪。无音乐。",
-    ""
+    "",
+    0
    ]
   },
   {
@@ -715,7 +724,7 @@
     "text": ""
    },
    "widgets_values": [
-    "【⏩ Finite Run · 一次提交跑完 N 段】\n1. 填 prompts：两段词用单独一行 --- 分开（第 1 块喂第 1 段）；\n   只跑一种内容就留空 prompts、把词填进 prompt 格。\n2. segments = 要跑的段数（本示例 2）；run_id 必须填（各段中间文件靠它定位）。\n3. 首帧图可拔（不接 = 纯文生成视频）；各段共用同一张图，与画布连跑同语义。\n4. 采样两件套（KSamplerSelect + BasicScheduler）各段共用同一个。\n5. 跑完得到：末段 latent（可接下游）+ 拼成一条的画面/音频 + report。\n   各段中间文件在 output/relay_kit/<run_id>/stage_NNNNN.safetensors。\n⚠ 合并输出驻留内存：段数多 / 分辨率高时先小分辨率试两段。\n⚠ 不含音频缝补丁与画质域后处理（要那些请用画布连跑逐段接）。"
+    "【⏩ Finite Run · 一次提交跑完 N 段】\n1. 填 prompts：两段词用单独一行 --- 分开（第 1 块喂第 1 段）；\n   只跑一种内容就留空 prompts、把词填进 prompt 格。\n2. segments = 要跑的段数（本示例 2）；run_id 必须填（各段中间文件靠它定位）。\n3. 首帧图可拔（不接 = 纯文生成视频）；各段共用同一张图，与画布连跑同语义。\n4. 采样两件套（KSamplerSelect + BasicScheduler）各段共用同一个。\n5. 跑完得到：末段 latent（可接下游）+ 拼成一条的画面/音频 + report。\n   各段中间文件在 output/relay_kit/<run_id>/stage_NNNNN.safetensors。\n6. settle_frames：同机位续接保持 0（默认）；换机位/换镜填 -1（自动把硬切退回段边界）。\n⚠ 合并输出驻留内存：段数多 / 分辨率高时先小分辨率试两段。\n⚠ 不含音频缝补丁与画质域后处理（要那些请用画布连跑逐段接）。"
    ]
   }
  ],

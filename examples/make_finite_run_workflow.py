@@ -197,6 +197,7 @@ def main() -> int:
             True,             # pin_audio
             PROMPT_BLOCK_1 + "\n---\n" + PROMPT_BLOCK_2,   # prompts（可选）
             "",               # note（可选）
+            0,                # settle_frames（可选）：0 = 同机位默认；换镜填 -1
         ]))
 
     nodes.extend([
@@ -241,6 +242,7 @@ def main() -> int:
              "4. 采样两件套（KSamplerSelect + BasicScheduler）各段共用同一个。\n"
              "5. 跑完得到：末段 latent（可接下游）+ 拼成一条的画面/音频 + report。\n"
              "   各段中间文件在 output/relay_kit/<run_id>/stage_NNNNN.safetensors。\n"
+             "6. settle_frames：同机位续接保持 0（默认）；换机位/换镜填 -1（自动把硬切退回段边界）。\n"
              "⚠ 合并输出驻留内存：段数多 / 分辨率高时先小分辨率试两段。\n"
              "⚠ 不含音频缝补丁与画质域后处理（要那些请用画布连跑逐段接）。"
          ]},

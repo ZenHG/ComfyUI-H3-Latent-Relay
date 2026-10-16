@@ -21,6 +21,9 @@ TimelineDirector 的 ``MiniMaxH3FiniteSegmentSampler``（GPL-3.0）**只借鉴�
     → BasicGuider → SamplerCustomAdvanced → H3RelayLatentSave
     → VAEDecode / VAEDecodeAudio → H3RelayTrimAV → H3RelayJoinAV
 
+其中「Trim AV」的 ``trim_frames`` 由桥的第 3 路给（全自动），``settle_frames`` 由调用方给
+（沉降档属**裁量**，不是后处理 ⇒ 必须让脚本/API 侧也能设，否则画布能设、API 设不了）。
+
 返回的图与 ``GraphBuilder.finalize()`` 同构（链接一律 ``[节点 id, 输出位]``）；
 对象型入参（model/clip/vae/…）原样落进对应输入槽，宿主执行时按字面值解析。
 所有硬校验都收在 ``build_finite_graph`` 一处 ⇒ 任何调用方都在烧卡前拿到同一组错误。
@@ -33,6 +36,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from ._grid import GUIDE_RUNS
 from .bridge import MASK_MODES
 from .prompt import split_prompt_blocks
+from .seam import SETTLE_CAP
 
 #: 一次展开的段数上限（≈640 个临时节点的护栏；要更多分批提交，每批一个 run_id 段区间）。
 FINITE_MAX_SEGMENTS = 64
@@ -85,7 +89,8 @@ def resolve_finite_prompts(prompt: Any, prompts: Any, segments: Any) -> Tuple[Li
 
 def validate_finite_params(*, segments: Any = None, seed: Any = None, run_id: Any = None,
                            context_frames: Any = None, mask_mode: Any = None,
-                           length: Any = None, width: Any = None, height: Any = None) -> None:
+                           length: Any = None, width: Any = None, height: Any = None,
+                           settle_frames: Any = None) -> None:
     """建图前的硬校验（纯值检查，不碰盘、不碰 GPU）。
 
     任一项为 ``None`` ⇒ **跳过该项**。执行期调用方总会给全；而入队前那次
@@ -151,6 +156,16 @@ def validate_finite_params(*, segments: Any = None, seed: Any = None, run_id: An
         if v < 32 or v % 16 != 0:
             raise FinitePlanError(
                 "%s 必须是 ≥32 且 16 的倍数（H3 画布栅格；得到 %d）。" % (name, v))
+    if settle_frames is not None:
+        try:
+            sf = int(settle_frames)
+        except (TypeError, ValueError):
+            raise FinitePlanError(
+                "settle_frames 必须是整数（得到 %r）。" % (settle_frames,)) from None
+        if sf < -1 or sf > SETTLE_CAP:
+            raise FinitePlanError(
+                "settle_frames 必须在 -1..%d 之间（-1 = 自动量切换点，0 = 只裁钉住区，"
+                "N = 固定多裁 N 帧；得到 %d）。" % (SETTLE_CAP, sf))
 
 
 def validate_finite_inputs_early(**kw: Any) -> Optional[str]:
@@ -194,6 +209,7 @@ def build_finite_graph(
     length: int,
     context_frames: int,
     mask_mode: str,
+    settle_frames: int = 0,
     pin_audio: bool,
     model: Any,
     clip: Any,
@@ -219,7 +235,8 @@ def build_finite_graph(
     # 校验放这里（唯一的门）：节点与测试都走本函数 ⇒ 烧卡前的错误拦截对所有调用方生效。
     validate_finite_params(segments=segments, seed=seed, run_id=run_id,
                            context_frames=context_frames, mask_mode=mask_mode,
-                           length=length, width=width, height=height)
+                           length=length, width=width, height=height,
+                           settle_frames=settle_frames)
     n = int(segments)
     rid = "" if run_id is None else str(run_id)
     nt = "" if note is None else str(note)
@@ -273,14 +290,15 @@ def build_finite_graph(
                        "inputs": {"latent": [samp, 0], "run_id": rid,
                                   "stage_index": k, "note": nt}}
 
-        # ⑥ 解码 + 裁重叠头（trim_frames 走桥的第 3 路，全自动）
+        # ⑥ 解码 + 裁重叠头（trim_frames 走桥的第 3 路，全自动；settle_frames 由调用方给）
         graph[vdec] = {"class_type": "VAEDecode",
                        "inputs": {"samples": [samp, 0], "vae": vae}}
         graph[adec] = {"class_type": "VAEDecodeAudio",
                        "inputs": {"samples": [samp, 0], "vae": audio_vae}}
         graph[trim] = {"class_type": "H3RelayTrimAV",
                        "inputs": {"images": [vdec, 0], "trim_frames": [bridge, 2],
-                                  "fps": 24.0, "audio": [adec, 0]}}
+                                  "fps": 24.0, "audio": [adec, 0],
+                                  "settle_frames": int(settle_frames)}}
 
         # ⑦ 张量域拼条（首段无累计输入 ⇒ 透传）
         join_inputs: Dict[str, Any] = {"images": [trim, 0], "audio": [trim, 1]}
@@ -291,13 +309,14 @@ def build_finite_graph(
         prev_join = join
 
     report = (
-        "一次提交展开 %d 段（seed=%d，run_id=%s，context_frames=%d，mask_mode=%s）。\n"
+        "一次提交展开 %d 段（seed=%d，run_id=%s，context_frames=%d，mask_mode=%s，"
+        "settle_frames=%d）。\n"
         "每段链：ImageToVideo → CopyBridge → 采样 → LatentSave → 解码 → TrimAV → JoinAV"
-        "（上一段由桥自取，不再手接 Latent Load）。\n"
+        "（上一段由桥自取，不再手接 Latent Load；trim_frames 由桥给，settle_frames 见上）。\n"
         "边车：output/relay_kit/%s/stage_%05d..%05d（含谱系头）。\n"
         "⚠ 合并输出驻留内存：%d 段全画面在一条张量里，长片先小分辨率验证。"
         % (n, int(seed), rid or "（空）", int(context_frames), str(mask_mode),
-           rid or "<run_id>", 0, n - 1, n)
+           int(settle_frames), rid or "<run_id>", 0, n - 1, n)
     )
     return graph, [[samp, 0], [prev_join, 0], [prev_join, 1], report], report
 

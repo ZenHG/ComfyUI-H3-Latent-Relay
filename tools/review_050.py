@@ -684,10 +684,23 @@ ck("J1 存量工作流无『输出数组过期』的节点", not _stale, "计数
 #   服务端 /object_info 报的 `H3RelayTrimAV` 只有 3 路输出（没有 prev_tail），
 #   而 l1_api 已经引用 `["903", 3]` ⇒ 真渲染第一段就炸。
 #   ⚠️ ComfyUI 官方只忽略 **`.disabled` 结尾**（`nodes.py:2369`），`.bak` 不认。
+# 🔴 2026-10-17 修一个**误报**：原判据用「目录名 != 本仓目录名」当排除条件 —— 那隐含假设
+#   「仓目录与部署副本同名」。在副本仓（`ComfyUI-H3-Latent-Relay - 副本`）里开发时，
+#   custom_nodes 下那份**正当的运行时镜像**会被判成第二份副本 ⇒ 每次跑都红，红到没人看它
+#   （机检说谎比没有机检更坏）。改成按**身份**排除，两条满足其一即算镜像、不算副本：
+#     ① `H3RELAY_DEPLOY` 明确指到它（发布器用的同一个环境变量）；
+#     ② 它的 `nodes.py` 与仓内 `nodes.py` **一字不差**（忽略 CRLF）—— 同一份代码
+#        不可能"静默覆盖"任何定义，覆盖风险为零。
+#   2026-09-17 那起事故是**旧版**副本（代码不同）⇒ 仍会红，判据没有被放水。
 _CNODES = os.environ.get("CUSTOM_NODES_DIR") or os.path.join(COMFY, "custom_nodes")
 _shadow = []
 if os.path.isdir(_CNODES):
     _self = os.path.basename(KIT)
+    _deploy = os.environ.get("H3RELAY_DEPLOY") or ""
+    try:
+        _own_nodes = Path(os.path.join(KIT, "nodes.py")).read_bytes().replace(b"\r\n", b"\n")
+    except OSError:
+        _own_nodes = b""
     for _nm in sorted(os.listdir(_CNODES)):
         _p = os.path.join(_CNODES, _nm)
         if not os.path.isdir(_p) or _nm == _self:
@@ -701,17 +714,27 @@ if os.path.isdir(_CNODES):
             _body = Path(_nj).read_text(encoding="utf-8", errors="replace")[:8192]
         except Exception:
             continue
-        if "H3Relay" in _body:
-            _shadow.append("%s（%s，版本 %s）" % (
-                _nm, "会让 ComfyUI 忽略" if _nm.endswith(".disabled") else "🔴 会覆盖节点定义",
-                (re.search(r'__version__\s*=\s*"([^"]+)"',
-                           Path(os.path.join(_p, "__init__.py")).read_text(encoding="utf-8", errors="replace")) or [None, "?"])[1]
-                if os.path.exists(os.path.join(_p, "__init__.py")) else "?"))
+        if "H3Relay" not in _body:
+            continue
+        try:
+            _same = Path(_nj).read_bytes().replace(b"\r\n", b"\n") == _own_nodes
+        except OSError:
+            _same = False
+        if _same or (_deploy and os.path.abspath(_p) == os.path.abspath(_deploy)):
+            print("      · %s = 运行时镜像（nodes.py 与仓内一字不差）⇒ 跳过" % _nm)
+            continue
+        _shadow.append("%s（%s，版本 %s）" % (
+            _nm, "会让 ComfyUI 忽略" if _nm.endswith(".disabled") else "🔴 会覆盖节点定义",
+            (re.search(r'__version__\s*=\s*"([^"]+)"',
+                       Path(os.path.join(_p, "__init__.py")).read_text(encoding="utf-8", errors="replace")) or [None, "?"])[1]
+            if os.path.exists(os.path.join(_p, "__init__.py")) else "?"))
 print("      custom_nodes=%s" % _CNODES)
 if _shadow:
     for _s in _shadow:
         print("         · " + _s)
     print("         → 处置：把非现役那份**移出 custom_nodes**（或改名以 `.disabled` 结尾）")
+    print("         → 若它其实就是你的部署副本：跑 `tools/sync_deploy_check.py <该目录>` 复核，"
+          "再按「铺文件 → 重启服务端 → 确认 report」四步重铺")
 else:
     print("      只有一份本包副本")
 ck("J3 custom_nodes 无「同包第二份副本」（副本会静默覆盖节点定义）",
@@ -1231,7 +1254,8 @@ for _nm, _st in (("input", _decl_in), ("节点数", _decl_nd), ("项数", _decl_
 #      常量两侧覆盖法：本机跑验到 (8,116) 与 (7,103)，CI 跑验到 (7,103)；两者合起来覆盖全部两项。
 #   ⚠️ 只扫 `_v3_docs`（4 个声明文件）：`exp/`、`LOCAL-*.md`、tests 注释里的是**历史数字**，
 #      它们本来就该保持旧值（改它们反而抹掉历史），不纳入。
-_V3_LEGIT_PAIRS = [(11, 163)]           # (节点数, input 数) —— 2026-10-07 收敛成一个
+_V3_LEGIT_PAIRS = [(11, 164)]           # (节点数, input 数) —— 2026-10-07 收敛成一个
+#   2026-10-17：163→164（Finite Run 补 `settle_frames`：画布能设的裁量，脚本/API 侧也要能设）
 #   2026-10-16：10→11 / 153→163（新增 Seed from Video 10 参；见 §H3h 下行注释）
 #   2026-10-15：8→10 / 129→153（新增 Join AV 4 参 + Finite Run 20 参；见 §H3h 下行注释）
 #   2026-10-12：124 → 127（「潜空间分块放大」加 3 个空间分块参数）。

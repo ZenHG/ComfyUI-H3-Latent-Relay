@@ -11,8 +11,9 @@
 # ============================================================================
 # 第 37 组：无头连跑 Finite Run（0.6.36）—— 展开图结构 / 链接 / 校验（零 GPU）
 #
-# 锁三件事：① 图结构（每段 10 节点、链接端点逐一正确 —— 接错槽 = 静默坏片）；
-# ② 逐段参数（段号/词块/种子/run_id）逐位一致；③ 建图期校验（烧卡前 raise）。
+# 锁四件事：① 图结构（每段 10 节点、链接端点逐一正确 —— 接错槽 = 静默坏片）；
+# ② 逐段参数（段号/词块/种子/run_id）逐位一致；③ 建图期校验（烧卡前 raise）；
+# ④ 沉降档随段下传（画布能设的裁量，脚本/API 侧也必须能设 —— 铁律一）。
 # 真实出片正确性（缝观感/音画同步/内存）不在本组范围 —— 需 GPU + 人眼。
 # ============================================================================
 
@@ -171,14 +172,14 @@ _FR = NODES.H3RelayFiniteRun
 check("37.38 FiniteRun 标了 V3_EXPAND（V3 外壳据此开 enable_expand）",
       getattr(_FR, "V3_EXPAND", False) is True)
 _it = _FR.INPUT_TYPES()
-check("37.39 输入槽 20 个（16 必填 + 4 可选）",
-      len(_it["required"]) == 16 and len(_it["optional"]) == 4,
+check("37.39 输入槽 21 个（16 必填 + 5 可选）",
+      len(_it["required"]) == 16 and len(_it["optional"]) == 5,
       "必填 %d / 可选 %d" % (len(_it["required"]), len(_it["optional"])))
 check("37.40 四路输出（末段 latent / 画面 / 音频 / 报告）",
       _FR.RETURN_TYPES == ("LATENT", "IMAGE", "AUDIO", "STRING")
       and _FR.RETURN_NAMES == ("last_latent", "images", "audio", "report"))
 check("37.41 链接型输入全在 optional（必填链接会堵掉纯文生成/不换词/不用声锚）",
-      list(_it["optional"]) == ["image", "prompts", "voice_anchor", "note"]
+      list(_it["optional"]) == ["image", "prompts", "voice_anchor", "note", "settle_frames"]
       and all(t in ("IMAGE", "LATENT") for t in
               (_it["optional"]["image"][0], _it["optional"]["voice_anchor"][0])))
 
@@ -255,6 +256,45 @@ check("37.61 报错首行点出节点名与关键入参",
       _e60.splitlines()[0][:70])
 check("37.62 报错全文里带上人话原因（不许 splitlines 截断）",
       "块词" in _e60, _e60.splitlines()[1][:60])
+
+# ---------------------------------------------------------------------------
+print("[7] 沉降档 settle_frames 随段下传（画布能设、脚本/API 也必须能设 —— 铁律一）")
+# ---------------------------------------------------------------------------
+#   背景：0.6.38 GPU 验收发现「换镜续接」唯一的旋钮 `settle_frames` 只在画布链上能设，
+#   Finite Run 的展开图里压根没写它 ⇒ 脚本侧拿不到（正是铁律一禁止的"两条路不一样"）。
+#   它是**裁量**（Trim AV 自己的入参）不是后处理 ⇒ 必须随段下传。
+_sd = {n["inputs"].get("settle_frames") for nid, n in _g3.items() if nid.endswith("_trim")}
+check("37.63 不传 settle_frames ⇒ 每段 TrimAV 都是 0（默认 = 只裁钉住区，老图逐位不变）",
+      _sd == {0}, str(_sd))
+_gm1, _om1, _rm1 = _build(2, settle_frames=-1)
+_sdm1 = {n["inputs"].get("settle_frames") for nid, n in _gm1.items() if nid.endswith("_trim")}
+check("37.64 settle_frames=-1（换镜自动）⇒ 每段 TrimAV 都带 -1", _sdm1 == {-1}, str(_sdm1))
+_gn7, _on7, _rn7 = _build(2, settle_frames=7)
+_sdn7 = {n["inputs"].get("settle_frames") for nid, n in _gn7.items() if nid.endswith("_trim")}
+check("37.65 settle_frames=N（固定多裁）⇒ 每段 TrimAV 都带同一个 N", _sdn7 == {7}, str(_sdn7))
+check("37.66 沉降档写进 report（不读源码也能自证生效）",
+      "settle_frames=-1" in _rm1 and "settle_frames=0" in _r3,
+      next((l for l in _rm1.splitlines() if "settle" in l), "（report 里没有）"))
+expect_raise("37.67 settle_frames=-2 ⇒ raise（小于 -1 没有语义）",
+             lambda: _build(1, settle_frames=-2), "settle_frames")
+expect_raise("37.68 settle_frames 超过 SETTLE_CAP ⇒ raise（对齐 TrimAV 的 widget 上界）",
+             lambda: _build(1, settle_frames=CORE.SETTLE_CAP + 1), "settle_frames")
+expect_raise("37.69 settle_frames 非整数 ⇒ raise",
+             lambda: _build(1, settle_frames="自动"), "settle_frames")
+#   入队前那道门**不**接 settle_frames：它由宿主 schema 的 min/max 把关（-1..SETTLE_CAP），
+#   这里多判一次只会造出第二套边界 ⇒ 只要它不因为不认识这个参数而崩就行。
+check("37.70 入队前校验不认识 settle_frames 也不崩（边界归宿主 schema 管）",
+      _G.validate_finite_inputs_early(prompt="词", prompts="", segments=2, run_id="r") is None)
+_raw71 = _FR().run(model="M", clip="C", vae="V", audio_vae="AV", sampler="S", sigmas="G",
+                   prompt="词", prompts="", segments=2, seed=0, run_id="r", width=608,
+                   height=1056, length=124, context_frames=22, mask_mode="hard",
+                   pin_audio=True, settle_frames=-1)
+check("37.71 节点层 run() 把 settle_frames 传进展开图（每段 TrimAV 都是 -1）",
+      {n["inputs"].get("settle_frames") for nid, n in _raw71["expand"].items()
+       if nid.endswith("_trim")} == {-1})
+check("37.72 TrimAV 的 widget 上界就是 relay_core.SETTLE_CAP（两处同一个数，不许各写一份）",
+      NODES.H3RelayTrimAV.INPUT_TYPES()["optional"]["settle_frames"][1]["max"] == CORE.SETTLE_CAP,
+      str(NODES.H3RelayTrimAV.INPUT_TYPES()["optional"]["settle_frames"][1]["max"]))
 
 # ---------------------------------------------------------------------------
 print("[9] 桥自取 context（0.6.37 免接线）：接了就照接、没接就自取、取不到就 raise")

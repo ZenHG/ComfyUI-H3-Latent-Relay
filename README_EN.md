@@ -151,7 +151,7 @@ The log should show `钉住 22 帧` / `裁首 N 帧 = 钉住 22 + 沉降 0` / `�
 | `stage_index` | `0` | `1`, `2`… | **LatentLoad + bridge + LatentSave** (all three must match; Chain syncs them) |
 | `run_id` | one film name, e.g. `myfilm` | **character-identical to segment 1** | all **six** nodes that carry it (Chain / bridge / LatentSave / LatentLoad / TrimAV / AudioSeam) — on the canvas, editing one field syncs the rest of its group |
 | `context_frames` | `22` | `22` (leave alone) | bridge (pin window; only 5/22/39/56/73/90/107/124) |
-| `settle_frames` | — (segment 1 trims nothing) | keep `0` | TrimAV (`0` = no settle trimming, which is the recommendation) |
+| `settle_frames` | — (segment 1 trims nothing) | keep `0` for a fixed camera; **`-1` when the shot changes** | TrimAV (`0` = no settle trimming, the recommendation for a fixed camera; `-1` = auto-moves a cut's hard switch back to the segment boundary) |
 | `seam_ghost` / `settle_sharpen` | — | keep `0` | TrimAV / Post |
 
 | The three most common ways to break it | Fix |
@@ -451,7 +451,7 @@ are actually loaded — the minimal distribution set in `dist/` is exactly those
 | 3 | 🔴 **Audio must come from TrimAV (or AudioSeam) output**; never wire `VAEDecodeAudio` directly into the save node (~0.9 s per seam, accumulating) |
 | 4 | **`context_frames` only accepts `5+17k`** (5/22/39/56/73/90/107/124) and must be smaller than the segment length; out-of-range values **raise instead of snapping** |
 | 5 | **Production `mask_mode` = `hard`** (zero re-draw in the pinned region); `taper` **does not pin** and is a control arm only |
-| 6 | **Keep `settle_frames = 0`**: measured, "trimming the settle" is what causes jumps at the seam. To cure blur use Post's `settle_sharpen` / `settle_auto` (picture-domain fix, no timeline change ⇒ cannot introduce a jump) |
+| 6 | **Keep `settle_frames = 0` for a fixed camera**: measured, "trimming the settle" is what causes jumps at the seam. To cure blur use Post's `settle_sharpen` / `settle_auto` (picture-domain fix, no timeline change ⇒ cannot introduce a jump). **Exception: `-1` when the camera/shot changes** — it measures the switch point and trims past it, which is what moves the hard cut back to the segment boundary (real GPU, 0.6.38: all three cases pass, picture and audio switch together) |
 | 7 | **`patch_seconds ≤ 1.2`** (AudioSeam): enough to cover the 10 ms decoder silence at the head; use `0` when dialogue sits at the very head. **Shortening the patch is the primary defence for dialogue; the guard is only a backstop** |
 | 8 | **🔍 Upscale once per chain**: this pack's upscale node and the one **built into** third-party progressive samplers (SelfLift etc.) are the same operation — enabling both upscales the same latent twice |
 | 9 | **`chunks=1` is the only path consistent with upstream whole-segment inference**: `chunks>1` **changes the picture** (3D volumetric attention is cut); raise it only under OOM and **re-check the seam** |

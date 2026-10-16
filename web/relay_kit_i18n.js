@@ -268,7 +268,7 @@ export const H3_TIPS = {
         en: "【Wire it】Take the audio decoder output (VAEDecodeAudio).\nPicture and sound are trimmed by the same frame count so they stay in sync.\nWithout it the audio ends up longer than the picture.",
     },
     "H3RelayTrimAV.settle_frames": {
-        en: "【Keep it at 0】Whether to also trim the settle zone: after the pinned region the model replays a few frames of the previous segment.\nThose frames are soft, but trimming them is what causes the seam jump (measured: 0 frames trimmed jumps 0.020, 16 frames 0.055).\n· 0 (default) = trim the pinned region only, no jump; -1 = measure it; N = always trim N extra frames.",
+        en: "【Pick by camera】Keep 0 for a fixed camera; use -1 when the shot changes.\nThe settle zone is the few frames after the pinned region where the model replays the previous segment.\n· Fixed camera: trimming them causes the seam jump (0 frames → 0.020, 16 → 0.055) ⇒ keep 0;\n· Shot change: -1 moves the hard cut back to the segment boundary.",
     },
     "H3RelayTrimAV.seam_ghost": {
         en: "【Keep it at 0】Replaces the first trimmed frame with a blend of the previous last frame and this first frame.\nMeasured, it only splits one jump into two without reducing the displacement ⇒ two stutters, more visible than a single jump.\n· 0 (default) = off; above 0 = on (only when you know it helps).",
@@ -699,6 +699,9 @@ export const H3_TIPS = {
     },
     "H3RelayFiniteRun.note": {
         en: "【Note】A note written into every segment's sidecar, e.g. \"22-frame window v2\".",
+    },
+    "H3RelayFiniteRun.settle_frames": {
+        en: "【Pick by camera】Keep 0 for a fixed camera; use -1 when the shot changes.\nThe settle zone is the few frames after the pinned region where the model replays the previous segment.\n· Fixed camera: trimming them causes the seam jump (0 frames → 0.020, 16 → 0.055) ⇒ keep 0;\n· Shot change: -1 moves the hard cut back to the segment boundary.",
     },
     "H3RelaySeedFromVideo.video": {
         en: "【Wiring】The picture frames of an existing video (LoadVideo's image output).\nIt becomes segment 1 of the chain; later segments continue outward as usual.",
