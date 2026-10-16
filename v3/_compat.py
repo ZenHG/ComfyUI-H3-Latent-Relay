@@ -198,3 +198,21 @@ def call_v1(class_name, kwargs):
     """
     cls = getattr(V1, class_name)
     return node_output(getattr(cls(), cls.FUNCTION)(**kwargs))
+
+
+def call_v1_validate(class_name, kwargs):
+    """V1 的 ``VALIDATE_INPUTS`` → V3 的 ``validate_inputs``。
+
+    ⚠️ 两边必须都有：默认出口是 **V3**，而 V3 宿主找的是**小写** ``validate_inputs``
+    （``execution.py:897`` 对 ``_ComfyNodeInternal`` 子类走这条）⇒ 只在 V1 类上写
+    ``VALIDATE_INPUTS``，默认出口下**等于没校验**（静默失效，不报错）。
+
+    返回值原样透传：``True`` = 没意见；字符串 = 报错文案（宿主当作
+    ``custom_validation_failed`` 的 details 显示，并以 HTTP 400 拒收）。
+    ``None`` 会让宿主当成校验失败 —— 所以这里把 ``None`` 归一成 ``True``。
+    """
+    fn = getattr(getattr(V1, class_name), "VALIDATE_INPUTS", None)
+    if fn is None:
+        return True
+    r = fn(**kwargs)
+    return True if r is None else r

@@ -83,52 +83,64 @@ def resolve_finite_prompts(prompt: Any, prompts: Any, segments: Any) -> Tuple[Li
     return [_p] * n, "每段词：全部用同一份 `prompt`（`prompts` 留空 = 不换词）"
 
 
-def validate_finite_params(*, segments: Any, seed: Any, run_id: Any,
-                           context_frames: Any, mask_mode: Any, length: Any,
-                           width: Any = None, height: Any = None) -> None:
-    """建图前的硬校验（纯值检查，不碰盘、不碰 GPU）。"""
-    try:
-        n = int(segments)
-    except (TypeError, ValueError):
-        raise FinitePlanError("segments 必须是整数（得到 %r）。" % (segments,)) from None
-    if n < 1:
-        raise FinitePlanError("segments 至少为 1（得到 %d）。" % n)
-    if n > FINITE_MAX_SEGMENTS:
-        raise FinitePlanError(
-            "segments 上限 %d（一次展开的临时节点数护栏；得到 %d）。\n"
-            "    要跑更长：分几批提交，每批一个 run_id 段区间。"
-            % (FINITE_MAX_SEGMENTS, n))
-    try:
-        s = int(seed)
-    except (TypeError, ValueError):
-        raise FinitePlanError("seed 必须是整数（得到 %r）。" % (seed,)) from None
-    if s < 0:
-        raise FinitePlanError("seed 不能为负（得到 %d）。" % s)
-    rid = "" if run_id is None else str(run_id)
-    if n > 1 and not rid.strip():
-        # 第 2 段起 LatentLoad 要读上一段落盘文件 ⇒ 没 run_id 必然炸。建图期说清，
-        # 别让第 1 段的卡烧完了才报。
-        raise FinitePlanError(
-            "多段连跑必须填 `run_id`（落盘与读上一段都靠它定位文件）。\n"
-            "    只跑 1 段可以留空；≥2 段请填一个这部片子独有的名字（换新片子必须换新名字）。")
-    try:
-        cf = int(context_frames)
-    except (TypeError, ValueError):
-        raise FinitePlanError("context_frames 必须是整数（得到 %r）。" % (context_frames,)) from None
-    if cf not in GUIDE_RUNS:
-        raise FinitePlanError(
-            "context_frames 只认合法窗 %s（得到 %d）。\n"
-            "    窗必须落在 H3 的 17k+5 帧栅格上，否则桥切出来的尾段会整体错位。"
-            % (" / ".join(str(g) for g in GUIDE_RUNS), cf))
-    if mask_mode not in MASK_MODES:
+def validate_finite_params(*, segments: Any = None, seed: Any = None, run_id: Any = None,
+                           context_frames: Any = None, mask_mode: Any = None,
+                           length: Any = None, width: Any = None, height: Any = None) -> None:
+    """建图前的硬校验（纯值检查，不碰盘、不碰 GPU）。
+
+    任一项为 ``None`` ⇒ **跳过该项**。执行期调用方总会给全；而入队前那次
+    （``validate_finite_inputs_early``）看不到链接型入参 —— 宿主 ``get_input_data``
+    在没有 execution_list 时对链接走 mark_missing，拿到手就是 ``None``。
+    看不到就不猜（猜错会挡住合法图），留给执行期那道门。
+    """
+    n = None
+    if segments is not None:
+        try:
+            n = int(segments)
+        except (TypeError, ValueError):
+            raise FinitePlanError("segments 必须是整数（得到 %r）。" % (segments,)) from None
+        if n < 1:
+            raise FinitePlanError("segments 至少为 1（得到 %d）。" % n)
+        if n > FINITE_MAX_SEGMENTS:
+            raise FinitePlanError(
+                "segments 上限 %d（一次展开的临时节点数护栏；得到 %d）。\n"
+                "    要跑更长：分几批提交，每批一个 run_id 段区间。"
+                % (FINITE_MAX_SEGMENTS, n))
+    if seed is not None:
+        try:
+            s = int(seed)
+        except (TypeError, ValueError):
+            raise FinitePlanError("seed 必须是整数（得到 %r）。" % (seed,)) from None
+        if s < 0:
+            raise FinitePlanError("seed 不能为负（得到 %d）。" % s)
+    if n is not None and run_id is not None:
+        rid = str(run_id)
+        if n > 1 and not rid.strip():
+            # 第 2 段起 LatentLoad 要读上一段落盘文件 ⇒ 没 run_id 必然炸。建图期说清，
+            # 别让第 1 段的卡烧完了才报。
+            raise FinitePlanError(
+                "多段连跑必须填 `run_id`（落盘与读上一段都靠它定位文件）。\n"
+                "    只跑 1 段可以留空；≥2 段请填一个这部片子独有的名字（换新片子必须换新名字）。")
+    if context_frames is not None:
+        try:
+            cf = int(context_frames)
+        except (TypeError, ValueError):
+            raise FinitePlanError("context_frames 必须是整数（得到 %r）。" % (context_frames,)) from None
+        if cf not in GUIDE_RUNS:
+            raise FinitePlanError(
+                "context_frames 只认合法窗 %s（得到 %d）。\n"
+                "    窗必须落在 H3 的 17k+5 帧栅格上，否则桥切出来的尾段会整体错位。"
+                % (" / ".join(str(g) for g in GUIDE_RUNS), cf))
+    if mask_mode is not None and mask_mode not in MASK_MODES:
         raise FinitePlanError(
             "mask_mode 只认 %s（得到 %r）。" % (" / ".join(MASK_MODES), mask_mode))
-    try:
-        L = int(length)
-    except (TypeError, ValueError):
-        raise FinitePlanError("length 必须是整数（得到 %r）。" % (length,)) from None
-    if L < 5:
-        raise FinitePlanError("length 至少 5 帧（H3 最短片段；得到 %d）。" % L)
+    if length is not None:
+        try:
+            L = int(length)
+        except (TypeError, ValueError):
+            raise FinitePlanError("length 必须是整数（得到 %r）。" % (length,)) from None
+        if L < 5:
+            raise FinitePlanError("length 至少 5 帧（H3 最短片段；得到 %d）。" % L)
     for name, val in (("width", width), ("height", height)):
         if val is None:
             continue
@@ -139,6 +151,30 @@ def validate_finite_params(*, segments: Any, seed: Any, run_id: Any,
         if v < 32 or v % 16 != 0:
             raise FinitePlanError(
                 "%s 必须是 ≥32 且 16 的倍数（H3 画布栅格；得到 %d）。" % (name, v))
+
+
+def validate_finite_inputs_early(**kw: Any) -> Optional[str]:
+    """``VALIDATE_INPUTS`` 用：入队前的**尽力**校验。返回错误文案，或 ``None`` = 没意见。
+
+    为什么要有它：执行期才报错的话，上游的加载器节点已经先跑过了（冷启动时那是
+    一次完整的模型上卡）。把「看得到字面值」的错误提到 ``/prompt`` 校验阶段，
+    宿主直接以 HTTP 400 拒收 —— 一行卡都不烧。
+
+    只许**更松**，不许更紧：任何一项拿到 ``None``（= 链接型入参，校验期不可知）
+    就跳过对应检查；交叉项（词块数 vs 段数）必须两项都看得到才判。
+    误拦一张合法图，比晚拦一次坏图严重得多。
+    """
+    try:
+        validate_finite_params(
+            segments=kw.get("segments"), seed=kw.get("seed"), run_id=kw.get("run_id"),
+            context_frames=kw.get("context_frames"), mask_mode=kw.get("mask_mode"),
+            length=kw.get("length"), width=kw.get("width"), height=kw.get("height"))
+        prompt, prompts, n = kw.get("prompt"), kw.get("prompts"), kw.get("segments")
+        if prompt is not None and prompts is not None and n is not None:
+            resolve_finite_prompts(prompt, prompts, n)
+    except FinitePlanError as exc:
+        return str(exc)
+    return None
 
 
 # ---------------------------------------------------------------------------

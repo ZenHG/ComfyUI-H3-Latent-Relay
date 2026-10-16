@@ -93,11 +93,25 @@ class H3RelayJoinAV(_Shell):
 class H3RelayFiniteRun(_Shell):
     """⏩ H3 Relay · Finite Run：一次提交跑完 N 段（服务端展开，无头可用）。
 
-    ⚠️ 与另外 9 个外壳的差别：本节点 **V3_EXPAND=True** ⇒ ``define_schema`` 自动带上
-    ``enable_expand=True``（``v1_inputs`` 之类照旧从 V1 类生成，不手写）。
+    ⚠️ 与另外 9 个外壳的差别：
+      · **V3_EXPAND=True** ⇒ ``define_schema`` 自动带上 ``enable_expand=True``；
+      · **多一个** ``validate_inputs``（V3 宿主找的是小写名）—— 少了它，默认出口下
+        入队前校验就**静默失效**，错误会拖到执行期（那时上游加载器已经跑过）。
     """
 
     _V1_NAME = "H3RelayFiniteRun"
+
+    @classmethod
+    def validate_inputs(cls, prompt=None, prompts=None, segments=None, run_id=None):
+        """转调 V1 的 ``VALIDATE_INPUTS``（唯一真相源）。
+
+        ⚠️ 参数表必须与 ``nodes.py`` 那个**同名同集**：宿主用 ``getfullargspec`` 读名字，
+        被声明的入参会跳过宿主自带的 min/max/枚举检查 ⇒ 多写一个名字 = 放松那一项。
+        （机检：``tests/test_v3_schema.py`` 逐字比对两套签名。）
+        """
+        return C.call_v1_validate(cls._V1_NAME, {
+            "prompt": prompt, "prompts": prompts,
+            "segments": segments, "run_id": run_id})
 
 
 # 注册顺序与 V1 的 NODE_CLASS_MAPPINGS 一致（非必需，便于人工双向核对）

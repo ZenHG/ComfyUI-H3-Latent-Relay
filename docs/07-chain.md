@@ -143,9 +143,16 @@ MiniMaxH3ImageToVideo → H3RelayLatentLoad → H3RelayCopyBridge → RandomNois
 | `context_frames` / `mask_mode` / `pin_audio` | 与拷贝桥同义（每段都用这套） |
 | `voice_anchor`（可选） | 声锚；各段共用同一个。不接 = 用上一段自己的音频尾 |
 
-**建图期校验**（任何 GPU 工作开始之前）：词块数 < 段数 / 多段但 `run_id` 空 /
-`context_frames` 不在 5+17k 栅格 / `mask_mode` 非法 / `length` < 5 / 画面非 16 倍数 /
-`seed` 为负 —— 全部当场报错，不烧卡。
+**两道校验门**（都要，分工由「入队前看不看得到」决定）：
+
+| 门 | 拦什么 | 代价 |
+|---|---|---|
+| ① **入队前**（`VALIDATE_INPUTS`） | 词块数 < 段数 / 多段但 `run_id` 空 / `segments` 越界 | `/prompt` 直接 **HTTP 400**，**一个节点都不执行**（模型不上卡） |
+| ② **建图期**（`build_finite_graph` 内部） | `context_frames` 不在 5+17k 栅格 / `mask_mode` 非法 / `length` < 5 / 画面非 16 倍数 / `seed` 为负 | 采样之前报；上游加载器可能已跑过 |
+
+为什么分两道：宿主在**入队前**把链接型入参一律当 `None`（`get_input_data` 无
+execution_list 时走 mark_missing）⇒ 凡是可能由链接喂进来的值，入队前**看不到就不许猜**
+（猜错会挡住合法图）。所以 ① 只会更松，绝不会误拦。
 
 **与 Chain 的分工**（两条路并存，不互斥）：
 
@@ -158,9 +165,14 @@ MiniMaxH3ImageToVideo → H3RelayLatentLoad → H3RelayCopyBridge → RandomNois
 | 拼成片 | 文件域流拷贝（🧩 按钮 / `auto_concat`） | 张量域 JoinAV（一次编码出成片） |
 | 断点续跑 | ✅ `_progress.json` + ⏭ 续跑 | ❌ |
 
+**已验证到哪**（2026-10-16 真机，纯 `/prompt` API 路径）：2 段 @448×768 / 每段 39 帧 / 窗 22 / 8 步
+⇒ **成功**，成片 **56 帧**（= 39 + 39 − 22，与桥的裁帧账逐帧对上），音轨 2.334 s ≈ 画面 2.333 s，
+两段边车 + 谱系头齐；t2v（不接首帧图）1 段也成功；入队前拒收那次**一个节点都没执行**。
+改码后重跑同一张图：成片 **md5 逐字节相同**（固定种子 ⇒ 行为零变化）。
+
 **已知边界**（诚实声明）：合并输出是**一条驻留内存的张量**（段数多 / 分辨率高时先小分辨率试两段）；
-不含 AudioSeam / Post；本轮**零 GPU 验证**（机检只证图结构与复用件行为不变）⇒ 缝观感 /
-音画同步 / 内存峰值待真机验收。示例：`examples/finite_run_ui.json`。
+不含 AudioSeam / Post。⚠️ **仍未验**：人眼缝观感、≥3 段、长片内存峰值、与画布 Chain 的逐帧对照。
+示例：`examples/finite_run_ui.json`。
 
 ---
 

@@ -152,9 +152,18 @@ MiniMaxH3ImageToVideo → H3RelayLatentLoad → H3RelayCopyBridge → RandomNois
 | `context_frames` / `mask_mode` / `pin_audio` | same meaning as on the copy bridge (one set for every segment) |
 | `voice_anchor` (optional) | voice anchor; one shared anchor. Unwired = the previous segment's own audio tail |
 
-**Build-time validation** (before any GPU work): fewer prompt blocks than segments / multi-segment
-with an empty `run_id` / `context_frames` off the 5+17k grid / illegal `mask_mode` / `length` < 5 /
-picture not a multiple of 16 / negative `seed` — all error out immediately, nothing burns.
+**Two validation gates** (both are needed; the split is decided by what is visible *before*
+queueing):
+
+| Gate | Catches | Cost |
+|---|---|---|
+| ① **Before queueing** (`VALIDATE_INPUTS`) | fewer prompt blocks than segments / multi-segment with an empty `run_id` / `segments` out of range | `/prompt` returns **HTTP 400** and **not a single node runs** (no model is paged onto the GPU) |
+| ② **Build time** (inside `build_finite_graph`) | `context_frames` off the 5+17k grid / illegal `mask_mode` / `length` < 5 / picture not a multiple of 16 / negative `seed` | errors before sampling; upstream loaders may already have run |
+
+Why two: before queueing the host treats every **linked** input as `None` (`get_input_data`
+takes the mark_missing path without an execution_list) ⇒ for any value a link could supply,
+that gate **refuses to guess** (a wrong guess would block a legitimate graph). So gate ① is
+always the *looser* one — it never falsely rejects.
 
 **Division of labour with Chain** (both paths coexist, not mutually exclusive):
 
@@ -167,11 +176,17 @@ picture not a multiple of 16 / negative `seed` — all error out immediately, no
 | concat into a film | file-domain stream copy (🧩 button / `auto_concat`) | tensor-domain JoinAV (one encode) |
 | resume from progress | ✅ `_progress.json` + ⏭ resume | ❌ |
 
+**What has been verified** (real GPU, 2026-10-16, through the plain `/prompt` API): two segments at
+448×768 / 39 frames each / window 22 / 8 steps ⇒ **success**, the film is **56 frames**
+(= 39 + 39 − 22, matching the bridge's trim arithmetic frame by frame), audio 2.334 s ≈ picture
+2.333 s, both sidecars with lineage headers; single-segment t2v (no first-frame image) also
+succeeded; the before-queueing rejection ran **not a single node**. Re-running the same graph after
+the code change produced a film with **the identical md5** (fixed seed ⇒ zero behaviour change).
+
 **Known boundaries (stated honestly)**: the merged output is **one in-memory tensor** (for many
 segments / high resolution, try two segments at low resolution first); AudioSeam and Post are not
-included; this round is **zero-GPU verified** (machine checks only prove graph structure and that
-the reused nodes behave unchanged) ⇒ seam look, A/V sync and memory peak await real acceptance.
-Example: `examples/finite_run_ui.json`.
+included. ⚠️ **Still unverified**: seam look by human eye, ≥3 segments, memory peak on long films,
+frame-by-frame comparison against canvas Chain. Example: `examples/finite_run_ui.json`.
 
 ---
 

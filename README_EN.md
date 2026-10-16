@@ -492,7 +492,7 @@ The Chinese documents are the source of truth; `README_EN.md` and the English `d
 | [`docs/05-troubleshooting.md`](docs/05-troubleshooting.md) · 🇬🇧 [English](docs/05-troubleshooting_EN.md) | **complete troubleshooting table** · **FAQ** · workflow-file self-check · API submission |
 | [`docs/06-continuity-scripting.md`](docs/06-continuity-scripting.md) · 🇬🇧 [English](docs/06-continuity-scripting_EN.md) | prompt-side discipline: head padding · dialogue-safe timing · last-frame anchor chaining |
 | [`docs/07-chain.md`](docs/07-chain.md) · 🇬🇧 [English](docs/07-chain_EN.md) | the Chain auto-run controller (prompts / concat / resume) |
-| [`docs/08-testing.md`](docs/08-testing.md) · 🇬🇧 [English](docs/08-testing_EN.md) | offline self-test: 37 assertion groups (674 assertions) · tool inventory |
+| [`docs/08-testing.md`](docs/08-testing.md) · 🇬🇧 [English](docs/08-testing_EN.md) | offline self-test: 37 assertion groups (687 assertions) · tool inventory |
 | [`docs/09-metrics.md`](docs/09-metrics.md) · 🇬🇧 [English](docs/09-metrics_EN.md) | reference ranges for observables (DTW residual / appearance drift) · self-calibration |
 | 🇨🇳 [`docs/10-audio-seam-and-concat.md`](docs/10-audio-seam-and-concat.md) | **audio seam & multi-segment concatenation** — Chinese only for now: seam conventions and tuning guide · **dialogue protection** · criterion limits · track levels · sidecars · **script usage without the canvas** |
 | [`RELEASE-NOTES.md`](RELEASE-NOTES.md) | **user-facing release notes** (bilingual, one section per version) · **read this before upgrading** |

@@ -211,3 +211,47 @@ check("37.48 不接 image/voice_anchor 直接调 run() 不炸（可选链接槽�
       isinstance(_raw48, dict) and "expand" in _raw48, type(_raw48).__name__)
 check("37.49 报告里带「每段词」来源行（哪来的词写进 report，不猜）",
       "每段词" in _raw48["result"][3], _raw48["result"][3].splitlines()[-1][:60])
+
+# —— 37.50~ 入队前校验（2026-10-16 GPU 验收发现「校验太晚」后补）——
+#   宿主契约（execution.py:1095-1112）：VALIDATE_INPUTS 在**入队前**调用；链接型入参
+#   此时一律是 None（get_input_data 无 execution_list 时走 mark_missing）⇒ 只能判
+#   「看得到字面值」的项，看不到的**不许猜** —— 猜错会挡住合法图，比晚拦一次坏图严重。
+_ve = _G.validate_finite_inputs_early
+check("37.50 全部字面值可见且合法 ⇒ 没意见（None）",
+      _ve(prompt="词", prompts="", segments=2, run_id="r") is None)
+check("37.51 词块数不够 ⇒ 入队前就报（文案与执行期同一句）",
+      "块词" in (_ve(prompt="", prompts="只有一块", segments=2, run_id="r") or ""),
+      str(_ve(prompt="", prompts="只有一块", segments=2, run_id="r"))[:50])
+check("37.52 多段没 run_id ⇒ 入队前就报",
+      "run_id" in (_ve(prompt="词", prompts="", segments=2, run_id="") or ""))
+check("37.53 segments 超上限 ⇒ 入队前就报",
+      "上限" in (_ve(prompt="词", prompts="", segments=99, run_id="r") or ""))
+# 关键护栏：看不到的项（链接型入参 = None）一律放行，绝不误拦
+check("37.54 prompts 是链接（None）⇒ 不判交叉项，放行",
+      _ve(prompt="词", prompts=None, segments=2, run_id="r") is None)
+check("37.55 segments 是链接（None）⇒ 段数相关项全放行",
+      _ve(prompt="", prompts="", segments=None, run_id="") is None)
+check("37.56 两项都是字面空串（确实没词）⇒ 报「没有词可跑」",
+      "没有词可跑" in (_ve(prompt="", prompts="", segments=2, run_id="r") or ""))
+_G.validate_finite_params(segments=2, run_id="r")      # 只给两项也不该炸
+check("37.57 validate_finite_params 容忍未知项（None 跳过）", True)
+expect_raise("37.58 但给了非法值照样 raise（跳过 ≠ 放水）",
+             lambda: _G.validate_finite_params(segments=0), "至少为 1")
+expect_raise("37.59 单给 context_frames 也照样判（不因为别项缺席而放水）",
+             lambda: _G.validate_finite_params(context_frames=23), "合法窗")
+# 37.60~ 报错文案：没有 stage_index 入参的节点**不该**带上「段号」话术
+#   （否则错误开头读起来像第二个问题）。Trim AV / Post / Upscale / Finite Run 都属此类。
+try:
+    _FR().run(model="M", clip="C", vae="V", audio_vae="AV", sampler="S", sigmas="G",
+              prompt="", prompts="只有一块", segments=2, seed=0, run_id="r", width=608,
+              height=1056, length=124, context_frames=22, mask_mode="hard", pin_audio=True)
+    _e60 = ""
+except RuntimeError as _exc60:
+    _e60 = str(_exc60)
+check("37.60 无 stage_index 的节点报错不带「段号」话术（读起来不像第二个问题）",
+      bool(_e60) and "段号" not in _e60.splitlines()[0], _e60.splitlines()[0][:70])
+check("37.61 报错首行点出节点名与关键入参",
+      "H3RelayFiniteRun" in _e60.splitlines()[0] and "run_id=r" in _e60.splitlines()[0],
+      _e60.splitlines()[0][:70])
+check("37.62 报错全文里带上人话原因（不许 splitlines 截断）",
+      "块词" in _e60, _e60.splitlines()[1][:60])

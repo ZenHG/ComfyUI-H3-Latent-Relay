@@ -344,7 +344,8 @@ from .prompt import (PROMPT_SEPARATOR_MIN_DASHES, _lines_like_js, pick_prompt_bl
 
 # —— finite：服务端「一次提交跑完 N 段」的展开图构建（纯函数，节点侧只做编排）。
 from .finite import (FINITE_MAX_SEGMENTS, FinitePlanError, build_finite_graph,
-                     finite_graph_node_count, resolve_finite_prompts, validate_finite_params)
+                     finite_graph_node_count, resolve_finite_prompts,
+                     validate_finite_inputs_early, validate_finite_params)
 
 __all__ = [
     "ADVISE_WITHIN",
@@ -621,6 +622,7 @@ __all__ = [
     "UPSCALE_TILE_FEATHER_DEFAULT",
     "UPSCALE_TILE_OVERLAP_DEFAULT",
     "_core_window_1d",
+    "validate_finite_inputs_early",
     "validate_finite_params",
     "video_from_latent",
     "video_tail_from_latent",
@@ -946,6 +948,7 @@ _OWNER = {
     "build_finite_graph": "finite",
     "finite_graph_node_count": "finite",
     "resolve_finite_prompts": "finite",
+    "validate_finite_inputs_early": "finite",
     "validate_finite_params": "finite",
 }
 

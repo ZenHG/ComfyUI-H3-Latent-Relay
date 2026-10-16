@@ -107,10 +107,16 @@ def _node_errors(*keys):
     def deco(fn):
         # 装饰时把默认值算好（运行期不再反射），免得每段执行都付一次参数表成本
         try:
-            _defaults = {k: p.default for k, p in inspect.signature(fn).parameters.items()
+            _params = inspect.signature(fn).parameters
+            _defaults = {k: p.default for k, p in _params.items()
                          if k != "self" and p.default is not inspect.Parameter.empty}
+            # 本节点结构上有没有「段号」概念。没有就不提 —— 否则错误开头会多出一句
+            # 「段号未提供」，读起来像第二个错误（Post / Trim AV / Upscale / Finite Run
+            # 都没有 stage_index 入参，却都会带上这句）。
+            _has_stage = "stage_index" in _params
         except (TypeError, ValueError):
             _defaults = {}
+            _has_stage = False
 
         @functools.wraps(fn)
         def wrapper(self, *args, **kwargs):
@@ -123,15 +129,17 @@ def _node_errors(*keys):
                     bound = inspect.signature(fn).bind_partial(self, *args, **kwargs).arguments
                 except Exception:
                     bound = {}
-                # 段号：能取到就写「第 N 段」，取不到就明说没有 —— **不伪造**（本仓纪律）
-                stage = bound.get("stage_index")
-                if stage is None:
-                    seg = "段号未提供（本节点无 stage_index 入参）"
-                else:
-                    try:
-                        seg = "第 %d 段" % int(stage)
-                    except (TypeError, ValueError):
-                        seg = "段号=%r" % (stage,)
+                # 段号：本节点有这个概念才写（拿到了写「第 N 段」，没拿到明说没拿到 —— 不伪造）
+                seg = ""
+                if _has_stage:
+                    stage = bound.get("stage_index")
+                    if stage is None:
+                        seg = "：段号未提供"
+                    else:
+                        try:
+                            seg = "：第 %d 段" % int(stage)
+                        except (TypeError, ValueError):
+                            seg = "：段号=%r" % (stage,)
                 vals = []
                 for k in keys:
                     if k in bound:
@@ -140,7 +148,7 @@ def _node_errors(*keys):
                         vals.append("%s=%s" % (k, _errctx_val(_defaults[k])))
                 # 约束 A：str(exc) **全文**嵌进去（不许 splitlines()[0]）
                 raise RuntimeError(
-                    "【%s】处理失败：%s；入参 %s。\n"
+                    "【%s】处理失败%s；入参 %s。\n"
                     "原因：%s\n"
                     "（原始异常：%s）"
                     % (type(self).__name__, seg, "、".join(vals) or "无",
@@ -2589,6 +2597,26 @@ class H3RelayFiniteRun:
         "每段链：ImageToVideo → LatentLoad → CopyBridge → 采样 → LatentSave → 解码 → TrimAV → JoinAV。"
     )
 
+    # ⚠️ 参数表**必须**与 v3/nodes_v3.py 里 H3RelayFiniteRun.validate_inputs 同名同集
+    #    （宿主用 getfullargspec 读名字；两套不一致 ⇒ 一侧静默失效）。机检：
+    #    tests/test_v3_schema.py 的签名逐字比对。
+    #    这里只列 4 项，且每一项都**不放松**宿主自带校验：
+    #      · prompt / prompts / run_id 是 STRING —— 宿主对 STRING 没有值检查；
+    #      · segments 宿主是 min 1 / max 64，本包校验逐字相同（FINITE_MAX_SEGMENTS）。
+    #    被声明的入参会**跳过**宿主自带的 min/max/枚举检查 ⇒ width / height / length /
+    #    context_frames / mask_mode 一律不在此列（它们的边界继续由宿主把关）。
+    @classmethod
+    def VALIDATE_INPUTS(cls, prompt=None, prompts=None, segments=None, run_id=None):
+        """入队前的尽力校验：能在 ``/prompt`` 阶段说清的错误不拖到执行期。
+
+        执行期才报错的话，上游加载器已经先跑过了（冷启动 = 一次完整的模型上卡）。
+        可见性规则见 ``CORE.validate_finite_inputs_early``：看不到的（链接型入参在
+        校验期是 ``None``）一律不猜。
+        """
+        msg = CORE.validate_finite_inputs_early(
+            prompt=prompt, prompts=prompts, segments=segments, run_id=run_id)
+        return True if msg is None else msg
+
     @_node_errors("run_id", "segments")
     def run(self, model, clip, vae, audio_vae, sampler, sigmas, image=None,
             prompt="", prompts="", segments=2, seed=0, run_id="relay",
@@ -2597,7 +2625,8 @@ class H3RelayFiniteRun:
         """建图并返回展开图（本方法**不采样**，只编排；执行由宿主对展开图进行）。
 
         可选链接槽（image / voice_anchor）不接线时宿主整个键都不传 ⇒ 必须给默认值。
-        硬校验在 ``build_finite_graph`` 里（唯一的门），烧卡前说清。
+        校验两道门：入队前 ``VALIDATE_INPUTS``（只判字面值可见的项）+ 本函数里
+        ``build_finite_graph``（唯一真相源）。哪一项归哪道门见 docs/07-chain.md。
         """
         blocks, pnote = CORE.resolve_finite_prompts(prompt, prompts, segments)
         # 前缀由宿主在执行本节点前设好（以本节点 id 为根）⇒ 唯一
