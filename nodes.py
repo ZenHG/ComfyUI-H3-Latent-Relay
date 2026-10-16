@@ -4,8 +4,8 @@
 # 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 """H3 Latent Relay · 节点层
 
-十个节点（0.6.8 起八件 + 0.6.36 新增两件）：续接七件套 + 一个画质域潜空间放大适配器
-+ 图内拼条 + 无头连跑，覆盖"用作者的续接方式"所需的全部接线：
+十一个节点（0.6.8 起八件 + 0.6.36 两件 + 0.6.37 一件）：续接七件套 + 一个画质域潜空间放大适配器
++ 图内拼条 + 无头连跑 + 视频起段，覆盖"用作者的续接方式"所需的全部接线：
 
   🔗 H3 Relay · Latent Save   —— 把本段的 AV latent 落盘，供下一段读
   🔗 H3 Relay · Latent Load   —— 读回上一段的 AV latent
@@ -2642,6 +2642,199 @@ class H3RelayFiniteRun:
         return {"expand": graph, "result": tuple(outputs)}
 
 
+class H3RelaySeedFromVideo:
+    """🔗 H3 Relay · Seed from Video —— 把**一段已有视频**变成第 0 段（种子段）。
+
+    为什么需要它：本仓整条链都从「上一段的 latent 边车」出发 ⇒ 第 1 段必须由本仓生成。
+    本节点让**任意来源的视频**（实拍 / 别人的产物 / 早先跑的成片）成为链的起点，
+    之后每一段都走本仓的近完美接缝（逐位钉住 + 裁重叠）。
+
+    它替你挡三处坑（不挡就是静默出坏片，或桥当场 raise）：
+
+      ① **时序栅格**：H3 只认 5+17k 帧（⇔ ``latent_t ≡ 2 (mod 5)``）。源帧数不在档上时，
+         桥切尾段的起点会落在周期位置非 0 处 ⇒ 相位错位 ⇒ 桥直接拒。
+         本节点按**帧尾**裁到最近的档（裁掉几帧写进报告与边车头，不悄悄丢）。
+      ② **画布栅格**：宽高必须是 16 的倍数，且**要与后续各段一致**（桥跨分辨率直接拒）。
+         尺寸不符时按你填的 width/height **居中裁切 + lanczos 重采样**（不拉伸变形）。
+      ③ **音画等长**（铁律二）：源音轨与视频帧数对不上时，按视频长度**裁尾 / 补零**；
+         源没有音轨则给**静音种子**（缝处的音频由本段生成接管），
+         而不是让桥去报「context_latent 没有音频流」。
+
+    产出：``output/relay_kit/<run_id>/stage_NNNNN.safetensors``（含谱系头 + ``source=video``）。
+    后续接法与本仓任何一段**完全相同**：Latent Load / Copy Bridge / Trim AV 原样用。
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "video": ("IMAGE", {
+                    "tooltip": "【接法】已有视频的画面帧（LoadVideo 的画面输出）。\n它会变成链的第 1 段，之后各段照常往外接。",
+                }),
+                "video_vae": ("VAE", {
+                    "tooltip": "【接什么】H3 的视频 VAE（与出词节点用的同一个）。",
+                }),
+                "audio_vae": ("VAE", {
+                    "tooltip": "【接什么】H3 的音频 VAE（与音频解码用的同一个）。",
+                }),
+                "width": ("INT", {
+                    "default": 1344, "min": 64, "max": 8192, "step": 16,
+                    "tooltip": "【画面宽】16 的倍数，与后续各段填同一个数。\n（与出词节点也要一致，不一致桥会拒。）\n源视频尺寸不同时按这里居中裁切重采样。",
+                }),
+                "height": ("INT", {
+                    "default": 768, "min": 64, "max": 8192, "step": 16,
+                    "tooltip": "【画面高】16 的倍数，与后续各段填同一个数。\n（与出词节点也要一致，不一致桥会拒。）\n源视频尺寸不同时按这里居中裁切重采样。",
+                }),
+                "run_id": ("STRING", {
+                    "default": "relay",
+                    "tooltip": "【填什么】片名。\n源视频会存成这一段的边车，必须与后面各段一字不差。",
+                }),
+                "stage_index": ("INT", {
+                    "default": 0, "min": 0, "max": 9999, "step": 1,
+                    "tooltip": "【填什么】源视频是第几段。\n通常填 0（当第 1 段），后面从 1 起往外接。",
+                }),
+            },
+            "optional": {
+                # ⚠ 新 widget 必须追加在**最后一个**：widgets_values 按位置对应。
+                "audio": ("AUDIO", {
+                    "tooltip": "【接法】源视频的音轨（LoadVideo 的音频输出）。\n不接 = 静音种子，缝处音频由本段生成接管。",
+                }),
+                "snap": (["trim", "error"], {
+                    "default": "trim",
+                    "tooltip": "【帧数不在档上怎么办】trim = 按帧尾裁到最近的合法档（默认）。\nerror = 直接报错，由你自己先裁好再喂进来。",
+                }),
+                "note": ("STRING", {
+                    "default": "",
+                    "tooltip": "【可留空】写进边车头的备注，比如「源片 v2」。",
+                }),
+            },
+        }
+
+    RETURN_TYPES = ("LATENT", "STRING")
+    RETURN_NAMES = ("latent", "report")
+    FUNCTION = "seed"
+    CATEGORY = CATEGORY
+    OUTPUT_NODE = True          # 落盘本身就是它的产物，没有下游也必须执行
+    DESCRIPTION = ("把一段已有视频编码成第 0 段（种子段）的 AV latent 边车，"
+                   "之后各段即可用本插件的续接链往外接。"
+                   "自动处理时序栅格（5+17k）、画布栅格（16 的倍数）与音画等长。")
+
+    @_node_errors("run_id", "stage_index")
+    def seed(self, video, video_vae, audio_vae, width, height, run_id, stage_index,
+             audio=None, snap="trim", note=""):
+        import comfy.audio
+        import comfy.nested_tensor
+        import comfy.utils
+        import torch
+
+        if video is None or not torch.is_tensor(video) or video.dim() != 4:
+            raise ValueError("video 需要是画面帧张量 [帧, 高, 宽, 通道]（接 LoadVideo 的画面输出）。")
+        n_in = int(video.shape[0])
+
+        # —— ① 时序栅格：按帧尾裁到粗档 5+17k（细档会让桥的尾段相位错位）
+        n = CORE.frame_grid_floor(n_in)
+        if n < 5:
+            raise ValueError(
+                "源视频只有 %d 帧，短于 H3 的最短片段 5 帧 ⇒ 没有合法档可裁。\n"
+                "    至少要 5 帧（5+17k：5 / 22 / 39 / 56 …）。" % n_in)
+        dropped = n_in - n
+        if dropped and str(snap) == "error":
+            raise ValueError(
+                "源视频 %d 帧不在 H3 的 5+17k 档上（最近的合法档 = %d 帧，要裁掉 %d 帧）。\n"
+                "    把 snap 改成 trim 让它自己裁，或先自己裁好再喂进来。" % (n_in, n, dropped))
+        frames = video[:n] if dropped else video
+
+        # —— ② 画布栅格：16 的倍数（latent 用 //16 开方），且必须与后续各段一致
+        w, h = int(width), int(height)
+        for _nm, _v in (("width", w), ("height", h)):
+            if _v < 32 or _v % 16 != 0:
+                raise ValueError(
+                    "%s 必须是 ≥32 且 16 的倍数（H3 画布栅格；得到 %d）。" % (_nm, _v))
+        # 只取前 3 通道（与核心「VAE Encode」同款）：带 alpha 的 4 通道直接喂进去会喂错通道
+        frames = frames[..., :3]
+        resized = (int(frames.shape[1]) != h) or (int(frames.shape[2]) != w)
+        if resized:
+            px = comfy.utils.common_upscale(frames.movedim(-1, 1), w, h, "lanczos", "center")
+            frames = px.movedim(1, -1)
+
+        # —— ③ 编码：视频流 + 音频流（音频按视频长度对齐，缺则静音种子）
+        v = video_vae.encode(frames)
+        if not torch.is_tensor(v) or v.dim() != 5 or int(v.shape[1]) != 24:
+            # ⚠️ 先拼成字符串再插：`% (tuple(...))` 在值是 tuple 时会被当成**多个**参数，
+            #    与单个 %r 不匹配 ⇒ 抛 TypeError，把真正的错因盖掉（本行就是这么被抓出来的）。
+            _got = "%r" % (tuple(v.shape) if torch.is_tensor(v) else type(v),)
+            raise ValueError(
+                "video_vae 编出来的不是 H3 视频 latent"
+                "（期望 [B,24,T,H/16,W/16]，得到 %s）。\n"
+                "    接错 VAE 了？请接 H3 的视频 VAE。" % _got)
+        lt = int(v.shape[2])
+        fc_check = CORE.pixel_frames(lt)
+        if fc_check != n:
+            raise ValueError(
+                "栅格对不上：源视频 %d 帧编出 %d 步 latent，而 H3 的时序网格说这该是 %d 帧。\n"
+                "    ⇒ 这个视频 VAE 的时序压缩与 H3 不一致，不能继续"
+                "（继续会得到帧位错开的片子）。" % (n, lt, fc_check))
+        at = CORE.audio_steps(n)
+        a_note = "静音种子（源没有音轨）"
+        if audio is None:
+            a = torch.zeros([1, 32, 2, at], dtype=v.dtype, device=v.device)
+        else:
+            wf = audio.get("waveform") if isinstance(audio, dict) else None
+            sr = int(audio.get("sample_rate") or 0) if isinstance(audio, dict) else 0
+            if wf is None:
+                raise ValueError("audio 需要是波形字典 {'waveform': [B,C,L], 'sample_rate': int}。")
+            if not sr:
+                raise ValueError(
+                    "audio 里没有 sample_rate（收到 %r）⇒ 无法确定要不要重采样，不猜。" % (sr,))
+            vae_sr = int(getattr(audio_vae, "audio_sample_rate", 32000))
+            if sr != vae_sr:
+                wf = comfy.audio.resample(wf, sr, vae_sr)
+            a = audio_vae.encode(wf[:1].movedim(1, -1))
+            if not torch.is_tensor(a) or a.dim() != 4 or int(a.shape[1]) != 32:
+                _gota = "%r" % (tuple(a.shape) if torch.is_tensor(a) else type(a),)
+                raise ValueError(
+                    "audio_vae 编出来的不是 H3 音频 latent"
+                    "（期望 [B,32,2,T]，得到 %s）。\n"
+                    "    接错 VAE 了？请接 H3 的音频 VAE。" % _gota)
+            got = int(a.shape[-1])
+            if got > at:
+                a = a[..., :at]
+                a_note = "源音轨 %d 步 → 按视频长度裁到尾 %d 步（@%d Hz）" % (got, at, vae_sr)
+            elif got < at:
+                a = torch.nn.functional.pad(a, (0, at - got))
+                a_note = "源音轨 %d 步 → 补零到尾 %d 步（@%d Hz）" % (got, at, vae_sr)
+            else:
+                a_note = "源音轨 %d 步，长度本来就对（@%d Hz）" % (got, vae_sr)
+        # 两条流必须同 dtype/同设备：NestedTensor 只存列表、**不校验**，
+        # 混着进去会在采样器里才炸（且报错指向不明）。音频流很小，搬一次可以忽略。
+        a = a.to(dtype=v.dtype, device=v.device)
+
+        latent = {"samples": comfy.nested_tensor.NestedTensor((v, a))}
+
+        # —— ④ 落盘 + 谱系（`source=video` 让事后看得出这一段不是本仓生成的）
+        path = _stage_path(run_id, stage_index)
+        lineage = _stage_lineage(run_id, stage_index)
+        # 种子段的来源是**一段视频**，不是链里的上一段 ⇒ 父段记空串（沿用「段号−1」会是假谱系）
+        lineage["parent_stage"] = ""
+        lineage.update({"source": "video", "source_frames": n_in, "frames": n,
+                        "dropped_frames": dropped, "canvas": [w, h], "latent_steps": lt})
+        CORE.save_av_latent(latent, path, note=note, lineage=lineage)
+        lines = [
+            "[H3 Relay] 已把源视频写成第 %d 段（种子）→ %s" % (int(stage_index), path),
+            "  帧：源 %d → 用 %d%s ｜ 画布 %dx%d%s"
+            % (n_in, n, ("（按帧尾裁掉 %d 帧）" % dropped) if dropped else "（本来就在档上）",
+               w, h, "（已居中裁切重采样）" if resized else "（尺寸本来就对）"),
+            "  latent：视频 %s 步（覆盖 %d 帧）｜ 音频 %d 步"
+            % (lt, fc_check, at),
+            "  音频：%s" % a_note,
+            "  头：run=%s 父段=无（来源是视频）pack=%s source=video"
+            % (lineage["run_id"], lineage["pack"]),
+        ]
+        report = "\n".join(lines)
+        print(report, flush=True)
+        return (latent, report)
+
+
 NODE_CLASS_MAPPINGS = {
     "H3RelayLatentSave": H3RelayLatentSave,
     "H3RelayLatentLoad": H3RelayLatentLoad,
@@ -2653,6 +2846,7 @@ NODE_CLASS_MAPPINGS = {
     "H3RelayLatentUpscale": H3RelayLatentUpscale,
     "H3RelayJoinAV": H3RelayJoinAV,
     "H3RelayFiniteRun": H3RelayFiniteRun,
+    "H3RelaySeedFromVideo": H3RelaySeedFromVideo,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -2666,4 +2860,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "H3RelayLatentUpscale": "🔍 H3 Relay · Latent Upscale",
     "H3RelayJoinAV": "🧩 H3 Relay · Join AV",
     "H3RelayFiniteRun": "⏩ H3 Relay · Finite Run",
+    "H3RelaySeedFromVideo": "🔗 H3 Relay · Seed from Video",
 }

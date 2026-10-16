@@ -28,6 +28,8 @@ AV 打包 latent 适配器）：**未装那个包时本包照常加载**，只�
     🔍 H3 Relay · Latent Upscale    H3RelayLatentUpscale  画质域：拆 AV 打包 latent → 逐块调学习式 3D 放大器（**零去噪、时间维不动**）→ 回包保留原音频；块数自选、分块==整段
     🧩 H3 Relay · Join AV    H3RelayJoinAV      张量域拼条：本段裁后画面/音频接到累计后面（规格不符直接报错，不静默拉伸）
     ⏩ H3 Relay · Finite Run    H3RelayFiniteRun  服务端展开：**一次提交跑完 N 段**（无头可用，脚本/API 与画布同一套节点）
+    🔗 H3 Relay · Seed from Video    H3RelaySeedFromVideo  把**一段已有视频**变成第 1 段（种子段），之后各段照常往外接
+                            （自动挡三处坑：时序栅格 5+17k、画布栅格 16 的倍数、音画等长）
 
 后端路由（不是节点；由 Chain 的按钮触发）：
     POST /h3relay/concat    把已跑完的 N 段拼成一条成片（画面流拷贝无损 + 音频逐段对齐 + 断言）
@@ -63,7 +65,7 @@ _CONCAT_LOCK = asyncio.Lock()
 #     `elif hasattr(module,"comfy_entrypoint"): ...`
 #   （ComfyUI/nodes.py:2295-2337）—— V1 分支命中即 return ⇒ 同时导出两者时 **V3 永不生效**。
 #   所以 V3 模式下把 NODE_CLASS_MAPPINGS **显式设为 None**（宿主的判据含 "is not None"）。
-# 默认 **v3**（2026-09-24 切换）：V3 出口已过 91 项逐字段机检（10 节点 / 153 个 input
+# 默认 **v3**（2026-09-24 切换）：V3 出口已过 98 项逐字段机检（11 节点 / 163 个 input
 # 的顺序·取值·组合项全序与 V1 一致）＋ 2 段真实链验证（362/362 帧守恒 · 流拷贝无损 ·
 # PCM 边车被拼接路由取到）。
 # ⚠️ 回退到 V1：设 H3RELAY_NODE_API=v1 后重启 —— 两条出口的代码都还在，只是默认换了。

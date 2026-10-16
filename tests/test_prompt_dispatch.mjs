@@ -313,13 +313,17 @@ function tableTypes(src, varName) {
         fileURLToPath(new URL("../web/relay_kit_chain.js", import.meta.url)), "utf-8");
     const declared = classesDeclaringWidget(pySrc, "stage_index");
     const inTable = tableTypes(chainSrc, "STAGE_TYPES");
+    // 2026-10-16：不变式扩到第三个集合 —— 段号**固定**的那一类（视频起段）单列，
+    //   不随连跑推进（推进会把源视频反复编码、覆盖已生成段的边车）。
+    const inStatic = tableTypes(chainSrc, "STAGE_STATIC");
+    const union = [].concat(inTable || [], inStatic || []);
     const expect = declared.filter((c) => c !== CHAIN_SELF);
-    const missing = expect.filter((c) => !(inTable || []).includes(c));
-    const extra = (inTable || []).filter((c) => !expect.includes(c));
-    check(`8.21 STAGE_TYPES ↔ nodes.py 双向对账（nodes.py 声明 ${declared.length} 处，去掉 Chain 自己应有 ${expect.length} 类，表里 ${inTable === null ? "读不到" : inTable.length} 类）`,
-        declared.length > 0 && inTable !== null && missing.length === 0 && extra.length === 0,
-        inTable === null
-            ? "读不到 `const STAGE_TYPES = [ … ];`（改名了？改了就要同步本闸）"
+    const missing = expect.filter((c) => !union.includes(c));
+    const extra = union.filter((c) => !expect.includes(c));
+    check(`8.21 STAGE_TYPES+STAGE_STATIC ↔ nodes.py 双向对账（nodes.py 声明 ${declared.length} 处，去掉 Chain 自己应有 ${expect.length} 类，表里 ${union.length} 类）`,
+        declared.length > 0 && inTable !== null && inStatic !== null && missing.length === 0 && extra.length === 0,
+        inTable === null || inStatic === null
+            ? "读不到 `const STAGE_TYPES/STAGE_STATIC = [ … ];`（改名了？改了就要同步本闸）"
             : `nodes.py 有而表里没有：${missing.join("/") || "无"} ｜ 表里有而 nodes.py 没有：${extra.join("/") || "无"}`);
 }
 

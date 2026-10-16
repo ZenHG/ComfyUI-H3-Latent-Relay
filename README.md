@@ -29,7 +29,7 @@ anchor 与采样 latent 不同源（会漂）、只能锚第 0 帧。本包直�
 | 层 | 节点 | 说明 |
 |---|---|---|
 | **必备 3** | Latent 存 · 拷贝桥（复合桥）· 裁重叠 | 少一个就不叫续接 |
-| **可选 5** | 后处理 Post · 音频缝 · 连跑 Chain · Latent Upscale · Finite Run | 各自独立、**默认全关 = 逐位直通**（Finite Run 是连跑的服务端版） |
+| **可选 6** | 后处理 Post · 音频缝 · 连跑 Chain · Latent Upscale · Finite Run · Seed from Video | 各自独立、**默认全关 = 逐位直通**（Finite Run 是连跑的服务端版；Seed from Video 只在「从已有视频起段」时用） |
 | **手动接线才用 2** | Latent 读 · Join AV | 桥自己会从磁盘取源；Join AV 只在图内手拼几条时用 |
 
 | 节点 | 作用 |
@@ -44,6 +44,7 @@ anchor 与采样 latent 不同源（会漂）、只能锚第 0 帧。本包直�
 | 🔗 **H3 Relay · Chain** | 自动连跑控制器：自动推进段号并排队；0.6.7 起还能**换词**（`prompts` 按 `---` 分块）与**拼片**（🧩） |
 | 🧩 **H3 Relay · Join AV** | **张量域拼条**：本段裁后画面/音频接到累计后面出一条（规格不符直接报错，不静默拉伸） |
 | ⏩ **H3 Relay · Finite Run** | **服务端展开**：一次提交跑完 N 段（无需前端按钮；脚本/API 与画布走同一套节点）。每段链 = ImageToVideo → LatentLoad → CopyBridge → 采样 → LatentSave → 解码 → TrimAV → JoinAV |
+| 🔗 **H3 Relay · Seed from Video** | **入口**：把**一段已有视频**编码成第 1 段（种子段）的边车，之后各段照常往外接。自动挡三处坑：时序栅格（5+17k 帧）、画布栅格（16 的倍数）、音画等长（裁尾/补零/静音种子） |
 
 > **三个域别混挂**：时间轴 = `H3RelayTrimAV`（冻结）／画质域 = `H3RelayPost`／音频域 = `H3RelayAudioSeam`。
 >
@@ -81,7 +82,7 @@ git clone https://github.com/ZenHG/ComfyUI-H3-Latent-Relay.git
 包名不允许带 "ComfyUI"。
 
 **装完必须重启 ComfyUI 后端**（ComfyUI-Manager 点 *Restart*；没装就重启 Python 进程）——
-仅刷新浏览器不会加载新节点。节点列表里搜 `🔗 H3 Relay`（7 个）+ `🔍 H3 Relay · Latent Upscale` + `🧩 H3 Relay · Join AV` + `⏩ H3 Relay · Finite Run` 即为全部 10 个。
+仅刷新浏览器不会加载新节点。节点列表里搜 `🔗 H3 Relay`（8 个）+ `🔍 H3 Relay · Latent Upscale` + `🧩 H3 Relay · Join AV` + `⏩ H3 Relay · Finite Run` 即为全部 11 个。
 
 **可选：用 🔍 H3 Relay · Latent Upscale 才需要装**（不装不影响其他 7 个节点，用时会报一条写明仓库与权重地址的错）：
 

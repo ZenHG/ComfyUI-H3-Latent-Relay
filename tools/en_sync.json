@@ -17,7 +17,7 @@
           "en": "Core features",
           "mode": "condensed",
           "h_en": "0afdf15030545ac2",
-          "h_src": "72bcbe58de93830f",
+          "h_src": "5f99e270aecdb7ac",
           "seeded": "by-position"
         },
         {
@@ -33,7 +33,7 @@
           "en": "Install",
           "mode": "condensed",
           "h_en": "be0f1da177f355ab",
-          "h_src": "da524eba69cc7736",
+          "h_src": "9d7ec1b013ab7dad",
           "seeded": "by-position"
         },
         {
@@ -79,7 +79,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-16",
-      "src_sha": "e4e91bfdd88f4ff7"
+      "src_sha": "3452126a1617b026"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -432,7 +432,7 @@
           "zh": "单测（零 GPU、秒级）",
           "en": "Unit tests (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "108c4198b521cfd7",
+          "h_en": "a4efea45cbe5ab31",
           "h_src": "6afc54933571a0e1",
           "seeded": "by-position"
         },
@@ -448,16 +448,16 @@
           "zh": "V3 外壳与默认出口（零 GPU、秒级）",
           "en": "V3 shell and default exit (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "51f15e6a98400256",
-          "h_src": "371033bc673c66a4",
+          "h_en": "a279f1a7aa9252d9",
+          "h_src": "f0df487df9a14fe7",
           "seeded": "by-position"
         },
         {
           "zh": "tools/ 下的其他自检（完整清单见 [`tools/README.md`](../tools/README.md)）",
           "en": "Other self-checks under tools/ (full list in [`tools/README.md`](../tools/README.md))",
           "mode": "full",
-          "h_en": "86530d8be1b99626",
-          "h_src": "0f63081858ad5cd2",
+          "h_en": "dbe559661371fdac",
+          "h_src": "dfd8e541041bdf0b",
           "seeded": "by-position"
         },
         {
@@ -471,7 +471,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-16",
-      "src_sha": "23262dd8519ae50d"
+      "src_sha": "086c08b6ed7201b6"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",

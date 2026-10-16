@@ -641,6 +641,148 @@ check("C1.9 缝最小化·拒信：子段超过走向 ⇒ 外推拒信、退末�
       abs(float(_o_ov[0].mean()) - float(_o_ov_last[0].mean())) < 0.001,
       "多帧 %.4f vs 末帧 %.4f（应一致）" % (float(_o_ov[0].mean()), float(_o_ov_last[0].mean())))
 
+
+# ============================================================================
+# 视频起段（Seed from Video，0.6.37）—— 栅格 / 画布 / 音画对齐 / 谱系
+#   零 GPU、零模型：VAE 用桩（只回正确形状的张量），验的是**节点自己的编排与护栏**。
+# ============================================================================
+import importlib.util as _ilu
+import shutil as _shutil
+import tempfile as _tempfile
+import types as _types
+
+_pkg = _types.ModuleType("h3latentrelay")
+_pkg.__path__ = [_KIT_DIR]
+sys.modules.setdefault("h3latentrelay", _pkg)
+_spec = _ilu.spec_from_file_location("h3latentrelay.nodes", os.path.join(_KIT_DIR, "nodes.py"))
+NODES = _ilu.module_from_spec(_spec)
+sys.modules["h3latentrelay.nodes"] = NODES
+_spec.loader.exec_module(NODES)
+
+_SV = NODES.H3RelaySeedFromVideo
+_TMP = _tempfile.mkdtemp(prefix="h3seed_")
+_OLD_STAGE = NODES._stage_path
+NODES._stage_path = lambda rid, idx: os.path.join(_TMP, str(rid), "stage_%05d.safetensors" % int(idx))
+
+
+class _VidVAE:
+    """桩视频 VAE：把帧数翻成步数（用本包的网格表，保证与真实现同口径）。"""
+
+    def encode(self, px):
+        n = int(px.shape[0])
+        st = CORE.steps_for_frames(n)
+        assert st is not None, "桩 VAE 收到非网格帧数 %d（节点本应先裁到网格）" % n
+        return torch.zeros(1, 24, st, int(px.shape[1]) // 16, int(px.shape[2]) // 16)
+
+
+class _AudVAE:
+    audio_sample_rate = 32000
+
+    def encode(self, wav):
+        steps = max(1, int(round(int(wav.shape[1]) / 32000 * 40)))
+        return torch.zeros(1, 32, 2, steps)
+
+
+class _BadVAE:
+    def encode(self, x):
+        return torch.zeros(1, 8, 2)          # 维数/通道都不对
+
+
+def _vid(n, h=32, w=32, c=3):
+    return torch.zeros(n, h, w, c)
+
+
+def _aud(seconds):
+    return {"waveform": torch.zeros(1, 2, int(32000 * seconds)), "sample_rate": 32000}
+
+
+# G1 网格工具：粗档 5+17k，且不硬编码周期
+check("G1.1 frame_grid_floor 只给粗档 5+17k（4→0 / 21→5 / 23→22 / 125→124）",
+      [CORE.frame_grid_floor(x) for x in (4, 21, 23, 125)] == [0, 5, 22, 124],
+      str([CORE.frame_grid_floor(x) for x in (4, 21, 23, 125)]))
+check("G1.2 frame_grid_floor 的结果**一定**落在网格上（steps_for_frames 不为 None）",
+      all(CORE.steps_for_frames(CORE.frame_grid_floor(n)) is not None
+          for n in range(5, 400, 7)))
+check("G1.3 frame_grid_floor 不硬编码 17（= 前两项和 + k×全周期和）",
+      CORE.frame_grid_floor(300) == sum(CORE.FRAME_PER_TOKEN[:2])
+      + sum(CORE.FRAME_PER_TOKEN) * ((300 - sum(CORE.FRAME_PER_TOKEN[:2])) // sum(CORE.FRAME_PER_TOKEN)),
+      str(CORE.frame_grid_floor(300)))
+check("G1.4 audio_steps == round(n/24×40)（与宿主 temporal_shape 同口径）",
+      all(CORE.audio_steps(n) == round(n / CORE.FPS * CORE.AUDIO_HZ) for n in (5, 22, 39, 73, 124)),
+      str([CORE.audio_steps(n) for n in (5, 22, 39, 73, 124)]))
+
+# G2 正常路径：39 帧 / 尺寸本来就对 / 无音轨 ⇒ 静音种子
+_rep = _SV().seed(_vid(39, 768, 448), _VidVAE(), _AudVAE(), 448, 768, "seedok", 0)[1]
+_p = os.path.join(_TMP, "seedok", "stage_00000.safetensors")
+check("G2.1 边车已写出", os.path.isfile(_p), _p)
+_meta = CORE.read_av_latent_meta(_p)
+check("G2.2 头记了 source=video + 帧数 + 画布", _meta.get("source") == "video"
+      and _meta.get("frames") == 39 and _meta.get("source_frames") == 39
+      and _meta.get("canvas") == [448, 768] and _meta.get("dropped_frames") == 0,
+      str({k: _meta.get(k) for k in ("source", "frames", "canvas", "dropped_frames")}))
+check("G2.3 种子段**没有父段**（不许沿用段号−1 的假谱系）", _meta.get("parent_stage") == "",
+      repr(_meta.get("parent_stage")))
+_lat = CORE.load_av_latent(_p)["samples"]
+check("G2.4 读回：视频 [1,24,12,48,28] / 音频 [1,32,2,65]（39 帧的 12 步 + 65 音频步）",
+      tuple(_lat.tensors[0].shape) == (1, 24, 12, 48, 28)
+      and tuple(_lat.tensors[1].shape) == (1, 32, 2, 65),
+      "%s / %s" % (tuple(_lat.tensors[0].shape), tuple(_lat.tensors[1].shape)))
+check("G2.5 无音轨 ⇒ 静音种子，且报告照实说", "静音种子" in _rep, _rep.splitlines()[3][:60])
+
+# G3 栅格：48 帧按帧尾裁到 39（裁 9 帧写进头与报告）
+_SV().seed(_vid(48, 768, 448), _VidVAE(), _AudVAE(), 448, 768, "seedtrim", 0)
+_m3 = CORE.read_av_latent_meta(os.path.join(_TMP, "seedtrim", "stage_00000.safetensors"))
+check("G3.1 帧尾裁到粗档：48→39，裁掉 9 帧记进头",
+      _m3.get("frames") == 39 and _m3.get("source_frames") == 48 and _m3.get("dropped_frames") == 9,
+      str({k: _m3.get(k) for k in ("frames", "source_frames", "dropped_frames")}))
+expect_raise("G3.2 snap=error ⇒ 不裁、当场报错并给出合法档",
+             lambda: _SV().seed(_vid(48, 768, 448), _VidVAE(), _AudVAE(), 448, 768,
+                                "seederr", 0, snap="error"), "39")
+expect_raise("G3.3 少于 5 帧 ⇒ 报错（没有合法档可裁）",
+             lambda: _SV().seed(_vid(4), _VidVAE(), _AudVAE(), 448, 768, "seed4", 0), "5")
+
+# G4 画布：16 的倍数（与后续各段一致）
+expect_raise("G4.1 width 不是 16 的倍数 ⇒ 报错",
+             lambda: _SV().seed(_vid(39, 768, 448), _VidVAE(), _AudVAE(), 440, 768, "s1", 0), "16 的倍数")
+_pa = os.path.join(_TMP, "seedrs", "stage_00000.safetensors")
+_SV().seed(_vid(39, 32, 32), _VidVAE(), _AudVAE(), 448, 768, "seedrs", 0)
+_la = CORE.load_av_latent(_pa)["samples"]
+check("G4.3 源尺寸不符 ⇒ 居中裁切重采样到目标画布（latent 空间维跟着变）",
+      tuple(_la.tensors[0].shape) == (1, 24, 12, 48, 28),
+      str(tuple(_la.tensors[0].shape)))
+_SV().seed(_vid(39, 768, 448, c=4), _VidVAE(), _AudVAE(), 448, 768, "seedrgba", 0)
+check("G4.4 带 alpha 的 4 通道输入照样编（只取前 3 通道）",
+      os.path.isfile(os.path.join(_TMP, "seedrgba", "stage_00000.safetensors")))
+
+# G5 音画等长（铁律二）：音轨长则裁尾、短则补零，结果恒等于 audio_steps(帧数)
+_SV().seed(_vid(39), _VidVAE(), _AudVAE(), 448, 768, "seedal", 0, audio=_aud(5.0))
+_la2 = CORE.load_av_latent(os.path.join(_TMP, "seedal", "stage_00000.safetensors"))["samples"]
+check("G5.1 源音轨过长 ⇒ 裁到与视频等长（65 步）",
+      tuple(_la2.tensors[1].shape) == (1, 32, 2, 65), str(tuple(_la2.tensors[1].shape)))
+_SV().seed(_vid(39), _VidVAE(), _AudVAE(), 448, 768, "seedas", 0, audio=_aud(0.05))
+_la3 = CORE.load_av_latent(os.path.join(_TMP, "seedas", "stage_00000.safetensors"))["samples"]
+check("G5.2 源音轨过短 ⇒ 补零到等长（同样是 65 步）",
+      tuple(_la3.tensors[1].shape) == (1, 32, 2, 65), str(tuple(_la3.tensors[1].shape)))
+check("G5.3 两条流同 dtype/同设备（NestedTensor 不校验，混着进去会在采样器才炸）",
+      _la3.tensors[0].dtype == _la3.tensors[1].dtype
+      and _la3.tensors[0].device == _la3.tensors[1].device,
+      "%s/%s" % (_la3.tensors[0].dtype, _la3.tensors[1].dtype))
+expect_raise("G5.4 音轨缺 sample_rate ⇒ 报错（不许猜要不要重采样）",
+             lambda: _SV().seed(_vid(39), _VidVAE(), _AudVAE(), 448, 768, "seedsr", 0,
+                                audio={"waveform": torch.zeros(1, 2, 3200)}), "sample_rate")
+
+# G6 接错 VAE 要当场说清（不许静默出坏片）
+expect_raise("G6.1 视频 VAE 不是 H3 的（通道不对）⇒ 报错",
+             lambda: _SV().seed(_vid(39), _BadVAE(), _AudVAE(), 448, 768, "seedbv", 0), "[B,24,T")
+expect_raise("G6.2 音频 VAE 不是 H3 的（通道不对）⇒ 报错",
+             lambda: _SV().seed(_vid(39), _VidVAE(), _BadVAE(), 448, 768, "seedba", 0,
+                                audio=_aud(1.0)), "[B,32,2,T")
+expect_raise("G6.3 video 不是 4 维帧张量 ⇒ 报错",
+             lambda: _SV().seed(None, _VidVAE(), _AudVAE(), 448, 768, "seednv", 0), "画面帧张量")
+
+NODES._stage_path = _OLD_STAGE
+_shutil.rmtree(_TMP, ignore_errors=True)
+
 # ============================================================================
 print()
 print("=" * 78)

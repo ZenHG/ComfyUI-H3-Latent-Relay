@@ -73,6 +73,7 @@ export const H3_NODES = {
     H3RelayLatentUpscale: { zh: "🔍 H3 Relay · 潜空间分块放大", en: "🔍 H3 Relay · Latent Upscale" },
     H3RelayJoinAV: { zh: "🧩 H3 Relay · 图内拼条", en: "🧩 H3 Relay · Join AV" },
     H3RelayFiniteRun: { zh: "⏩ H3 Relay · 无头连跑", en: "⏩ H3 Relay · Finite Run" },
+    H3RelaySeedFromVideo: { zh: "🔗 H3 Relay · 视频起段", en: "🔗 H3 Relay · Seed from Video" },
 };
 
 // ---------------------------------------------------------------------------
@@ -126,6 +127,10 @@ export const H3_WIDGETS = {
     clip: { zh: "文本编码器", en: "clip" },
     vae: { zh: "视频 VAE", en: "video VAE" },
     audio_vae: { zh: "音频 VAE", en: "audio VAE" },
+    video: { zh: "源视频帧", en: "source frames" },
+    video_vae: { zh: "视频 VAE", en: "video VAE" },
+    video_vae: { zh: "视频 VAE", en: "video VAE" },
+    snap: { zh: "帧数不在档上", en: "off-grid frames" },
     sampler: { zh: "采样器", en: "sampler" },
     sigmas: { zh: "噪声表", en: "sigmas" },
     image: { zh: "首帧图", en: "first frame" },
@@ -695,6 +700,37 @@ export const H3_TIPS = {
     "H3RelayFiniteRun.note": {
         en: "【Note】A note written into every segment's sidecar, e.g. \"22-frame window v2\".",
     },
+    "H3RelaySeedFromVideo.video": {
+        en: "【Wiring】The picture frames of an existing video (LoadVideo's image output).\nIt becomes segment 1 of the chain; later segments continue outward as usual.",
+    },
+    "H3RelaySeedFromVideo.video_vae": {
+        en: "【What to wire】The H3 video VAE (the same one your prompt node uses).",
+    },
+    "H3RelaySeedFromVideo.audio_vae": {
+        en: "【What to wire】The H3 audio VAE (the same one your audio decode uses).",
+    },
+    "H3RelaySeedFromVideo.width": {
+        en: "【Picture width】A multiple of 16; use the same number as your later segments.\nIt must also match your prompt node, or the bridge refuses.\nIf the source video differs, it is centre-cropped and resampled to this.",
+    },
+    "H3RelaySeedFromVideo.height": {
+        en: "【Picture height】A multiple of 16; use the same number as your later segments.\nIt must also match your prompt node, or the bridge refuses.\nIf the source video differs, it is centre-cropped and resampled to this.",
+    },
+    "H3RelaySeedFromVideo.run_id": {
+        en: "【What to fill】The film name.\nThe source video is stored as this segment's sidecar; it must match the later segments exactly.",
+    },
+    "H3RelaySeedFromVideo.stage_index": {
+        en: "【What to fill】Which segment the source video is.\nUsually 0 (segment 1); later segments then continue from 1.",
+    },
+    "H3RelaySeedFromVideo.audio": {
+        en: "【Wiring】The source video's audio track (LoadVideo's audio output).\nLeave it unwired = a silent seed; the seam audio is taken over by the generated segment.",
+    },
+    "H3RelaySeedFromVideo.snap": {
+        en: "【When the frame count is off-grid】trim = cut the tail to the nearest legal step (default).\nerror = stop with an error so you can pre-trim the clip yourself.",
+    },
+    "H3RelaySeedFromVideo.note": {
+        en: "【Optional】A note written into the sidecar header, e.g. \"source v2\".",
+    },
+
 };
 
 // ---------------------------------------------------------------------------
@@ -722,6 +758,7 @@ export const H3_SLOTS = {
 //    `model_name` 刻意**不在**本表里（标签可译，值不可译）。
 // ---------------------------------------------------------------------------
 export const H3_COMBOS = {
+    snap: { trim: "按帧尾裁", error: "直接报错" },
     mask_mode: { hard: "硬边", taper: "渐缩", ramp: "斜坡", blend: "混合", window: "窗" },
     blend_shape: { smoothstep: "平滑阶跃", hann: "汉宁窗" },
     window_shape: { sine: "正弦", hann: "汉宁窗" },

@@ -841,6 +841,7 @@ RUN_ID_TYPES: Tuple[str, ...] = (
     "H3RelayTrimAV",
     "H3RelayAudioSeam",
     "H3RelayFiniteRun",
+    "H3RelaySeedFromVideo",
 )
 
 _RUN_ID_TYPE_SET = frozenset(RUN_ID_TYPES)

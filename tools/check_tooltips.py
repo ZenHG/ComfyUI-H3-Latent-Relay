@@ -55,7 +55,7 @@ I18N_JS = os.path.join(KIT, "web", "relay_kit_i18n.js")
 NODE_ORDER = [
     "H3RelayLatentSave", "H3RelayLatentLoad", "H3RelayCopyBridge", "H3RelayTrimAV",
     "H3RelayPost", "H3RelayAudioSeam", "H3RelayChain", "H3RelayLatentUpscale",
-    "H3RelayJoinAV", "H3RelayFiniteRun",
+    "H3RelayJoinAV", "H3RelayFiniteRun", "H3RelaySeedFromVideo",
 ]
 
 #: 长度上限（字符）。中文按"一眼看完"，英文按同样信息量的自然膨胀留 2 倍余量。
