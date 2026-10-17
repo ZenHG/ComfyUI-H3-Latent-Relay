@@ -112,7 +112,8 @@ def main() -> int:
               % (args.rev, args.rev))
         return 1
     print("\n[OK] 副本与 %s 完全一致。" % args.rev)
-    return 0
+    import deploy_live_check as _lc
+    return _lc.live_check(_lc._repo_version())
 
 
 if __name__ == "__main__":

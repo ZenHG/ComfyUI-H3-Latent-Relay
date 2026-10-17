@@ -1305,8 +1305,13 @@ class H3RelayChain:
                     "default": "", "multiline": True,
                     "tooltip": "【可选】每段各自的词。\n用单独一行 --- 把词分成几块：第 1 块给第 1 段，依次类推。留空 = 不换词。\n⚠ 词块数不够要跑的段数时不排队，并告诉你。也可以从别的节点连线进来。",
                 }),
+                # 🔴 2026-10-15：**折进 advanced 区**（`advanced: True`）。
+                #   这一格早已失效（0.6.15 起词由节点的 `prompt` 输出口给），但**槽位不能删** ——
+                #   `widgets_values` 按位存，删它会让后面所有格的取值整体前移（旧图静默错位）。
+                #   ⇒ 官方机制 `advanced` 正好：**留槽位、不占主界面**（与那 54 个 advanced 项同一待遇），
+                #   展开「advanced inputs」仍看得到，tooltip 说明它为什么还在。
                 "prompt_target": ("STRING", {
-                    "default": "",
+                    "advanced": True, "default": "",
                     "tooltip": "【已废弃】旧版「前端替你写词」那条路已删除，这一格不再起作用。\n现在词从这个节点的 prompt 输出口给。\n保留它只是不让旧工作流的槽位错位。",
                 }),
                 # 2026-10-14：默认 False → True。连跑的意义就是"出成片"，默认关等于让每个新用户
@@ -1518,7 +1523,7 @@ class H3RelayCopyBridge:
                 #（voice_anchor 恒为最后一个槽：widgets_values 按位对槽，见 0.6.1 的约定）
                 "audio_ref_seconds": ("FLOAT", {
                     "advanced": True, "default": 0.0, "min": 0.0, "max": 30.0, "step": 0.5,
-                    "tooltip": "【音频参考窗】0（默认）= 自动。\n从上一段尾部往前累计够 2 秒有声内容就停（上限 6 秒）。\n窗里可含多个说话人的音色，只占官方 3 个音频槽里的 1 个。\n⚠ 参考里就是上一段的台词，模型可能复述；接了声锚时本项不生效。",
+                    "tooltip": "【音频参考窗】0（默认）= 自动。\n从上一段尾部往前累计够 2 秒有声就停（上限 6 秒）。\n窗里可含多个说话人的音色；只占官方 3 个音频槽里的 1 个。\n标题上的 `refs n/3` = 本项额度：`⚠` 越界、`?` 读不到。\n⚠ 参考里就是上一段的台词，可能被复述；接了声锚时本项不生效。",
                 }),
                 # ⚠ 0.6.1 声锚 —— 追加在**最后**（守 widgets_values 按位对槽）
                 "voice_anchor": ("LATENT", {
@@ -1537,7 +1542,7 @@ class H3RelayCopyBridge:
                 #    现在做成**一个看得见的选择器**。`auto`（默认）= 只看文件 ⇒ 存量用户零行为变化。
                 "exp_anchor": (list(EXP_ANCHOR_MODES), {
                     "default": "auto",
-                    "tooltip": "【实验·默认 auto】两个实验的总开关。\n"
+                    "tooltip": "【实验·默认 auto】两个实验的总开关：按人累积音色 / 时不变历史锚。\n"
                                "· auto（默认）= 与旧版一致：看 run 目录的配置文件，有就开。\n"
                                "· off = 显式关（文件在也不开，报告会点名）。\n"
                                "· 其余 = 显式开；缺配置文件直接报错。\n"

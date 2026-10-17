@@ -8,16 +8,16 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "condensed",
-          "h_en": "d941307882463221",
-          "h_src": "80b6ee69917a6e3a",
+          "h_en": "31b887682ff0cb7a",
+          "h_src": "7089eca418bf6246",
           "seeded": "by-position"
         },
         {
           "zh": "核心功能",
           "en": "Core features",
           "mode": "condensed",
-          "h_en": "377878c6361a0085",
-          "h_src": "58e5846f8f69225c",
+          "h_en": "9c6450b80a61c859",
+          "h_src": "8d9424f2c0cfa724",
           "seeded": "by-position"
         },
         {
@@ -72,14 +72,14 @@
           "zh": "文档索引",
           "en": "Documentation index",
           "mode": "condensed",
-          "h_en": "f8f3a6d0b6376e5a",
-          "h_src": "9b9db4ea0693a7a3",
+          "h_en": "c5f42e90392f6aec",
+          "h_src": "ea81c0b4474e4035",
           "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-10-17",
-      "src_sha": "0bfea115b205b923"
+      "src_sha": "1e3918a69842407d"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -408,14 +408,14 @@
           "zh": "声锚（voice_anchor，0.6.19）：跨说话人续接时锁定音色",
           "en": "Voice anchor (voice_anchor, 0.6.19): lock timbre when continuing across speakers",
           "mode": "full",
-          "h_en": "649f783ffdfbd87c",
-          "h_src": "29984df3c30dbbe3",
+          "h_en": "33ca5a1ac75acc7b",
+          "h_src": "c421988947806cbb",
           "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-10-17",
-      "src_sha": "a0f6b960504fcfa9"
+      "src_sha": "7f37e90dde0a1f22"
     },
     "docs/08-testing.md": {
       "en": "docs/08-testing_EN.md",
@@ -440,8 +440,16 @@
           "zh": "前端纯函数的单测（node 跑、零依赖）",
           "en": "Unit tests for front-end pure functions (run by node, zero dependencies)",
           "mode": "full",
-          "h_en": "bf95359397b71fc5",
-          "h_src": "ac4544aa09506807",
+          "h_en": "3a798446a9e1e0de",
+          "h_src": "2d011a1c46b57476",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "🔴 改前端之后的必跑清单（2026-10-15 立，有实测依据）",
+          "en": "🔴 Checklist after changing the front-end (established 2026-10-15, from measurements)",
+          "mode": "full",
+          "h_en": "cd45a90347bc89dc",
+          "h_src": "55464ff2ac4a2e75",
           "seeded": "by-position"
         },
         {
@@ -471,7 +479,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-17",
-      "src_sha": "20ce33646c71c27f"
+      "src_sha": "ae0afbc6a4d0582c"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",

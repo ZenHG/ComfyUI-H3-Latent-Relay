@@ -21,8 +21,9 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
-    H3_NODES, H3_WIDGETS, H3_SLOTS, H3_TIPS, LANG_KEY, LANG_EVENT,
+    H3_NODES, H3_WIDGETS, H3_SLOTS, H3_TIPS, H3_BUTTONS, LANG_KEY, LANG_EVENT,
     normLang, defaultLang, comboLabel, isDefaultTitle, swapTitle, applyLang, ownNodes, tipFor, pickTip,
+    btnLabel,
 } from "../web/relay_kit_i18n.js";
 
 let pass = 0;
@@ -276,9 +277,85 @@ check("5.3 英文态回落显示原值（不留中文钩子）",
         `exact=${pickTip(fake, "NewNode", "foo").en} / fallback=${pickTip(fake, "OtherNode", "foo").en} / no-en=${pickTip(fake, "OtherNode", "bar")}`);
 }
 
-// ---- 10. 自引用：ci.yml / docs/08 的期望数 == 本文件实跑 ----
+// ---- 10. 按钮词表（0.6.34）：英文界面下 Chain 的 7 个按钮不许露中文 ----
 {
-    const EXPECTED_CHECKS = 33;                 // 含本行这条自检自己（pass 在本行执行时还没算上自己 ⇒ 比的是 pass+1）
+    // 10.1 🔴 真正的防漂判据：**代码里 addBtn 的标签** ↔ **词表键** 双向一致。
+    //      少一条 = 那个按钮在英文界面下露中文（静默）；多一条 = 死词条（改名后忘了删）。
+    const src = readFileSync(fileURLToPath(new URL("../web/relay_kit_chain.js", import.meta.url)), "utf-8");
+    const inCode = [...src.matchAll(/addBtn\("([^"]+)"/g)].map((m) => m[1]);
+    const keys = Object.keys(H3_BUTTONS);
+    const missing = inCode.filter((c) => !keys.includes(c));
+    const dead = keys.filter((k) => !inCode.includes(k));
+    check("10.1 词表键 == 代码里 `addBtn` 的标签（双向；缺 = 露中文，多 = 死词条）",
+        inCode.length > 0 && missing.length === 0 && dead.length === 0,
+        `代码 ${inCode.length} / 词表 ${keys.length} ｜ 缺 ${JSON.stringify(missing)} ｜ 死 ${JSON.stringify(dead)}`);
+
+    check("10.2 `btnLabel`：en 取词表、zh 原样、未知键 ⇒ null（调用方一个字节都别动）",
+        btnLabel(inCode[0], "en") === H3_BUTTONS[inCode[0]]
+        && btnLabel(inCode[0], "zh") === inCode[0]
+        && btnLabel(inCode[0], undefined) === inCode[0]     // 不传 = zh（normLang 的口径）
+        && btnLabel("不存在的按钮", "en") === null
+        && btnLabel("", "en") === null,
+        btnLabel(inCode[0], "en"));
+
+    // 10.3 🔴 铁律一：只改 `label`（渲染文本），**绝不改 `name`**（name = 序列化依据 ⇒ 改了就改图）。
+    const bz = mkNode("H3RelayChain", { widgets: [{ name: inCode[0] }] });
+    applyLang(bz, "en");
+    check("10.3 按钮：`label` 换成英文，**`name` 一字不动**（铁律一）",
+        bz.widgets[0].label === H3_BUTTONS[inCode[0]] && bz.widgets[0].name === inCode[0],
+        `label=${bz.widgets[0].label}`);
+
+    applyLang(bz, "zh");
+    check("10.4 切回中文 ⇒ `label` 恢复成 name 原样（不留英文残影）",
+        bz.widgets[0].label === inCode[0] && bz.widgets[0].name === inCode[0],
+        `label=${bz.widgets[0].label}`);
+}
+
+// ---- 10.5 标题**兜底**：打开工作流后 title 被写回，也必须换语言 ----
+// 🔴 2026-10-16 浏览器实测发现的真 bug：`app.loadGraphData()`（打开工作流）在
+//    `onNodeCreated` **之后**才把 JSON 里的 `title` 写回节点，而之后没有任何事件触发重刷
+//    ⇒ 英文用户「打开一个工作流」看到中文节点名（按钮英文、标题中文，同节点两套语言）。
+//    修法 = 帧级兜底里也纠正 title（`swapTitle` 幂等且只换默认前缀 ⇒ 不碰用户自定义标题）。
+{
+    // 10.5.1 swapTitle 的三种形态（这是兜底安全性的依据）
+    check("10.5.1 `swapTitle` 幂等且只换前缀：中文形态→英文、英文形态→原样、自定义→不碰",
+        swapTitle("🔗 H3 Relay · 连跑控制（说明）", "H3RelayChain", "en")
+            === "🔗 H3 Relay · Chain（说明）"
+        && swapTitle("🔗 H3 Relay · Chain（说明）", "H3RelayChain", "en")
+            === "🔗 H3 Relay · Chain（说明）"                       // 幂等
+        && swapTitle("我自己写的标题", "H3RelayChain", "en") === "我自己写的标题"
+        && swapTitle("🔗 H3 Relay · 连跑控制（说明）", "H3RelayChain", "zh")
+            === "🔗 H3 Relay · 连跑控制（说明）",
+        swapTitle("🔗 H3 Relay · 连跑控制（说明）", "H3RelayChain", "en"));
+
+    // 10.5.2 兜底语义本身：节点 title 处于「另一种语言形态」时必须被纠正
+    //     （用与 guardPass 同一表达式，别在两处各写一份判据）
+    const fixTitle = (title, type, L) => swapTitle(title, type, L);
+    check("10.5.2 兜底判据：处于中文形态的 title 在 en 下会被纠正（打开工作流的场景）",
+        fixTitle("🔗 H3 Relay · 连跑控制（词分发）", "H3RelayChain", "en")
+            === "🔗 H3 Relay · Chain（词分发）"
+        && fixTitle("🔗 H3 Relay · 读上段潜空间（stage-1）", "H3RelayLatentLoad", "en")
+            === "🔗 H3 Relay · Latent Load（stage-1）",
+        fixTitle("🔗 H3 Relay · 连跑控制（词分发）", "H3RelayChain", "en"));
+
+    // 10.5.3 反向：用户自定义标题在两种语言下都不许被碰（铁律三）
+    check("10.5.3 铁律三：用户自定义标题在 en/zh 下都原样返回",
+        fixTitle("我的桥", "H3RelayChain", "en") === "我的桥"
+        && fixTitle("我的桥", "H3RelayChain", "zh") === "我的桥"
+        && fixTitle("读上段终态latent(stage-1)", "H3RelayLatentLoad", "en")
+            === "读上段终态latent(stage-1)",
+        "自定义标题必须原样");
+    // 空标题是**另一种**故意行为：直接填当前语言译文（画布上很常见），不是"原样返回"
+    check("10.5.4 空标题 ⇒ 填当前语言译文（与 10.5.3 的「自定义不碰」是两回事）",
+        fixTitle("", "H3RelayChain", "en") === "🔗 H3 Relay · Chain"
+        && fixTitle("", "H3RelayChain", "zh") === "🔗 H3 Relay · 连跑控制"
+        && fixTitle(null, "H3RelayChain", "en") === "🔗 H3 Relay · Chain",
+        fixTitle("", "H3RelayChain", "en"));
+}
+
+// ---- 11. 自引用：ci.yml / docs/08 的期望数 == 本文件实跑 ----
+{
+    const EXPECTED_CHECKS = 41;                 // 含本行这条自检自己（pass 在本行执行时还没算上自己 ⇒ 比的是 pass+1）
     const root = fileURLToPath(new URL("..", import.meta.url));
     const decl = [];
     for (const rel of [".github/workflows/ci.yml", "docs/08-testing.md"]) {

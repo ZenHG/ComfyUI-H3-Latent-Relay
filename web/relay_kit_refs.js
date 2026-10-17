@@ -30,6 +30,8 @@
 /** 官方 `ref_audios` 的槽数（`MiniMaxH3ReferenceToVideo` 的 Autogrow max）。 */
 export const OFFICIAL_AUDIO_REF_MAX = 3;
 
+import { normLang } from "./relay_kit_i18n.js";
+
 /** 官方参考节点的类型名（宿主实现类名，改了要跟着改）。 */
 export const REF_HOST = "MiniMaxH3ReferenceToVideo";
 
@@ -55,7 +57,7 @@ export const SUFFIX_MARK = " · ";
  *    否则刷新两次就把后缀叠成两遍（2026-10-04 第一版只剥 `⚠`/`ℹ`，
  *    「正好用满」那条会被叠起来 —— 标题越来越长）。
  */
-const SUFFIX_RE = /\s*·\s*(?:⚠|ℹ|音频参考)[\s\S]*$/;
+const SUFFIX_RE = /\s*·\s*(?:⚠|ℹ|refs)[\s\S]*$/;
 
 /** 判一个输入名是不是官方音频参考槽。 */
 export function isRefAudioSlot(name) {
@@ -120,33 +122,30 @@ export function countRefAudioSlots(nodes) {
  *    用户在 prompt 里写 `<Audio 3>` 会**指空**，而且**任何一层都不会报错** ——
  *    这正是本模块存在的理由（把静默失效变成显性提示）。
  */
-export function ordinalHint(perHost) {
+export function ordinalHint(perHost, lang = "zh") {
     const bad = [];
     for (const h of perHost || []) {
         const w = (h && h.wired) || [];
         if (!w.length) continue;
         if (w.every((x) => x.ordinal === x.slot + 1)) continue;   // 连续且从 0 起 ⇒ 不会骗人
-        bad.push(w.map((x) => `ref_audio_${x.slot}→<Audio ${x.ordinal}>`).join("、"));
+        bad.push(w.map((x) => `ref_audio_${x.slot}→<Audio ${x.ordinal}>`).join(", "));
     }
     if (!bad.length) return "";
-    return "⚠ 音频槽按**已接线顺序**编号：" + bad.join("；")
-         + " —— 这是在 prompt 里要写的号，按槽号写会指空（且不报错）。";
+    // 角标只留「规则 + 映射」；"按槽号写会指空"的后果写在 `docs/07`。
+    const head = normLang(lang) === "en"
+        ? "⚠ <Audio n> follows wiring order: "
+        : "⚠ <Audio n> 已接线顺序：";
+    return head + bad.join(", ");
 }
 
-/**
- * 「一段里多人怎么锚」的正路 —— **只在越界时**拼进文案（那时用户多半正想塞更多人）。
- *
- * 🔴 为什么不给本包加 `voice_anchor_2/3`：本包注入的音频块走 `conditioning_set_values(append=True)`
- *    直接进 `minimax_refs`（DiT 侧），而 tokenize **早就发生过了** ⇒ 文本呈现里**没有**对应的
- *    `<Audio j>` 标签。而宿主/官方/两个第三方包（T8、csglide）的口径一致：
- *    **文本标签与 DiT 参考块同序同数**，且提示词**要引用**那个标签。
- *    ⇒ 本包硬塞第二块 = 造一行"prompt 指不到的参考"，与这条契约相反，且我们**未实测**。
- *    正路是把其余人的音频接**官方 `ref_audios` 槽**（那条路自动有标签）。
- */
-export const MULTI_ANCHOR_GUIDE =
-    ` 一段里多人要各自有参考：把其余人的音频也接**官方 ref_audio 槽**` +
-    `（只有官方那条路会生成 <Audio j> 标签，prompt 才引得到），` +
-    `先用官方的 TrimAudioDuration 裁到 ~0.9 s 再接（参考行会随每一步采样，长参考=慢）。`;
+// 🔴 为什么不给本包加 `voice_anchor_2/3`（2026-10-14：原先这段是一句拼进标题的常量，
+//    标题改短角标后它没地方放了 ⇒ 只留理由，正文在 `docs/07` §一段内多人说话）：
+//    本包注入的音频块走 `conditioning_set_values(append=True)` 直接进 `minimax_refs`（DiT 侧），
+//    而 tokenize **早就发生过了** ⇒ 文本呈现里**没有**对应的 `<Audio j>` 标签。而宿主/官方/两个
+//    第三方包（T8、csglide）的口径一致：**文本标签与 DiT 参考块同序同数**，且提示词**要引用**那个标签。
+//    ⇒ 本包硬塞第二块 = 造一行"prompt 指不到的参考"，与这条契约相反，且我们**未实测**。
+//    正路是把其余人的音频接**官方 `ref_audios` 槽**（那条路自动有标签），
+//    先用官方的 TrimAudioDuration 裁到 ~0.9 s 再接（参考行会随每一步采样，长参考=慢）。
 
 /**
  * 算额度与文案。
@@ -166,13 +165,11 @@ export function audioRefBudget(officialUsed, stageIndex) {
         // ⚠️ 文案不能说「拔掉 voice_anchor 就退额度」—— **那是错的**：
         //    不接声锚时本包注入的是**上一段音频尾**（`plan.audio_ref` 的 else 分支），
         //    额度照样占 1 个。要真退回官方额度，只能**自己把参考节点的槽位减下来**。
-        text = `⚠ 音频参考 ${total} 个（官方上限 ${OFFICIAL_AUDIO_REF_MAX}）：` +
-               `你的 ${used} + 本包 ${mine}。模型不拦，但超出官方口径、我们未实测。` +
-               `本包这 ${mine} 个是**续接音频**（声锚 / 上一段尾窗，二选一，没有"完全不用"的开关）` +
-               `⇒ 要腾额度，请自行减少参考节点的 ref_audio 槽位。` +
-               MULTI_ANCHOR_GUIDE;
+        // 🔴 角标只放「符号 + 数字」：**标题是纯文本**，长解释既塞不下、又会把标题撑爆
+        //    （而且 `**` 会原样显示星号）。完整口径见 `docs/07` §音频参考额度。
+        text = `⚠ refs ${total}/${OFFICIAL_AUDIO_REF_MAX}`;
     } else if (total === OFFICIAL_AUDIO_REF_MAX && mine > 0) {
-        text = `音频参考 ${total}/${OFFICIAL_AUDIO_REF_MAX}（你的 ${used} + 本包 ${mine}）—— 正好用满。`;
+        text = `refs ${total}/${OFFICIAL_AUDIO_REF_MAX}`;
     }
     return { mine, total, over, text };
 }
@@ -199,12 +196,12 @@ export function audioRefBudget(officialUsed, stageIndex) {
  *   · **参考节点在、但读不到它的输入表** ⇒ `null`（未知）——
  *     这时**不许返回 0**（返回 0 就会静默放过真越界）。
  */
-export function refBudgetFromScan(scan, stageIndex) {
+export function refBudgetFromScan(scan, stageIndex, lang = "zh") {
     if (isScanUnknown(scan)) return null;
     const b = audioRefBudget(scan.used, stageIndex);
     // 「已接线顺序」编号提示：**独立于额度**（没越界也可能编号骗人）⇒ 单独挂一个字段，
     // 由 `budgetTitle` 决定要不要显示（纯函数 `ordinalHint` 已经在"不会骗人"时返回 ""）。
-    b.hint = ordinalHint(scan.perHost);
+    b.hint = ordinalHint(scan.perHost, lang);
     return b;
 }
 
@@ -228,7 +225,7 @@ export function isScanUnknown(scan) {
 }
 
 /** 未知态的后缀文案（宿主在、槽位读不到）。 */
-export const UNKNOWN_SUFFIX = SUFFIX_MARK + "⚠ 音频参考额度未知（读不到参考节点的输入）";
+export const UNKNOWN_SUFFIX = SUFFIX_MARK + "⚠ refs ?";
 
 /**
  * 纯函数：`标题 + 额度` → **应显示的完整标题**。

@@ -7,7 +7,7 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 
 | 项 | 值 |
 |---|---|
-| 版本 | **0.6.34** |
+| 版本 | **0.6.35** |
 | 许可 | **MIT**（第三方出处见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)） |
 | 宿主 | **ComfyUI ≥ 0.35.0，且带 MiniMax-H3 支持**（宿主自身为 GPL-3.0，见 §许可与出处） |
 
@@ -29,7 +29,7 @@ anchor 与采样 latent 不同源（会漂）、只能锚第 0 帧。本包直�
 | 层 | 节点 | 说明 |
 |---|---|---|
 | **必备 3** | Latent 存 · 拷贝桥（复合桥）· 裁重叠 | 少一个就不叫续接 |
-| **可选 6** | 后处理 Post · 音频缝 · 连跑 Chain · Latent Upscale · Finite Run · Seed from Video | 各自独立、**默认全关 = 逐位直通**（Finite Run 是连跑的服务端版；Seed from Video 只在「从已有视频起段」时用） |
+| **可选 6** | 后处理 Post · 音频缝 · 连跑 Chain · Latent Upscale · Finite Run · Seed from Video | 各自独立；自 **0.6.34** 起**不再默认逐位直通**（Post 的 `settle_auto`、音频缝的 `patch_seconds` 默认开，见下）。Finite Run 是连跑的服务端版；Seed from Video 只在「从已有视频起段」时用 |
 | **手动接线才用 2** | Latent 读 · Join AV | 桥**自己会按片名 + 段号从磁盘取源**（0.6.37 起）⇒ Latent 读 只在**显式换源**时才接；Join AV 只在图内手拼几条时用 |
 
 | 节点 | 作用 |
@@ -38,8 +38,8 @@ anchor 与采样 latent 不同源（会漂）、只能锚第 0 帧。本包直�
 | 🔗 **H3 Relay · Latent Load** | 读回上一段（段号 −1），断点续跑可指定 `explicit_path` 换源 |
 | 🔗 **H3 Relay · Copy Bridge（复合桥）** | 上一段尾 AV latent **逐位拷贝**进本段初始 latent + 噪声掩码（钉住区不重绘）；接 `[16] conditioning` 时**并联**钉帧（管取景）。`mask_mode` 默认 `hard`。**上一段不必手接**：留空即按 `run_id` + 段号−1 自取（0.6.37 起） |
 | 🔗 **H3 Relay · Trim AV** | 裁掉本段头部的重生成帧（**音画同裁**）——不裁就会在拼接处重播/跳变；`[3]` 输出 `prev_tail` |
-| 🔗 **H3 Relay · Post** | **画质域**：跨段统计匹配 / 低频残差 / 色调 / 反卷积 / 高频迁移 / 糊区锐化，全部默认关 |
-| 🔗 **H3 Relay · Audio Seam** | **音频域**：把上一段环境声补进本段头部，**长度守恒**（零 A/V 位移），默认关 |
+| 🔗 **H3 Relay · Post** | **画质域**：跨段统计匹配 / 低频残差 / 色调 / 反卷积 / 高频迁移 / 糊区锐化；**0.6.34 起 `settle_auto` 默认 0.5**（治重绘糊），其余默认关 |
+| 🔗 **H3 Relay · Audio Seam** | **音频域**：把上一段环境声补进本段头部，**长度守恒**（零 A/V 位移）；**0.6.34 起默认开**（`patch_seconds` 1.2，填 `0` = 关） |
 | 🔍 **H3 Relay · Latent Upscale** | **画质域 · latent 层**：拆 AV 打包 latent → 逐块过学习式 3D 放大器 → 回包。**零去噪、时间维一帧不动、音频原样带回**（需可选上游依赖，见 §安装） |
 | 🔗 **H3 Relay · Chain** | 自动连跑控制器：自动推进段号并排队；0.6.7 起还能**换词**（`prompts` 按 `---` 分块）与**拼片**（🧩） |
 | 🧩 **H3 Relay · Join AV** | **张量域拼条**：本段裁后画面/音频接到累计后面出一条（规格不符直接报错，不静默拉伸） |
@@ -442,6 +442,6 @@ ComfyUI-H3-Latent-Relay/
 | [`AGENTS.md`](AGENTS.md) | **给改这个仓库的 agent 的作业入口**：一次改动的闭环 · 三档检查（本地 / CI / 宿主+浏览器）· **铁律↔执行体映射表** · 全部机检一览 · 禁区 · 已知薄弱点 |
 | [`RELEASING.md`](RELEASING.md) | **发布规范（唯一真相源）**：GitHub + Comfy Registry 两个渠道必须成对、一条命令 `tools/release.py`、失败处置、密钥纪律 |
 | [`SECURITY.md`](SECURITY.md) | 密钥 / 依赖 / 网络行为声明 |
-| [`tools/README.md`](tools/README.md) | 18 个脚本的用途与期望值（**13 个自检/取证** + 拼接 CLI + 打包器 + **发布器** + **声库采集器** + **浏览器冒烟门**） |
+| [`tools/README.md`](tools/README.md) | 20 个脚本的用途与期望值（**15 个自检/取证** + 拼接 CLI + 打包器 + **发布器** + **声库采集器** + **浏览器冒烟门**） |
 | [`examples/README.md`](examples/README.md) | 两份可直接打开的工作流（最小续接 21 节点 / 全流程 47 节点）· 生成器 |
 | [`README_EN.md`](README_EN.md) | **英文精简版**（安装 / 接线 / 节点 / 参数 / 排障 / FAQ）—— 深度推导一律外链本文件与 `docs/` |

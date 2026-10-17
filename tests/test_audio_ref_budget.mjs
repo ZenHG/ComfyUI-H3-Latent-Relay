@@ -99,16 +99,20 @@ console.log("");
 console.log("[3] audioRefBudget：3+1 越界 / 2+1 用满 / 首段不注入");
 {
     const over = audioRefBudget(3, 1);
-    check("3.1 官方 3 + 本包 1 = 4 ⇒ over，文案含「4 个」与「官方上限 3」",
+    check("3.1 官方 3 + 本包 1 = 4 ⇒ over，角标 = `⚠ refs 4/3`",
         over.over === true && over.total === 4 && over.mine === 1
-        && over.text.includes("4 个") && over.text.includes(`官方上限 ${OFFICIAL_AUDIO_REF_MAX}`),
+        && over.text === `⚠ refs 4/${OFFICIAL_AUDIO_REF_MAX}`,
         over.text.slice(0, 40));
-    check("3.2 越界文案**不许**教用户「拔掉声锚就退额度」（不接声锚时仍占 1 个）",
-        over.text.includes("没有") || over.text.includes("无法"),
-        "文案须说清本包这 1 个关不掉");
+    // 🔴 2026-10-15 改短角标：长解释（本包这 1 个关不掉 / 多人怎么锚）**从标题搬进 `docs/07`**。
+    //    标题是**纯文本**且会被反复重写 ⇒ 塞长句既撑爆标题、`**` 还会原样显示星号。
+    //    这条断言就是那道闸：角标只许是「符号 + 数字」，出现长句/星号当场红。
+    check("3.2 越界角标是**纯徽标**（≤ 20 字符、无 `**`、无汉字长句）",
+        over.text.length <= 20 && !over.text.includes("**"),
+        "角标 = %r（%d 字符）" % (over.text, over.text.length));
     const full = audioRefBudget(2, 1);
-    check("3.3 官方 2 + 本包 1 = 3 ⇒ 不 over，文案含「正好用满」",
-        full.over === false && full.total === 3 && full.text.includes("正好用满"));
+    check("3.3 官方 2 + 本包 1 = 3 ⇒ 不 over，角标 = `refs 3/3`",
+        full.over === false && full.total === 3
+        && full.text === `refs 3/${OFFICIAL_AUDIO_REF_MAX}`);
     const first = audioRefBudget(3, 0);
     check("3.4 首段（stageIndex=0）本包不注入 ⇒ 官方 3 也不 over 且**无文案**",
         first.mine === 0 && first.over === false && first.text === "");
@@ -142,19 +146,19 @@ console.log("[5] budgetTitle / stripBudgetSuffix：幂等（② 的回归锁）"
 {
     const BASE = "H3RelayCopyBridge";
     const t1 = budgetTitle(BASE, 3, 1);
-    check("5.1 越界 ⇒ 标题含「⚠ 音频参考 4 个」",
-        t1.startsWith(BASE) && t1.includes("⚠ 音频参考 4 个"), t1.slice(0, 60));
+    check("5.1 越界 ⇒ 标题含角标 `⚠ refs 4/3`",
+        t1.startsWith(BASE) && t1.includes("⚠ refs 4/"), t1.slice(0, 60));
     check("5.2 越界文案**幂等**（反复调用不叠加）",
         budgetTitle(t1, 3, 1) === t1 && budgetTitle(budgetTitle(t1, 3, 1), 3, 1) === t1);
     const t2 = budgetTitle(BASE, 2, 1);
-    check("5.3 「正好用满」⇒ 含该文案",
-        t2.includes("正好用满"), t2.slice(0, 60));
+    check("5.3 「正好用满」⇒ 含角标 `refs 3/3`",
+        t2.includes("refs 3/"), t2.slice(0, 60));
     check("5.4 🔴「正好用满」也**幂等**（② 的回归锁：第一版剥不掉它 ⇒ 会叠）",
         budgetTitle(t2, 2, 1) === t2 && budgetTitle(budgetTitle(t2, 2, 1), 2, 1) === t2);
     const t3 = budgetTitle(t1, -1, 1);        // 越界 → 未知
     const t4 = budgetTitle(t3, 3, 1);         // 未知 → 又越界
     check("5.5 状态来回切换也**不会残留旧后缀**（未知 ↔ 越界）",
-        t3.includes("额度未知") && !t3.includes("音频参考 4 个") && t4 === t1,
+        t3.includes("refs ?") && !t3.includes("refs 4/") && t4 === t1,
         t4.slice(0, 60));
     check("5.6 无文案时标题**原样返回**（不追加任何东西）",
         budgetTitle(BASE, 0, 1) === BASE && budgetTitle(BASE, 1, 1) === BASE);
@@ -162,6 +166,13 @@ console.log("[5] budgetTitle / stripBudgetSuffix：幂等（② 的回归锁）"
         stripBudgetSuffix(t1) === BASE && stripBudgetSuffix(t2) === BASE
         && stripBudgetSuffix(budgetTitle(BASE, -1, 1)) === BASE
         && stripBudgetSuffix(BASE) === BASE);
+    // 🔴 2026-10-15 新增：**越界/用满/未知三种角标都不许含汉字** —— 它们是**语言无关**的徽标，
+    //    否则英文界面下桥节点标题就会「英文前缀 + 中文角标」（真被目检抓到过）。
+    check("5.8b 三种额度角标都不含汉字（语言无关 ⇒ 英文界面不露中文）",
+        [budgetTitle(BASE, 3, 1), budgetTitle(BASE, 2, 1), budgetTitle(BASE, -1, 1)]
+            .every((t) => !/[\u4e00-\u9fff]/.test(t)),
+        budgetTitle(BASE, 3, 1));
+
     check("5.8 节点标题被用户改过时，只**追加**后缀、不改他的前缀",
         budgetTitle("我的桥 A", 3, 1).startsWith("我的桥 A") === true);
 }
@@ -235,6 +246,17 @@ console.log("[6b] 音频槽的「已接线顺序」编号（ordinalHint）——
             [{ slot: 0, ordinal: 1 }, { slot: 2, ordinal: 2 }]),
         JSON.stringify(shuffled.perHost[0].wired));
 
+    // 🔴 2026-10-15 新增：编号提示是**双语**的（角标里的汉字在英文界面下就是「中文夹杂」）。
+    //    英文界面只换「规则那半句」，`ref_audio_n→<Audio m>` 映射是标识符、两种语言共用。
+    check("6b.6b 编号提示双语：英文界面换成英文头部，映射部分逐字不变",
+        ordinalHint(gap.perHost, "en").startsWith("⚠ <Audio n> follows wiring order: ")
+        && ordinalHint(gap.perHost, "en").includes("ref_audio_0→<Audio 1>")
+        && ordinalHint(gap.perHost, "zh").startsWith("⚠ <Audio n> 已接线顺序：")
+        // 不传 lang = zh（向后兼容）；未知 lang ⇒ normLang 落回 en
+        && ordinalHint(gap.perHost).startsWith("⚠ <Audio n> 已接线顺序：")
+        && ordinalHint(gap.perHost, "fr").startsWith("⚠ <Audio n> follows wiring order: "),
+        ordinalHint(gap.perHost, "en").slice(0, 80));
+
     check("6b.7 未接线 / 无参考节点 ⇒ 没有编号可提示（空串，不是噪声）",
         ordinalHint(countRefAudioSlots([hostNode("1078", 3, [])]).perHost) === ""
         && ordinalHint(countRefAudioSlots([]).perHost) === ""
@@ -253,8 +275,8 @@ console.log("[6b] 音频槽的「已接线顺序」编号（ordinalHint）——
         && budgetTitle(tGap, 2, 1, ordinalHint(gap.perHost)) === tGap
         && budgetTitle(budgetTitle(tGap, 2, 1, ordinalHint(gap.perHost)), 2, 1,
                        ordinalHint(gap.perHost)) === tGap);
-    check("6b.10 未知态（额度读不到）⇒ 只写「额度未知」，**不**硬塞编号提示",
-        budgetTitle("桥", -1, 1, ordinalHint(gap.perHost)).includes("额度未知")
+    check("6b.10 未知态（额度读不到）⇒ 只写 `refs ?`，**不**硬塞编号提示",
+        budgetTitle("桥", -1, 1, ordinalHint(gap.perHost)).includes("refs ?")
         && !budgetTitle("桥", -1, 1, ordinalHint(gap.perHost)).includes("已接线顺序"));
 
     // 🔴 最可能撞上的真实场景：**只接了 `ref_audio_2` 一个槽、且没越界** —— 此时额度文案是**空**的，
@@ -273,7 +295,7 @@ console.log("[6b] 音频槽的「已接线顺序」编号（ordinalHint）——
 // 🔴 这个数**必须等于本文件实跑的通过数（含本行这条自检）**。
 //    第一版写成 33（比实跑少 1）⇒ 自检"通过"了，而声明值与真值其实**不一致** ——
 //    自引用机制最怕的就是这种"差一个数还绿"的假绿。改断言后请同步 ci.yml 与 docs/08。
-const EXPECTED_CHECKS = 45;
+const EXPECTED_CHECKS = 47;
 console.log("");
 console.log("[7] 断言数自引用（ci.yml / docs/08 里写的「期望 N/0」必须等于本文件实跑数）");
 {

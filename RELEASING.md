@@ -121,6 +121,34 @@ python tools/release.py --set-token     # 轮换 registry PAT（从 stdin 读，
 - 🔴 **别往 ignore 文件里写行内注释**（`模式  # 注释` 会被当成模式的一部分 ⇒ **静默不忽略**）。
   加完行**必须** `git check-ignore -v <路径>` 验一遍。
 
+### 5.1 🔴 渠道二的 CLI：本机位置与判据（2026-10-15 实测）
+
+**本机有、且真能跑**（`--version` ⇒ `1.22.0`，exit 0）：
+
+```
+<家目录>/.local/comfy-cli/Scripts/comfy.exe
+# 隔离 venv 里的真 CLI（同目录有 pip3.12.exe ⇒ 系统 Python 3.12 建的，正是 §2-6 要的建法）
+```
+
+它是**隔离 venv 里的真 CLI**（同目录有 `pip3.12.exe` ⇒ 系统 Python 3.12，正是 §2-6 要的建法）。
+`tools/release.py` 的三步全在它身上：`comfy node validate` · `comfy node pack` · `comfy node publish`。
+
+🔴 **`publish` 是二级子命令**（`comfy node publish`，不是 `comfy publish`）——
+`comfy --help` 的顶层 Commands 里**看不到**它，`comfy publish` 会报 `No such command`。
+判据要用 `comfy --help-json`（49 个顶层命令 + 每棵子命令树都在里面）或直接
+`comfy node --help`，别用顶层 `--help` 目测。
+
+⇒ **PATH 上那个 `comfy`（`~/.local/bin/comfy.bat`）是 hermes wrapper、跑不动**
+（`no dependency environment is committed` / `uv.lock needs to be updated`）。
+⇒ **让 `release.py` 用上真的那个**：`COMFY_CLI=<家目录>/.local/comfy-cli/Scripts/comfy.exe`。
+（`_find_comfy()` 的候选清单里本来就有「隔离 venv（`~/.local/comfy-cli`）」这一条，
+但**排在 PATH 之后** —— 而 PATH 上那个坏的会先被试。所以显式给 `COMFY_CLI` 最稳。）
+
+⚠️ 另有一个**同名但不是它**的东西：某 Python 的 `Scripts/` 下可能有 `comfy-env.exe`
+（`comfy-env 0.3.89`，**真能跑**）—— 它是 **ComfyUI 环境管理器**
+（`init/generate/install/doctor/cleanup`），**没有 publish、与 registry 无关**。
+别因为「它也能跑」就把它当 CLI（本机 2026-10-15 因此空转了一轮）。
+
 ## 6. 版本与发布说明（`RELEASE-NOTES.md`）
 
 ### 6.1 版本号

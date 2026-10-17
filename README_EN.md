@@ -10,7 +10,7 @@ not coupled to any third-party H3 node pack.
 
 | Item | Value |
 |---|---|
-| Version | **0.6.34** |
+| Version | **0.6.35** |
 | License | **MIT** (third-party attribution in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) |
 | Host | **ComfyUI ≥ 0.35.0 with MiniMax-H3 support** (the host itself is GPL-3.0, see License) |
 
@@ -35,13 +35,11 @@ under `output/relay_kit/<run_id>/`). Mechanism and measurements: [`docs/01`](doc
 | Layer | Nodes | Notes |
 |---|---|---|
 | **Required 3** | LatentSave · CopyBridge (composite) · TrimAV | without them it is not continuation |
-| **Optional 6** | Post · AudioSeam · Chain · LatentUpscale · FiniteRun · SeedFromVideo | independent; **off by default = bit-exact pass-through** (Finite Run is the server-side twin of the chain; Seed from Video only when you start from an existing clip) |
+| **Optional 6** | Post · AudioSeam · Chain · LatentUpscale · FiniteRun · SeedFromVideo | independent; since **0.6.34** they are **no longer bit-exact pass-through by default** (Post's `settle_auto` and AudioSeam's `patch_seconds` ship switched on — see below). Finite Run is the server-side twin of the chain; Seed from Video only when you start from an existing clip |
 | **Manual routing only 2** | LatentLoad · JoinAV | the bridge **fetches the source from disk by film name + stage** (since 0.6.37) ⇒ wire LatentLoad only to **override** the source; Join AV only for hand-joining a few segments in-graph |
 > **Which of the two “runs” to pick**: `Chain` (canvas) = inspect each segment, re-roll the same stage if you
 > dislike it, attach the audio-seam or picture-domain nodes per segment; `Finite Run` (headless) = run N segments
 > in one submission, scripts and API on the same nodes, but **no per-stage re-roll**. Both coexist.
-
-| Node (canvas name) | What it does |
 
 | Node (canvas name) | What it does |
 |---|---|
@@ -49,8 +47,8 @@ under `output/relay_kit/<run_id>/`). Mechanism and measurements: [`docs/01`](doc
 | 🔗 **H3 Relay · Latent Load** | reads the previous segment (stage − 1); `explicit_path` overrides the source when resuming |
 | 🔗 **H3 Relay · Copy Bridge** | **bit-copies** the previous segment's tail AV latent into this segment's initial latent + a noise mask (the pinned region is not re-drawn); with `[16] conditioning` connected it **also pins keyframes in parallel** (framing). `mask_mode` defaults to `hard` |
 | 🔗 **H3 Relay · Trim AV** | trims the regenerated head frames (**video and audio together**) — without it the splice point replays or jumps; output `[3]` = `prev_tail` |
-| 🔗 **H3 Relay · Post** | **picture domain**: cross-segment statistics matching / low-frequency pull / tone / deconvolution / high-frequency transfer / blur-region sharpening; all off by default |
-| 🔗 **H3 Relay · Audio Seam** | **audio domain**: extends the previous segment's ambience into this segment's head, **length-preserving** (zero A/V shift); off by default |
+| 🔗 **H3 Relay · Post** | **picture domain**: cross-segment statistics matching / low-frequency pull / tone / deconvolution / high-frequency transfer / blur-region sharpening; **`settle_auto` defaults to 0.5 since 0.6.34** (cures re-draw blur), the rest are off |
+| 🔗 **H3 Relay · Audio Seam** | **audio domain**: extends the previous segment's ambience into this segment's head, **length-preserving** (zero A/V shift); **on by default since 0.6.34** (`patch_seconds` 1.2; set `0` to disable) |
 | 🔍 **H3 Relay · Latent Upscale** | **picture domain · latent level**: unpack the AV-packed latent → tile through a learned 3D upscaler → repack. **Zero denoising, not one frame moved in time, audio carried back untouched** (needs an optional upstream dependency — see Install) |
 | 🔗 **H3 Relay · Chain** | auto-run controller: advances stage numbers and queues; since 0.6.7 it also **rotates prompts** (`prompts` split on `---`) and **concatenates** (🧩) |
 | 🧩 **H3 Relay · Join AV** | **in-graph join**: append this segment's trimmed images/audio to the accumulated ones (spec mismatches error out instead of being silently stretched) |
@@ -513,6 +511,6 @@ The Chinese documents are the source of truth; `README_EN.md` and the English `d
 | [`AGENTS.md`](AGENTS.md) | **entry point for agents working on this repo**: the change loop · the three verification tiers (local / CI / host + browser) · **rule-to-enforcement map** · the full machine-check list · forbidden moves · known weak spots |
 | [`RELEASING.md`](RELEASING.md) | **release policy (single source of truth)**: GitHub + Comfy Registry must be updated as a pair · one command `tools/release.py` · failure handling · key discipline |
 | [`SECURITY.md`](SECURITY.md) | secrets / dependencies / network behaviour disclosure |
-| [`tools/README.md`](tools/README.md) | the 18 scripts and their expected values (**13 self-check/forensic** + concat CLI + bundler + **releaser** + **voice-bank collector** + **browser smoke gate**) |
+| [`tools/README.md`](tools/README.md) | the 20 scripts and their expected values (**15 self-check/forensic** + concat CLI + bundler + **releaser** + **voice-bank collector** + **browser smoke gate**) |
 | [`examples/README.md`](examples/README.md) | the two openable workflows (minimal continuation 21 nodes / full flow 47 nodes) · generators |
 | [`README.md`](README.md) | **Chinese source of truth** (install / wiring / nodes / parameters / troubleshooting / FAQ) — in-depth derivations always link out to that file and `docs/` |
