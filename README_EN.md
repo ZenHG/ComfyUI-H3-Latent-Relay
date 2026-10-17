@@ -57,6 +57,12 @@ under `output/relay_kit/<run_id>/`). Mechanism and measurements: [`docs/01`](doc
 | ⏩ **H3 Relay · Finite Run** | **server-side expansion**: run N segments in one submission (no frontend buttons; scripts/API and canvas share one implementation). Per segment: ImageToVideo → CopyBridge → sampling → LatentSave → decode → TrimAV → JoinAV (the previous segment is fetched by the bridge itself) |
 | 🔗 **H3 Relay · Seed from Video** | **entry point**: encode an **existing video clip** into the stage-1 (seed) sidecar; later segments then continue outward as usual. Blocks three traps for you: the temporal lattice (5+17k frames), the canvas lattice (multiples of 16) and A/V equal length (trim tail / zero-pad / silent seed) |
 
+> **Start from an existing clip and run the rest headlessly** (one submission since 0.6.39): first use
+> `Seed from Video` to write the clip as segment 0, then add `⏩ Finite Run` with `from_segment` = **1**
+> and `segments` = how many segments to run — the first segment's bridge fetches segment 0 by itself.
+> For the segments where the camera changes, set `settle_frames` = **-1** (moves the hard cut back to the
+> segment boundary). On canvas it is the same: set Chain's `stage_index` to 1 (both paths are one node set).
+
 > **Three domains — do not mix them up:** timeline = `H3RelayTrimAV` (frozen) / picture = `H3RelayPost` /
 > audio = `H3RelayAudioSeam`.
 >

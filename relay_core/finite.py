@@ -23,6 +23,9 @@ TimelineDirector 的 ``MiniMaxH3FiniteSegmentSampler``（GPL-3.0）**只借鉴�
 
 其中「Trim AV」的 ``trim_frames`` 由桥的第 3 路给（全自动），``settle_frames`` 由调用方给
 （沉降档属**裁量**，不是后处理 ⇒ 必须让脚本/API 侧也能设，否则画布能设、API 设不了）。
+``from_segment`` 决定**从第几段起跑**（段号整体平移）：``0`` = 从第 1 段起跑（不接任何已有段）；
+``>0`` = 首段的桥按 ``run_id`` + 段号−1 自取盘上那段续接 ⇒ 与画布 Chain 填 ``stage_index``
+同义，无头路径从此不必分两次提交、也不必手搓链。
 
 返回的图与 ``GraphBuilder.finalize()`` 同构（链接一律 ``[节点 id, 输出位]``）；
 对象型入参（model/clip/vae/…）原样落进对应输入槽，宿主执行时按字面值解析。
@@ -90,7 +93,7 @@ def resolve_finite_prompts(prompt: Any, prompts: Any, segments: Any) -> Tuple[Li
 def validate_finite_params(*, segments: Any = None, seed: Any = None, run_id: Any = None,
                            context_frames: Any = None, mask_mode: Any = None,
                            length: Any = None, width: Any = None, height: Any = None,
-                           settle_frames: Any = None) -> None:
+                           settle_frames: Any = None, from_segment: Any = None) -> None:
     """建图前的硬校验（纯值检查，不碰盘、不碰 GPU）。
 
     任一项为 ``None`` ⇒ **跳过该项**。执行期调用方总会给全；而入队前那次
@@ -166,6 +169,19 @@ def validate_finite_params(*, segments: Any = None, seed: Any = None, run_id: An
             raise FinitePlanError(
                 "settle_frames 必须在 -1..%d 之间（-1 = 自动量切换点，0 = 只裁钉住区，"
                 "N = 固定多裁 N 帧；得到 %d）。" % (SETTLE_CAP, sf))
+    if from_segment is not None:
+        try:
+            int(from_segment)
+        except (TypeError, ValueError):
+            raise FinitePlanError(
+                "from_segment 必须是整数（得到 %r）。" % (from_segment,)) from None
+        if int(from_segment) < 0:
+            raise FinitePlanError(
+                "from_segment 不能为负（0 = 从第 1 段起跑，即不接任何已有段；得到 %d）。"
+                % int(from_segment))
+        # 上限不在这判：段号只决定**读/写哪个 stage 文件**，与展开图的临时节点数无关
+        #   （后者由 segments 管）。填大了只会在桥自取时明确报「文件不在」—— 见
+        #   nodes.py 里 H3RelayFiniteRun.run 的起始段预检，那一步更早、也更具体。
 
 
 def validate_finite_inputs_early(**kw: Any) -> Optional[str]:
@@ -210,6 +226,7 @@ def build_finite_graph(
     context_frames: int,
     mask_mode: str,
     settle_frames: int = 0,
+    from_segment: int = 0,
     pin_audio: bool,
     model: Any,
     clip: Any,
@@ -235,12 +252,15 @@ def build_finite_graph(
     # None ⇒ 取默认（与下面 rid / nt 同一惯例）：脚本侧显式传 None 不该炸成 TypeError。
     if settle_frames is None:
         settle_frames = 0
+    if from_segment is None:
+        from_segment = 0
     # 校验放这里（唯一的门）：节点与测试都走本函数 ⇒ 烧卡前的错误拦截对所有调用方生效。
     validate_finite_params(segments=segments, seed=seed, run_id=run_id,
                            context_frames=context_frames, mask_mode=mask_mode,
                            length=length, width=width, height=height,
-                           settle_frames=settle_frames)
+                           settle_frames=settle_frames, from_segment=from_segment)
     n = int(segments)
+    fs = int(from_segment)
     rid = "" if run_id is None else str(run_id)
     nt = "" if note is None else str(note)
     graph: Dict[str, Dict[str, Any]] = {}
@@ -248,6 +268,7 @@ def build_finite_graph(
 
     for k in range(n):
         tag = prefix + "seg%d_" % k
+        stage = fs + k                     # 本次实际跑第几段（from_segment 平移）
         i2v, bridge = tag + "i2v", tag + "bridge"
         noise, guider, samp = tag + "noise", tag + "guider", tag + "samp"
         save, vdec, adec = tag + "save", tag + "vdec", tag + "adec"
@@ -263,7 +284,8 @@ def build_finite_graph(
         graph[i2v] = {"class_type": "MiniMaxH3ImageToVideo", "inputs": i2v_inputs}
 
         # ② 上一段 latent **不接了** —— 桥自己按 run_id + 段号−1 从磁盘取（0.6.37 起免接线）。
-        #    k=0 时没有上一段 ⇒ 桥自动直通，与画布第 1 段同行为。
+        #    stage ≥ 1 时取的是上一段；stage = 0（from_segment=0 且 k=0）没有上一段
+        #    ⇒ 桥自动直通，与画布第 1 段同行为。
 
         # ③ 拷贝桥：latent 钉住 + conditioning 钉帧（复合桥，最小示例同款接法）
         bridge_inputs: Dict[str, Any] = {
@@ -273,7 +295,7 @@ def build_finite_graph(
             "pin_audio": bool(pin_audio),
             "conditioning": [i2v, 0],
             "run_id": rid,
-            "stage_index": k,
+            "stage_index": stage,
         }
         if voice_anchor is not None:
             bridge_inputs["voice_anchor"] = voice_anchor
@@ -291,7 +313,7 @@ def build_finite_graph(
         # ⑤ 边车落盘（OUTPUT_NODE；B1 谱系头由节点内部按 run_id/段号自动写）
         graph[save] = {"class_type": "H3RelayLatentSave",
                        "inputs": {"latent": [samp, 0], "run_id": rid,
-                                  "stage_index": k, "note": nt}}
+                                  "stage_index": stage, "note": nt}}
 
         # ⑥ 解码 + 裁重叠头（trim_frames 走桥的第 3 路，全自动；settle_frames 由调用方给）
         graph[vdec] = {"class_type": "VAEDecode",
@@ -313,13 +335,15 @@ def build_finite_graph(
 
     report = (
         "一次提交展开 %d 段（seed=%d，run_id=%s，context_frames=%d，mask_mode=%s，"
-        "settle_frames=%d）。\n"
+        "settle_frames=%d，from_segment=%d）。\n"
         "每段链：ImageToVideo → CopyBridge → 采样 → LatentSave → 解码 → TrimAV → JoinAV"
         "（上一段由桥自取，不再手接 Latent Load；trim_frames 由桥给，settle_frames 见上）。\n"
-        "边车：output/relay_kit/%s/stage_%05d..%05d（含谱系头）。\n"
+        "边车：output/relay_kit/%s/stage_%05d..%05d（含谱系头）%s。\n"
         "⚠ 合并输出驻留内存：%d 段全画面在一条张量里，长片先小分辨率验证。"
         % (n, int(seed), rid or "（空）", int(context_frames), str(mask_mode),
-           int(settle_frames), rid or "<run_id>", 0, n - 1, n)
+           int(settle_frames), fs, rid or "<run_id>", fs, fs + n - 1,
+           ("；首段读 stage_%05d 续接" % (fs - 1)) if fs > 0 else "；首段不接上一段（直通）",
+           n)
     )
     return graph, [[samp, 0], [prev_join, 0], [prev_join, 1], report], report
 

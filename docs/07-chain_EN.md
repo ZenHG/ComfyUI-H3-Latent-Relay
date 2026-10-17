@@ -152,6 +152,7 @@ MiniMaxH3ImageToVideo → H3RelayCopyBridge → RandomNoise
 | `width` / `height` / `length` | picture size (multiples of 16) and frames per segment (all segments equal) |
 | `context_frames` / `mask_mode` / `pin_audio` | same meaning as on the copy bridge (one set for every segment) |
 | `settle_frames` | **trim policy**, sent down to Trim AV for every segment. Keep `0` for same-camera continuation; fill `-1` when the camera changes (see below) |
+| `from_segment` | **start after which segment** (stage numbers shift as a block). `0` = start at segment 1 (default); `N` = continue from segment N, the first segment's bridge fetches segment N from disk. ⚠ that sidecar must exist, or it errors **before** anything runs |
 | `voice_anchor` (optional) | voice anchor; one shared anchor. Unwired = the previous segment's own audio tail |
 
 **How to pick the settle mode** (real GPU, 0.6.38: three-point window sweep + all three auto
@@ -168,6 +169,23 @@ replays a few frames of the previous segment".
 **4.5 frames earlier** than the picture ⇒ a visible hard cut plus an audible A/V mismatch.
 ⚠️ `-1` is not a free lunch: the auto value sometimes comes from a **grade-convergence tail**
 rather than a drag ⇒ it eats a few frames of new content. For exact control fill a fixed `N`.
+The criterion is always "where did the cut land", never "did auto mode run".
+
+**Start from an existing clip and run the rest headlessly** (one submission since 0.6.39):
+
+| Step | What | Key parameters |
+|---|---|---|
+| ① seed | `LoadVideo → GetVideoComponents → 🔗 Seed from Video`, writing the clip as the segment-0 sidecar | `run_id`, `stage_index=0`, canvas matching the later segments |
+| ② run | `⏩ Finite Run` on the model chain plus the sampler pair | `from_segment=1`, `segments` = how many to run, `settle_frames` (`-1` on a camera change) |
+| ③ take | the node's `images` / `audio` outputs *are* the joined film; sidecars live in `output/relay_kit/<run_id>/` | — |
+
+- Why not "seed and run in one submission": `Seed from Video` and the later segments have **no
+  in-graph dependency** (the latter reads by path) ⇒ execution order within one submission is not
+  determined, so a segment may read before the sidecar exists. Two submissions is also the real usage.
+- On canvas it is the same: set Chain's `stage_index` to `1` and click the buttons as usual.
+  Both paths are one node set (iron rule 1).
+- ⚠ With `from_segment > 0` do **not** wire the first-frame `image`: the head comes from the previous
+  segment's pinned region, so a wired image has no effect.
 The criterion is always "where did the cut land", never "did auto mode run".
 
 **Two validation gates** (both are needed; the split is decided by what is visible *before*
@@ -188,7 +206,7 @@ always the *looser* one — it never falsely rejects.
 | | Chain (canvas) | Finite Run (headless) |
 |---|---|---|
 | driver | frontend buttons + queuePrompt state machine | server-side expansion, one submission |
-| re-roll after per-segment review | ✅ natural (▶ runs again, same stage file overwritten) | ❌ one shot (a redo reruns everything) ⇒ v2 `from_segment` |
+| re-roll after per-segment review | ✅ natural (▶ runs again, same stage file overwritten) | ❌ one shot (a redo reruns everything) ⇒ **since 0.6.39 fill `from_segment` to re-run only the later segments** |
 | audio-seam patch / picture-domain post | ✅ per segment | ❌ not in the expanded graph |
 | first-frame image | one image (Chain never touches image nodes) | one image |
 | concat into a film | file-domain stream copy (🧩 button / `auto_concat`) | tensor-domain JoinAV (one encode) |

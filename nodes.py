@@ -2621,6 +2621,17 @@ class H3RelayFiniteRun:
                               "· 同机位：裁它们正是缝处跳帧的源头（实测 0 帧 0.020、16 帧 0.055）⇒ 保持 0；\n"
                               "· 换机位：-1 自动把硬切退回段边界（实测三档全过）。",
                 }),
+                # ⚠ 继续追加在**最后一个**（widgets_values 按位置对应，插中间会整体错位）。
+                #   from_segment 把段号整体平移：0 = 从第 1 段起跑；N = 从第 N+1 段起跑，
+                #   首段的桥自取盘上第 N 段续接 ⇒ 与画布 Chain 填 stage_index 同义。
+                "from_segment": ("INT", {
+                    "default": 0, "min": 0, "max": 9999, "step": 1,
+                    "tooltip": "【从第几段之后起跑】0 = 从第 1 段起跑（默认）。\n"
+                              "填 N = 接第 N 段往外跑；视频起段后填 1。\n"
+                              "⚠ 盘上必须有该段的边车文件，\n"
+                              "没有会在开跑前就报错，不等模型上卡。\n"
+                              "接续已有段时别接首帧图 image。",
+                }),
             },
         }
 
@@ -2659,22 +2670,35 @@ class H3RelayFiniteRun:
             prompt="", prompts="", segments=2, seed=0, run_id="relay",
             width=1344, height=768, length=124, context_frames=22,
             mask_mode="hard", pin_audio=True, voice_anchor=None, note="",
-            settle_frames=0):
+            settle_frames=0, from_segment=0):
         """建图并返回展开图（本方法**不采样**，只编排；执行由宿主对展开图进行）。
 
         可选链接槽（image / voice_anchor）不接线时宿主整个键都不传 ⇒ 必须给默认值。
-        校验两道门：入队前 ``VALIDATE_INPUTS``（只判字面值可见的项）+ 本函数里
-        ``build_finite_graph``（唯一真相源）。哪一项归哪道门见 docs/07-chain.md。
+        校验三道门：入队前 ``VALIDATE_INPUTS``（只判字面值可见的项）→ 起始段**文件**预检
+        （``from_segment>0`` 时首段要读的那份必须在盘上，否则等模型上卡后才炸）→
+        本函数里 ``build_finite_graph``（唯一真相源）。哪一项归哪道门见 docs/07-chain.md。
         """
         blocks, pnote = CORE.resolve_finite_prompts(prompt, prompts, segments)
+        # from_segment>0 ⇒ 首段桥要自取盘上第 from_segment-1 段。文件不在就让它在
+        # **这里**炸（上游加载器还没跑），而不是等采样器接到空 latent 才炸。
+        _fs = int(from_segment or 0)
+        if _fs > 0:
+            _need = _stage_path(run_id, _fs - 1)
+            if not os.path.isfile(_need):
+                raise RuntimeError(
+                    "from_segment=%d ⇒ 首段要读第 %d 段当上一段，但盘上没有它的边车：%s\n"
+                    "    ⇒ 三种原因：① run_id 与起段时填的**不是一字不差**；② 那段还没跑；"
+                    "③ 你其实想从第 1 段起跑（把 from_segment 改回 0）。\n"
+                    "    已存在的段文件列在 output/relay_kit/%s/ 下（stage_NNNNN.safetensors）。"
+                    % (_fs, _fs - 1, _need, str(run_id)))
         # 前缀由宿主在执行本节点前设好（以本节点 id 为根）⇒ 唯一
         from comfy_execution.graph_utils import GraphBuilder
         graph, outputs, report = CORE.build_finite_graph(
             prefix=GraphBuilder.alloc_prefix(), segments=segments, blocks=blocks,
             seed=seed, run_id=run_id, note=note, width=width, height=height,
             length=length, context_frames=context_frames, mask_mode=mask_mode,
-            settle_frames=settle_frames, pin_audio=pin_audio, model=model, clip=clip,
-            vae=vae, audio_vae=audio_vae,
+            settle_frames=settle_frames, from_segment=from_segment, pin_audio=pin_audio,
+            model=model, clip=clip, vae=vae, audio_vae=audio_vae,
             image=image, sampler=sampler, sigmas=sigmas, voice_anchor=voice_anchor)
         outputs[3] = report + "\n" + pnote
         # V1 出口：expand 图 + result（输出可以是 [展开图节点 id, 输出位] 链接）

@@ -172,14 +172,15 @@ _FR = NODES.H3RelayFiniteRun
 check("37.38 FiniteRun 标了 V3_EXPAND（V3 外壳据此开 enable_expand）",
       getattr(_FR, "V3_EXPAND", False) is True)
 _it = _FR.INPUT_TYPES()
-check("37.39 输入槽 21 个（16 必填 + 5 可选）",
-      len(_it["required"]) == 16 and len(_it["optional"]) == 5,
+check("37.39 输入槽 22 个（16 必填 + 6 可选）",
+      len(_it["required"]) == 16 and len(_it["optional"]) == 6,
       "必填 %d / 可选 %d" % (len(_it["required"]), len(_it["optional"])))
 check("37.40 四路输出（末段 latent / 画面 / 音频 / 报告）",
       _FR.RETURN_TYPES == ("LATENT", "IMAGE", "AUDIO", "STRING")
       and _FR.RETURN_NAMES == ("last_latent", "images", "audio", "report"))
 check("37.41 链接型输入全在 optional（必填链接会堵掉纯文生成/不换词/不用声锚）",
-      list(_it["optional"]) == ["image", "prompts", "voice_anchor", "note", "settle_frames"]
+      list(_it["optional"]) == ["image", "prompts", "voice_anchor", "note",
+                                "settle_frames", "from_segment"]
       and all(t in ("IMAGE", "LATENT") for t in
               (_it["optional"]["image"][0], _it["optional"]["voice_anchor"][0])))
 
@@ -304,7 +305,7 @@ check("37.72 TrimAV 的 widget 上界就是 relay_core.SETTLE_CAP（两处同一
       str(NODES.H3RelayTrimAV.INPUT_TYPES()["optional"]["settle_frames"][1]["max"]))
 
 # ---------------------------------------------------------------------------
-print("[9] 桥自取 context（0.6.37 免接线）：接了就照接、没接就自取、取不到就 raise")
+print("[8] 桥自取 context（0.6.37 免接线）：接了就照接、没接就自取、取不到就 raise")
 # ---------------------------------------------------------------------------
 import shutil as _sh2
 import tempfile as _tf2
@@ -346,3 +347,60 @@ check("37.73 接了 context_latent ⇒ 以接线为准（自取不介入，存�
 
 NODES._stage_path = _OLD_SP
 _sh2.rmtree(_TMP2, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+print("[9] from_segment：从第 N 段起跑（段号整体平移，0.6.39）")
+# ---------------------------------------------------------------------------
+#   为什么要有它：无头路径此前**只能**从第 1 段起跑 ⇒ 「视频起段 → 一次提交跑完剩下的段」
+#   这条最常用的路走不通，只能分两次提交或手搓链（手搓链 = 第二套实现，铁律一禁止）。
+#   画布 Chain 早就能填 stage_index，这里只是把同一能力补到无头路径。
+_gf, _of, _rf = _build(3, from_segment=1)
+_stf = [n["inputs"]["stage_index"] for nid, n in sorted(_gf.items())
+        if nid.endswith(("_bridge", "_save"))]
+check("37.74 from_segment=1 ⇒ 桥与落盘的段号整体平移成 1,2,3", _stf == [1, 1, 2, 2, 3, 3], str(_stf))
+check("37.75 from_segment=0 ⇒ 与旧行为逐位一致（仍是 0,1,2）",
+      [n["inputs"]["stage_index"] for nid, n in sorted(_g3.items())
+       if nid.endswith(("_bridge", "_save"))] == [0, 0, 1, 1, 2, 2])
+check("37.76 报告写明实际段号区间与「首段读哪一份续接」",
+      "stage_00001..00003" in _rf and "首段读 stage_00000 续接" in _rf,
+      next((l for l in _rf.splitlines() if "边车" in l), "")[:70])
+check("37.77 from_segment=0 时报告说「首段不接上一段（直通）」",
+      "首段不接上一段（直通）" in _build(2)[2])
+expect_raise("37.78 from_segment 为负 ⇒ raise", lambda: _build(1, from_segment=-1), "不能为负")
+# ⚠ 只挡**int() 解不出**的值：`"1"` 这种能解析的串与 segments/seed 同口径（容忍，不自作严格）
+expect_raise("37.79 from_segment 是非数字串 ⇒ raise",
+             lambda: _build(1, from_segment="第一段"), "整数")
+_gnf, _onf, _rnf = _build(2, from_segment=None)
+check("37.80 from_segment=None ⇒ 取默认 0（不抛裸 TypeError）",
+      {n["inputs"]["stage_index"] for nid, n in _gnf.items() if nid.endswith("_save")} == {0, 1})
+# 节点层：起始段文件不在 ⇒ **开跑前**就报（不等模型上卡）；在 ⇒ 直通建图
+import shutil as _sh3
+import tempfile as _tf3
+_OLD_SP3 = NODES._stage_path
+_TMP3 = _tf3.mkdtemp(prefix="h3fs_")
+NODES._stage_path = lambda rid, idx: os.path.join(_TMP3, str(rid),
+                                                  "stage_%05d.safetensors" % int(idx))
+try:
+    _FR().run(model="M", clip="C", vae="V", audio_vae="AV", sampler="S", sigmas="G",
+              prompt="词", prompts="", segments=2, seed=0, run_id="fsx", width=608,
+              height=1056, length=124, context_frames=22, mask_mode="hard",
+              pin_audio=True, from_segment=1)
+    check("37.81 起始段边车不在 ⇒ run() 开跑前就 raise", False, "竟然没抛")
+except RuntimeError as _e81:
+    check("37.81 起始段边车不在 ⇒ run() 开跑前就 raise（不等模型上卡）",
+          "stage_00000" in str(_e81) and "from_segment=1" in str(_e81),
+          str(_e81).splitlines()[0][:70])
+_sv3 = NODES.H3RelayLatentSave()
+getattr(_sv3, NODES.H3RelayLatentSave.FUNCTION)(_lat(seed=21), "fsx", 0, "seed for fs")
+_raw82 = _FR().run(model="M", clip="C", vae="V", audio_vae="AV", sampler="S", sigmas="G",
+                   prompt="词", prompts="", segments=2, seed=0, run_id="fsx", width=608,
+                   height=1056, length=124, context_frames=22, mask_mode="hard",
+                   pin_audio=True, from_segment=1)
+check("37.82 起始段边车在 ⇒ 正常建图，段号 1,2 且不读第 0 段以外的东西",
+      {n["inputs"]["stage_index"] for nid, n in _raw82["expand"].items()
+       if nid.endswith("_save")} == {1, 2})
+check("37.83 from_segment=1 时 report 里点名要读的那一份（不读源码也能自证）",
+      "首段读 stage_00000 续接" in _raw82["result"][3])
+NODES._stage_path = _OLD_SP3
+_sh3.rmtree(_TMP3, ignore_errors=True)
+

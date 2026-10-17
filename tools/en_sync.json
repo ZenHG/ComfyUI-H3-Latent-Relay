@@ -16,8 +16,8 @@
           "zh": "核心功能",
           "en": "Core features",
           "mode": "condensed",
-          "h_en": "e5ea3a5e14a5514a",
-          "h_src": "9c8dc3ecf1474684",
+          "h_en": "377878c6361a0085",
+          "h_src": "58e5846f8f69225c",
           "seeded": "by-position"
         },
         {
@@ -79,7 +79,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-17",
-      "src_sha": "b42dfbd4d789783e"
+      "src_sha": "0bfea115b205b923"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -352,8 +352,8 @@
           "zh": "⏩ Finite Run：一次提交跑完 N 段（无头连跑，0.6.36）",
           "en": "⏩ Finite Run: run N segments in one submission (headless, 0.6.36)",
           "mode": "full",
-          "h_en": "7d177f7c473b81e9",
-          "h_src": "d8c99243f55ba2c5",
+          "h_en": "8865640b8d1edb06",
+          "h_src": "cfd9a64c2536e414",
           "seeded": "by-position"
         },
         {
@@ -415,7 +415,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-17",
-      "src_sha": "b4b506d31a654620"
+      "src_sha": "a0f6b960504fcfa9"
     },
     "docs/08-testing.md": {
       "en": "docs/08-testing_EN.md",
@@ -432,8 +432,8 @@
           "zh": "单测（零 GPU、秒级）",
           "en": "Unit tests (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "a76a03dccd603754",
-          "h_src": "587f580647335e2f",
+          "h_en": "e84a5177bdd5c6f6",
+          "h_src": "63615cf5ee0dd055",
           "seeded": "by-position"
         },
         {
@@ -448,8 +448,8 @@
           "zh": "V3 外壳与默认出口（零 GPU、秒级）",
           "en": "V3 shell and default exit (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "7913420d1a81d2c6",
-          "h_src": "57b8d63b1b2358a1",
+          "h_en": "7fdd45b88236e32d",
+          "h_src": "28318c2580126d64",
           "seeded": "by-position"
         },
         {
@@ -471,7 +471,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-17",
-      "src_sha": "341684a7fd91779e"
+      "src_sha": "20ce33646c71c27f"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",

@@ -140,6 +140,7 @@ export const H3_WIDGETS = {
     length: { zh: "帧数", en: "length" },
     seed: { zh: "随机种子", en: "seed" },
     settle_frames: { zh: "沉降帧数", en: "settle frames" },
+    from_segment: { zh: "起始段号", en: "start segment" },
     seam_ghost: { zh: "缝帧重影", en: "seam ghost" },
     seam_ghost_alpha: { zh: "重影强度", en: "ghost strength" },
     settle_sharpen: { zh: "糊区锐化", en: "soft-zone sharpen" },
@@ -702,6 +703,9 @@ export const H3_TIPS = {
     },
     "H3RelayFiniteRun.settle_frames": {
         en: "【Pick by camera】Keep 0 for a fixed camera; use -1 when the shot changes.\nThe settle zone is the few frames after the pinned region where the model replays the previous segment.\n· Fixed camera: trimming them causes the seam jump (0 frames → 0.020, 16 → 0.055) ⇒ keep 0;\n· Shot change: -1 moves the hard cut back to the segment boundary.",
+    },
+    "H3RelayFiniteRun.from_segment": {
+        en: "【Start after which segment】0 = start at segment 1 (default).\nFill N to continue from segment N; fill 1 after a video seed.\n⚠ that segment's sidecar must exist on disk, or it errors\nbefore anything runs — not after the model is on the GPU.\nDo not wire the first-frame image when continuing.",
     },
     "H3RelaySeedFromVideo.video": {
         en: "【Wiring】The picture frames of an existing video (LoadVideo's image output).\nIt becomes segment 1 of the chain; later segments continue outward as usual.",
