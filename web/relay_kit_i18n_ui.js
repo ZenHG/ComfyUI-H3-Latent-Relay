@@ -266,13 +266,14 @@ function repaint() {
 /** 全图应用语言。返回改了哪些（调试用；异常一律吞掉）。 */
 export function applyLangAll() {
     const L = currentLang();
-    const stat = { nodes: 0, widgets: 0, slots: 0, titles: 0 };
+    const stat = { nodes: 0, widgets: 0, slots: 0, titles: 0, states: 0 };
     for (const n of ownNodes(nodesOf)) {
         try {
             const r = applyLang(n, L);
             stat.nodes += 1;
             stat.widgets += r.widgets;
             stat.slots += r.slots;
+            stat.states += r.states;
             if (r.title) stat.titles += 1;
         } catch (e) { /* 单个节点失败不影响其它 */ }
     }
@@ -311,6 +312,13 @@ function guardPass() {
                 }
                 if (w && w.__h3I18nWantTip != null && w.tooltip !== w.__h3I18nWantTip) {
                     w.tooltip = w.__h3I18nWantTip;
+                }
+                // 双态开关（0.6.36）：汉化插件同样会改 `options.on/off`。
+                if (w && w.__h3I18nWantOn != null && w.options && w.options.on !== w.__h3I18nWantOn) {
+                    w.options.on = w.__h3I18nWantOn;
+                }
+                if (w && w.__h3I18nWantOff != null && w.options && w.options.off !== w.__h3I18nWantOff) {
+                    w.options.off = w.__h3I18nWantOff;
                 }
             } catch (e) { /* 单格失败不影响其它 */ }
             // 标题兜底（2026-10-16 加）。

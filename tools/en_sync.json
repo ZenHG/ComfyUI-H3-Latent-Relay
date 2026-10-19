@@ -8,8 +8,8 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "condensed",
-          "h_en": "31b887682ff0cb7a",
-          "h_src": "7089eca418bf6246",
+          "h_en": "4c18d54c7c91552d",
+          "h_src": "b4400ee7a249435f",
           "seeded": "by-position"
         },
         {
@@ -48,8 +48,8 @@
           "zh": "目录结构",
           "en": "Repository layout",
           "mode": "condensed",
-          "h_en": "513ef4bde24c8d0f",
-          "h_src": "dbad652f81283ad3",
+          "h_en": "89f4487fa995a999",
+          "h_src": "96b956b5741e9a46",
           "seeded": "by-position"
         },
         {
@@ -72,14 +72,14 @@
           "zh": "文档索引",
           "en": "Documentation index",
           "mode": "condensed",
-          "h_en": "438244fe50805779",
-          "h_src": "bf48293b8b3ef423",
+          "h_en": "9fe7df6920f130aa",
+          "h_src": "fe45ff5ced75c48e",
           "seeded": "by-position"
         }
       ],
       "acks": [],
-      "stamped": "2026-10-16",
-      "src_sha": "a8d2bfbf028b7847"
+      "stamped": "2026-10-19",
+      "src_sha": "7be72b8c89fbf257"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -166,7 +166,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-16",
+      "stamped": "2026-10-19",
       "src_sha": "06ca2288755a21d0"
     },
     "docs/02-parameters.md": {
@@ -184,14 +184,14 @@
           "zh": "参数",
           "en": "Parameters",
           "mode": "full",
-          "h_en": "dafff69f2af04b47",
-          "h_src": "634d0dd18d71a27b",
+          "h_en": "fd09df48e5424da7",
+          "h_src": "827f122316486382",
           "seeded": "by-position"
         }
       ],
       "acks": [],
-      "stamped": "2026-10-16",
-      "src_sha": "2b6cd3118cc63bbf"
+      "stamped": "2026-10-19",
+      "src_sha": "53956f7f235a8b53"
     },
     "docs/03-sampling-and-design.md": {
       "en": "docs/03-sampling-and-design_EN.md",
@@ -222,7 +222,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-16",
+      "stamped": "2026-10-19",
       "src_sha": "e0c4d1c18fb4b8e2"
     },
     "docs/04-canvas-and-widgets.md": {
@@ -238,7 +238,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-16",
+      "stamped": "2026-10-19",
       "src_sha": "d39be80cc6d876ab"
     },
     "docs/05-troubleshooting.md": {
@@ -294,7 +294,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-16",
+      "stamped": "2026-10-19",
       "src_sha": "9115e791360e9ca7"
     },
     "docs/06-continuity-scripting.md": {
@@ -318,7 +318,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-16",
+      "stamped": "2026-10-19",
       "src_sha": "c046d84ff172f569"
     },
     "docs/07-chain.md": {
@@ -328,8 +328,8 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "full",
-          "h_en": "5fd653a37e204634",
-          "h_src": "e4b2aa3c5e686028",
+          "h_en": "c74b107c435ab87b",
+          "h_src": "6a4319fd31cc0c53",
           "seeded": "by-position"
         },
         {
@@ -406,8 +406,8 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-16",
-      "src_sha": "3535e5cb93b77c91"
+      "stamped": "2026-10-19",
+      "src_sha": "9b57105db60b2475"
     },
     "docs/08-testing.md": {
       "en": "docs/08-testing_EN.md",
@@ -424,24 +424,24 @@
           "zh": "单测（零 GPU、秒级）",
           "en": "Unit tests (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "fb0d655106b8bb6a",
-          "h_src": "52852aa71be0eec9",
+          "h_en": "bbab6c2ab59f3d7e",
+          "h_src": "2ad57572dfde8ae6",
           "seeded": "by-position"
         },
         {
           "zh": "前端纯函数的单测（node 跑、零依赖）",
           "en": "Unit tests for front-end pure functions (run by node, zero dependencies)",
           "mode": "full",
-          "h_en": "3a798446a9e1e0de",
-          "h_src": "f041ef331700f436",
+          "h_en": "699d87543513febc",
+          "h_src": "bfecf36a0f73e534",
           "seeded": "by-position"
         },
         {
           "zh": "🔴 改前端之后的必跑清单（2026-10-15 立，有实测依据）",
           "en": "🔴 Checklist after changing the front-end (established 2026-10-15, from measurements)",
           "mode": "full",
-          "h_en": "ca28cc020f32a010",
-          "h_src": "cc307f99abb8ead0",
+          "h_en": "0527d919ba29b51e",
+          "h_src": "4ddf0715095a8c79",
           "seeded": "by-position"
         },
         {
@@ -456,8 +456,8 @@
           "zh": "tools/ 下的其他自检（完整清单见 [`tools/README.md`](../tools/README.md)）",
           "en": "Other self-checks under tools/ (full list in [`tools/README.md`](../tools/README.md))",
           "mode": "full",
-          "h_en": "9ddbe70059149d81",
-          "h_src": "20da02d69e5873fe",
+          "h_en": "ac5fccd280773e1d",
+          "h_src": "c6679bb2ab7a0c00",
           "seeded": "by-position"
         },
         {
@@ -470,8 +470,8 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-16",
-      "src_sha": "ce3240b97b065aaa"
+      "stamped": "2026-10-19",
+      "src_sha": "b66b33b6092d06f1"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",
@@ -526,7 +526,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-16",
+      "stamped": "2026-10-19",
       "src_sha": "6886d24ff831c09b"
     },
     "docs/10-audio-seam-and-concat.md": {
@@ -590,7 +590,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-16",
+      "stamped": "2026-10-19",
       "src_sha": "068491bc51cdce1e"
     }
   }

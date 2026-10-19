@@ -26,6 +26,15 @@
 //   额度提示是**追加在标题末尾**的（`budgetTitle` 拼字符串）⇒ 若本模块整段替换标题，
 //   会把别人的提示抹掉；顺序反了也可能互相覆盖。
 //   ⇒ `swapTitle()` 只替换**前缀**（默认名部分），**原样保留后缀** ⇒ 谁先谁后都对。
+//
+// ---------------------------------------------------------------------------
+// 🔴 可见字符串渠道（新增任何一种 ⇒ 必须同时补词表 + 判据，别再靠"记得"）
+//   标题 `H3_NODES` · 参数标签 `H3_WIDGETS` · 悬浮 `H3_TIPS` · 端口 `H3_SLOTS`
+//   枚举 `comboLabel` · **双态开关 `H3_STATES`**（`options.on/off`）· 按钮 `H3_BUTTONS`
+// ⚠️ 0.6.36 教训：`label_on/off` 不在前两张表的覆盖面上 ⇒ 英文界面整块露中文，
+//    而且是**用户先发现**的。判据 = `check_frontend` F5。
+// ---------------------------------------------------------------------------
+
 
 /** 语言存取键（**刻意不与别的包共用**：两包各管各的，避免互相覆盖 localStorage）。 */
 export const LANG_KEY = "h3relay_lang";
@@ -92,7 +101,7 @@ export const H3_WIDGETS = {
     mask_mode: { zh: "掩码模式", en: "mask mode" },
     taper_tokens: { zh: "渐缩 token 数", en: "taper tokens" },
     seam_min: { zh: "缝端掩码下限", en: "seam floor" },
-    pin_audio: { zh: "钉住音频", en: "pin audio" },
+    pin_audio: { zh: "复制音频", en: "copy audio" },
     ramp_top: { zh: "斜坡上限", en: "ramp top" },
     ramp_tokens: { zh: "斜坡 token 数", en: "ramp tokens" },
     // ⚠️ 命名历史坑（2026-10-14 修正显示名）：`anchor_*` 是 0.5.0 的**统计纠偏基准**（走 latent 统计量），
@@ -105,12 +114,12 @@ export const H3_WIDGETS = {
     blend_shape: { zh: "混合窗形", en: "blend shape" },
     window_top: { zh: "窗峰值", en: "window peak" },
     window_shape: { zh: "窗函数", en: "window shape" },
-    ref_anchor_latent: { zh: "外观锚（接线）", en: "appearance anchor" },
-    ref_anchor_stage: { zh: "外观锚段号", en: "appearance anchor stage" },
-    ref_anchor_frames: { zh: "外观锚帧数", en: "appearance anchor frames" },
+    ref_anchor_latent: { zh: "外观参考（接线）", en: "appearance reference" },
+    ref_anchor_stage: { zh: "外观参考段号", en: "appearance reference stage" },
+    ref_anchor_frames: { zh: "外观参考帧数", en: "appearance reference frames" },
     audio_ref_seconds: { zh: "音频参考窗", en: "audio ref window" },
-    voice_anchor: { zh: "声锚", en: "voice anchor" },
-    voice_anchor_stage: { zh: "声锚段号", en: "voice anchor stage" },
+    voice_anchor: { zh: "声音参考", en: "voice reference" },
+    voice_anchor_stage: { zh: "声音参考段号", en: "voice reference stage" },
     exp_anchor: { zh: "实验开关", en: "experiment switch" },
     // 裁重叠
     images: { zh: "图像", en: "images" },
@@ -139,7 +148,7 @@ export const H3_WIDGETS = {
     diagnostics: { zh: "诊断", en: "diagnostics" },
     // 后处理
     guide: { zh: "缝另一侧帧", en: "seam-opposite frame" },
-    head_zone_frames: { zh: "段头作用帧数", en: "head zone" },
+    head_zone_frames: { zh: "本段开头帧数", en: "segment start" },
     settle_auto: { zh: "自适应糊区补偿", en: "adaptive soft-zone" },
     match_prev_stats_frames: { zh: "统计取几帧", en: "stats frames" },
     baseline: { zh: "段体参考", en: "body reference" },
@@ -162,10 +171,10 @@ export const H3_WIDGETS = {
     seam_feather: { zh: "接缝羽化", en: "seam feather" },
     // 音频缝
     patch_seconds: { zh: "头部补丁秒数", en: "head patch" },
-    tile_seconds: { zh: "床环瓦片秒数", en: "bed tile" },
+    tile_seconds: { zh: "环境声瓦片秒数", en: "ambience tile" },
     fade_seconds: { zh: "淡变秒数", en: "fade seconds" },
-    bed_stage: { zh: "床声段号", en: "bed stage" },
-    bed_select: { zh: "床声从哪取", en: "bed source" },
+    bed_stage: { zh: "环境声段号", en: "ambience stage" },
+    bed_select: { zh: "环境声从哪取", en: "ambience source" },
     join_curve: { zh: "拼接曲线", en: "join curve" },
     join_prime_ms: { zh: "丢前置毫秒", en: "drop priming" },
     join_cross_ms: { zh: "交叉淡变毫秒", en: "cross-fade ms" },
@@ -173,7 +182,7 @@ export const H3_WIDGETS = {
     join_align_seconds: { zh: "画面裁量秒数", en: "picture trim s" },
     patch_guard: { zh: "台词守卫", en: "dialogue guard" },
     patch_guard_layers: { zh: "台词守卫档位", en: "guard level" },
-    declick_ratio: { zh: "去咔判据", en: "declick ratio" },
+    declick_ratio: { zh: "去咔判断", en: "declick rule" },
     declick_quiet_dbfs: { zh: "去咔静噪门限", en: "quiet floor" },
     declick_max_len_ms: { zh: "去咔最长时长", en: "max click ms" },
     cut_head_frames: { zh: "裁头帧数", en: "cut head frames" },
@@ -189,6 +198,25 @@ export const H3_WIDGETS = {
     audio_out: { zh: "成片音轨", en: "film audio" },
     video_crf: { zh: "成片画质", en: "film quality" },
     concat_result: { zh: "成片路径", en: "film path" },
+};
+
+// ---------------------------------------------------------------------------
+// 词表 · 双态开关的「开 / 关」文案（`class_type.参数名`）
+// ---------------------------------------------------------------------------
+// 🔴 为什么单开一张表：后端 `label_on` / `label_off` 被宿主搬成 `options.on/off`
+//    （前端源码：`{on: t.label_on, off: t.label_off}`），**不在** `H3_WIDGETS` 的
+//    覆盖面上 ⇒ 不写这张表，英文界面下整个开关仍是中文（0.6.36 实测两处）。
+// 🔴 与 `H3_TIPS` 同规：只写 `en`；中文唯一源是后端原文，切回 zh 时**还原**。
+// 🔴 `tools/check_frontend.py` 的 F5 双向核对「`nodes.py` 有 label_on ⇒ 本表有键」。
+export const H3_STATES = {
+    "H3RelayTrimAV.diagnostics": {
+        on: "🧪 Diagnostics on (+3 read-outs)",
+        off: "Diagnostics off (default)",
+    },
+    "H3RelayAudioSeam.patch_guard": {
+        on: "🛡 Dialogue guard on",
+        off: "Guard off (legacy)",
+    },
 };
 
 // ---------------------------------------------------------------------------
@@ -237,7 +265,7 @@ export const H3_TIPS = {
         en: "[Wiring] Take this segment's VAEDecode output.\nIt arrives with a duplicated head; this node trims it.",
     },
     "H3RelayTrimAV.trim_frames": {
-        en: "[Leave it alone] Wire Copy Bridge's 3rd output here.\n(`trim_frames`) Segment 1 ⇒ 0; from segment 2 ⇒ the pinned frame count.\nTyping a number by hand easily disagrees with the bridge.",
+        en: "[Leave it alone] Wire Copy Bridge's 3rd output here.\nWired: segment 1 ⇒ 0, from segment 2 ⇒ the copied frame count.\n· -1 (default) = not wired: it errors at run time and says how to wire it.\n· 0 = deliberately no trim (first segment / standalone).",
     },
     "H3RelayTrimAV.fps": {
         en: "[Leave it alone] H3 is fixed at 24 fps; audio is trimmed on the same timeline.",
@@ -246,7 +274,7 @@ export const H3_TIPS = {
         en: "[Wire it] Take the audio decoder output (VAEDecodeAudio).\nPicture and sound are trimmed by the same frame count so they stay in sync.\nWithout it the audio ends up longer than the picture.",
     },
     "H3RelayTrimAV.settle_frames": {
-        en: "[Keep it at 0] Whether to also trim the settle zone: after the pinned region the model replays a few frames of the previous segment.\nThose frames are soft, but trimming them is what causes the seam jump (measured: 0 frames trimmed jumps 0.020, 16 frames 0.055).\n· 0 (default) = trim the pinned region only, no jump; -1 = measure it; N = always trim N extra frames.",
+        en: "[Keep it at 0] Whether to also trim the settle zone: after the copied region the model replays a few frames of the previous segment.\nThose frames are soft, but trimming them is what causes the seam jump (measured: 0 frames trimmed jumps 0.020, 16 frames 0.055).\n· 0 (default) = trim the copied region only, no jump; -1 = measure it; N = always trim N extra frames.",
     },
     "H3RelayTrimAV.seam_ghost": {
         en: "[Keep it at 0] Replaces the first trimmed frame with a blend of the previous last frame and this first frame.\nMeasured, it only splits one jump into two without reducing the displacement ⇒ two stutters, more visible than a single jump.\n· 0 (default) = off; above 0 = on (only when you know it helps).",
@@ -261,13 +289,13 @@ export const H3_TIPS = {
         en: "[With the soft-zone sharpening] How many frames it acts on (from the first trimmed frame, fading to 0).\nDefault 24 frames ≈ 1 s; measured, the soft zone recovers within 16–20 frames.",
     },
     "H3RelayTrimAV.lowfreq_pull": {
-        en: "[Enable as needed] Low-frequency transfer: pulls the low frequencies of the first trimmed frames towards the previous last frame.\nColour, brightness and lighting follow; this segment's own detail and pose stay.\n· 0 (default) = off; 0.7 = medium; 1.0 = strongest (measured seam step down to 0.0011).\nLow frequencies only ⇒ the previous pose is not copied ⇒ no ghosting.",
+        en: "[Enable as needed] Low-frequency residual: pulls the head's colour/brightness towards the previous last frame.\nLow frequencies only ⇒ pose is not copied, no ghosting.\n0 (default) = off; 0.7 = medium; 1.0 = strongest (seam step can reach 0.0011).\n⚠ Overlaps with the cross-segment statistics match — use one of them.",
     },
     "H3RelayTrimAV.lowfreq_frames": {
         en: "[With the low-frequency transfer] How many frames it acts on (fading to 0).\nThe reference implementation uses 12; measured, the seam zone is affected within the first 12 frames.",
     },
     "H3RelayTrimAV.lowfreq_blur": {
-        en: "[With the low-frequency transfer] Low-frequency scale (blur kernel).\nLarger aligns only broad colour and lighting; the reference implementation uses 64.",
+        en: "[Low-frequency scale] The default 16 is enough.\n16 → about 1.6 s for 12 frames; 64 → about 22 s on the same shot, while the seam step only goes from 0.0024 to 0.0011.\n⇒ Do not raise it to 64 unless you are chasing broad colour drift; 32 is the middle ground.",
     },
     "H3RelayTrimAV.deconv_strength": {
         en: "[Enable as needed] Deconvolution of the head: inverts an assumed blur kernel to recover the signal.\nUnlike sharpening (which just amplifies high frequencies, noise included), it can in principle restore detail.\n0 (default) = off; 0.5–1.0 = blend ratio. Too high rings.",
@@ -288,7 +316,7 @@ export const H3_TIPS = {
         en: "[Enable as needed] Grey-world white balance: aligns the head's R:G:B ratio (colour temperature) to the body's.\nOrthogonal to the low-frequency transfer (which handles overall brightness). Gain is clamped to ±25%.\n0 (default) = off.",
     },
     "H3RelayTrimAV.match_prev": {
-        en: "[Enable as needed] Cross-segment statistics match: aligns head colour/exposure to the previous tail's trend.\nStatistics only ⇒ no ghosting.\nThe target is an extrapolation from the last few frames, not one frame.\nNoise gate on by default: a step within 3× the frame noise is ignored.\nIt is applied only when it shrinks the step.\n0 (default) = off; start around 0.5.",
+        en: "[Enable as needed] Cross-segment statistics match: aligns head brightness/colour to the previous tail.\nStatistics only ⇒ no ghosting; the noise gate leaves good frames alone.\n0 (default) = off; 0.5 is a good start.\n⚠ Negative evidence only: worse on the approximate-guide path (0.0007 → 0.0039);\nno positive copy-bridge measurement yet ⇒ do not enable by default.",
     },
     "H3RelayTrimAV.match_prev_frames": {
         en: "[With the cross-segment match] How many frames it acts on: from the first trimmed frame, fading to 0.",
@@ -316,80 +344,80 @@ export const H3_TIPS = {
         en: "[Wiring] The previous segment's full AV latent.\nTaken from Latent Load; required, segment 1 included.\n⚠ At segment 1 it hands over an empty context and the bridge passes through — do not unplug it, a missing input fails submission.",
     },
     "H3RelayCopyBridge.context_frames": {
-        en: "[Copy-window length] Frames written into this segment's head.\nOnly the 5+17k grid (5/22/39/56/73/90/107/124) and it must be shorter than the segment.\nA longer window steadies the seam but leaves fewer frames for new content.",
+        en: "[Copy-window frames] How many frames are written into this segment's start.\nOnly 5+17k (5/22/39/56/73/90/107/124), and it must be shorter than the segment.\nA longer window steadies the seam but leaves fewer frames for new content.",
     },
     "H3RelayCopyBridge.mask_mode": {
-        en: "[Mask mode] Output = model × m + previous tail × (1−m).\n· hard (recommended, default) = whole window pinned, zero redraw — use it for real continuation.\n· ramp / window = loosen the seam; framing may be rewritten.\n· taper / blend = comparison only.\nm=0 is what pins; measured, all four non-hard modes jump.",
+        en: "[Mask mode] How much of each pixel comes from the model vs the previous segment.\n· hard (recommended, default) = whole window from the previous segment, no redraw — real continuation.\n· ramp / window = loosen the seam; framing may be rewritten.\n· taper / blend = comparison only.\n· m = 0 means all from the previous segment; all four non-hard modes jump.",
     },
     "H3RelayCopyBridge.taper_tokens": {
-        en: "[taper only] How many seam-end tokens take part in the linear transition.",
+        en: "[taper only] How many tokens before the seam take part in the linear fade.",
     },
     "H3RelayCopyBridge.seam_min": {
-        en: "[taper only] Mask floor at the seam.\n0 = fully pinned; 0.3 = 30% redraw freedom there.\nThe head is always fully redrawn; this does not reach it.",
+        en: "[taper only] Mask floor at the seam.\n0 = all from the previous segment; 0.3 = leave 30% for the model to redraw here.\nThe segment start is always fully redrawn; this mode does not reach it.",
     },
     "H3RelayCopyBridge.pin_audio": {
-        en: "[Pin audio] On (default) = the previous audio tail is copied in too.\nTurn it off to pin video only. The audible join still belongs to Trim AV and the concat step.",
+        en: "[Copy audio] On (default) = the previous segment's sound is copied too.\nTurn it off to copy picture only; audible joining is still handled by Trim AV and the join step.",
     },
     "H3RelayCopyBridge.ramp_top": {
-        en: "[ramp only] Largest m at the seam.\n0 = degenerates to hard. Higher blends more but makes the noise drop steeper.\nLengthen the copy window if you raise it.",
+        en: "[ramp only] How much the model may change at the seam.\n0 = becomes hard; higher is smoother at the seam but the noise step gets steeper.\nIf you raise it, lengthen the copy window too.",
     },
     "H3RelayCopyBridge.ramp_tokens": {
-        en: "[ramp only] Seam-end tokens taking part in the ramp.\n0 = whole copy window; 2–3 = loosen only the seam, motion stays locked.",
+        en: "[ramp only] Tokens at the seam that take part in the ramp.\n0 = the whole copy window; 2–3 = loosen the seam only and keep motion locked.",
     },
     "H3RelayCopyBridge.anchor_latent": {
-        en: "[Optional colour reference] The AV latent of the global appearance anchor (usually segment 1).\nThe trimmed prefix is pulled towards the anchor's colour and variance, so new content returns to the global grade. It fixes colour drift as the chain grows.",
+        en: "[Optional colour reference] The AV latent of the global appearance reference (usually segment 1).\nThe trimmed prefix is pulled towards the reference's colour and variance, so new content returns to the global grade. It fixes colour drift as the chain grows.",
     },
     "H3RelayCopyBridge.anchor_blend": {
-        en: "[Correction strength] 0–1: how much of the prefix is pulled towards the anchor's statistics. 1 = full (default), 0.5 = half.\nLower it when the anchor and this segment are meant to differ. No effect without `anchor_latent`.",
+        en: "[Correction strength] 0–1: how strongly the opening is pulled towards the reference.\n1 = full (default), 0.5 = half; lower it when the reference and this segment may differ.\nNo effect when no reference latent is wired.",
     },
     "H3RelayCopyBridge.blend_top": {
-        en: "[blend only] Cap on the model's share at the seam.\n0 = degenerates to hard; higher trusts this segment's own prediction.\nStart around 0.5.",
+        en: "[blend only] Upper bound of the model's share at the seam.\n0 = becomes hard; higher trusts this segment's own generation more.\nStart at 0.5.",
     },
     "H3RelayCopyBridge.blend_tokens": {
-        en: "[blend only] Seam-end tokens taking part in the blend.\n0 = whole copy window; 2–3 = blend only the seam.",
+        en: "[blend only] Tokens at the seam that take part in the blend.\n0 = the whole copy window; 2–3 = blend the seam only.",
     },
     "H3RelayCopyBridge.blend_shape": {
         en: "[blend only] Blend window shape.\nsmoothstep = polynomial (default); hann = cosine.\nBoth have zero slope at the ends ⇒ softer transition.",
     },
     "H3RelayCopyBridge.window_top": {
-        en: "[window only] Peak of the window (most redraw freedom at the centre). 0 = degenerates to hard.\nUnlike ramp it falls back at the seam, so the seam stays pinned. Too high hands framing back to the model.",
+        en: "[window only] Peak of the window (loosest in the middle). 0 = becomes hard.\nOpposite of ramp: both ends fall back low ⇒ the seam stays copied.\nToo high hands framing back to the model.",
     },
     "H3RelayCopyBridge.window_shape": {
-        en: "[window only] Window shape.\nsine = low but non-zero at the ends (default); hann = exactly zero at the ends (both ends pinned).",
+        en: "[window only] Window shape.\nsine = low but non-zero at the ends (default); hann = exactly zero at the ends (both ends copied).",
     },
     "H3RelayCopyBridge.conditioning": {
-        en: "[Optional] When wired it also appends pinned frames to the conditioning.\nIt governs framing and works in parallel with the latent pin window; unwired = copy bridge only.\n⚠ The 4th output must go to the sampler's positive.",
+        en: "[Optional] When wired, these copied frames are also added to the sampling condition.\nIt governs framing and works together with the latent copy window; unwired = copy bridge only.\n⚠ The 4th output must go to the sampler's positive.",
     },
     "H3RelayCopyBridge.run_id": {
-        en: "[What to enter] The film name, same as Latent Save.\nIt is what makes the two \"stage number only\" anchors below work (they use it to find the files).",
+        en: "[What to enter] The film name, same as Latent Save.\nIt is what makes the two \"stage number only\" references below work (they use it to find the files).",
     },
     "H3RelayCopyBridge.stage_index": {
         en: "[What to enter] This segment's index (segment 1 = 0).\nWith `run_id` it drives anchor auto-read, and it must match the save.",
     },
     "H3RelayCopyBridge.ref_anchor_latent": {
-        en: "[Appearance anchor · wired] The AV latent of the global appearance anchor (usually segment 1), fed in by a wire.\nEvery step rides on it as a near-noise-free reference, holding long-range drift in check.",
+        en: "[Appearance anchor · wired] The AV latent of the global appearance reference (usually segment 1), fed in by a wire.\nEvery step rides on it as a near-noise-free reference, holding long-range drift in check.",
     },
     "H3RelayCopyBridge.ref_anchor_stage": {
         en: "[Appearance anchor · no wiring] Enter a stage number, no wire needed.\n≥ 0 = when `ref_anchor_latent` is unwired, read stage_<this> as the anchor; -1 (default) = off.\n⚠ Must be lower than this segment's index.",
     },
     "H3RelayCopyBridge.ref_anchor_frames": {
-        en: "[Appearance anchor · how much] Frames taken from the anchor's head.\nDefault 5; more drags the anchor's motion in too.",
+        en: "[Appearance anchor · how much] Frames taken from the reference's start.\nDefault 5; more drags the anchor's motion in too.",
     },
     "H3RelayCopyBridge.audio_ref_seconds": {
-        en: "[Audio reference window] 0 (default) = automatic.\nWalks back from the previous tail until 2 s of voiced audio (cap 6 s).\nIt may hold several speakers; it takes 1 of the official 3 audio slots.\n`refs n/3` on the title is that budget: `⚠` = over, `?` = unreadable.\n⚠ The reference is the previous segment's own dialogue, so the model may echo it; a wired anchor disables this.",
+        en: "[Audio reference window] 0 (default) = automatic.\nWalks back from the previous tail until 2 s of voiced audio (cap 6 s).\nIt may hold several speakers; it takes 1 of the official 3 audio slots.\n`refs n/3` on the title is the budget: `⚠` = over, `?` = unreadable.\n⚠ The reference is the previous segment's dialogue and may be repeated; ignored when a voice reference is wired.",
     },
     "H3RelayCopyBridge.voice_anchor": {
-        en: "[Voice anchor · wired] The speaker's audio anchor (LoadAudio → VAEEncodeAudio).\nWith it, the pinned audio prefix and the audio reference both use the anchor's tail window instead of the previous tail.\n· The anchor is the first person who speaks across the seam; not needed for the same speaker.\n⚠ Ignored when `pin_audio=False`; an all-zero / constant / silent anchor errors out.",
+        en: "[Voice reference · wired] Take the speaker's audio (LoadAudio → audio encode).\nWith it, the copied audio opening and the audio reference both use its tail window, not the previous segment.\n· Who: the first person who speaks across the seam; not needed for the same speaker.\n⚠ Ignored when copy audio is off; an all-zero / constant / silent reference errors out.",
     },
     // ===== 后处理 =====
     "H3RelayPost.images": {
         en: "[Wiring] Take Trim AV's `images` output (the trimmed picture).\nIt only changes picture quality; frame count and audio are untouched.",
     },
     "H3RelayPost.guide": {
-        en: "[Wiring] Take Trim AV's 4th output, `prev_tail`.\nIt is the last frame of the pinned region, i.e. the other side of the seam; only the cross-segment match and the low-frequency transfer need it.\n⚠ Whether it really is the previous last frame depends on the bridge: yes with the copy bridge, only an approximation with the Latent bridge.",
+        en: "[Wiring] Take Trim AV's 4th output, `prev_tail`.\nIt is the last frame of the copied region, i.e. the other side of the seam; only the cross-segment match and the low-frequency transfer need it.\n⚠ Whether it really is the previous last frame depends on the bridge: yes with the copy bridge, only an approximation with the Latent bridge.",
     },
     "H3RelayPost.match_prev": {
-        en: "[Enable as needed, 0 by default] Cross-segment statistics match.\nAligns the head's colour and exposure to `guide`.\nStatistics only ⇒ no ghosting. Needs `guide`.\nNoise gate on by default: a step within 3× the frame noise is ignored.\n⚠ On the Latent bridge keep 0: `guide` is only an approximation there.\n⚠ The cross-segment master switch must also be ticked.",
+        en: "[Enable as needed, 0 by default] Cross-segment statistics match: aligns head brightness/colour to `guide`.\nStatistics only ⇒ no ghosting; the noise gate skips small steps.\n⚠ On the Latent bridge keep 0: `guide` is only an approximation there and aligning to it makes things worse (0.0007 → 0.0039).\n⚠ No positive measurement on the copy-bridge path yet ⇒ not a universal fix.",
     },
     "H3RelayPost.match_prev_frames": {
         en: "[With the cross-segment match] How many frames it acts on: from the first frame, fading to 0.",
@@ -407,10 +435,10 @@ export const H3_TIPS = {
         en: "[With the low-frequency transfer] How many frames it acts on (fading to 0).",
     },
     "H3RelayPost.lowfreq_blur": {
-        en: "[With the low-frequency transfer] Low-frequency scale (blur kernel); the reference uses 64.",
+        en: "[Low-frequency scale] The default 16 is enough.\n16 → about 1.6 s for 12 frames; 64 → about 22 s on the same shot, while the seam step only goes from 0.0024 to 0.0011.\n⇒ Do not raise it to 64 unless you are chasing broad colour drift; 32 is the middle ground.",
     },
     "H3RelayPost.head_zone_frames": {
-        en: "[Head zone] The four items below act over this many frames.\nHistogram match / white balance / deconvolution / body high-frequency transfer.\n⚠ The soft-zone sharpening does not use this; it has its own frame count.",
+        en: "[Segment start frames] The four items below act over this many frames.\nHistogram match / white balance / deconvolution / body high-frequency transfer.\n⚠ The soft-zone sharpening does not use this; it has its own frame count.",
     },
     "H3RelayPost.hist_match": {
         en: "[Within a segment] Histogram match: aligns the head's tonal distribution to the body's.\nIt fixes tonal drift between head and body (inside one segment; no `guide` needed).\nEnable as needed; 0 by default. Acts over `head_zone_frames`.",
@@ -487,34 +515,34 @@ export const H3_TIPS = {
         en: "[Wiring] Take Trim AV's `audio` output.\nFor segment 1, with no Trim AV node, take the audio decoder directly.",
     },
     "H3RelayAudioSeam.run_id": {
-        en: "[What to enter] The film name, exactly matching Latent Save / the bridge.\nIt uses it to find the previous segment's saved audio as the bed source.",
+        en: "[What to enter] The film name, exactly matching Latent Save / the bridge.\nIt uses it to find the previous segment's saved audio as the ambience source.",
     },
     "H3RelayAudioSeam.stage_index": {
-        en: "[What to enter] This segment's index (segment 1 = 0).\nSegment 1 has no seam to patch and passes through (its audio is still saved as segment 2's bed source).",
+        en: "[What to enter] This segment's index (segment 1 = 0).\nSegment 1 has no seam to patch and passes through (its audio is still saved as segment 2's ambience source).",
     },
     "H3RelayAudioSeam.patch_seconds": {
         en: "[Head patch] Replaces the first N seconds with the previous segment's ambience.\nDefault 1.2: ambience and background noise no longer restart every segment.\n· Higher covers more of the head (above 1.2 it risks swallowing dialogue); lower is safer.\n⚠ It replaces everything in those N seconds, so the head should not contain dialogue. 0 = off.",
     },
     "H3RelayAudioSeam.tile_seconds": {
-        en: "[Bed tiling] Takes tiles of this length and cross-fades them to fill the patch.\n0 (default) = take the quietest stretch from the whole window. Use it when the previous segment's clean ambience is shorter than the patch; 1.2 is a good value.",
+        en: "[Ambience tile seconds] Cut the ambience into tiles of this length and cross-fade them to fill the patch.\n0 (default) = take the quietest stretch from the whole window. Use it when the previous segment's clean ambience is shorter than the patch; 1.2 is a good value.",
     },
     "H3RelayAudioSeam.fade_seconds": {
         en: "[Patch boundary] How wide a cross-fade between the patch and what follows.\n0 = hard cut (an audible click); 0.25 is a measured-good value.",
     },
     "H3RelayAudioSeam.bed_stage": {
-        en: "[What to enter] Which segment's audio to use as the bed (0 = segment 1).\nAmbience in the same scene barely changes, so segment 1 is steadiest. ⚠ Must be lower than this segment's index.",
+        en: "[Ambience source] Which segment's audio to use (0 = segment 1).\nAmbience in the same scene barely changes, so segment 1 is steadiest. ⚠ Must be lower than this segment's index.",
     },
     "H3RelayAudioSeam.note": {
         en: "[Optional] A note, stored in the file's metadata to tell versions apart.",
     },
     "H3RelayAudioSeam.bed_select": {
-        en: "[Where the bed comes from] \n· tail (default) = a stretch of the bed's tail as long as the patch: right at the seam, so level and timbre continue naturally.\n· quiet = the globally quietest window. Measured, it makes the patch quieter, turning the seam dip into a silent hole ⇒ comparison only.",
+        en: "[Where the ambience comes from] Pick one:\n· tail (default) = a stretch of the source's tail as long as the patch: right at the seam, so level and timbre continue naturally.\n· quiet = the globally quietest stretch. Measured, it makes the patch quieter, turning the seam dip into a silent hole ⇒ comparison only.",
     },
     "H3RelayAudioSeam.join_curve": {
         en: "[Join curve] Shape of the cross-fade at the seam.\n· qsin (default, equal power) = no level dip when the two sides are uncorrelated.\n· tri (linear) = measured 4.7 dB dip, heard as the volume dropping and coming back ⇒ comparison only.",
     },
     "H3RelayAudioSeam.join_prime_ms": {
-        en: "[Join only] Encoder priming to drop from each head, in milliseconds.\nDefault 33 ms (measured for AAC). It is not content — dropping it is an alignment fix; 0 = keep it.",
+        en: "[Join only] Encoder warm-up to drop from each start, in milliseconds.\nDefault 33 ms (measured for AAC). It is not content — dropping it is an alignment fix; 0 = keep it.",
     },
     "H3RelayAudioSeam.join_cross_ms": {
         en: "[Join only] Cross-fade length at the seam, in milliseconds. Default 0 = none.\nA cross-fade shortens the timeline ⇒ the audio runs ahead of the picture, accumulating.\nSo it only makes sense together with `join_align_seconds`.\n⚠ Filling this alone errors out instead of silently producing a misaligned track.",
@@ -526,13 +554,13 @@ export const H3_TIPS = {
         en: "[Join only] Picture trim per seam in seconds = trimmed frames ÷ fps.\nAbove 0 = timeline conserving: the output is exactly as long as the trimmed picture, with no level dip at the seam.\n0 = the old shortening behaviour (comparison only). Must be at least `join_cross_ms`.",
     },
     "H3RelayAudioSeam.patch_guard": {
-        en: "[Dialogue guard] On (default) = before patching, detect whether this segment's head contains dialogue.\nIf it does, the patch shrinks to 0.40 s before the line; if the line starts too early the patch is switched off.\nOff = old behaviour: the patch may replace dialogue at the head.",
+        en: "[Dialogue guard] On (default) = before patching, detect whether this segment's start contains dialogue.\nIf it does, the patch shrinks to 0.40 s before the line; if the line starts too early the patch is switched off.\nOff = old behaviour: the patch may replace dialogue at the start.",
     },
     "H3RelayAudioSeam.patch_guard_layers": {
         en: "[Dialogue guard level] 0 (default) = the energy test alone.\n1 = add an energy step; 2 = add spectral centroid; 3 = add spectral flatness (all three lower the sensitivity).\n⚠ Levels 1–3 go against a guard that should rather over-detect, and were calibrated on few samples ⇒ off by default.\n⚠ Do not rest dialogue safety on this field: keep `patch_seconds` at or below 1.2 instead.",
     },
     "H3RelayAudioSeam.declick_ratio": {
-        en: "[Isolated-transient suppression] Test = local peak ÷ background noise. 0 = off; 4.0 recommended.\nIt removes a short click that pops out where the background is very quiet.\n⚠ The test looks at how quiet the surroundings are, not how loud the click is — loudness alone would cut speech consonants too.\n⚠ Only that spot changes (2 ms fades both sides); the rest stays bit-identical.",
+        en: "[De-click rule] Local peak ÷ background floor. 0 = off; 4.0 recommended.\nWhat it does: removes a short spike popping out of a very quiet background.\n⚠ It looks at how quiet the surroundings are, not how loud the spike is — loudness alone would clip dialogue consonants.\n⚠ Only that spot is touched (2 ms fades at both ends); the rest is bit-identical, length unchanged.",
     },
     "H3RelayAudioSeam.declick_quiet_dbfs": {
         en: "[Isolated-transient suppression] Only act when the background is below this level (dBFS). Default −50.\nMeasured: −56 dBFS at an isolated transient ⇒ acted on; about −35 dBFS at a speech consonant ⇒ not acted on.\n⚠ Higher is more aggressive and may touch soft consonants; lower is more conservative.",
@@ -544,7 +572,7 @@ export const H3_TIPS = {
         en: "[Isolated-transient suppression] Frames this segment will lose (= the bridge's `context_frames`).\nWhy: this node works on untrimmed audio while the output is trimmed ⇒ a seam peak looks \"not isolated\" here, yet nothing precedes it in the finished film.\nGiven this value the suppressor treats that spot as a fresh file head.\n⚠ 0 = the fix is off; a script normally fills it.",
     },
     "H3RelayAudioSeam.loudness_normalize": {
-        en: "[Loudness balance] On (default) = aligns this segment's speech loudness to a common target.\nWhy on: the model follows the anchor's loudness — with an anchor it is normalised, without one nothing governs it.\nEach segment's level is then left to the model (measured 7.97 dB spread). Off = the old behaviour.",
+        en: "[Loudness balance] On (default) = aligns this segment's speech loudness to a common target.\nWhy on: the model follows the reference's loudness — with a reference it is normalised, without one nothing governs it.\nEach segment's level is then left to the model (measured 7.97 dB spread). Off = the old behaviour.",
     },
     "H3RelayAudioSeam.loudness_target_dbfs": {
         en: "[Loudness balance] Target level (median RMS over voiced windows, dBFS). Default −23.0.\n⚠ Not the whole-segment RMS and not the peak — silence and ambience are excluded, so it describes speech loudness.",
@@ -590,7 +618,7 @@ export const H3_TIPS = {
         en: "[Unload after run] On = return the model to system memory to free VRAM; off (default) = keep it loaded.\n⚠ With chunking it reloads once per chunk and is clearly slower.",
     },
     "H3RelayLatentUpscale.spatial_tiles": {
-        en: "[VRAM · split space] Cut the frame into tiles along its long edge. 1 = no split (default).\nBetter than splitting time: each tile keeps the whole time axis, so no temporal context is lost; only the boundary narrows (overlap + feathering handle it).\n⚠ Splitting changes the picture ⇒ re-check the seam. 2–4 tiles is usually enough.",
+        en: "[VRAM · split space] Cut along the long edge into tiles. 1 = no split (default).\nLow VRAM: on 8 GB at 2 MP try 2 tiles first; go 3–4 if needed, 4 is usually enough.\nEach tile keeps the full time axis ⇒ gentler than splitting time (`chunks`); but it changes the picture → re-check the seam.",
     },
     "H3RelayLatentUpscale.spatial_overlap": {
         en: "[Spatial overlap] Overlap width between tiles (latent cells; 1 cell ≈ 16 px). Default 8.\nOverlap is context only and cores are exclusive ⇒ no ghosting.\nIt costs compute: an 80-cell edge with overlap 8 makes 3 tiles ~40% dearer. Must still fit `seam_feather`.",
@@ -602,7 +630,7 @@ export const H3_TIPS = {
         en: "[Voice anchor · no wiring] Enter a stage number, no wire needed.\n≥ 0 = when `voice_anchor` is unwired, read the audio of stage_<this> as the anchor; -1 (default) = off.\n⚠ Must be lower than this segment's index; ignored when `voice_anchor` is wired.",
     },
     "H3RelayCopyBridge.exp_anchor": {
-        en: "[Experiment · default auto] One switch for the two conditioning experiments: per-speaker voice accumulation, and the time-invariant history anchor.\n· auto (default) = the old behaviour: read the run-directory config files, on if present.\n· off = off for good (ignored and reported). The rest = explicitly on; a missing file errors out.\n⚠ Both are untested experiments."
+        en: "[Experiment · default auto] One switch for the two conditioning experiments: per-speaker voice accumulation, and the time-invariant history reference.\n· auto (default) = the old behaviour: read the run-directory config files, on if present.\n· off = off for good (ignored and reported). The rest = explicitly on; a missing file errors out.\n⚠ Both are untested experiments."
     },
 };
 
@@ -744,6 +772,15 @@ export function pickTip(table, type, widgetName) {
     return e && e.en ? e : null;
 }
 
+/** 双态开关词表查找（同上：精确键优先；缺 `on`/`off` 任一侧 ⇒ 当没命中）。 */
+export function pickState(table, type, widgetName) {
+    const t = String(type || "");
+    const n = String(widgetName || "");
+    if (!t || !n || !table) return null;
+    const e = table[t + "." + n] || table["*." + n];
+    return e && e.on && e.off ? e : null;
+}
+
 /**
  * 该 (节点类型, 参数名) 组合的双语提示（没有就 null ⇒ **不动**原 tooltip）。
  * 🔴 键先试 `class_type.参数名`，再退到 `*.参数名` 通配。
@@ -768,7 +805,7 @@ export function tipFor(type, widgetName, lang) {
  *          （便于测试与调试；`tips` 只数**真改动了**的那几个）
  */
 export function applyLang(node, lang) {
-    const out = { title: false, widgets: 0, slots: 0, tips: 0 };
+    const out = { title: false, widgets: 0, slots: 0, tips: 0, states: 0 };
     if (!node) return out;
     const L = normLang(lang);
     try {
@@ -827,6 +864,38 @@ export function applyLang(node, lang) {
                 w.__h3I18nTipTouched = false;
             }
         } catch (e) { /* 提示失败不影响标签 */ }
+        // 双态开关：后端 `label_on`/`label_off` 被宿主搬成 `options.on/off`（见 H3_STATES）。
+        // 与提示同一套「英文才写、中文还原」的规则 ⇒ 中文仍只有后端一份。
+        try {
+            const st = pickState(H3_STATES, node.type, name);
+            if (st) {
+                if (!w.__h3I18nStateTouched) {
+                    w.__h3I18nStateSaved = {
+                        on: w.options ? w.options.on : undefined,
+                        off: w.options ? w.options.off : undefined,
+                    };
+                    w.__h3I18nStateTouched = true;
+                }
+                if (L === "en") {
+                    if (w.options) {
+                        if (w.options.on !== st.on) { w.options.on = st.on; out.states += 1; }
+                        if (w.options.off !== st.off) { w.options.off = st.off; out.states += 1; }
+                    }
+                    w.__h3I18nWantOn = st.on;
+                    w.__h3I18nWantOff = st.off;
+                } else {
+                    const saved = w.__h3I18nStateSaved || {};
+                    if (w.options) {
+                        if (w.options.on !== saved.on) { w.options.on = saved.on; out.states += 1; }
+                        if (w.options.off !== saved.off) { w.options.off = saved.off; out.states += 1; }
+                    }
+                    delete w.__h3I18nWantOn;
+                    delete w.__h3I18nWantOff;
+                    delete w.__h3I18nStateSaved;
+                    w.__h3I18nStateTouched = false;
+                }
+            }
+        } catch (e) { /* 开关文案失败不影响别的 */ }
         try { applyCombo(node, name, L); } catch (e) { /* 枚举钩子失败不影响别的 */ }
     }
 

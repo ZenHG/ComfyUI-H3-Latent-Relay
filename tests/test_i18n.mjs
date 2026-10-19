@@ -21,9 +21,9 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
-    H3_NODES, H3_WIDGETS, H3_SLOTS, H3_TIPS, H3_BUTTONS, LANG_KEY, LANG_EVENT,
+    H3_NODES, H3_WIDGETS, H3_SLOTS, H3_TIPS, H3_BUTTONS, H3_STATES, LANG_KEY, LANG_EVENT,
     normLang, defaultLang, comboLabel, isDefaultTitle, swapTitle, applyLang, ownNodes, tipFor, pickTip,
-    btnLabel,
+    pickState, btnLabel,
 } from "../web/relay_kit_i18n.js";
 
 let pass = 0;
@@ -353,9 +353,52 @@ check("5.3 英文态回落显示原值（不留中文钩子）",
         fixTitle("", "H3RelayChain", "en"));
 }
 
-// ---- 11. 自引用：ci.yml / docs/08 的期望数 == 本文件实跑 ----
+// ---- 11. 双态开关（后端 `label_on`/`label_off` → `options.on/off`）----
+// 🔴 0.6.36 用户当场抓到的两处漏翻：Trim AV「诊断开/关」、Audio Seam「台词守卫开/关」。
+//    它们在 `H3_WIDGETS` 的覆盖面**之外**（宿主把 `label_on` 搬进 `options.on`）
+//    ⇒ 必须单开词表 + 单独断言，否则每次都要等用户发现。
 {
-    const EXPECTED_CHECKS = 41;                 // 含本行这条自检自己（pass 在本行执行时还没算上自己 ⇒ 比的是 pass+1）
+    const CJK1 = /[\u4e00-\u9fff]/;
+    const mkToggle = (type, name, on, off) => mkNode(type, {
+        widgets: [{ name, value: true, options: { on, off } }],
+    });
+
+    const t1 = mkToggle("H3RelayTrimAV", "diagnostics", "🧪 诊断开（+3 路观测）", "诊断关（默认）");
+    const r1 = applyLang(t1, "en");
+    check("11.1 Trim AV「诊断」开关：en 下 options.on/off 都换成英文",
+        t1.widgets[0].options.on === H3_STATES["H3RelayTrimAV.diagnostics"].on
+        && t1.widgets[0].options.off === H3_STATES["H3RelayTrimAV.diagnostics"].off
+        && r1.states === 2,
+        `${t1.widgets[0].options.on} / ${t1.widgets[0].options.off}`);
+
+    const t2 = mkToggle("H3RelayAudioSeam", "patch_guard", "🛡 台词守卫开", "守卫关（旧行为）");
+    const r2 = applyLang(t2, "en");
+    check("11.2 Audio Seam「台词守卫」：en 下 on/off 均无汉字",
+        !CJK1.test(t2.widgets[0].options.on) && !CJK1.test(t2.widgets[0].options.off)
+        && r2.states === 2,
+        `${t2.widgets[0].options.on} / ${t2.widgets[0].options.off}`);
+
+    check("11.3 铁律一：`value` / `name` 一字不动，且不往 widget 上加序列化字段",
+        t2.widgets[0].value === true && t2.widgets[0].name === "patch_guard"
+        && !("label_on" in t2.widgets[0]) && !("label_off" in t2.widgets[0]));
+
+    const r3 = applyLang(t2, "en");
+    check("11.4 幂等：同一语言应用两次，第二次零改动", r3.states === 0, `states=${r3.states}`);
+
+    applyLang(t2, "zh");
+    check("11.5 切回中文 ⇒ 精确还原后端原文（不留英文、不自造中文）",
+        t2.widgets[0].options.on === "🛡 台词守卫开"
+        && t2.widgets[0].options.off === "守卫关（旧行为）",
+        `${t2.widgets[0].options.on} / ${t2.widgets[0].options.off}`);
+
+    const bad = Object.entries(H3_STATES).filter(([, v]) => CJK1.test(v.on) || CJK1.test(v.off));
+    check("11.6 词表自检：`H3_STATES` 每条英文都不含汉字", bad.length === 0,
+        bad.map(([k]) => k).join(","));
+}
+
+// ---- 12. 自引用：ci.yml / docs/08 的期望数 == 本文件实跑 ----
+{
+    const EXPECTED_CHECKS = 47;                 // 含本行这条自检自己（pass 在本行执行时还没算上自己 ⇒ 比的是 pass+1）
     const root = fileURLToPath(new URL("..", import.meta.url));
     const decl = [];
     for (const rel of [".github/workflows/ci.yml", "docs/08-testing.md"]) {

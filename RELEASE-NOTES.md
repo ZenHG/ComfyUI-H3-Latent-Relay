@@ -19,6 +19,36 @@
 
 ---
 
+## 0.6.36 — 2026-10-19
+
+**续接段忘了接「裁重叠」的帧数时，以前会悄悄一帧都不裁：接缝把上一段开头重播一遍，而所有检查都显示正常。这一版改成当场报错，并告诉你怎么接。**
+
+- 「Trim AV」的 `trim_frames` 默认从 `0` 改为 **`-1`（未接线）**。它正常由「Copy Bridge」第 3 路供给；已经接好线的图**完全不受影响**。
+- 忘了这根线：运行会停下并提示——续接段接「Copy Bridge」第 3 路；首段 / 独立段填 `0`。
+- 首段和独立段本来就不需要裁：把 `trim_frames` 填 `0` 即可。
+- 「Post」的低频残差 `lowfreq_blur` 默认从 `64` 降到 `16`：同一段约 22 秒 → 约 1.6 秒，缝上的差别只有 0.0013（看不出来）。老图仍按原来的值跑。
+- 「潜空间分块放大」的空间分块提示补上小显存建议（8G / 2MP 先试 2 块，3~4 块通常够），两个细调参数收进「高级」。
+- 「连跑控制」不再要求先画分组框：没有分组时自动在整张图里找；只有一张图放多套链路时才需要分组。
+- 「跨段统计匹配」的提示写明：目前只有负向证据（近似参照路线会变差），拷贝桥下还没有正向实测。
+- 术语统一：标签改口语（「钉住音频」→「复制音频」、「床声」→「环境声」），提示里的「段头 / 声锚 / 外观锚」改成「本段开头 / 声音参考 / 外观参考」。
+
+**升级动作**：无需改图或连线。只有「首段放了 Trim AV、却没接线」的图需要把该格填成 `0`。
+
+<!-- EN -->
+
+**If a continuation segment's trim count was never wired, nothing used to be trimmed: the seam replayed the previous segment's opening while every check still passed. It now stops right away and tells you how to wire it.**
+
+- Trim AV's `trim_frames` now defaults to `-1` (not wired) instead of `0`. It is normally fed by Copy Bridge's 3rd output; graphs that already wire it are unaffected.
+- If that link is missing, the run stops with a message: wire Copy Bridge's 3rd output for continuation segments, or set `0` for a first or standalone segment.
+- First and standalone segments need no trimming: set `trim_frames` to `0`.
+- Post's low-frequency residual `lowfreq_blur` now defaults to `16` instead of `64`: about 22 s → about 1.6 s on the same shot, with a seam difference of only 0.0013 (invisible). Existing graphs keep their saved value.
+- The spatial-tiling hint now gives low-VRAM advice (on 8 GB at 2 MP try 2 tiles; 3–4 is usually enough), and two fine-tuning knobs moved under Advanced.
+- Chain no longer asks you to draw a group box first: without one it searches the whole graph; groups are only needed when one graph holds several chains.
+- The cross-segment match hint now states it has negative evidence only (the approximate-guide path gets worse); there is no positive measurement on the copy-bridge path yet.
+- Wording cleanup: plainer labels (Pin audio → Copy audio, Bed source → Ambience source) and tooltips without the old jargon.
+
+**Action required**: none — no graph or wiring changes. Only a graph that puts Trim AV on a first segment without wiring it needs that field set to `0`.
+
 ## 0.6.35 — 2026-10-16
 
 **英文界面下 Chain 的 7 个按钮此前整块是中文，桥节点标题挂着一行长中文警告。这一版都改对了，并把「切英文后画布上真的是英文」做成自动断言。**

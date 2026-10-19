@@ -551,13 +551,15 @@ class H3RelayLatentUpscale:
                 }),
                 "spatial_tiles": ("INT", {
                     "default": 1, "min": 1, "max": 16, "step": 1,
-                    "tooltip": "【显存·切空间】沿画面长边切几块跑。1 = 不切（默认）。\n比切时间好：每块时间轴完整 ⇒ 时间上下文不丢，只是边界变窄（靠重叠 + 羽化过渡）。\n⚠ 切了会改画面 ⇒ 切完必须重看缝。一般 2~4 块够。",
+                    "tooltip": "【显存·切空间】沿长边切几块。1 = 不切（默认）。\n小显存：8G 跑 2MP 先试 2 块；不够再 3~4，通常到 4 就够。\n每块时间轴完整 ⇒ 比切时间（chunks）伤得轻；但切了会改画面，切完重看缝。",
                 }),
                 "spatial_overlap": ("INT", {
+                    "advanced": True,
                     "default": CORE.UPSCALE_TILE_OVERLAP_DEFAULT, "min": 1, "max": 64, "step": 1,
                     "tooltip": "【空间重叠】相邻两条的重叠宽度（latent 格，1 格约 16 像素）。默认 8。\n重叠只当上下文用，核心区独占 ⇒ 不会重影。\n它换算力：长边 80 格、重叠 8 时 3 块多算约 40%。至少要装得下接缝羽化。",
                 }),
                 "seam_feather": ("INT", {
+                    "advanced": True,
                     "default": CORE.UPSCALE_TILE_FEATHER_DEFAULT, "min": 0, "max": 16, "step": 2,
                     "tooltip": "【接缝羽化】过渡带宽度（latent 格）。默认 4；0 = 硬过渡。\n成片出现淡色差线时调到 8~12，并同步调大空间重叠。",
                 }),
@@ -837,8 +839,13 @@ class H3RelayTrimAV:
                     "tooltip": "【接法】接本段画面解码（VAEDecode）的输出。\n收到的是含重复开头的完整画面，它把重复部分裁掉。",
                 }),
                 "trim_frames": ("INT", {
-                    "default": 0, "min": 0, "max": 362, "step": 1,
-                    "tooltip": "【不用填】从 Copy Bridge 第 3 路输出接线。\n（trim_frames）第 1 段自动 0；第 2 段起自动等于钉住帧数。\n手填容易和桥对不上。",
+                    # 0.6.36：默认 -1 = **未接线**。旧默认 0 让「忘接线」与「明确不裁」
+                    #   在服务端完全同形 ⇒ 漏接只能表现为静默裁 0（接缝重播）。
+                    "default": -1, "min": -1, "max": 362, "step": 1,
+                    "tooltip": "【不用填】从 Copy Bridge 第 3 路输出接线。\n"
+                               "接上线：第 1 段自动 0，第 2 段起自动等于拷贝帧数。\n"
+                               "-1（默认）= 未接线，运行时报错并说明怎么接；\n"
+                               "0 = 明确不裁（首段 / 独立段）。",
                 }),
                 "fps": ("FLOAT", {
                     "default": 24.0, "min": 1.0, "max": 120.0, "step": 0.001,
@@ -853,7 +860,7 @@ class H3RelayTrimAV:
                 #    插在中间会让旧工作流里它后面的取值整体错位（见 CHANGES 0.2.1）。
                 "settle_frames": ("INT", {
                     "default": 0, "min": -1, "max": 36, "step": 1,
-                    "tooltip": "【保持 0】裁不裁「沉降区」：钉住区之后模型还会先复现上一段几帧。\n那几帧略糊，但裁它们正是缝处跳帧的源头（实测裁 0 帧跳 0.020、裁 16 帧 0.055）。\n· 0（默认）= 只裁钉住区，缝处无跳；-1 = 自动；N = 固定多裁 N 帧。",
+                    "tooltip": "【保持 0】裁不裁「沉降区」：复制区之后模型还会先复现上一段几帧。\n那几帧略糊，但裁它们正是缝处跳帧的源头（实测裁 0 帧跳 0.020、裁 16 帧 0.055）。\n· 0（默认）= 只裁复制区，缝处无跳；-1 = 自动；N = 固定多裁 N 帧。",
                 }),
                 # ⚠ 继续追加在**最后**（同上铁律）：缝帧重影，2026-09-15 新增。
                 #    🔴 默认 0（关）：数值上能压平最大单帧跳，但**观感实测更差**——
@@ -883,22 +890,22 @@ class H3RelayTrimAV:
                 #    （`_lowfreq_appearance_pull`）：只吸收上段的低频色档/布光，保留本段细节。
                 "lowfreq_pull": ("FLOAT", {"advanced": True,
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "【按需开】低频残差传递：把裁后开头几帧的低频拉向上段末帧。\n色档/亮度/布光跟着走，本段自己的细节与姿态保留。\n· 0（默认）= 关；0.7 = 中等；1.0 = 最强（实测缝点阶跃可降到 0.0011）。\n只动低频 ⇒ 不复制上段姿态 ⇒ 无重影。",
+                    "tooltip": "【按需开】低频残差：把本段开头几帧的色档/亮度拉向上段末帧。\n只动低频 ⇒ 不复制姿态、无重影。\n0（默认）= 关；0.7 = 中等；1.0 = 最强（缝点阶跃可到 0.0011）。\n⚠ 与「跨段统计匹配」作用重叠，二选一。",
                 }),
                 "lowfreq_frames": ("INT", {"advanced": True,
                     "default": 12, "min": 0, "max": 48, "step": 1,
                     "tooltip": "【配合低频残差】作用帧数（权重衰减到 0）。\n参考实现用 12 帧，实测缝区影响就在前 12 帧内。",
                 }),
                 "lowfreq_blur": ("INT", {"advanced": True,
-                    "default": 64, "min": 8, "max": 128, "step": 8,
-                    "tooltip": "【配合低频残差】低频尺度（模糊核）。\n越大只对齐大尺度的色档与布光；参考实现用 64。",
+                    "default": 16, "min": 8, "max": 128, "step": 8,
+                    "tooltip": "【低频尺度】默认 16 就够。\n16 → 12 帧约 1.6 秒；64 → 同一段约 22 秒，而缝点阶跃只从 0.0024 降到 0.0011。\n⇒ 除非专治大面积色档漂移，别加到 64；32 是折中。",
                 }),
                 # ⚠ 继续追加在**最后**（同上铁律）：后处理层补全，2026-09-16。
                 #    以下四个都是**画质域修复**：帧数守恒、不动音频、不动时间轴
                 #    ⇒ 结构上不可能引入跳帧。默认全 0（关），旧行为逐位不变。
                 "deconv_strength": ("FLOAT", {"advanced": True,
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "【按需开】段头反卷积去模糊：按假设的模糊核逆推原始信号。\n与锐化的区别：锐化只是放大高频（噪声一起放大），反卷积理论上能还原细节。\n0（默认）= 关；0.5~1.0 = 混合比。太大易出振铃。",
+                    "tooltip": "【按需开】本段开头反卷积去模糊：按假设的模糊核逆推原始信号。\n与锐化的区别：锐化只是放大高频（噪声一起放大），反卷积理论上能还原细节。\n0（默认）= 关；0.5~1.0 = 混合比。太大易出振铃。",
                 }),
                 "deconv_radius": ("FLOAT", {"advanced": True,
                     "default": 1.5, "min": 0.5, "max": 6.0, "step": 0.5,
@@ -906,7 +913,7 @@ class H3RelayTrimAV:
                 }),
                 "detail_borrow": ("FLOAT", {"advanced": True,
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "【按需开】段体高频迁移：段头保留自己的低频，高频换成段体的结构。\n与低频残差互补。0（默认）= 关。\n⚠ 段头与段体差异大时会带出纹理错位。",
+                    "tooltip": "【按需开】段体高频迁移：本段开头保留自己的低频，高频换成段体的结构。\n与低频残差互补。0（默认）= 关。\n⚠ 本段开头与段体差异大时会带出纹理错位。",
                 }),
                 "detail_blur": ("INT", {"advanced": True,
                     "default": 9, "min": 3, "max": 64, "step": 2,
@@ -914,11 +921,11 @@ class H3RelayTrimAV:
                 }),
                 "hist_match": ("FLOAT", {"advanced": True,
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "【按需开】直方图匹配：把段头的色阶分布对齐到段体。\n比低频残差更强 —— 那个只对齐均值，这个对齐整条分布。\n0（默认）= 关；1 = 完全对齐。",
+                    "tooltip": "【按需开】直方图匹配：把本段开头的色阶分布对齐到段体。\n比低频残差更强 —— 那个只对齐均值，这个对齐整条分布。\n0（默认）= 关；1 = 完全对齐。",
                 }),
                 "wb_match": ("FLOAT", {"advanced": True,
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "【按需开】灰世界白平衡：把段头的 R:G:B 比例（色温）对齐到段体。\n与低频残差正交（那个管亮度总量）。对症色温滑档；增益限幅 ±25%。\n0（默认）= 关。",
+                    "tooltip": "【按需开】灰世界白平衡：把本段开头的 R:G:B 比例（色温）对齐到段体。\n与低频残差正交（那个管亮度总量）。对症色温滑档；增益限幅 ±25%。\n0（默认）= 关。",
                 }),
                 # 🔴 2026-09-17 新增（RESEARCH_seam_frontier §2 方向二）：**跨段**统计匹配。
                 #   与上面三个的区别：hist_match / wb_match / deconv / detail_borrow 都是
@@ -927,7 +934,7 @@ class H3RelayTrimAV:
                 #   ⚠ 铁律：新 widget 一律**追加在 optional 末位**（旧工作流取值不前移）。
                 "match_prev": ("FLOAT", {"advanced": True,
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "【按需开】跨段统计匹配：把段头的色档/曝光分布对齐到上段尾部走向。\n只对齐统计量、不复制姿态 ⇒ 无重影。\n目标取上段末几帧的外推，不是单帧。\n默认开噪声闸：阶跃不超过帧间噪声×3 时不动手，避免修噪声。\n外推只在能缩小阶跃时采信，不会把阶跃修大。\n0（默认）= 关；建议从 0.5 起。",
+                    "tooltip": "【按需开】跨段统计匹配：把本段开头的亮度/色档对齐上段尾部走向。\n只对齐统计量、不复制姿态 ⇒ 无重影；带噪声闸，不会把好帧修坏。\n0（默认）= 关；建议 0.5。\n⚠ 目前只有负向证据：近似参照路线实测更差（0.0007→0.0039）；\n拷贝桥下尚无正向实测 ⇒ 别默认开。",
                 }),
                 "match_prev_frames": ("INT", {"advanced": True,
                     "default": 12, "min": 1, "max": 96, "step": 1,
@@ -975,10 +982,10 @@ class H3RelayTrimAV:
     )
 
     @_node_errors("trim_frames", "fps", "settle_frames", "save_pcm")
-    def trim(self, images, trim_frames=0, fps=24.0, audio=None, settle_frames=0,
+    def trim(self, images, trim_frames=-1, fps=24.0, audio=None, settle_frames=0,
              seam_ghost=0, seam_ghost_alpha=0.5,
              settle_sharpen=0.0, settle_sharpen_frames=24,
-             lowfreq_pull=0.0, lowfreq_frames=12, lowfreq_blur=64,
+             lowfreq_pull=0.0, lowfreq_frames=12, lowfreq_blur=16,
              deconv_strength=0.0, deconv_radius=1.5,
              detail_borrow=0.0, detail_blur=9,
              hist_match=0.0, wb_match=0.0,
@@ -998,6 +1005,16 @@ class H3RelayTrimAV:
                 % (fps,)
             )
         pin = int(trim_frames)
+        # 0.6.36 防漏连：未接线时 widget 停在 -1。不拦就静默裁 0 ⇒ 接缝重播上一段开头，
+        #   而帧数、音频、四条断言全都正常（静默坏片）。V1 / V3 / API 三个出口都走这里。
+        if pin < 0:
+            raise RuntimeError(
+                "「Trim AV」的 trim_frames 未接线（%d）：本段不会裁掉重叠的开头。\n"
+                "    · 续接段：把「Copy Bridge」第 3 路（trim_frames）接到这个输入；\n"
+                "    · 首段 / 独立段确实不裁：把它改成 0。\n"
+                "    为什么拦：漏接时这里取 0 ⇒ 接缝处重播上一段开头（22 帧窗约 0.9 秒），\n"
+                "    而帧数、音频与四条断言全都正常，看不出问题。" % pin
+            )
         before = int(images.shape[0])
         if pin <= 0:
             msg = "[H3 Relay] 裁 0 帧 → 不裁（独立段或纯首段）。"
@@ -1258,8 +1275,9 @@ class H3RelayChain:
         留空 = 不换词。词块不够要跑的段数时**直接报错**，不会静默复用上一块。
       · **自动拼成片**（`auto_concat`）：连跑跑完自动把 N 段拼成一条。
 
-    使用前提：把 Chain、桥、落盘、读上段 latent 拉进**同一个分组框**
-    （框选 → 右键 → 添加分组），否则按钮找不到要推进的节点。
+    分组**不是前提**：没有分组框时，本节点在整张图里找「桥 / 落盘 / 读上段 latent」。
+    只有一张图放多套链路时，才需要各画一个分组框把它们隔开（否则会互相推进段号）。
+    ⇒ 新用户不用先画框；`status` 会写明当前范围是「本组」还是「全图」。
 
     **第 1 段什么都不用做**：「Latent Load」在 `stage_index == 0` 时会交一个「空上下文」，
     桥识别后自动直通（latent 原样过、裁剪帧数输出 0）；段号 ≥ 1 时读上一段、真续接。
@@ -1350,7 +1368,8 @@ class H3RelayChain:
         "它控制同一分组里的「桥 / 落盘 / 读上段 latent」，另有一个 `prompt` 输出口。\n"
         "\n"
         "怎么用：\n"
-        "1. 把这四个节点框进**同一个分组**（框选 → 右键 → 添加分组）。\n"
+        "1. 分组框**不是必需的**：没有分组时自动在整张图里找。\n"
+        "   同一张图有多套链路时，才需要各自框进一个分组，避免互相推进段号。\n"
         "2. 要「每段用各自的词」：把 `prompts` 用**单独一行 `---`** 分成几块粘进来，\n"
         "   再把本节点的 **`prompt` 输出连到出词节点的 `prompt` 输入**（这一步是关键，别漏）。\n"
         "   取第几块由本节点的 `stage_index` 决定：画布上会自动跟着按钮改；\n"
@@ -1420,40 +1439,40 @@ class H3RelayCopyBridge:
                 }),
                 "context_frames": ("INT", {
                     "default": 22, "min": 5, "max": 124, "step": 17,
-                    "tooltip": "【拷贝窗长】写进本段开头的帧数。\n只认 5+17k（5/22/39/56/73/90/107/124），必须小于本段帧数。\n窗越长缝越稳，留给新内容的帧越少。",
+                    "tooltip": "【拷贝窗帧数】写进本段开头的帧数。\n只认 5+17k（5/22/39/56/73/90/107/124），必须小于本段帧数。\n窗越长接缝越稳，留给新内容的帧越少。"
                 }),
             },
             "optional": {
                 "mask_mode": (["hard", "taper", "ramp", "blend", "window"], {
                     "default": "hard",
-                    "tooltip": "【掩码分型】输出 = 模型生成 × m + 上段尾 × (1−m)。\n· hard（推荐，默认）= 全窗钉住、零重绘 —— 真续接用它。\n· ramp / window = 缝处松开一点，取景可能被改写。\n· taper / blend = 仅对照。\nm=0 才钉住；实测四个非 hard 档都会跳。",
+                    "tooltip": "【掩码模式】每个像素用多少模型生成、多少用上一段。\n· hard（推荐，默认）= 整窗都用上一段、不重绘 —— 真续接用它。\n· ramp / window = 接缝处松一点，取景可能被改写。\n· taper / blend = 仅对照。\n· m = 0 才是全用上一段；四个非 hard 档都会跳。"
                 }),
                 "taper_tokens": ("INT", {"advanced": True,
                     "default": 4, "min": 1, "max": 12, "step": 1,
-                    "tooltip": "【仅 taper 档】缝端前多少个 token 参与线性过渡。",
+                    "tooltip": "【渐缩档】只在 taper 档生效：接缝前多少个 token 参与线性过渡。"
                 }),
                 "seam_min": ("FLOAT", {"advanced": True,
                     "default": 0.10, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "【仅 taper 档】缝端掩码下限。\n0 = 完全硬锁；0.3 = 缝端留 30% 重绘自由度。\n头部恒为全重绘，本档管不到。",
+                    "tooltip": "【渐缩档】只在 taper 档生效：接缝端的掩码下限。\n0 = 完全用上一段；0.3 = 这里留 30% 给模型重绘。\n本段开头始终全重绘，这一档管不到它。"
                 }),
                 "pin_audio": ("BOOLEAN", {
                     "default": True,
-                    "tooltip": "【钉音频】开（默认）= 把上一段音频尾也拷进来。\n只钉视频时关掉。可听的拼接仍归 Trim AV 与拼接步骤。",
+                    "tooltip": "【复制音频】开（默认）= 上一段的声音也复制过来。\n只想复制画面时关掉；能听的拼接仍由 Trim AV 与拼接步骤负责。"
                 }),
                 "ramp_top": ("FLOAT", {"advanced": True,
                     "default": 0.25, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "【仅 ramp 档】缝端最大 m。\n0 = 退化成 hard。越大缝处越协调，但边界噪声落差越陡。\n想调大就同时加长拷贝窗。",
+                    "tooltip": "【斜坡档】只在 ramp 档生效：接缝处最多让模型改多少。\n0 = 变成 hard；越大接缝越协调，但噪声落差越陡。\n想调大就同时加长拷贝窗。"
                 }),
                 "ramp_tokens": ("INT", {"advanced": True,
                     "default": 0, "min": 0, "max": 12, "step": 1,
-                    "tooltip": "【仅 ramp 档】参与斜坡的缝端 token 数。\n0 = 整个拷贝窗铺开；2~3 = 只松缝、锁住运动。",
+                    "tooltip": "【斜坡档】只在 ramp 档生效：接缝处参与斜坡的 token 数。\n0 = 铺满整个拷贝窗；2~3 = 只松接缝、锁住运动。"
                 }),
                 "anchor_latent": ("LATENT", {
-                    "tooltip": "【统计纠偏，可选】全局外观锚段（通常第 1 段）的 AV latent。\n接上后：被裁掉的前缀会被拉向锚段的色档与方差 ⇒ 本段新内容回到全局色档。治「越跑越偏色」。",
+                    "tooltip": "【统计纠偏，可选】全局外观参考段（通常第 1 段）的 AV latent。\n接上后：被裁掉的前缀会被拉向参考段的色档与方差 ⇒ 本段新内容回到全局色档。治「越跑越偏色」。",
                 }),
                 "anchor_blend": ("FLOAT", {
                     "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "【纠偏强度】0~1：前缀被拉向锚段统计量的比例。1 = 全量（默认），0.5 = 一半。\n锚段与本段允许有意差异时调低。不接 anchor_latent 时无效。",
+                    "tooltip": "【纠偏强度】0~1：把开头拉向参考段的比例。\n1 = 全量（默认），0.5 = 一半；参考段与本段允许有差异时调低。\n不接参考 latent 时无效。"
                 }),
                 # 🔴 2026-09-17 新增（RESEARCH_seam_frontier §4 方向四）：**重叠区双向融合**。
                 #   与 ramp 同语义、不同曲线：ramp 线性升，blend 用**窗形**升（两端导数 0）。
@@ -1462,57 +1481,57 @@ class H3RelayCopyBridge:
                 #   ⚠ 本节点**无存量 UI 工作流**引用（已核），故新 widget 可紧邻同族项放。
                 "blend_top": ("FLOAT", {"advanced": True,
                     "default": 0.50, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "【仅 blend 档】缝端模型占比上限。\n0 = 退化成 hard；越大越信任本段自己的预测。\n建议从 0.5 起。",
+                    "tooltip": "【混合档】只在 blend 档生效：接缝处模型占比的上限。\n0 = 变成 hard；越大越信任本段自己的生成。\n建议从 0.5 起。"
                 }),
                 "blend_tokens": ("INT", {"advanced": True,
                     "default": 0, "min": 0, "max": 12, "step": 1,
-                    "tooltip": "【仅 blend 档】参与融合的缝端 token 数。\n0 = 整个拷贝窗；2~3 = 只融缝。",
+                    "tooltip": "【混合档】只在 blend 档生效：接缝处参与混合的 token 数。\n0 = 整个拷贝窗；2~3 = 只混接缝。"
                 }),
                 "blend_shape": (list(CORE.BLEND_SHAPES), {"advanced": True,
                     "default": CORE.BLEND_SHAPE_DEFAULT,
-                    "tooltip": "【仅 blend 档】融合窗形。\nsmoothstep = 多项式（默认）；hann = 余弦。\n两者两端导数都为 0 ⇒ 过渡更柔。",
+                    "tooltip": "【混合档】只在 blend 档生效：混合窗形。\nsmoothstep = 多项式（默认）；hann = 余弦。\n两者两端变化率都为 0 ⇒ 过渡更柔和。"
                 }),
                 # ⚠ 追加在**最后**（保护既有 widgets_values 的按位对槽）
                 "window_top": ("FLOAT", {"advanced": True,
                     "default": CORE.SEAM_WINDOW_TOP, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "【仅 window 档】窗函数峰值（中心处最大重绘自由度）。0 = 退化成 hard。\n与 ramp 相反：缝端回落到低位 ⇒ 缝端重新钉牢。太大等于把取景交还给模型。",
+                    "tooltip": "【窗口档】只在 window 档生效：窗的峰值（中间最松）。0 = 变成 hard。\n与斜坡相反：接缝两端回落到低位 ⇒ 接缝保持复制。\n太大会把取景交还给模型。"
                 }),
                 "window_shape": (list(CORE.WINDOW_SHAPES), {"advanced": True,
                     "default": CORE.WINDOW_SHAPE_DEFAULT,
-                    "tooltip": "【仅 window 档】窗形。\nsine = 端点低但非 0（默认）；hann = 端点严格为 0（两端硬钉）。",
+                    "tooltip": "【窗口档】只在 window 档生效：窗形。\nsine = 两端低但不是 0（默认）；hann = 两端严格为 0（两端都复制）。"
                 }),
                 # ⚠ 以下为 0.6.0「复合桥」折叠槽位——**一律追加在末尾**（守 widgets_values 按位对槽）
                 "conditioning": ("CONDITIONING", {
-                    "tooltip": "【可选】接上后同时在 conditioning 上追加钉帧。\n它管取景/构图，与 latent 钉住窗并联生效；不接 = 只做拷贝桥。\n⚠ 第 4 路输出要接到采样器的 positive。",
+                    "tooltip": "【可选】接上后，采样条件里也追加这些复制帧。\n它管取景和构图，与 latent 复制窗同时生效；不接 = 只做拷贝桥。\n⚠ 第 4 路输出要接到采样器的 positive。"
                 }),
                 "run_id": ("STRING", {
                     "default": "relay",
-                    "tooltip": "【填什么】片名，与 Latent Save 一致。\n填了才能用下面两个「只填段号」的锚（它们靠它找段文件）。",
+                    "tooltip": "【填什么】片名，与 Latent Save 一致。\n填了才能用下面两个「只填段号」的参考（它们靠它找段文件）。",
                 }),
                 "stage_index": ("INT", {
                     "advanced": True, "default": 0, "min": 0, "max": 9999, "step": 1,
-                    "tooltip": "【填什么】本段段号（第 1 段 = 0）。\n与 run_id 一起用于自动读锚，也要与保存一致。",
+                    "tooltip": "【填什么】本段段号（第 1 段 = 0）。\n与 run_id 一起用于自动读参考，也要与保存一致。",
                 }),
                 "ref_anchor_latent": ("LATENT", {
-                    "tooltip": "【外观锚·接线】全局外观锚（通常第 1 段）的 AV latent，直接接线喂进来。\n每一步都把锚当作几乎无噪的参考骑乘，压住长程漂移（越跑越偏色、偏构图）。",
+                    "tooltip": "【外观参考·接线】全局外观参考（通常第 1 段）的 AV latent，直接接线喂进来。\n每一步都拿它当几乎无噪的基准来对齐，压住长程漂移（越跑越偏色、偏构图）。",
                 }),
                 "ref_anchor_stage": ("INT", {
                     "advanced": True, "default": -1, "min": -1, "max": 9999, "step": 1,
-                    "tooltip": "【外观锚·免接线】只填段号，不用接线。\n≥ 0 = 没接 ref_anchor_latent 时自动读 stage_<该值>；-1（默认）= 关。\n⚠ 必须小于本段段号（锚得是跑完的段）。",
+                    "tooltip": "【外观参考·免接线】只填段号，不用接线。\n≥ 0 = 没接 ref_anchor_latent 时自动读 stage_<该值>；-1（默认）= 关。\n⚠ 必须小于本段段号（参考得是跑完的段）。",
                 }),
                 "ref_anchor_frames": ("INT", {
                     "advanced": True, "default": 5, "min": 1, "max": 64, "step": 1,
-                    "tooltip": "【外观锚·取多少】从锚段开头取几帧。\n默认 5；取多了会把锚段的动作也拖进来。",
+                    "tooltip": "【外观参考·取多少】从参考段开头取几帧。\n默认 5；取多了会把参考段的动作也拖进来。",
                 }),
                 # 🆕 0.6.25 音频参考窗（秒）—— 必须排在 `voice_anchor` **之前**
                 #（voice_anchor 恒为最后一个槽：widgets_values 按位对槽，见 0.6.1 的约定）
                 "audio_ref_seconds": ("FLOAT", {
                     "advanced": True, "default": 0.0, "min": 0.0, "max": 30.0, "step": 0.5,
-                    "tooltip": "【音频参考窗】0（默认）= 自动。\n从上一段尾部往前累计够 2 秒有声就停（上限 6 秒）。\n窗里可含多个说话人的音色；只占官方 3 个音频槽里的 1 个。\n标题上的 `refs n/3` = 本项额度：`⚠` 越界、`?` 读不到。\n⚠ 参考里就是上一段的台词，可能被复述；接了声锚时本项不生效。",
+                    "tooltip": "【音频参考窗】0（默认）= 自动。\n从上一段尾部往前累计够 2 秒有声就停（上限 6 秒）。\n窗里可含多个说话人的音色；只占官方 3 个音频槽里的 1 个。\n标题的 `refs n/3` = 额度：`⚠` 越界、`?` 读不到。\n⚠ 参考里就是上一段的台词，可能被复述；接了声音参考时本项不生效。"
                 }),
                 # ⚠ 0.6.1 声锚 —— 追加在**最后**（守 widgets_values 按位对槽）
                 "voice_anchor": ("LATENT", {
-                    "tooltip": "【声锚·接线】说话人的音频锚（LoadAudio → VAEEncodeAudio）。\n接上后：钉住的音频前缀与音频参考都改用声锚尾窗，不再取上段音频。\n· 锚 = 缝上第一个开口说话的人；同人不必接，换人才接。\n⚠ pin_audio=False 时被忽略；全零 / 常量 / 静音的锚会当场报错。",
+                    "tooltip": "【声音参考·接线】接说话人的音频（LoadAudio → 音频编码）。\n接上后：复制过来的音频开头和音频参考都改用它的尾部，不再取上一段。\n· 谁接：接缝后第一个开口的人；同一个人不必接，换人才接。\n⚠ 复制音频关闭时无效；全零 / 常量 / 静音的参考会当场报错。"
                 }),
                 # 🆕 0.6.34 声锚「免接线」档 —— **追加在最末**（继续守「`voice_anchor` 是最后一个槽」
                 #    这条老约定：`widgets_values` 按位存，插在中间会让存量图的槽位整体错位）。
@@ -1520,14 +1539,14 @@ class H3RelayCopyBridge:
                 #    省掉 LoadAudio + VAEEncodeAudio 两个节点加一根线。
                 "voice_anchor_stage": ("INT", {
                     "default": -1, "min": -1, "max": 9999, "step": 1,
-                    "tooltip": "【声锚·免接线】只填段号，不用接线。\n≥ 0 = 没接 voice_anchor 时自动读 stage_<该值> 的音频；-1（默认）= 关。\n⚠ 必须小于本段段号；接了 voice_anchor 时本档不生效。",
+                    "tooltip": "【声音参考·免接线】只填段号，不用接线。\n≥ 0 = 没接 voice_anchor 时自动读 stage_<该值> 的音频；-1（默认）= 关。\n⚠ 必须小于本段段号；接了 voice_anchor 时本档不生效。",
                 }),
                 # 🆕 0.6.34 实验层总开关（**追加在最末**，继续守 widgets_values 按位对槽）。
                 #    原先两个实验（VA / 历史锚）只能靠 run 目录的配置文件开关 ⇒ 画布上看不见；
                 #    现在做成**一个看得见的选择器**。`auto`（默认）= 只看文件 ⇒ 存量用户零行为变化。
                 "exp_anchor": (list(EXP_ANCHOR_MODES), {
                     "default": "auto",
-                    "tooltip": "【实验·默认 auto】两个实验的总开关：按人累积音色 / 时不变历史锚。\n"
+                    "tooltip": "【实验·默认 auto】两个实验的总开关：按人累积音色 / 时不变历史参考。\n"
                                "· auto（默认）= 与旧版一致：看 run 目录的配置文件，有就开。\n"
                                "· off = 显式关（文件在也不开，报告会点名）。\n"
                                "· 其余 = 显式开；缺配置文件直接报错。\n"
@@ -1836,12 +1855,12 @@ class H3RelayPost:
             },
             "optional": {
                 "guide": ("IMAGE", {
-                    "tooltip": "【接法】接 Trim AV 第 4 路输出 prev_tail。\n= 钉住区最后一帧，也就是缝的另一侧；只有跨段统计匹配与低频残差需要它。\n⚠ 它是不是「上一段末帧」取决于走哪条桥：拷贝桥下是，Latent 桥下只是近似。",
+                    "tooltip": "【接法】接 Trim AV 第 4 路输出 prev_tail。\n= 复制区最后一帧，也就是缝的另一侧；只有跨段统计匹配与低频残差需要它。\n⚠ 它是不是「上一段末帧」取决于走哪条桥：拷贝桥下是，Latent 桥下只是近似。",
                 }),
                 # —— 组 1：跨段色档/曝光对齐（缝的另一侧 = guide）——
                 "match_prev": ("FLOAT", {
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "【按需开，默认 0】跨段统计匹配。\n把段头的色档/曝光分布对齐到 guide。\n只对齐统计量、不复制姿态 ⇒ 无重影。需要 guide。\n⚠ 走 Latent 桥请保持 0：那条路的 guide 只是近似，对齐它反而更差。\n⚠ 还要勾选下面的跨段总闸。\n默认开噪声闸：阶跃小就不动手。",
+                    "tooltip": "【按需开，默认 0】跨段统计匹配：把本段开头亮度/色档对齐 guide。\n只对齐统计量、不复制姿态 ⇒ 无重影；带噪声闸，阶跃小就不动手。\n⚠ 走 Latent 桥请保持 0：guide 只是近似，对齐它反而更差（0.0007→0.0039）。\n⚠ 拷贝桥下尚无正向实测 ⇒ 别当万能药。",
                 }),
                 "match_prev_frames": ("INT", {"advanced": True,
                     "default": 12, "min": 1, "max": 96, "step": 1,
@@ -1857,12 +1876,12 @@ class H3RelayPost:
                 }),
                 "lowfreq_pull": ("FLOAT", {
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "【按需开，默认 0】低频残差传递。\n只把段头的低频色档对齐 guide，不动细节与姿态 ⇒ 无重影。\n与跨段统计匹配作用域重叠，建议二选一。\n⚠ 需要 guide，也受跨段总闸约束。",
+                    "tooltip": "【按需开，默认 0】低频残差传递。\n只把本段开头的低频色档对齐 guide，不动细节与姿态 ⇒ 无重影。\n与跨段统计匹配作用域重叠，建议二选一。\n⚠ 需要 guide，也受跨段总闸约束。",
                 }),
                 "lowfreq_frames": ("INT", {"advanced": True, "default": 12, "min": 1, "max": 96, "step": 1,
                                            "tooltip": "【配合低频残差】作用帧数（权重衰减到 0）。"}),
-                "lowfreq_blur": ("INT", {"advanced": True, "default": 64, "min": 4, "max": 256, "step": 4,
-                                         "tooltip": "【配合低频残差】低频尺度（模糊核），参考实现用 64。"}),
+                "lowfreq_blur": ("INT", {"advanced": True, "default": 16, "min": 4, "max": 256, "step": 4,
+                                         "tooltip": "【低频尺度】默认 16 就够。\n16 → 12 帧约 1.6 秒；64 → 同一段约 22 秒，而缝点阶跃只从 0.0024 降到 0.0011。\n⇒ 除非专治大面积色档漂移，别加到 64；32 是折中。"}),
                 # —— 组 2/3 共用：段头作用帧数 ——（2026-09-19 参数收口）
                 #   问题：组 2（色档对齐）与组 3（高频补）的**四个**强度旋钮，
                 #   作用区长度一直借的是组 4 的 `settle_sharpen_frames`
@@ -1873,27 +1892,27 @@ class H3RelayPost:
                 #   相同（24）⇒ 没显式设过值的图行为逐位不变。
                 "head_zone_frames": ("INT", {
                     "default": 24, "min": 1, "max": 96, "step": 1,
-                    "tooltip": "【段头作用区】下面四项都按这个帧数作用。\n直方图匹配 / 白平衡 / 反卷积 / 段体高频迁移。\n⚠ 糊区锐化不看这个，它用自己的帧数。",
+                    "tooltip": "【本段开头帧数】下面四项都按这个帧数作用。\n直方图匹配 / 白平衡 / 反卷积 / 段体高频迁移。\n⚠ 糊区锐化不看这个，它用自己的帧数。",
                 }),
                 # —— 组 2：段内色档对齐（基准 = 本段段体）——
                 "hist_match": ("FLOAT", {
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "【段内】直方图匹配：把段头的色阶分布对齐到段体。\n治段头与段体之间的色阶漂移（段内，不需要 guide）。\n按需开、默认 0；作用帧数 = head_zone_frames。",
+                    "tooltip": "【段内】直方图匹配：把本段开头的色阶分布对齐到段体。\n治本段开头与段体之间的色阶漂移（段内，不需要 guide）。\n按需开、默认 0；作用帧数 = head_zone_frames。",
                 }),
                 "wb_match": ("FLOAT", {
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "【段内】灰世界白平衡：把段头 R:G:B 比例对齐段体。\n与直方图匹配正交（那个管亮度总量，这个管色温）。\n按需开、默认 0。",
+                    "tooltip": "【段内】灰世界白平衡：把本段开头 R:G:B 比例对齐段体。\n与直方图匹配正交（那个管亮度总量，这个管色温）。\n按需开、默认 0。",
                 }),
                 # —— 组 3：高频补（治糊）——
                 "deconv_strength": ("FLOAT", {
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "【补高频】反卷积去模糊：提升段头高频，按需开、默认 0。\n太大易出振铃（此时把强度降下来）。作用帧数 = head_zone_frames。",
+                    "tooltip": "【补高频】反卷积去模糊：提升本段开头高频，按需开、默认 0。\n太大易出振铃（此时把强度降下来）。作用帧数 = head_zone_frames。",
                 }),
                 "deconv_radius": ("FLOAT", {"advanced": True, "default": 1.5, "min": 0.5, "max": 4.0, "step": 0.1,
                                             "tooltip": "【配合反卷积】模糊核半径。"}),
                 "detail_borrow": ("FLOAT", {
                     "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                    "tooltip": "【补高频】段体高频迁移：把段头的高频换成段体的结构。\n比反卷积更像真的，但可能与段头内容不符。\n按需开、默认 0。",
+                    "tooltip": "【补高频】段体高频迁移：把本段开头的高频换成段体的结构。\n比反卷积更像真的，但可能与本段开头内容不符。\n按需开、默认 0。",
                 }),
                 "detail_blur": ("INT", {"advanced": True, "default": 9, "min": 3, "max": 64, "step": 2,
                                         "tooltip": "【配合高频迁移】高频分离尺度。"}),
@@ -1912,7 +1931,7 @@ class H3RelayPost:
                 # ⚠ 继续追加在**最后**（同上铁律）。
                 "match_prev_stats_frames": ("INT", {"advanced": True,
                     "default": 1, "min": 0, "max": 24, "step": 1,
-                    "tooltip": "【配合跨段统计匹配】统计量取几帧 —— 这一格最容易写错。\n· 1（默认）= 只取紧贴缝的那一帧，与 guide 同一基准 ⇒ 修正量正好是缝上的阶跃。\n· 0 = 对整个作用区聚合 ⇒ 段头有亮度梯度时首帧会被推过 guide、凭空多出阶跃。仅供对照。",
+                    "tooltip": "【配合跨段统计匹配】统计量取几帧 —— 这一格最容易写错。\n· 1（默认）= 只取紧贴缝的那一帧，与 guide 同一基准 ⇒ 修正量正好是缝上的阶跃。\n· 0 = 对整个作用区聚合 ⇒ 本段开头有亮度梯度时首帧会被推过 guide、凭空多出阶跃。仅供对照。",
                 }),
                 # ⚠ 继续追加在**最后**（同上铁律）。2026-09-19 新增两项：
                 "baseline": (["robust", "legacy"], {
@@ -1941,7 +1960,7 @@ class H3RelayPost:
     def apply(self, images, guide=None,
               match_prev=0.0, match_prev_frames=12,
               match_prev_gain_max=1.15, match_prev_offset_max=0.06,
-              lowfreq_pull=0.0, lowfreq_frames=12, lowfreq_blur=64,
+              lowfreq_pull=0.0, lowfreq_frames=12, lowfreq_blur=16,
               head_zone_frames=24,
               hist_match=0.0, wb_match=0.0,
               deconv_strength=0.0, deconv_radius=1.5,
@@ -2090,11 +2109,11 @@ class H3RelayAudioSeam:
                 }),
                 "run_id": ("STRING", {
                     "default": "relay",
-                    "tooltip": "【填什么】片名，与 Latent Save / 桥一字不差。\n它靠这个找上一段存下来的音频当床源。",
+                    "tooltip": "【填什么】片名，与 Latent Save / 桥一字不差。\n它靠这个找上一段存下来的音频，当环境声来源。"
                 }),
                 "stage_index": ("INT", {
                     "default": 0, "min": 0, "max": 9999, "step": 1,
-                    "tooltip": "【填什么】本段段号（第 1 段 = 0）。\n第 1 段无缝可补，会直接直通（音频仍会保存，供第 2 段当床源）。",
+                    "tooltip": "【填什么】本段段号（第 1 段 = 0）。\n第 1 段无缝可补，会直接直通（音频仍会保存，供第 2 段当环境声来源）。"
                 }),
             },
             "optional": {
@@ -2104,7 +2123,7 @@ class H3RelayAudioSeam:
                 }),
                 "tile_seconds": ("FLOAT", {"advanced": True,
                     "default": 0.0, "min": 0.0, "max": 4.0, "step": 0.05,
-                    "tooltip": "【床环铺】床源改取这么长的瓦片，自叠化环铺满补丁。\n0（默认）= 整窗直取最静的一段。上一段干净环境窗比补丁短时用它，建议 1.2。",
+                    "tooltip": "【环境声瓦片秒数】把环境声切成这么长的瓦片，交叠淡化后铺满补丁。\n0（默认）= 从整窗直接取最静的一段。上一段干净环境声比补丁短时用它，建议 1.2。"
                 }),
                 "fade_seconds": ("FLOAT", {
                     "default": 0.25, "min": 0.0, "max": 0.5, "step": 0.01,
@@ -2112,7 +2131,7 @@ class H3RelayAudioSeam:
                 }),
                 "bed_stage": ("INT", {"advanced": True,
                     "default": 0, "min": 0, "max": 9999, "step": 1,
-                    "tooltip": "【填什么】用第几段的音频当床源（0 = 第 1 段）。\n同场景环境声变化不大，取第 1 段最稳。⚠ 必须小于本段段号。",
+                    "tooltip": "【环境声来源】用第几段的音频（0 = 第 1 段）。\n同一场景环境声变化不大，取第 1 段最稳。⚠ 必须小于本段段号。"
                 }),
                 "note": ("STRING", {"advanced": True,
                     "default": "",
@@ -2125,7 +2144,7 @@ class H3RelayAudioSeam:
                 #   还把本该有的起拍压平。默认档改为**取尾部窗 + 电平对齐**（带峰值护栏）。
                 "bed_select": (["tail", "quiet"], {
                     "default": CORE.AUDIO_SEAM_BED_SELECT,
-                    "tooltip": "【床声从哪取】\n· tail（默认）= 取床源尾部与补丁等长的一段：紧邻缝，电平与音色和缝前天然连续。\n· quiet = 取全局最静窗。实测会把补丁换成更静的内容，缝上从凹陷变成静音洞 ⇒ 仅供对照。",
+                    "tooltip": "【环境声从哪取】\n· tail（默认）= 从环境声来源的尾部取与补丁等长的一段：紧挨接缝，电平和音色自然接上。\n· quiet = 取全局最静的一段。实测会把补丁换得更静，接缝从凹陷变成静音洞 ⇒ 仅供对照。"
                 }),
                 # —— 第 3 路输出 joined（拼接）的三个细分参数：都折叠，别占画布 ——
                 "join_curve": (["qsin", "tri"], {
@@ -2136,7 +2155,7 @@ class H3RelayAudioSeam:
                 "join_prime_ms": ("FLOAT", {
                     "advanced": True,
                     "default": CORE.AUDIO_ENCODER_PRIME_MS, "min": 0.0, "max": 200.0, "step": 1.0,
-                    "tooltip": "【拼接用】每段开头要丢掉的编码器 priming（毫秒）。\n默认 33 毫秒（AAC 实测值）。它不是内容，丢掉是对齐修正；0 = 不丢。",
+                    "tooltip": "【拼接用】每段开头要丢掉的编码器预热（毫秒）。\n默认 33 毫秒（AAC 实测值）。它不是内容，丢掉只是对齐；0 = 不丢。"
                 }),
                 "join_cross_ms": ("FLOAT", {
                     "advanced": True,
@@ -2155,16 +2174,16 @@ class H3RelayAudioSeam:
                 }),
                 "patch_guard": ("BOOLEAN", {"advanced": True, "default": True,
                     "label_on": "🛡 台词守卫开", "label_off": "守卫关（旧行为）",
-                    "tooltip": "【台词守卫】开（默认）= 补丁前先探测本段头部有没有台词。\n有 ⇒ 补丁收缩到台词前 0.40 秒；台词太靠前 ⇒ 整个关掉补丁。\n关 = 旧行为，补丁可能把段首台词一起换掉。",
+                    "tooltip": "【台词守卫】开（默认）= 补丁前先探测本段开头有没有台词。\n有 ⇒ 补丁收缩到台词前 0.40 秒；台词太靠前 ⇒ 整个关掉补丁。\n关 = 旧行为，补丁可能把段首台词一起换掉。"
                 }),
                 "patch_guard_layers": ("INT", {
                     "advanced": True,
                     "default": CORE.AUDIO_SEAM_PATCH_GUARD_LAYERS, "min": 0, "max": 3, "step": 1,
-                    "tooltip": "【台词守卫档位】0（默认）= 只用能量判据。\n1 = 加能量阶跃；2 = 加谱质心；3 = 加谱平坦度（后三档都降低灵敏度）。\n⚠ 1~3 档与守卫「宁可误判也不漏」的意图相反，且标定样本少 ⇒ 默认关。\n⚠ 别把台词安全寄托在这一格：主防线是 patch_seconds 不超过 1.2。",
+                    "tooltip": "【台词守卫档位】0（默认）= 只用能量判断。\n1 = 加能量阶跃；2 = 加谱质心；3 = 加谱平坦度（后三档都降低灵敏度）。\n⚠ 1~3 档与守卫「宁可误判也不漏」的意图相反，且标定样本少 ⇒ 默认关。\n⚠ 别把台词安全寄托在这一格：主防线是 patch_seconds 不超过 1.2。",
                 }),
                 "declick_ratio": ("FLOAT", {
                     "default": CORE.AUDIO_DECLICK_RATIO, "min": 0.0, "max": 50.0, "step": 0.5,
-                    "tooltip": "【孤立瞬态抑制】判据 = 局部峰值 ÷ 背景底噪。0 = 关；建议 4.0。\n做什么：掐掉「背景极静处冒出来的一声短脉冲」。\n⚠ 判据看的是它周围有多静，不是它本身多响 —— 只看响度会连台词辅音一起掐。\n⚠ 只动那一处（两端各 2 毫秒淡变），其余内容逐位不动，长度守恒。",
+                    "tooltip": "【去咔判断】局部峰值 ÷ 背景底噪。0 = 关；建议 4.0。\n做什么：掐掉「背景极静处冒出来的一声短脉冲」。\n⚠ 看的是它周围有多静，不是它本身多响 —— 只看响度会连台词辅音一起掐。\n⚠ 只动那一处（两端各 2 毫秒淡变），其余内容逐位不动，长度不变。"
                 }),
                 "declick_quiet_dbfs": ("FLOAT", {"advanced": True,
                     "default": CORE.AUDIO_DECLICK_QUIET_DBFS,
@@ -2183,7 +2202,7 @@ class H3RelayAudioSeam:
                 # —— 2026-10-08：**响度归一**（不接声锚也要）。**继续追加在末位**，槽位安全。
                 "loudness_normalize": ("BOOLEAN", {"advanced": True,
                     "default": True,
-                    "tooltip": "【响度均衡】开（默认）= 把本段人声响度对齐到统一目标。\n为什么默认开：模型跟随声锚的响度 —— 接锚时锚已归一，不接锚时没人管。\n每段电平于是由模型自己决定（实测三段差 7.97 dB）。关 = 恢复旧行为。",
+                    "tooltip": "【响度均衡】开（默认）= 把本段人声响度对齐到统一目标。\n为什么默认开：模型跟随声音参考的响度 —— 接参考时参考已归一，不接参考时没人管。\n每段电平于是由模型自己决定（实测三段差 7.97 dB）。关 = 恢复旧行为。",
                 }),
                 "loudness_target_dbfs": ("FLOAT", {"advanced": True,
                     "default": -23.0, "min": -60.0, "max": 0.0, "step": 0.5,

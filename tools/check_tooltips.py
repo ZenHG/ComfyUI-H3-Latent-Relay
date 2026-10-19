@@ -264,16 +264,16 @@ def main() -> int:
 
     # ---------- P3 命名家族契约（2026-10-14 加）----------
     # 背景（有提交证据）：0.6.28 的 `6bde923` **一次性手写了 113 条标签**，锚族是
-    #   **按键名字面直译**的 —— `anchor_latent` → 「外观锚」、`ref_anchor_latent` → 「参考锚」，
-    #   而机制**正好相反**（`anchor_*` 是 0.5.0 的统计纠偏、`ref_anchor_*` 才是真外观锚）。
+    #   **按键名字面直译**的 —— `anchor_latent` → 「外观参考」、`ref_anchor_latent` → 「参考锚」，
+    #   而机制**正好相反**（`anchor_*` 是 0.5.0 的统计纠偏、`ref_anchor_*` 才是真外观参考）。
     #   错的标签"看着像个正常词"，所以 8 天没人发现：当时的判据（H3n）只查**有没有**标签，
     #   不查**对不对**；那次提交的验证目标是"切语言不坏图"，也不是"译名对不对"。
-    # ⇒ 把**语义决定**写成契约：真外观锚这一族必须叫「外观锚」，另一族**不许占用**这个词。
+    # ⇒ 把**语义决定**写成契约：真外观参考这一族必须叫「外观参考」，另一族**不许占用**这个词。
     #   ⚠️ 纯机械判据只能覆盖**被写进契约的家族**；没进契约的语义错位仍要靠人读。
     labels = read_widget_labels(I18N_JS)
     for keys, word, must in (
-        (("ref_anchor_latent", "ref_anchor_stage", "ref_anchor_frames"), "外观锚", True),
-        (("anchor_latent", "anchor_blend"), "外观锚", False),
+        (("ref_anchor_latent", "ref_anchor_stage", "ref_anchor_frames"), "外观参考", True),
+        (("anchor_latent", "anchor_blend"), "外观参考", False),
     ):
         bad = [(k, labels.get(k)) for k in keys if (word in (labels.get(k) or "")) != must]
         ck("P3 家族契约：%s %s「%s」"
@@ -302,7 +302,12 @@ def main() -> int:
             zh = cfg.get("tooltip") or ""
             if bad in zh:
                 hits.append("%s（该写「%s」）" % (key, norm))
-    ck("P5 术语表·表 B：禁用变体在任何中文提示里 0 命中（%d 条）" % len(g_ban),
+        # 2026-10-19：**标签也要查**。此前只查 tooltip ⇒ 六处标签（声锚 / 外观锚 / 床声…）
+        #   与提示用词不一致，机检全绿、人一眼看出。范围见 CONTRIBUTING 术语表。
+        for key, lab in labels.items():
+            if bad in (lab or ""):
+                hits.append("标签 %s（该写「%s」）" % (key, norm))
+    ck("P5 术语表·表 B：禁用变体在任何中文提示**与标签**里 0 命中（%d 条）" % len(g_ban),
        not hits, "命中 %s" % hits[:4])
 
     print("结果：通过 %d / 失败 %d" % (len(PASS), len(FAIL)))

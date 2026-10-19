@@ -143,6 +143,12 @@ NOTES_MARKER = "<!-- EN -->"
 #: 而且会诱使人「中英不均衡地删」来凑总数。两个语种各自成段、各自有预算，才说得通。
 NOTES_MAX_ZH = 700
 NOTES_MAX_EN = 1700
+#: 用户可见文案里**不许出现**的内部记号（0.6.36 入规范，见 RELEASING.md §6.2）。
+#: 只在本版一节上跑 ⇒ 误伤面小；命中即拒绝发布（已发布的 changelog 一个字符都改不回来）。
+NOTES_INTERNAL = (
+    "CHANGES.md", "RELEASE-NOTES", "review_050", "check_tooltips", "check_frontend",
+    "tests/", "tools/", "nodes.py", "ci.yml", "docs/", "机检", "断言",
+)
 
 
 def _cjk(s: str) -> int:
@@ -195,6 +201,12 @@ def _notes_parts(version: str) -> tuple:
                    % (len(zh), NOTES_MAX_ZH))
     if len(en) > NOTES_MAX_EN:
         bad.append("英文段 %d 字符 > 预算 %d（同上）" % (len(en), NOTES_MAX_EN))
+    # 内外分工的机检（0.6.36）：用户可见文案里出现内部记号 ⇒ 说明把 CHANGES 的内容搬过来了。
+    _hit = [w for w in NOTES_INTERNAL if w in zh or w in en]
+    _ids = sorted(set(re.findall(r"\b(?:H[34][a-z]|L\d{2})\b", zh + "\n" + en)))
+    if _hit or _ids:
+        bad.append("用户可见文案里出现内部记号：%s —— 这些只该写在 CHANGES.md（见 RELEASING.md §6.2）"
+                   % "、".join(_hit + _ids))
     if bad:
         die("RELEASE-NOTES.md 的 %s 一节不合格式（%d 处）：\n    - %s\n"
             "    模板见 RELEASING.md §6（registry 的 changelog 发出去就改不回来，所以这里必须拦住）。"

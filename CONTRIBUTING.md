@@ -59,6 +59,10 @@
 ruff check . --exclude dist      # 静态检查（CI 的第一道闸，最快失败）
 python tests/test_relay_core.py
 python tools/review_050.py       # 文档—代码一致性 + 全部机检
+# 改文案 / 标签 / 前端时**再加跑**这三条（它们不在 review_050 里）：
+python tools/check_tooltips.py   # 提示 + 标签 + 双态开关的写法与术语
+python tools/check_frontend.py   # 中英两侧对读 F1–F5
+node tests/test_i18n.mjs         # 语言切换纯函数
 ```
 - **先跑 ruff**：CI 把它放在最前，本地不跑就是"推上去才知道"。
   规则集与「刻意没开哪些、为什么」写在 `pyproject.toml` 的 `[tool.ruff.lint]`。
@@ -66,7 +70,7 @@ python tools/review_050.py       # 文档—代码一致性 + 全部机检
   `COMFYUI_PATH=/path/to/ComfyUI python tests/test_relay_core.py` 指定。
   注意：脚本本身需要**能 import 到 ComfyUI**（`comfy.nested_tensor` / `node_helpers` /
   `folder_paths`）——`relay_core` 模块可独立复用，但这份打包测试**不能**脱离 ComfyUI 跑。
-- 覆盖三十六个方面（**实测执行 625 项断言**），是本包正确性的主要保障。
+- 覆盖三十六个方面（**实测执行 632 项断言**），是本包正确性的主要保障。
   报告里请贴实际执行数，不要按源码行数统计（互斥分支不会同时执行）。
 - **改动后必须同步这几处计数与清单**（v0.4.2 起列为纪律，`tools/review_050.py` 会逐项核）：
   `__init__.py` 头注释节点清单 · 本文件的「方面数/断言数」· `tests/test_relay_core.py`
@@ -105,6 +109,11 @@ python tools/review_050.py       # 文档—代码一致性 + 全部机检
     `CHANGES` 的「实测」栏与测试断言里，不要摊进代码注释。
   - **一条结论只写一处**；能指向 `tests/` 的断言就指向它，**不复述**。
   - 自检标准：**把仓库克隆到一台干净机器上，这段字还有意义吗？** 没有 ⇒ 删。
+  - 🔴 **注释只写三样：为什么这么做 / 不这么会怎样 / 边界条件**（2026-10-19 定）。
+    复述代码、列全部参数、排比强调、例子堆叠 —— 一律删。
+    判据：删掉这句，后来的人会不会**踩坑**？不会 ⇒ 删。
+  - **长度**：行内注释 ≤ 2 行；docstring 只留用途 + 一个关键约束（≤ 6 行）。
+    超了通常是混进了过程或复述。**存量不回刷**，只约束新改动与正在碰的函数。
 
 - 🔴 **铁律一：UI 与 API 必须同一套实现，且必须基于节点**（2026-09-21 定）。
 
@@ -469,14 +478,32 @@ dimension size -1 can be any value and is ambiguous`。而**空音频是合法�
 - 改文案的顺序：① 改 `nodes.py`；② 改 `H3_TIPS` 的 `en`；③ 跑
   `python tools/check_tooltips.py`；④ 跑 `python tools/review_050.py`。
 
+### 可见字符串渠道（新增一类 ⇒ 必须同时补表 + 判据）
+
+画布上会出现的字有七个来源，**每个来源各有自己的表和判据**。只改 `tooltip` 不够 ——
+0.6.36 的两处漏翻（Trim AV「诊断」、Audio Seam「台词守卫」）就是漏了最后一行。
+
+| 渠道 | 覆盖它的表 | 判据 |
+|---|---|---|
+| 节点标题 | `H3_NODES`（`swapTitle`） | `review_050` H3n · `check_frontend` F4 |
+| 参数标签 | `H3_WIDGETS` | `review_050` H3n · `check_tooltips` P4/P5 |
+| 悬浮提示 | `H3_TIPS`（只存 `en`） | `review_050` H3p · `check_tooltips` |
+| 端口标签 | `H3_SLOTS` | `review_050` J-i18n |
+| 枚举显示 | `comboLabel`（存档值**不翻**） | `tests/test_i18n.mjs` |
+| **双态开关开/关** | **`H3_STATES`（`options.on/off`）** | **`check_frontend` F5** |
+| Chain 按钮 | `H3_BUTTONS`（`name` 不翻） | `check_frontend` F1 · `tests/test_i18n.mjs` |
+
+🔴 **新增任何用户能看见的后端字符串（如新的 `label_on`）⇒ 同一提交里必须补表 + 补判据**，
+否则英文界面会整块露中文，而所有既有判据都是绿的。
+
 ## 术语表（唯一真相源 · 机检在 `tools/check_tooltips.py` 的 P4~P6）
 同一个东西在**标签**与**提示**里必须是同一个词。历史上这里漂过（0.6.28 一次性手写 113 条标签时，
 锚族按键名直译写反了、8 天没人发现）⇒ 现在把术语**固化成两张表 + 机检**。
-**范围**：只管**画布上会看到的字**（`H3_WIDGETS` 的标签 + `nodes.py` 的中文 tooltip）。
+**范围**：只管**画布上会看到的字**（`H3_WIDGETS` 的标签 + `nodes.py` 的中文 tooltip + `label_on/off` 的双态文案）。
 `docs/` 正文是给人读的长文，允许用同义说法（例如「沉降区」），**不在本表管辖内**。
 **规矩**：
 - 要改下列标签或提示用词 ⇒ **先改本表**，再改代码；表与代码不一致 ⇒ P4/P5 当场红。
-- 表 B 的禁用变体**不许出现在任何中文提示里**（含「本仓既有写法」）。
+- 表 B 的禁用变体**不许出现在任何中文提示与标签里**（含「本仓既有写法」）。
 - 新增术语先判它属于哪张表：**只约束某个参数的标签** ⇒ 表 A；**任何地方都不该出现的旧写法** ⇒ 表 B。
 
 ### 表 A · 标签固定（精确相等，不许同义替换）
@@ -505,7 +532,7 @@ dimension size -1 can be any value and is ambiguous`。而**空音频是合法�
 | `match_prev` | 跨段统计匹配 |
 | `match_prev_gain_max` | 增益上限 |
 | `match_prev_offset_max` | 偏移上限 |
-| `head_zone_frames` | 段头作用帧数 |
+| `head_zone_frames` | 本段开头帧数 |
 | `match_prev_stats_frames` | 统计取几帧 |
 | `baseline` | 段体参考 |
 | `cross_seg_ack` | 跨段总闸 |
@@ -515,20 +542,21 @@ dimension size -1 can be any value and is ambiguous`。而**空音频是合法�
 | `video_crf` | 成片画质 |
 | `audio_out` | 成片音轨 |
 | `patch_seconds` | 头部补丁秒数 |
-| `tile_seconds` | 床环瓦片秒数 |
-| `bed_select` | 床声从哪取 |
+| `tile_seconds` | 环境声瓦片秒数 |
+| `bed_select` | 环境声从哪取 |
 | `join_curve` | 拼接曲线 |
 | `join_prime_ms` | 丢前置毫秒 |
 | `join_cross_ms` | 交叉淡变毫秒 |
 | `join_segment_seconds` | 每段有效秒数 |
 | `join_align_seconds` | 画面裁量秒数 |
 | `patch_guard_layers` | 台词守卫档位 |
-| `declick_ratio` | 去咔判据 |
+| `declick_ratio` | 去咔判断 |
 | `declick_quiet_dbfs` | 去咔静噪门限 |
 | `declick_max_len_ms` | 去咔最长时长 |
 | `audio_ref_seconds` | 音频参考窗 |
 | `align` | 对齐网格 |
 | `force_unload` | 跑完卸载 |
+| `pin_audio` | 复制音频 |
 | `chunks` | 时间分块数 |
 | `prompt_target` | 已废弃 |
 <!-- TERMS-LABEL:END -->
@@ -557,6 +585,15 @@ dimension size -1 can be any value and is ambiguous`。而**空音频是合法�
 | 片名 | 运行 ID |
 | 增益上限 | 最大增益 |
 | 偏移上限 | 最大偏移 |
+| 本段开头 | 段头 |
+| 声音参考 | 声锚 |
+| 外观参考 | 外观锚 |
+| 历史参考 | 历史锚 |
+| 复制区 | 钉住区 |
+| 拷贝帧数 | 钉住帧数 |
+| 复制 | 钉住 |
+| 环境声 | 床声 |
+| 判断 | 判据 |
 <!-- TERMS-BAN:END -->
 
 ### 标签（`H3_WIDGETS`）与 tooltip 必须同一套词
@@ -565,7 +602,7 @@ dimension size -1 can be any value and is ambiguous`。而**空音频是合法�
 锚族就**按键名直译**写反了，8 天没人发现）。规矩：
 
 - **标签用词必须与 tooltip 的 `【】` 标签/机制用词一致**（如提示写「糊区锐化」，标签就别写「沉降锐化」）。
-- **同一族的参数共享同一词根**，且**不许与别族撞词根**（`ref_anchor_*` = 外观锚；`anchor_*` = 统计纠偏）。
+- **同一族的参数共享同一词根**，且**不许与别族撞词根**（`ref_anchor_*` = 外观参考；`anchor_*` = 统计纠偏）。
   这条有契约机检（`check_tooltips.py` 的 **P3**）—— 改错当场红。
 - ⚠️ 机器只能盯**写进契约的家族**；其余语义错位要靠人读，别指望判据兜住。
 

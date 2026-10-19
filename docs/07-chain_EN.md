@@ -11,8 +11,9 @@ truth** — if the two ever disagree, the Chinese one wins.
 ---
 
 `🔗 H3 Relay · Chain` is a **pure control node that does not participate in wiring** (it has no input/output ports).
-It pulls **Chain + bridge + write-to-disk** (plus the "Latent Load" used along the chain) into the **same group box**
-(box-select → right-click → Add Group), and the buttons live on the Chain node:
+The buttons live on the Chain node. A group box is **not required**: without one it searches the whole
+graph for "bridge / write-to-disk / Latent Load"; only when one graph holds several chains do you need
+to put each chain in its own group box (otherwise they advance each other's stage numbers).
 
 | Button | What it does |
 |---|---|

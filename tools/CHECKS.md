@@ -3,7 +3,7 @@
 > 🔴 **本文件由 `tools/checks_ledger.py --write` 生成，别手改**（改台账 → 重新生成）。
 > 机检：`review_050.py` 的 **H4c** 核「本台账 ↔ `review_050.py` 的编号**双向一致**」。
 
-共 **55** 条带编号的判据 ｜ 其中盯**口径数字**的 **14** 条 ｜ 有**变异测试**的 **22** 条。
+共 **56** 条带编号的判据 ｜ 其中盯**口径数字**的 **15** 条 ｜ 有**变异测试**的 **23** 条。
 
 ## 一、盯「口径数字」的判据（**这些数字不许裸写**）
 
@@ -22,6 +22,7 @@
 | **H3v** | truth | `tools/` 脚本数（`N 个脚本`） | 把 `tools/README.md` 的「15 个脚本」改成「14 个脚本」 | — |
 | **H4d** | truth | **JS 测试期望数 ×4**（`43/0` / `29/0` / `45/0` / `33/0`；ci.yml + docs/08） | 把 `ci.yml` 头注释里 `test_run_id_parity` 的期望数改成 22 | node |
 | **H4e** | truth | **dist 白名单文件数**（`make_minimal_bundle.py` 的 `MANIFEST` 总长 vs 文档声明） | 把 `make_minimal_bundle.py` 的 `MANIFEST_RUNTIME` 删一项（42 → 41） | — |
+| **H4h** | truth | **`check_tooltips` 的项数**（`N 项`；ci.yml + docs/08 + tools/README） | 把 `docs/08-testing.md` 里 `check_tooltips` 的项数改成 1217 | host |
 | **I4** | consistency | 示例图节点数（`examples/README.md` 的「N 节点」） | — | — |
 
 ## 二、其余判据

@@ -6,7 +6,7 @@
 
 ## 为什么要有它（2026-10-15 立，有实测依据）
 
-这一轮改前端时，**本地全套 15/15 全绿、`review_050` 119/0、`check_tooltips` 1217/0**，
+这一轮改前端时，**本地全套 15/15 全绿、`review_050` 120/0、`check_tooltips` 1216 项全过**，
 却仍然漏了 3 类问题 —— 它们都只在「**中英两侧对读**」时才看得见：
 
 | 漏掉的 | 为什么既有判据看不见 |
@@ -24,10 +24,12 @@
 - **F2** `H3_TIPS` 的英文形状：无全角括号 / 无汉字 / `]` 后**留一个空格**
 - **F3** 中英**行数**一致（不等 ⇒ 必须在 `EXEMPT` 里写明理由）
 - **F4** 示例图里本包节点的 `title` **可被 i18n 换前缀**（空 / 等于默认 / 带默认前缀）
+- **F5** 双态开关（`label_on`/`label_off` → `options.on/off`）在 `H3_STATES` 里**全覆盖**且英文无汉字
+  （0.6.36 加：用户当场抓到 Trim AV「诊断」与 Audio Seam「台词守卫」两处漏翻）
 
 ## 用法
 
-    python tools/check_frontend.py            # 期望 通过 3 / 失败 0
+    python tools/check_frontend.py            # 期望 通过 5 / 失败 0
 """
 
 import io
@@ -323,6 +325,62 @@ def f3_alignment():
     return bad, len(zh)
 
 
+def f5_toggle_states():
+    """双态开关的「开 / 关」文案是否覆盖。
+
+    为什么单列（0.6.36，用户当场抓到两处）：后端 `label_on`/`label_off` 被宿主搬进
+    `options.on/off`（前端源码 `{on: t.label_on, off: t.label_off}`），
+    **不在** `H3_WIDGETS`（那是 `widget.name → label`）的覆盖面上。
+    ⇒ 只要有人给 BOOLEAN 写了 `label_on` 而没进 `H3_STATES`，英文界面下整个开关就是中文。
+    """
+    src = read(NODES)
+    toggles, cls, cur = {}, None, None
+    for line in src.splitlines():
+        m = re.match(r"class\s+(\w+)", line)
+        if m:
+            cls = m.group(1)
+        m = re.match(r'\s+"([A-Za-z_]\w*)": \("', line)
+        if m:
+            cur = m.group(1)
+        for key in ("label_on", "label_off"):
+            m = re.search(r'"%s":\s*"([^"]*)"' % key, line)
+            if m and cur:
+                toggles.setdefault("%s.%s" % (cls, cur), {})[key] = m.group(1)
+
+    js = read(I18N_JS)
+    i = js.index("export const H3_STATES = {")
+    j = js.index("\n};", i)
+    states, cur = {}, None
+    for line in js[i:j].splitlines():
+        m = re.match(r'^    "([^"]+)": \{$', line)
+        if m:
+            cur = m.group(1)
+            states[cur] = {}
+            continue
+        if cur:
+            m = re.match(r'\s+(on|off): "((?:[^"\\]|\\.)*)",?$', line)
+            if m:
+                states[cur][m.group(1)] = m.group(2)
+
+    bad = []
+    for k in sorted(toggles):
+        if k not in states:
+            bad.append("%s：nodes.py 有 label_on，H3_STATES 缺这一条" % k)
+            continue
+        if "label_off" not in toggles[k]:
+            bad.append("%s：nodes.py 只写了 label_on、缺 label_off" % k)
+        for side in ("on", "off"):
+            v = states[k].get(side)
+            if not v:
+                bad.append("%s：H3_STATES 缺 %s" % (k, side))
+            elif CJK.search(v):
+                bad.append("%s：%s 里还有汉字 %r" % (k, side, v[:30]))
+    for k in sorted(states):
+        if k not in toggles:
+            bad.append("%s：H3_STATES 有、nodes.py 里没有对应 label_on（死词条）" % k)
+    return bad, len(toggles)
+
+
 def main():
     fails = []
     print("=" * 78)
@@ -372,11 +430,22 @@ def main():
     else:
         print("     ✅ 全部一致（或已在豁免表里）")
 
+    bad5, n5 = f5_toggle_states()
+    print("\n[F5] 双态开关的 on/off 文案（%d 个带 label_on 的 BOOLEAN）" % n5)
+    if bad5:
+        fails.append("F5 双态开关漏翻/死条目 %d 处" % len(bad5))
+        for b in bad5[:12]:
+            print("     🔴 " + b)
+        print("     修法：在 `web/relay_kit_i18n.js` 的 `H3_STATES` 里补 `on`/`off`（只写英文）；")
+        print("     切回中文由 `applyLang` 还原后端原文，**不要**在词表里存中文。")
+    else:
+        print("     ✅ 覆盖完整，英文无汉字")
+
     print("\n" + "=" * 78)
     if fails:
         print("结果：失败 %d 项 —— %s" % (len(fails), "；".join(fails)))
         return 1
-    print("结果：通过 4 / 失败 0")
+    print("结果：通过 5 / 失败 0")
     print("=" * 78)
     return 0
 

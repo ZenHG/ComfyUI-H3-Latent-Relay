@@ -184,6 +184,8 @@ _CASES = [
     "_g35_loudness.py",
     # ⚠ 同上：**新写的**（0.6.33 的空间分块：几何 / 逐位等同 / 缝带无额外阶跃 / 节点层）。
     "_g36_spatial_tile.py",
+    # ⚠ 同上：**新写的**（0.6.36 的防漏连：桥第 3 路没人接 ⇒ 提交前硬拦）。
+    "_g37_trim_link_guard.py",
 ]
 for _case in _CASES:
     _case_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cases", _case)

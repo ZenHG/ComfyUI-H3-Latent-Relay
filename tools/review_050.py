@@ -869,10 +869,10 @@ ck("K15 mask_mode 分型写进 tooltip（五档都说到 + 推荐档 + 修正后
 _opt_cb = N.H3RelayCopyBridge.INPUT_TYPES()["optional"]
 ck("K15b 掩码族专属参数全部点明「只在哪一档生效」（改档位名必须同步这里）",
    # 2026-10-13：标签从内部记号（🔴实验档 X 专属）改成用户说法（仅 X 档）。
-   all("仅 taper 档" in _opt_cb[k][1]["tooltip"] for k in ("taper_tokens", "seam_min"))
-   and all("仅 ramp 档" in _opt_cb[k][1]["tooltip"] for k in ("ramp_top", "ramp_tokens"))
-   and all("仅 blend 档" in _opt_cb[k][1]["tooltip"] for k in ("blend_top", "blend_tokens"))
-   and all("仅 window 档" in _opt_cb[k][1]["tooltip"] for k in ("window_top", "window_shape")))
+   all("只在 taper 档生效" in _opt_cb[k][1]["tooltip"] for k in ("taper_tokens", "seam_min"))
+   and all("只在 ramp 档生效" in _opt_cb[k][1]["tooltip"] for k in ("ramp_top", "ramp_tokens"))
+   and all("只在 blend 档生效" in _opt_cb[k][1]["tooltip"] for k in ("blend_top", "blend_tokens"))
+   and all("只在 window 档生效" in _opt_cb[k][1]["tooltip"] for k in ("window_top", "window_shape")))
 
 # K16 —— 2026-09-19 深夜：settle_auto 自适应糊区补偿（方向二「观测—校正闭环」落地）
 _optP16 = N.H3RelayPost.INPUT_TYPES()["optional"]
@@ -1519,6 +1519,26 @@ def _js_table_keys(src, table):
     return keys
 
 
+def _js_table_block(src, table):
+    """`export const <table> = { … }` 的**表体**（到下一个 `export const` 或文件尾）。
+
+    🔴 为什么必须按表切块（0.6.36）：H3_TIPS 的宽松正则会**吃到别的表**
+    （新加的 `H3_STATES` 也是 4 空格 + 键，且先出现）⇒ 那些只写 `on/off` 的条目
+    会被判成「提示缺 `en`」，红得莫名其妙。切块后两处解析都只看本表。
+    """
+    m = re.search(r"export const %s = \{" % re.escape(table), src)
+    if not m:
+        return ""
+    rest = src[m.end():]
+    nxt = re.search(r"^export const ", rest, re.M)
+    return rest[:nxt.start()] if nxt else rest
+
+
+def _js_table_dotted_keys(src, table):
+    """同上，但认**带点的键**（`H3RelayTrimAV.diagnostics`）。"""
+    return set(re.findall(r'^\s{4}"([^"]+)":\s*\{', _js_table_block(src, table), re.M))
+
+
 _i18n_w = set(_js_table_keys(_i18n_src, "H3_WIDGETS"))
 _i18n_s = set(_js_table_keys(_i18n_src, "H3_SLOTS"))
 _i18n_n = set(_js_table_keys(_i18n_src, "H3_NODES"))
@@ -1635,7 +1655,7 @@ ck("H3n-i18n 词表里没有**死词条**（没有任何节点在用的键 ⇒ �
 #     漏一个 ⇒ 那一格悬浮时仍是**后端中文**（英文界面下露馅），且**没人会发现**。
 # ⚠️ 反向也查（表里多余 = 参数改名后忘了删）。
 # ⚠️ 与 H3n 一样：schema 读不到就退源码 AST，读不到就**记跳过并说明**，不静默变弱。
-_i18n_tips = set(re.findall(r'^\s{4}"([^"]+)":\s*\{', _i18n_src, re.M))
+_i18n_tips = _js_table_dotted_keys(_i18n_src, "H3_TIPS")
 _tips_ok = bool(re.search(r"export const H3_TIPS = \{", _i18n_src))
 
 _miss_t, _bad_tip = [], []
@@ -1676,7 +1696,8 @@ ck("H3p-i18n 悬浮提示里没有**死条目**（键不是任何节点的参数
 #    本表**只存 `en`**；留 `zh` 就是又把"两套中文说法"这条路打开了（历史上两边漂开过）。
 #    ⇒ 判据：每条必须有 `en`，且**不许有 `zh`**；切中文时前端回落后端原文（`tipFor` 返 null）。
 _incomplete, _has_zh = [], []
-for _k, _v in re.findall(r'^\s{4}"([^"]+)":\s*\{(.*?)\n\s{4}\},', _i18n_src, re.M | re.S):
+for _k, _v in re.findall(r'^\s{4}"([^"]+)":\s*\{(.*?)\n\s{4}\},',
+                         _js_table_block(_i18n_src, "H3_TIPS"), re.M | re.S):
     if _k not in _i18n_tips:
         continue
     if not re.search(r"\ben:\s*\"", _v):
@@ -2382,6 +2403,34 @@ ck("H4g 交付物无字节码/符号链接：git 受控集、`dist/`、`dist/*.z
    bool(_tracked) and not (_bc_git or _sym_git or _bc_dist or _sym_dist or _bc_zip_hits),
    "受控集 %s ｜ 符号链接 %s ｜ dist 字节码 %s ｜ dist 软链 %s ｜ zip %s ｜ ls-files %d"
    % (_bc_git[:3], _sym_git[:3], _bc_dist[:3], _sym_dist[:3], _bc_zip_hits[:3], len(_tracked)))
+
+# ============================================================================
+# H4h `check_tooltips` 的期望项数（2026-10-19 新增）—— 真值判据
+# ============================================================================
+# 🔴 为什么需要：这个数此前**零机检**，实测**已经漂了** —— `docs/08` 里 `1216 项` 与
+#   `1217 项` **并存**，`tools/check_frontend.py` 也写 `1217/0`，而真值是 1216。
+#   与 **H4d**（JS 期望数）同一个病：同一口径多处声明、没一处被盯。
+# 判据 = **真跑** `check_tooltips`，核 `_doc_txt` 里凡提到该脚本名的行的 `N 项` == 实跑。
+# ⚠️ 声明口径统一写 **`N 项`**、不写 `N/0` —— 同一行常有 `review_050` 的 `N/0`（H3g 扫同一批行），
+#   用 `/0` 形状会互相污染。这条写作纪律写进 `tools/CHECKS.md` 的口径表。
+_ct = subprocess.run([sys.executable, os.path.join(KIT, "tools", "check_tooltips.py")],
+                     capture_output=True, text=True, encoding="utf-8", errors="replace",
+                     cwd=KIT, env=dict(os.environ, COMFYUI_PATH=COMFY))
+_ct_m = _re.search(r"通过\s*(\d+)\s*/\s*失败\s*(\d+)", _ct.stdout or "")
+_ct_n, _ct_f = (int(_ct_m.group(1)), int(_ct_m.group(2))) if _ct_m else (-1, -1)
+_bad_ct = []
+if _ct_n <= 0 or _ct_f != 0:
+    _bad_ct.append("实跑未通过（%d/%d）：%s" % (_ct_n, _ct_f, (_ct.stderr or "").strip()[-120:]))
+for _fn, _txt in _doc_txt.items():
+    for _ln in _txt.splitlines():
+        if "check_tooltips" in _ln:
+            for _v in _re.findall(r"(\d+)\s*项", _ln):
+                if int(_v) != _ct_n:
+                    _bad_ct.append("%s: %s 项（应 %d 项）" % (_fn, _v, _ct_n))
+print("      check_tooltips 实跑：%d 项 / 失败 %d" % (_ct_n, _ct_f))
+ck("H4h `check_tooltips` 的期望项数在 ci.yml·docs/08·tools/README 与**实跑**一致"
+   "（此前零机检，已漂过：1216 与 1217 并存）",
+   not _bad_ct and _ct_n > 0, "%d 处：%s" % (len(_bad_ct), _bad_ct[:4]))
 
 # ============================================================================
 # H3g 本文件**自己的**期望数（2026-09-25 新增）

@@ -46,6 +46,8 @@
 # 🔴 前端静态一致性（中英两侧对读）；2026-10-15 起，改前端必跑。
 #    为什么单独列：本地全绿 ≠ 英文界面没问题（实测套件 15/15 + review_050 + check_tooltips 同时绿仍漏 3 类）。
 python tools/check_frontend.py
+# 🔴 文案与术语（提示 + 标签 + 双态开关）；改任何用户可见文字必跑。
+python tools/check_tooltips.py
 # 🔴 前端交互真门（要一个**活宿主** + playwright；它自己找浏览器，找不到会 SKIP）
 node tools/ui_smoke.cjs
 ruff check . --exclude dist
@@ -132,6 +134,7 @@ python tools/release.py            # 预演；--go 才真发；唯一真相源 =
 | **H4e** | dist 白名单文件数：`MANIFEST` 各段之和 == 文档声明（`dist/` 在时还核实际文件数） |
 | **H4f** | 无「`return` 后直接跟一个 `open(`」的形态（`SIM115` 的已知盲点） |
 | **H4g** | 交付物无字节码/符号链接：git 受控集、`dist/`、`dist/*.zip` 名录**硬判**，部署副本只报信息（宿主治理 `pack_refusal`） |
+| **H4h** | `check_tooltips` 的项数 == **实跑**（2026-10-19 加：这个数此前零机检，实测 1216 与 1217 **并存**） |
 
 > ⚠️ **本表是摘要，可能滞后**。**权威清单 = `tools/CHECKS.md`**（由 `tools/checks_ledger.py --write` 生成，
 > **H4c** 盯着它与 `review_050` 的编号双向一致）。要「有哪些判据 / 每条盯什么口径 / 有没有变异测试 /
@@ -140,7 +143,7 @@ python tools/release.py            # 预演；--go 才真发；唯一真相源 =
 ### 4.2 「口径数字」——**这些数字不许裸写**
 
 **口径数字** = 「描述某个可数事实、**且有机检盯着**」的数。完整表见 **`tools/CHECKS.md`**
-（由 `tools/checks_ledger.py --write` 生成，**别手改**）。当前 **14** 条判据在盯口径数字：
+（由 `tools/checks_ledger.py --write` 生成，**别手改**）。当前 **15** 条判据在盯口径数字：
 
 | 数字 | 谁盯 | 写在哪 |
 |---|---|---|
@@ -156,6 +159,7 @@ python tools/release.py            # 预演；--go 才真发；唯一真相源 =
 | `tools/` 脚本数 | **H3v** | `README.md` / `tools/README.md` |
 | **JS 测试期望数 ×4** | **H4d** | `ci.yml` / `docs/08` |
 | **dist 白名单文件数** | **H4e** | `docs/08` / `tools/README` |
+| **`check_tooltips` 项数** | **H4h** | `ci.yml` / `docs/08` / `tools/README`（**只许写 `N 项`**，见下） |
 
 🔴 **写作纪律（两条，都是被误报逼出来的）**：
 
@@ -167,6 +171,8 @@ python tools/release.py            # 预演；--go 才真发；唯一真相源 =
    ⇒ 口径数字**只在它的声明位写一次**；叙述里要提，就**别写成 `N/0` 或 `N 文件 /`**。
    · `docs/08-testing.md` 里写 `47/0`（描述 JS 单测期望数）⇒ 被 **H4d** 当成声明位 ⇒ 误报。
      ⇒ 叙述里要提，写成 `47 条断言`；**`N/0` 只许出现在 `ci.yml` 与 `docs/08` 的声明表格里**。
+   · `check_tooltips` 的项数**只许写 `N 项`**（**H4h** 只认 `(\d+)\s*项`）：这一行常同时出现
+     `review_050` 的 `N/0`，写成 `/0` 形状会**互相污染**（两条判据扫的是同一批行）。
 
 **新增一条口径数字 = 必须同时**：① 加判据；② 在 `tools/checks_ledger.py` 登记（否则 **H4c** 红）；
 ③ 按上面两条写。
@@ -208,6 +214,7 @@ python tools/release.py            # 预演；--go 才真发；唯一真相源 =
 | 14 | **中英语义一致性只做到「行数」这一层** | `check_frontend.py` **F3 只比行数**（弱启发式）⇒ 行数同、内容不同仍绿。本轮 3 处英文落后中文**全是人读发现的**（见 `CONTRIBUTING.md` §坑⑫）。收窄方向已写进 `LOCAL-维护规范与已知缺陷.md` §七 |
 | 15 | **`web/*.js` 的可见中文只做到「≤ 基线」这一层** | **F1** 是数量闸（`UNTRANSLATED_BASELINE = 115`，只许减不许增）⇒ 新增会被拦，**存量 115 条**无人管；且「某条用户到底看不看得见」仍靠人读 |
 | 13 | **「从容器读一个数当事实」无机检** | 落盘节点可自由决定时间戳原点 / `nb_frames` / 编码参数（见 `CONTRIBUTING.md` §实测与判据的坑「从容器读数」条）。这类写法**没有机检**（`H4b` 只挡字面恒真）—— 当前靠该条 + 组 35 的回归锁 + 人读 |
+| 16 | **双态开关（`label_on/off`）只有 F5 一条判据** | F5 双向核对「`nodes.py` 的 `label_on` ↔ `H3_STATES`」⇒ 漏一条、写错词都红；但**只覆盖带 `label_on` 的 BOOLEAN**，`DESCRIPTION`（节点库说明）仍是中文、无判据 |
 
 **静态检查现状（2026-10-07 扩）**：`E/F/W` + `B`（bugbear）/ `C4` / `PIE` / `RET` / `RUF100`。
 选型判据与「刻意没开的规则连同理由」写在 `pyproject.toml` 的 `[tool.ruff.lint]` 里 —— **改之前先量**：
