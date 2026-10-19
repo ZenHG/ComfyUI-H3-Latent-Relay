@@ -2844,6 +2844,7 @@ class H3RelaySeedFromVideo:
                 "（继续会得到帧位错开的片子）。" % (n, lt, fc_check))
         at = CORE.audio_steps(n)
         a_note = "静音种子（源没有音轨）"
+        bed_wf = None                     # 供⑤落床边车的波形（None = 源没有音轨）
         if audio is None:
             a = torch.zeros([1, 32, 2, at], dtype=v.dtype, device=v.device)
         else:
@@ -2857,6 +2858,7 @@ class H3RelaySeedFromVideo:
             vae_sr = int(getattr(audio_vae, "audio_sample_rate", 32000))
             if sr != vae_sr:
                 wf = comfy.audio.resample(wf, sr, vae_sr)
+            bed_wf = wf[:1]
             a = audio_vae.encode(wf[:1].movedim(1, -1))
             if not torch.is_tensor(a) or a.dim() != 4 or int(a.shape[1]) != 32:
                 _gota = "%r" % (tuple(a.shape) if torch.is_tensor(a) else type(a),)
@@ -2887,6 +2889,29 @@ class H3RelaySeedFromVideo:
         lineage.update({"source": "video", "source_frames": n_in, "frames": n,
                         "dropped_frames": dropped, "canvas": [w, h], "latent_steps": lt})
         CORE.save_av_latent(latent, path, note=note, lineage=lineage)
+        # —— ⑤ 音频床边车（`audio_%05d.safetensors`）：让后续段的「音频缝」有床源可读 ——
+        #    🔴 为什么必须在这里补（2026-10-19）：那个床文件**只有音频缝节点自己会写**，
+        #    而视频起段不经过音频缝 ⇒ 不补的话，起段链里音频缝永远报「床源音频不存在」，
+        #    且后续段也补不上（bed_stage 只能指向不存在的 stage 0）⇒ 结构性死锁。
+        #    起段手里就有原始音轨（零解码成本）⇒ 缺口在这里补上，音频缝的契约不变。
+        _sr_bed = int(getattr(audio_vae, "audio_sample_rate", 32000))
+        _want = int(round(n / CORE.FPS * _sr_bed))      # n 帧 @24fps 的秒数 × 采样率
+        if bed_wf is None:
+            _bed_wf = torch.zeros([1, 1, _want], dtype=torch.float32)
+            _bed_note = ("静音床边车（源没有音轨）。要让音频缝只在有环境声的段之间起作用，"
+                         "把它的 patch_seconds 填 0 或把 bed_stage 改指向有音轨的段")
+        else:
+            _bed_wf = bed_wf
+            if int(_bed_wf.shape[-1]) > _want:
+                _bed_wf = _bed_wf[..., :_want]
+            elif int(_bed_wf.shape[-1]) < _want:
+                _bed_wf = torch.nn.functional.pad(
+                    _bed_wf, (0, _want - int(_bed_wf.shape[-1])))
+            _bed_note = "床边车来自源音轨（已重采样到 %d Hz，裁/补到与视频等长 %d 样本）" % (
+                _sr_bed, _want)
+        _bed_path = _audio_stage_path(run_id, stage_index)
+        CORE.save_audio({"waveform": _bed_wf, "sample_rate": _sr_bed},
+                        _bed_path, note="seed bed")
         lines = [
             "[H3 Relay] 已把源视频写成第 %d 段（种子）→ %s" % (int(stage_index), path),
             "  帧：源 %d → 用 %d%s ｜ 画布 %dx%d%s"
@@ -2895,6 +2920,7 @@ class H3RelaySeedFromVideo:
             "  latent：视频 %s 步（覆盖 %d 帧）｜ 音频 %d 步"
             % (lt, fc_check, at),
             "  音频：%s" % a_note,
+            "  床边车：%s（%s）" % (_bed_path, _bed_note),
             "  头：run=%s 父段=无（来源是视频）pack=%s source=video"
             % (lineage["run_id"], lineage["pack"]),
         ]

@@ -778,9 +778,7 @@
     {
      "name": "report",
      "type": "STRING",
-     "links": [
-      18
-     ]
+     "links": null
     },
     {
      "name": "trim_frames",
@@ -1771,14 +1769,6 @@
    0,
    12,
    3,
-   "LATENT"
-  ],
-  [
-   18,
-   10,
-   1,
-   13,
-   0,
    "LATENT"
   ],
   [

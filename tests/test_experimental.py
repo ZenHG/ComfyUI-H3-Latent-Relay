@@ -780,6 +780,35 @@ expect_raise("G6.2 音频 VAE 不是 H3 的（通道不对）⇒ 报错",
 expect_raise("G6.3 video 不是 4 维帧张量 ⇒ 报错",
              lambda: _SV().seed(None, _VidVAE(), _AudVAE(), 448, 768, "seednv", 0), "画面帧张量")
 
+# G7 音频床边车（2026-10-19 修）：起段必须落 audio_%05d，否则音频缝结构性死锁
+#    （床文件只有音频缝自己会写；起段不经过它 ⇒ 不补就永远没有床源，后续段也补不上）
+_SV().seed(_vid(39), _VidVAE(), _AudVAE(), 448, 768, "seedbed0", 0)
+_bed0 = os.path.join(_TMP, "seedbed0", "audio_00000.safetensors")
+check("G7.1 静音起段也落床边车（不起步就永远死锁：后续段的音频缝只认这个文件）",
+      os.path.isfile(_bed0), _bed0)
+_bd0 = CORE.load_audio(_bed0)
+check("G7.2 床边车长度 = 帧数/24s×采样率（39 帧 @32k = 52000 样本）、率记 32000",
+      tuple(_bd0["waveform"].shape) == (1, 1, 52000) and int(_bd0["sample_rate"]) == 32000,
+      "%s / %s" % (tuple(_bd0["waveform"].shape), _bd0["sample_rate"]))
+check("G7.3 静音床 = 全零（不伪造环境声）",
+      float(_bd0["waveform"].abs().max()) == 0.0, str(float(_bd0["waveform"].abs().max())))
+_SV().seed(_vid(39), _VidVAE(), _AudVAE(), 448, 768, "seedbedL", 0, audio=_aud(5.0))
+_bdL = CORE.load_audio(os.path.join(_TMP, "seedbedL", "audio_00000.safetensors"))
+check("G7.4 源音轨过长 ⇒ 床边车裁到与视频等长（52000，不是 160000）",
+      tuple(_bdL["waveform"].shape) == (1, 2, 52000), str(tuple(_bdL["waveform"].shape)))
+_SV().seed(_vid(39), _VidVAE(), _AudVAE(), 448, 768, "seedbedS", 0, audio=_aud(0.05))
+_bdS = CORE.load_audio(os.path.join(_TMP, "seedbedS", "audio_00000.safetensors"))
+check("G7.5 源音轨过短 ⇒ 床边车补零到等长（52000）",
+      tuple(_bdS["waveform"].shape) == (1, 2, 52000), str(tuple(_bdS["waveform"].shape)))
+_SV().seed(_vid(39), _VidVAE(), _AudVAE(), 448, 768, "seedbed3", 3)
+check("G7.6 床边车跟着 stage_index 走（起段写在 stage 3 ⇒ audio_00003，不误写 00000）",
+      os.path.isfile(os.path.join(_TMP, "seedbed3", "audio_00003.safetensors"))
+      and not os.path.isfile(os.path.join(_TMP, "seedbed3", "audio_00000.safetensors")),
+      "audio_00003")
+_rep7 = _SV().seed(_vid(39), _VidVAE(), _AudVAE(), 448, 768, "seedbedR", 0)[1]
+check("G7.7 报告写明床边车路径（分支必须可观测）",
+      "床边车" in _rep7 and "audio_00000" in _rep7, _rep7.splitlines()[-2][:70])
+
 NODES._stage_path = _OLD_STAGE
 _shutil.rmtree(_TMP, ignore_errors=True)
 
