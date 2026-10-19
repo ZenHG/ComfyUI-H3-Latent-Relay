@@ -2688,6 +2688,15 @@ class H3RelayFiniteRun:
         # **这里**炸（上游加载器还没跑），而不是等采样器接到空 latent 才炸。
         _fs = int(from_segment or 0)
         if _fs > 0:
+            # 🔴 2026-10-20：`image` 与 `from_segment>0` 是**互斥**的 —— 从第 N 段起跑意味着
+            #   首段的起点由盘上第 N 段的尾巴决定，首帧图没有位置可用。原来只在 tooltip 里写，
+            #   接了就是静默错配 ⇒ 改成硬错误（铁律七：硬错误必须 raise，绝不静默降级）。
+            if image is not None:
+                raise RuntimeError(
+                    "from_segment=%d 与首帧图 image **不能同时用**：\n"
+                    "    · from_segment>0 = 接着盘上第 %d 段往外跑，起点来自那一段的尾巴；\n"
+                    "    · image = 第 1 段的第一帧，只有 from_segment=0 时才用得上。\n"
+                    "    ⇒ 二选一：要么把 from_segment 改回 0，要么把 image 断开。" % (_fs, _fs - 1))
             _need = _stage_path(run_id, _fs - 1)
             if not os.path.isfile(_need):
                 raise RuntimeError(
@@ -2746,12 +2755,12 @@ class H3RelaySeedFromVideo:
                     "tooltip": "【接什么】H3 的音频 VAE（与音频解码用的同一个）。",
                 }),
                 "width": ("INT", {
-                    "default": 1344, "min": 64, "max": 8192, "step": 16,
-                    "tooltip": "【画面宽】16 的倍数，与后续各段填同一个数。\n（与出词节点也要一致，不一致桥会拒。）\n源视频尺寸不同时按这里居中裁切重采样。",
+                    "default": 0, "min": 0, "max": 8192, "step": 16,
+                    "tooltip": "【画面宽】**0 = 跟随源视频**（默认，源尺寸向下取到 16 的倍数，不动内容）。\n填具体值 = 按这里居中裁切重采样，且必须与后续各段、出词节点一致（不一致桥会拒）。\n⚠ 两个都要么填 0、要么都填值。",
                 }),
                 "height": ("INT", {
-                    "default": 768, "min": 64, "max": 8192, "step": 16,
-                    "tooltip": "【画面高】16 的倍数，与后续各段填同一个数。\n（与出词节点也要一致，不一致桥会拒。）\n源视频尺寸不同时按这里居中裁切重采样。",
+                    "default": 0, "min": 0, "max": 8192, "step": 16,
+                    "tooltip": "【画面高】**0 = 跟随源视频**（默认，源尺寸向下取到 16 的倍数，不动内容）。\n填具体值 = 按这里居中裁切重采样，且必须与后续各段、出词节点一致（不一致桥会拒）。\n⚠ 两个都要么填 0、要么都填值。",
                 }),
                 "run_id": ("STRING", {
                     "default": "relay",
@@ -2814,6 +2823,18 @@ class H3RelaySeedFromVideo:
 
         # —— ② 画布栅格：16 的倍数（latent 用 //16 开方），且必须与后续各段一致
         w, h = int(width), int(height)
+        # 🆕 2026-10-20：**0 = 跟随源视频**。源本身就带尺寸，不该逼用户把它抄三处
+        #    （本节点 / 出词节点 / 后续各段）——抄错一处要等到桥那里才报，是首次使用最常踩的坑。
+        #    向下取到 16 的倍数 ⇒ 只做亚像素级缩小，**不放大、不裁内容**。
+        auto_canvas = (w == 0 and h == 0)
+        if auto_canvas:
+            h = max(64, (int(video.shape[1]) // 16) * 16)
+            w = max(64, (int(video.shape[2]) // 16) * 16)
+        elif w == 0 or h == 0:
+            raise ValueError(
+                "width / height 必须**同时**填 0（跟随源视频）或**同时**填具体值；"
+                "现在 width=%d height=%d。\n"
+                "    只填一个 = 另一个没有依据，不猜。" % (w, h))
         for _nm, _v in (("width", w), ("height", h)):
             if _v < 32 or _v % 16 != 0:
                 raise ValueError(
@@ -2845,6 +2866,11 @@ class H3RelaySeedFromVideo:
         at = CORE.audio_steps(n)
         a_note = "静音种子（源没有音轨）"
         bed_wf = None                     # 供⑤落床边车的波形（None = 源没有音轨）
+        # 本段音频应有的样本数（= n 帧 @24fps 的秒数 × 采样率）。**编码前**就要它 ——
+        #   🔴 2026-10-20：原来是把**整条源音轨**编完再 `a[..., :at]` 截断 ⇒ 60 s 的源
+        #   只为留 8 s 就白烧 7.5 倍音频 VAE 时间与显存。先截再编，结果逐位等价。
+        _sr_bed = int(getattr(audio_vae, "audio_sample_rate", 32000))
+        _want = int(round(n / CORE.FPS * _sr_bed))      # n 帧 @24fps 的秒数 × 采样率
         if audio is None:
             a = torch.zeros([1, 32, 2, at], dtype=v.dtype, device=v.device)
         else:
@@ -2858,6 +2884,17 @@ class H3RelaySeedFromVideo:
             vae_sr = int(getattr(audio_vae, "audio_sample_rate", 32000))
             if sr != vae_sr:
                 wf = comfy.audio.resample(wf, sr, vae_sr)
+            # 先按本段长度裁/补，**再**编码（省掉整条源音轨的无效编码）
+            _n_in = int(wf.shape[-1])
+            if _n_in > _want:
+                wf = wf[..., :_want]
+                _len_note = "源音轨 %d → 截到本段 %d 样本（省掉 %.1f× 无效编码）" % (
+                    _n_in, _want, _n_in / float(_want))
+            elif _n_in < _want:
+                wf = torch.nn.functional.pad(wf, (0, _want - _n_in))
+                _len_note = "源音轨 %d → 补零到本段 %d 样本" % (_n_in, _want)
+            else:
+                _len_note = "源音轨 %d 样本，长度本来就对" % _n_in
             bed_wf = wf[:1]
             a = audio_vae.encode(wf[:1].movedim(1, -1))
             if not torch.is_tensor(a) or a.dim() != 4 or int(a.shape[1]) != 32:
@@ -2867,14 +2904,15 @@ class H3RelaySeedFromVideo:
                     "（期望 [B,32,2,T]，得到 %s）。\n"
                     "    接错 VAE 了？请接 H3 的音频 VAE。" % _gota)
             got = int(a.shape[-1])
+            # 下面两支是**护栏**（VAE 步长粒度可能让 got 差 1 步）；主路径已在上游截好。
             if got > at:
                 a = a[..., :at]
-                a_note = "源音轨 %d 步 → 按视频长度裁到尾 %d 步（@%d Hz）" % (got, at, vae_sr)
+                a_note = "%s；编码 %d 步 → 裁到 %d 步（@%d Hz）" % (_len_note, got, at, vae_sr)
             elif got < at:
                 a = torch.nn.functional.pad(a, (0, at - got))
-                a_note = "源音轨 %d 步 → 补零到尾 %d 步（@%d Hz）" % (got, at, vae_sr)
+                a_note = "%s；编码 %d 步 → 补零到 %d 步（@%d Hz）" % (_len_note, got, at, vae_sr)
             else:
-                a_note = "源音轨 %d 步，长度本来就对（@%d Hz）" % (got, vae_sr)
+                a_note = "%s；编码 %d 步（@%d Hz）" % (_len_note, got, vae_sr)
         # 两条流必须同 dtype/同设备：NestedTensor 只存列表、**不校验**，
         # 混着进去会在采样器里才炸（且报错指向不明）。音频流很小，搬一次可以忽略。
         a = a.to(dtype=v.dtype, device=v.device)
@@ -2894,8 +2932,6 @@ class H3RelaySeedFromVideo:
         #    而视频起段不经过音频缝 ⇒ 不补的话，起段链里音频缝永远报「床源音频不存在」，
         #    且后续段也补不上（bed_stage 只能指向不存在的 stage 0）⇒ 结构性死锁。
         #    起段手里就有原始音轨（零解码成本）⇒ 缺口在这里补上，音频缝的契约不变。
-        _sr_bed = int(getattr(audio_vae, "audio_sample_rate", 32000))
-        _want = int(round(n / CORE.FPS * _sr_bed))      # n 帧 @24fps 的秒数 × 采样率
         if bed_wf is None:
             _bed_wf = torch.zeros([1, 1, _want], dtype=torch.float32)
             _bed_note = ("静音床边车（源没有音轨）。要让音频缝只在有环境声的段之间起作用，"
@@ -2912,13 +2948,20 @@ class H3RelaySeedFromVideo:
         _bed_path = _audio_stage_path(run_id, stage_index)
         CORE.save_audio({"waveform": _bed_wf, "sample_rate": _sr_bed},
                         _bed_path, note="seed bed")
+        if auto_canvas:
+            _canvas_note = "（跟随源视频，已居中裁切重采样）" if resized else "（跟随源视频）"
+        else:
+            _canvas_note = "（已居中裁切重采样）" if resized else "（尺寸本来就对）"
         lines = [
             "[H3 Relay] 已把源视频写成第 %d 段（种子）→ %s" % (int(stage_index), path),
             "  帧：源 %d → 用 %d%s ｜ 画布 %dx%d%s"
             % (n_in, n, ("（按帧尾裁掉 %d 帧）" % dropped) if dropped else "（本来就在档上）",
-               w, h, "（已居中裁切重采样）" if resized else "（尺寸本来就对）"),
+               w, h, _canvas_note),
             "  latent：视频 %s 步（覆盖 %d 帧）｜ 音频 %d 步"
             % (lt, fc_check, at),
+            "  时间轴：按 %.0f fps 解释帧序列（本节点拿不到源的 fps）—— 源若不是 %.0f fps，"
+            "画面时长会跟着变，请先把源转成 %.0f fps 再喂进来。"
+            % (CORE.FPS, CORE.FPS, CORE.FPS),
             "  音频：%s" % a_note,
             "  床边车：%s（%s）" % (_bed_path, _bed_note),
             "  头：run=%s 父段=无（来源是视频）pack=%s source=video"

@@ -688,6 +688,18 @@ class _BadVAE:
         return torch.zeros(1, 8, 2)          # 维数/通道都不对
 
 
+class _LenVAE:
+    """记录「实际喂进来的样本数」的音频 VAE —— 用来证明**先截再编**（不是整条编完再截）。"""
+    audio_sample_rate = 32000
+
+    def __init__(self):
+        self.seen = []
+
+    def encode(self, wav):
+        self.seen.append(int(wav.shape[1]))
+        return torch.zeros(1, 32, 2, max(1, int(round(int(wav.shape[1]) / 32000 * 40))))
+
+
 def _vid(n, h=32, w=32, c=3):
     return torch.zeros(n, h, w, c)
 
@@ -808,6 +820,28 @@ check("G7.6 床边车跟着 stage_index 走（起段写在 stage 3 ⇒ audio_000
 _rep7 = _SV().seed(_vid(39), _VidVAE(), _AudVAE(), 448, 768, "seedbedR", 0)[1]
 check("G7.7 报告写明床边车路径（分支必须可观测）",
       "床边车" in _rep7 and "audio_00000" in _rep7, _rep7.splitlines()[-2][:70])
+
+# G8 2026-10-20 两处「对开源用户更省事」的改动
+#   ① 画布 0 = 跟随源视频（源自己带尺寸，不该逼用户抄三处）
+#   ② 音频**先截到本段长度再编码**（原来整条编完才 a[..., :at]，长源白烧 N 倍）
+_SV().seed(_vid(39, 768, 448), _VidVAE(), _AudVAE(), 0, 0, "seedauto", 0)
+_m8 = CORE.read_av_latent_meta(os.path.join(_TMP, "seedauto", "stage_00000.safetensors"))
+check("G8.1 width=height=0 ⇒ 跟随源视频（画布 = 源尺寸，不缩放）",
+      _m8.get("canvas") == [448, 768], str(_m8.get("canvas")))
+expect_raise("G8.2 只填一个 0 ⇒ 报错（另一个没有依据，不猜）",
+             lambda: _SV().seed(_vid(39, 768, 448), _VidVAE(), _AudVAE(), 0, 768, "s8b", 0),
+             "必须**同时**")
+_SV().seed(_vid(39, 300, 400), _VidVAE(), _AudVAE(), 0, 0, "seedauto2", 0)
+_m8c = CORE.read_av_latent_meta(os.path.join(_TMP, "seedauto2", "stage_00000.safetensors"))
+check("G8.3 源尺寸不在 16 的倍数上 ⇒ 向下取整到栅格（400×300 → 400×288），不放大",
+      _m8c.get("canvas") == [400, 288], str(_m8c.get("canvas")))
+_lv = _LenVAE()
+_SV().seed(_vid(39), _VidVAE(), _lv, 448, 768, "seedpre", 0, audio=_aud(5.0))
+check("G8.4 音频先截到本段长度再编码：VAE 实收 52000 样本（源是 160000）",
+      _lv.seen and _lv.seen[-1] == 52000, str(_lv.seen))
+_rep8 = _SV().seed(_vid(39), _VidVAE(), _AudVAE(), 448, 768, "seedfps", 0)[1]
+check("G8.5 报告点名时间轴按 24 fps 解释（拿不到源 fps，必须出声）",
+      "时间轴" in _rep8 and "fps" in _rep8, _rep8.splitlines()[3][:70])
 
 NODES._stage_path = _OLD_STAGE
 _shutil.rmtree(_TMP, ignore_errors=True)

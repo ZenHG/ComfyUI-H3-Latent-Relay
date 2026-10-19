@@ -717,10 +717,10 @@ export const H3_TIPS = {
         en: "[What to wire] The H3 audio VAE (the same one your audio decode uses).",
     },
     "H3RelaySeedFromVideo.width": {
-        en: "[Picture width] A multiple of 16; use the same number as your later segments.\nIt must also match your prompt node, or the bridge refuses.\nIf the source video differs, it is centre-cropped and resampled to this.",
+        en: "[Picture width] **0 = follow the source video** (default: the source size rounded down to a multiple of 16, content untouched).\nA concrete value = centre-crop and resample to it, and it must match your later segments and your prompt node, or the bridge refuses.\n⚠ Set both width and height, or leave both at 0.",
     },
     "H3RelaySeedFromVideo.height": {
-        en: "[Picture height] A multiple of 16; use the same number as your later segments.\nIt must also match your prompt node, or the bridge refuses.\nIf the source video differs, it is centre-cropped and resampled to this.",
+        en: "[Picture height] **0 = follow the source video** (default: the source size rounded down to a multiple of 16, content untouched).\nA concrete value = centre-crop and resample to it, and it must match your later segments and your prompt node, or the bridge refuses.\n⚠ Set both width and height, or leave both at 0.",
     },
     "H3RelaySeedFromVideo.run_id": {
         en: "[What to fill] The film name.\nThe source video is stored as this segment's sidecar; it must match the later segments exactly.",
