@@ -3,7 +3,7 @@
 > 🔴 **本文件由 `tools/checks_ledger.py --write` 生成，别手改**（改台账 → 重新生成）。
 > 机检：`review_050.py` 的 **H4c** 核「本台账 ↔ `review_050.py` 的编号**双向一致**」。
 
-共 **56** 条带编号的判据 ｜ 其中盯**口径数字**的 **15** 条 ｜ 有**变异测试**的 **23** 条。
+共 **58** 条带编号的判据 ｜ 其中盯**口径数字**的 **15** 条 ｜ 有**变异测试**的 **25** 条。
 
 ## 一、盯「口径数字」的判据（**这些数字不许裸写**）
 
@@ -32,6 +32,7 @@
 | **E1** | consistency | relay_core.MASK_MODES | — | — |
 | **E2** | consistency | 节点选项与 MASK_MODES 一致 | — | — |
 | **E3** | hygiene | 四个权重函数齐备 | — | — |
+| **H7** | truth | 单节点类体量：默认上限 + 已知超额项只许减不许增 | 把 `H3RelayJoinAV` 类撑到 401 行（它不在已知超额名单里 ⇒ 必须红） | — |
 | **H3e** | hygiene | 开源卫生：受版本控制的文本里无作者本机路径 | 在任一受控文本里插一行本机盘符路径（如 `X:/tmp/a`） | git |
 | **H3k** | gate | Comfy Registry 元数据齐备 | 把 `pyproject.toml` 的 `license` 改成裸 SPDX 字符串 | — |
 | **H3l** | hygiene | 发布规范在位且成对 | — | — |
@@ -52,6 +53,7 @@
 | **H4c** | truth | 判据台账 | 从本台账删掉一个编号（或 `review_050` 里加一条未登记的编号） | git |
 | **H4f** | hygiene | 无「`return` 后直接跟一个 `open | 把任一受控 `*.py` 改成「`return` 后直接跟 `open(`」的形态 | — |
 | **H4g** | hygiene | 交付物无字节码/符号链接：git 受控集、`dist/`、`dist/*.zip` 名录 **硬判**，部署副本只报信息 | ① 把任一受控文件改成 `.pyc` 形态后 `git add -f`（受控集里出现字节码）；② 往 `dist/<包>/` 里放一个软链（包内符号链接，宿主规则②） | — |
+| **H7b** | truth | `nodes.py` 总行数不超过上限 | 在 `nodes.py` 末尾加 1 行（当前正好 3000 顶格 ⇒ 必须红） | — |
 | **I1** | hygiene | 示例图 widgets_values **未超出** schema 槽位数 | — | — |
 | **I2** | hygiene | 取值都在候选/范围内 | — | host |
 | **I3** | hygiene | **全部**示例图的 widget 输入带 `widget` 标记 | — | — |

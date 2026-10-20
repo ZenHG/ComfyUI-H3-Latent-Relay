@@ -52,11 +52,13 @@ sys.path.insert(0, KIT)
 
 I18N_JS = os.path.join(KIT, "web", "relay_kit_i18n.js")
 
-NODE_ORDER = [
-    "H3RelayLatentSave", "H3RelayLatentLoad", "H3RelayCopyBridge", "H3RelayTrimAV",
-    "H3RelayPost", "H3RelayAudioSeam", "H3RelayChain", "H3RelayLatentUpscale",
-    "H3RelaySeedFromVideo", "H3RelayJoinAV", "H3RelayFiniteRun",
-]
+# 🔴 2026-10-20：**不再手抄节点清单**，改成从注册表派生。
+#   手抄的代价实测过两次：0.6.37 加 SeedFromVideo、0.6.38 加 Join AV / Finite Run 时都漏了这里，
+#   后果是**新节点的全部提示被判成「孤儿」**（P1 红），而真因跟提示文案毫无关系。
+#   顺序仍与 `NODE_CLASS_MAPPINGS` 一致（注册顺序），报告可读性不变。
+def node_order(N) -> list:
+    """节点处理顺序 = 注册表键顺序（唯一真相源）。"""
+    return list(N.NODE_CLASS_MAPPINGS)
 
 #: 长度上限（字符）。中文按"一眼看完"，英文按同样信息量的自然膨胀留 2 倍余量。
 MAX_ZH = 150
@@ -197,7 +199,7 @@ def read_glossary(path: str) -> tuple[dict, list]:
 def main() -> int:
     N = load_nodes()
     params: dict[str, tuple] = {}
-    for cls_name in NODE_ORDER:
+    for cls_name in node_order(N):
         cls = getattr(N, cls_name)
         it = cls.INPUT_TYPES()
         for sec in ("required", "optional"):

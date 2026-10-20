@@ -2464,6 +2464,47 @@ ck("H4h `check_tooltips` 的期望项数在 ci.yml·docs/08·tools/README 与**�
    not _bad_ct and _ct_n > 0, "%d 处：%s" % (len(_bad_ct), _bad_ct[:4]))
 
 # ============================================================================
+# H7 节点层体量闸（2026-10-20 新增，立项 P1；H5/H6 已被 requirements.txt 与 CHANGES 版本占用）—— 真值判据
+# ============================================================================
+# 🔴 为什么需要：规范只规定「`relay_core/` 是纯算法层」，**没规定 `nodes.py` 多大该拆**。
+#   实测 0.6.35 2426 行 → 0.6.36 2445 → 0.6.37 2717 → 0.6.38 **3000**，
+#   而「拆过」拆的是算法层（`relay_core.py` → 包），**节点层从来没拆过**。
+# 判据分两条，都是**当场量真值**（不抄文档里的数）：
+#   ① 单个节点类：默认上限 `_H5_CLASS_CAP`；已在 `_H5_KNOWN` 里的**只许减不许增**
+#      （超了立刻红 ⇒ 想加就得先下沉，与 `check_frontend` 的 F1 基线同一个套路）。
+#   ② `nodes.py` 总行数：上限 `_H5_FILE_CAP`（今天是 3000，正好顶格 ⇒ 再加就得先拆）。
+# ⚠️ 这是**结构性闸**，判的是「该不该拆」，不是「代码丑不丑」。
+_H5_CLASS_CAP = 400
+_H5_KNOWN = {"H3RelayTrimAV": 439, "H3RelayCopyBridge": 426}   # 只许减不许增
+_H5_FILE_CAP = 3000
+_h7_bad, _h7_lines, _cur7, _n7, _total7 = [], [], None, 0, 0
+with open(os.path.join(KIT, "nodes.py"), encoding="utf-8") as _fh7:
+    for _ln in _fh7:
+        _total7 += 1
+        if _ln.startswith("class H3Relay"):
+            if _cur7:
+                _h7_lines.append((_cur7, _n7))
+            _cur7 = _ln.split("class ")[1].split("(")[0].split(":")[0].strip()
+            _n7 = 1
+        elif _cur7 is not None:
+            _n7 += 1
+if _cur7:
+    _h7_lines.append((_cur7, _n7))
+for _nm7, _c7 in _h7_lines:
+    _cap7 = _H5_KNOWN.get(_nm7, _H5_CLASS_CAP)
+    if _c7 > _cap7:
+        _h7_bad.append("%s %d > %d%s" % (_nm7, _c7, _cap7,
+                                         "（已知超额，只许减不许增）" if _nm7 in _H5_KNOWN else ""))
+ck("H7 单节点类体量：默认上限 + 已知超额项只许减不许增",
+   not _h7_bad,
+   "上限 %d ｜ 已知超额 %s ｜ 违规 %s"
+   % (_H5_CLASS_CAP, "、".join("%s %d" % (k, v) for k, v in _H5_KNOWN.items()),
+      "；".join(_h7_bad[:4]) or "无"))
+ck("H7b `nodes.py` 总行数不超过上限（顶格 ⇒ 再加就得先把算法段下沉到 relay_core/）",
+   _total7 <= _H5_FILE_CAP, "%d 行（上限 %d）" % (_total7, _H5_FILE_CAP))
+
+
+# ============================================================================
 # H3g 本文件**自己的**期望数（2026-09-25 新增）
 # ============================================================================
 # 🔴 **必须是本文件最后一个 ck()**：它算的是「本文件的总检查数」= 此刻已跑数 + 自己这 1 条。

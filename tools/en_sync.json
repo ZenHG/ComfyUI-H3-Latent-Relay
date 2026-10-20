@@ -448,8 +448,8 @@
           "zh": "🔴 改前端之后的必跑清单（2026-10-15 立，有实测依据）",
           "en": "🔴 Checklist after changing the front-end (established 2026-10-15, from measurements)",
           "mode": "full",
-          "h_en": "553c3ceec1f37ff2",
-          "h_src": "9bf37db0fabd828d",
+          "h_en": "35b7f38bb935e916",
+          "h_src": "98117f66b620b2c3",
           "seeded": "by-position"
         },
         {
@@ -464,8 +464,8 @@
           "zh": "tools/ 下的其他自检（完整清单见 [`tools/README.md`](../tools/README.md)）",
           "en": "Other self-checks under tools/ (full list in [`tools/README.md`](../tools/README.md))",
           "mode": "full",
-          "h_en": "a88c4d944b783512",
-          "h_src": "3753ddff9b388ffe",
+          "h_en": "113ea8edeb1701fb",
+          "h_src": "7da79078431624b6",
           "seeded": "by-position"
         },
         {
@@ -479,7 +479,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-20",
-      "src_sha": "527882b1387e608d"
+      "src_sha": "28f9f7649fec7dfc"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",

@@ -32,7 +32,7 @@ from pathlib import Path
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 R50 = os.path.join(KIT, "tools", "review_050.py")
 DOC = os.path.join(KIT, "tools", "CHECKS.md")
-_ID_RE = re.compile(r"^(H1|H3[a-z]|H4[a-z]|I[0-9]|J[0-9]|L[0-9]+|E[0-9]+)")
+_ID_RE = re.compile(r"^(H1|H3[a-z]|H4[a-z]|H7[a-z]?|I[0-9]|J[0-9]|L[0-9]+|E[0-9]+)")
 
 # ── 类别 ──────────────────────────────────────────────────────────────────
 # consistency = 一致性判据（同一数字多处声明 ⇒ 核各处相等）
@@ -47,6 +47,7 @@ KIND = {
     "H3u": "truth", "H3v": "truth", "H3y": "truth", "H4b": "truth",
     "H4c": "truth", "H4d": "truth", "H4e": "truth", "H4h": "truth",
     "H4f": "hygiene", "H4g": "hygiene",
+    "H7": "truth", "H7b": "truth",
     "H3e": "hygiene", "H3l": "hygiene", "H3m": "hygiene", "H3n": "hygiene", "H3o": "hygiene",
     "H3p": "hygiene", "H3q": "hygiene", "H3r": "hygiene", "H3s": "hygiene", "H3t": "hygiene",
     "H3w": "hygiene", "H3x": "hygiene", "H4a": "hygiene",
@@ -96,6 +97,8 @@ MUTATION = {
     "H4d": "把 `ci.yml` 头注释里 `test_run_id_parity` 的期望数改成 22",
     "H4e": "把 `make_minimal_bundle.py` 的 `MANIFEST_RUNTIME` 删一项（42 → 41）",
     "H4h": "把 `docs/08-testing.md` 里 `check_tooltips` 的项数改成 1217",
+    "H7": "把 `H3RelayJoinAV` 类撑到 401 行（它不在已知超额名单里 ⇒ 必须红）",
+    "H7b": "在 `nodes.py` 末尾加 1 行（当前正好 3000 顶格 ⇒ 必须红）",
     "H4f": "把任一受控 `*.py` 改成「`return` 后直接跟 `open(`」的形态",
     "H4g": "① 把任一受控文件改成 `.pyc` 形态后 `git add -f`（受控集里出现字节码）；"
            "② 往 `dist/<包>/` 里放一个软链（包内符号链接，宿主规则②）",
