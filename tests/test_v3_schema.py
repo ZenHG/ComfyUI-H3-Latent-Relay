@@ -22,6 +22,7 @@
 """
 import asyncio
 import importlib.util
+import inspect
 import os
 import sys
 
@@ -342,6 +343,43 @@ _bad_nc = sorted({_ok for _n, _k, _ok in _NOT_CARRIED} - set(_V3_NO_CARRY))
 check("8.2 [3] 里「V3 未承载」而跳过的键都在上面的例外表里（跳过 %d 处）"
       % len(_NOT_CARRIED), not _bad_nc,
       "跳出例外表=%s ｜ 明细=%s" % (_bad_nc, _NOT_CARRIED[:4]))
+
+print()
+print("[9] 入队前校验的两侧签名（2026-10-16 加：GPU 验收发现「校验太晚」）")
+# 背景：执行期才报错的话，上游加载器已经先跑过了（冷启动 = 一次完整的模型上卡）。
+#   ComfyUI 的入队前钩子在两个出口下**名字不同**：
+#     · V1 类（非 _ComfyNodeInternal）⇒ 宿主找大写 `VALIDATE_INPUTS`（execution.py:901）
+#     · V3 外壳（_ComfyNodeInternal 子类）⇒ 宿主找小写 `validate_inputs`（execution.py:897）
+#   默认出口是 V3 ⇒ **只在 V1 侧写等于没校验**，而且是静默失效（不报错、不告警）。
+#   本组把两侧签名钉成一致：宿主用 getfullargspec 读**参数名**，被声明的入参会
+#   **跳过**宿主自带的 min/max/枚举检查 ⇒ 两侧名单不一致 = 一侧的宿主校验被放松。
+_v1_cls = V1.H3RelayFiniteRun
+check("9.1 V1 类**自己**声明了 VALIDATE_INPUTS（不是继承来的）",
+      "VALIDATE_INPUTS" in _v1_cls.__dict__)
+_v3_shell = V3_BY_ID.get("H3RelayFiniteRun")
+_v3_cls = _v3_shell[0] if _v3_shell else None
+check("9.2 V3 外壳**自己**声明了 validate_inputs（默认出口靠它，缺了就是静默失效）",
+      _v3_cls is not None and "validate_inputs" in _v3_cls.__dict__,
+      "外壳在场=%s" % bool(_v3_shell))
+if "VALIDATE_INPUTS" in _v1_cls.__dict__ and _v3_cls is not None \
+        and "validate_inputs" in _v3_cls.__dict__:
+    # 与宿主同款取法（execution.py:902/905）：先拿到**类上**的属性再 getfullargspec 读 args
+    # （classmethod 的 args 里会带上 'cls'，宿主那边只是个永不命中的名字，无副作用）
+    _a1 = [a for a in inspect.getfullargspec(_v1_cls.VALIDATE_INPUTS).args if a != "cls"]
+    _a2 = [a for a in inspect.getfullargspec(_v3_cls.validate_inputs).args if a != "cls"]
+    check("9.3 两侧入参名单**逐字一致**（宿主按名字路由；不一致 = 一侧校验被跳过）",
+          _a1 == _a2, "V1=%s ｜ V3=%s" % (_a1, _a2))
+    _IT = _v1_cls.INPUT_TYPES()
+    _valid = set(_IT.get("required", {})) | set(_IT.get("optional", {}))
+    check("9.4 被声明的名字都是真实存在的入参（不写幽灵名）",
+          set(_a1) <= _valid, "多出来=%s" % sorted(set(_a1) - _valid))
+    # 被声明的入参会**跳过**宿主的 min/max/枚举检查 ⇒ 每一项本包都得至少同样严。
+    # 枚举型最危险（宿主从此不再管它的取值域）⇒ 一律不许出现在声明名单里。
+    _enum = [n for n in _a1
+             if isinstance(((_IT.get("required", {}).get(n)
+                             or _IT.get("optional", {}).get(n)) or ("",))[0], list)]
+    check("9.5 被声明的入参里没有「枚举型」槽（枚举留给宿主把关，声明即放松）",
+          not _enum, str(_enum))
 
 print()
 print("=" * 78)

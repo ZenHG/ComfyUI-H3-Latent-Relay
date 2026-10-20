@@ -42,6 +42,15 @@ _TYPES = {
     "AUDIO": io.Audio,
     "MASK": io.Mask,
     "CONDITIONING": io.Conditioning,
+    # 2026-10-15 补（⏩ Finite Run 的接线槽）。不补不会报错、会**静默降级**：
+    # 未知类型走 io.Custom 兜底 ⇒ 画布上接不了标准节点的输出。
+    "MODEL": io.Model,
+    "CLIP": io.Clip,
+    "VAE": io.Vae,
+    "SAMPLER": io.Sampler,
+    "SIGMAS": io.Sigmas,
+    "NOISE": io.Noise,
+    "GUIDER": io.Guider,
 }
 
 # V1 选项键 → V3 构造参数名（值语义相同）。
@@ -140,6 +149,10 @@ def schema_from_v1(v1_cls) -> "io.Schema":
         description=getattr(v1_cls, "DESCRIPTION", "") or "",
         # V1 的 OUTPUT_NODE=True（LatentSave / AudioSeam）→ V3 is_output_node
         is_output_node=bool(getattr(v1_cls, "OUTPUT_NODE", False)),
+        # 服务端展开节点（⏩ Finite Run）：V1 类标 V3_EXPAND=True ⇒ V3 同步开。
+        # 两边必须同时开：V3 出口下 NodeOutput 带 expand 而 schema 没开，宿主直接拒
+        # （comfy_api 对二者配对有硬校验）。
+        enable_expand=bool(getattr(v1_cls, "V3_EXPAND", False)),
         inputs=v1_inputs(v1_cls.INPUT_TYPES()),
         outputs=v1_outputs(getattr(v1_cls, "RETURN_TYPES", ()),
                            getattr(v1_cls, "RETURN_NAMES", ())),
@@ -151,6 +164,8 @@ def node_output(raw):
 
     * 裸 tuple                            → ``io.NodeOutput(*raw)``
     * ``{"ui": {K: [...]}, "result": r}`` → ``io.NodeOutput(*r, ui={K: [...]})``
+    * ``{"expand": 图, "result": r}``     → ``io.NodeOutput(*r, expand=图)``
+      （⏩ Finite Run 服务端展开；外层输出可以是 ``[临时节点 id, 输出位]`` 链接）
     * ``None`` / ``{}``（无输出节点）      → ``io.NodeOutput()``
 
     ``ui`` 用**原始 UI 字典**（官方允许：``io.NodeOutput(ui={"images": results})``）。
@@ -162,10 +177,15 @@ def node_output(raw):
     """
     if raw is None or raw == {}:
         return io.NodeOutput()
-    if isinstance(raw, dict) and "ui" in raw:
+    if isinstance(raw, dict) and ("ui" in raw or "expand" in raw):
         res = raw.get("result")
         res = res if isinstance(res, tuple) else (() if res is None else (res,))
-        return io.NodeOutput(*res, ui=raw["ui"])
+        kw = {}
+        if "ui" in raw:
+            kw["ui"] = raw["ui"]
+        if "expand" in raw:
+            kw["expand"] = raw["expand"]
+        return io.NodeOutput(*res, **kw)
     res = raw if isinstance(raw, tuple) else (raw,)
     return io.NodeOutput(*res)
 
@@ -178,3 +198,21 @@ def call_v1(class_name, kwargs):
     """
     cls = getattr(V1, class_name)
     return node_output(getattr(cls(), cls.FUNCTION)(**kwargs))
+
+
+def call_v1_validate(class_name, kwargs):
+    """V1 的 ``VALIDATE_INPUTS`` → V3 的 ``validate_inputs``。
+
+    ⚠️ 两边必须都有：默认出口是 **V3**，而 V3 宿主找的是**小写** ``validate_inputs``
+    （``execution.py:897`` 对 ``_ComfyNodeInternal`` 子类走这条）⇒ 只在 V1 类上写
+    ``VALIDATE_INPUTS``，默认出口下**等于没校验**（静默失效，不报错）。
+
+    返回值原样透传：``True`` = 没意见；字符串 = 报错文案（宿主当作
+    ``custom_validation_failed`` 的 details 显示，并以 HTTP 400 拒收）。
+    ``None`` 会让宿主当成校验失败 —— 所以这里把 ``None`` 归一成 ``True``。
+    """
+    fn = getattr(getattr(V1, class_name), "VALIDATE_INPUTS", None)
+    if fn is None:
+        return True
+    r = fn(**kwargs)
+    return True if r is None else r

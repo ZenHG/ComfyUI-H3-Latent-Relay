@@ -7,7 +7,7 @@
 # subprocess / git 调用送进安全扫描面。分发包（我们发的 zip）的真相源是
 # tools/make_minimal_bundle.py 的**白名单**清单（文件数与体积见 `tools/README.md`）。
 # ⚠️ 两者**机制不同、口径不必相等**（2026-10-07 实测）：本文件是**黑名单**，作用在
-#    「git 跟踪文件」上 ⇒ registry 包 = 49 文件；白名单 dist = 42 文件。差的 6 个 =
+#    「git 跟踪文件」上 ⇒ registry 包 = 53 文件；白名单 dist = 42 文件。差的 6 个 =
 #    图标/横幅 4（Registry 卡片要用）+ `exp/history_anchor_v2/` 里 2 个开发件
 #    （有意不排 `exp/` 整块 —— 少一条特例少一个坑）。**别把「两者相等」当判据。**
 # 机检：tools/review_050.py 的 H3k（缺文件或漏排某条 = 红）。

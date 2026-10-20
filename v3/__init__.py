@@ -15,9 +15,10 @@
 本层只做**协议转换**：``define_schema`` 抄 V1 的 ``INPUT_TYPES``，``execute`` 转调
 ``nodes.py`` 的 V1 实现。``relay_core/`` 包的算法与那整套离线断言**完全不被动到**。
 
-节点清单（8 个，``node_id`` 与 V1 **完全同名** ⇒ 用户已存的工作流零改动可用）：
+节点清单（10 个，``node_id`` 与 V1 **完全同名** ⇒ 用户已存的工作流零改动可用）：
     H3RelayLatentUpscale / H3RelayLatentSave / H3RelayLatentLoad / H3RelayTrimAV /
-    H3RelayCopyBridge / H3RelayPost / H3RelayAudioSeam / H3RelayChain
+    H3RelayCopyBridge / H3RelayPost / H3RelayAudioSeam / H3RelayChain /
+    H3RelayJoinAV / H3RelayFiniteRun
 
 ⚠️ **清单的唯一真相源 = ``v3/nodes_v3.py`` 的 ``NODES``**（上面那行只是给人读的注释）。
    2026-09-25 删掉了本文件里原来那个 `V3_NODE_IDS` 列表：它与 `NODES` 是**同一份清单的两处声明**、

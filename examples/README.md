@@ -5,6 +5,7 @@
 | `minimal_relay_official.json` | 第 2 段要接对**哪些线**（全官方节点 + 本包） | 21 节点 |
 | `fullflow_second_pass_latent_upscale_ui.json` | **一采 → 🔍 H3 Relay · Latent Upscale → 二采 → 续接** 整条链路怎么接 | 47 节点 |
 | `seed_from_video_ui.json` | **从一段已有视频起段**，再由「连跑控制」往外接 N 段（新节点 `Seed from Video` 的全功能画布） | 23 节点 |
+| `finite_run_ui.json` | **一次提交跑完 N 段**（`Finite Run` 的服务端展开；不用点按钮、无头可用） | 11 节点 |
 
 ## `minimal_relay_official.json`
 

@@ -90,6 +90,42 @@ class H3RelaySeedFromVideo(_Shell):
     _V1_NAME = "H3RelaySeedFromVideo"
 
 
+class H3RelayJoinAV(_Shell):
+    """🧩 H3 Relay · Join AV：把本段裁后画面/音频接到累计后面（张量域拼条）。"""
+
+    _V1_NAME = "H3RelayJoinAV"
+
+
+class H3RelayFiniteRun(_Shell):
+    """⏩ H3 Relay · Finite Run：一次提交跑完 N 段（服务端展开，无头可用）。
+
+    ⚠️ 与另外 9 个外壳的差别：
+      · **V3_EXPAND=True** ⇒ ``define_schema`` 自动带上 ``enable_expand=True``；
+      · **多一个** ``validate_inputs``（V3 宿主找的是小写名）—— 少了它，默认出口下
+        入队前校验就**静默失效**，错误会拖到执行期（那时上游加载器已经跑过）。
+    """
+
+    _V1_NAME = "H3RelayFiniteRun"
+
+    @classmethod
+    def validate_inputs(cls, prompt=None, prompts=None, segments=None, run_id=None):
+        """转调 V1 的 ``VALIDATE_INPUTS``（唯一真相源）。
+
+        ⚠️ 参数表必须与 ``nodes.py`` 那个**同名同集**：宿主用 ``getfullargspec`` 读名字，
+        被声明的入参会跳过宿主自带的 min/max/枚举检查 ⇒ 多写一个名字 = 放松那一项。
+        （机检：``tests/test_v3_schema.py`` 逐字比对两套签名。）
+        """
+        return C.call_v1_validate(cls._V1_NAME, {
+            "prompt": prompt, "prompts": prompts,
+            "segments": segments, "run_id": run_id})
+
+
+class H3RelaySeedFromVideo(_Shell):
+    """🔗 H3 Relay · Seed from Video：把一段已有视频变成第 0 段（种子段）。"""
+
+    _V1_NAME = "H3RelaySeedFromVideo"
+
+
 # 注册顺序与 V1 的 NODE_CLASS_MAPPINGS 一致（非必需，便于人工双向核对）
 NODES = [
     H3RelayLatentUpscale,
@@ -101,4 +137,6 @@ NODES = [
     H3RelayAudioSeam,
     H3RelayChain,
     H3RelaySeedFromVideo,
+    H3RelayJoinAV,
+    H3RelayFiniteRun,
 ]

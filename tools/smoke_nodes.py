@@ -221,7 +221,29 @@ def main() -> int:
     print("\n── 4. 控制节点 ──")
     run_node("H3RelayChain", ctx)
 
-    print("\n── 5. 反证：缺上一段必须报错（不能静默出坏片） ──")
+    print("\n── 5. 图内拼条 / 无头连跑 ──")
+    run_node("H3RelayJoinAV", dict(ctx, images=make_images(3),
+                                    audio=make_audio(80000, 44100),
+                                    images_acc=make_images(2),
+                                    audio_acc=make_audio(60000, 44100)))
+    # FiniteRun 的返回值形状与别的节点不同（{"expand": 图, "result": 四路}）⇒
+    # 不走 run_node 的路数断言，直接验两键 + 图规模 + result 路数。
+    _fr_cls = N.H3RelayFiniteRun
+    _fr_kw, _fr_miss = build_kwargs(_fr_cls, dict(ctx, prompt="冒烟测试词", prompts=""))
+    _raw = _fr_cls().run(**_fr_kw)
+    ck("H3RelayFiniteRun 返回 expand + result 两键",
+       isinstance(_raw, dict) and "expand" in _raw and "result" in _raw,
+       "键 = %s" % (sorted(_raw) if isinstance(_raw, dict) else type(_raw).__name__))
+    ck("H3RelayFiniteRun 展开图 = 2 段 × 10 节点（上一段由桥自取，不再手接 Latent Load）",
+       isinstance(_raw.get("expand"), dict) and len(_raw["expand"]) == 20,
+       "节点数 %s" % len(_raw.get("expand") or {}))
+    ck("H3RelayFiniteRun result 4 路且第 4 路是报告字面量",
+       len(_raw.get("result") or ()) == 4 and isinstance(_raw["result"][3], str))
+    ck("H3RelayFiniteRun 输出链接指向末段节点",
+       isinstance(_raw["result"][0], list) and _raw["result"][0][0].endswith("seg1_samp"),
+       str(_raw["result"][0]))
+
+    print("\n── 6. 反证：缺上一段必须报错（不能静默出坏片） ──")
     bad = dict(ctx, run_id="_smoke_does_not_exist", stage_index=1,
                context_latent=None)
     run_node("H3RelayLatentLoad", bad, expect_raise=True)

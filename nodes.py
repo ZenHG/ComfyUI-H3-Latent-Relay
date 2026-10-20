@@ -4,8 +4,8 @@
 # 第三方出处与许可见 THIRD-PARTY-NOTICES.md
 """H3 Latent Relay · 节点层
 
-九个节点（0.6.8 起八件 + 0.6.37 一件）：续接七件套 + 一个画质域潜空间放大适配器
-+ 视频起段，覆盖"用作者的续接方式"所需的全部接线：
+十一个节点（0.6.8 起八件 + 0.6.37 一件 + 0.6.38 两件）：续接七件套 + 一个画质域潜空间放大适配器
++ 视频起段 + 图内拼条 + 无头连跑，覆盖"用作者的续接方式"所需的全部接线：
 
   🔗 H3 Relay · Latent Save   —— 把本段的 AV latent 落盘，供下一段读
   🔗 H3 Relay · Latent Load   —— 读回上一段的 AV latent
@@ -2692,6 +2692,285 @@ class H3RelaySeedFromVideo:
         return (latent, report)
 
 
+class H3RelayJoinAV:
+    """🧩 H3 Relay · Join AV——把「本段裁后画面/音频」接到累计后面，拼成一条。
+
+    为什么不用核心自带的批处理节点：那个节点规格不符时**静默拉伸/补边**（把小图
+    放大去凑大图）⇒ 看到的是「被拉变形的接缝」而不是报错。本节点规格不符直接报错
+    （宁可不拼，也不出悄悄变形的片子）。手动连拼与 ⏩ Finite Run 展开图都用它。
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "images": ("IMAGE", {
+                    "tooltip": "【接法】从「Trim AV」的画面输出拉线过来（已裁掉重叠头）。",
+                }),
+                "audio": ("AUDIO", {
+                    "tooltip": "【接法】从「Trim AV」的音频输出拉线过来，与画面同裁，音画不串位。",
+                }),
+            },
+            "optional": {
+                "images_acc": ("IMAGE", {
+                    "tooltip": "【累计画面】上一段拼到现在的画面。\n首段不接；第 2 段起接上一个 Join AV 的 images 输出。",
+                }),
+                "audio_acc": ("AUDIO", {
+                    "tooltip": "【累计音频】上一段拼到现在的音频，与累计画面成对使用。",
+                }),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE", "AUDIO", "STRING")
+    RETURN_NAMES = ("images", "audio", "report")
+    FUNCTION = "join"
+    CATEGORY = CATEGORY
+    DESCRIPTION = (
+        "把「本段裁后画面/音频」拼到累计后面，出一条完整音画（张量域，零重编码）。\n"
+        "规格不符（分辨率/帧率/采样率/声道）直接报错，不静默拉伸。"
+    )
+
+    def join(self, images, audio, images_acc=None, audio_acc=None):
+        import torch
+
+        # —— 画面：严格规格校验后拼接（与核心批处理节点的差别就在这一句）——
+        if images_acc is None:
+            out_images = images
+        else:
+            if images_acc.shape[1:] != images.shape[1:]:
+                raise RuntimeError(
+                    "画面规格不符，拒绝拼接：累计 %s vs 本段 %s。\n"
+                    "    各段必须同一分辨率/帧率（拼在一起才能是一条）。\n"
+                    "    核心自带的批处理节点会把小图放大凑数 —— 本节点不那么做。"
+                    % (tuple(images_acc.shape[1:]), tuple(images.shape[1:])))
+            out_images = torch.cat((images_acc, images), dim=0)
+
+        # —— 音频：采样率/声道校验后沿时间拼 ——
+        if audio_acc is None:
+            out_audio = audio
+            aud_note = "首段（无累计输入，原样透传）"
+        else:
+            sr_a, sr_b = int(audio_acc["sample_rate"]), int(audio["sample_rate"])
+            if sr_a != sr_b:
+                raise RuntimeError(
+                    "音频采样率不符，拒绝拼接：累计 %d Hz vs 本段 %d Hz。"
+                    % (sr_a, sr_b))
+            w_a, w_b = audio_acc["waveform"], audio["waveform"]
+            if w_a.shape[0] != w_b.shape[0] or w_a.shape[1] != w_b.shape[1]:
+                raise RuntimeError(
+                    "音频规格不符，拒绝拼接：累计 %s vs 本段 %s（批/声道必须一致）。"
+                    % (tuple(w_a.shape[:2]), tuple(w_b.shape[:2])))
+            out_audio = {"waveform": torch.cat((w_a, w_b), dim=-1),
+                         "sample_rate": sr_a}
+            aud_note = "累计 %d 样本 + 本段 %d 样本 = %d 样本 @ %d Hz" % (
+                int(w_a.shape[-1]), int(w_b.shape[-1]),
+                int(out_audio["waveform"].shape[-1]), sr_a)
+
+        report = ("[H3 Relay] Join AV：画面 累计 %d 帧 + 本段 %d 帧 = %d 帧；音频 %s。"
+                  % (int(images_acc.shape[0]) if images_acc is not None else 0,
+                     int(images.shape[0]), int(out_images.shape[0]), aud_note))
+        print(report, flush=True)
+        return (out_images, out_audio, report)
+
+
+class H3RelayFiniteRun:
+    """⏩ H3 Relay · Finite Run——**一次提交**跑完 N 段（服务端展开，无头可用）。
+
+    把「第 1..N 段」整条连跑展开成一张无环图，宿主一次执行完：不用前端按钮、不用
+    逐段手改段号（脚本/API 与画布同一套实现），每段读上一段落盘文件续接（和手动
+    连跑同一条链、同一批节点）。展开图里全部是已有节点，算法零重写。
+
+    ⚠ 边界（诚实声明）：各段用**同一张首帧图、同一个种子、同一段长**（与手动连跑
+    同语义）；不含音频缝补丁与画质域后处理节点；合并输出是**一条驻留内存的张量**。
+    沉降档（``settle_frames``）是**裁量**不是后处理 ⇒ 随段下传，换镜续接时脚本侧也能设。
+    """
+
+    # V3 外壳据此开启 enable_expand（V1 出口无需声明，返回 expand 字典即生效）。
+    V3_EXPAND = True
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model": ("MODEL", {
+                    "tooltip": "【接法】接你图里模型链的最后一级（放大器/LoRA 都在它之后接）。",
+                }),
+                "clip": ("CLIP", {
+                    "tooltip": "【接法】接 CLIP 读取节点的输出，各段的词都靠它编码。",
+                }),
+                "vae": ("VAE", {
+                    "tooltip": "【接法】接视频 VAE，画面编解码用它。",
+                }),
+                "audio_vae": ("VAE", {
+                    "tooltip": "【接法】接音频 VAE，声音编解码用它。",
+                }),
+                "sampler": ("SAMPLER", {
+                    "tooltip": "【接法】接采样器选择节点（如 euler），各段共用。",
+                }),
+                "sigmas": ("SIGMAS", {
+                    "tooltip": "【接法】接噪声表节点（步数与调度），各段共用同一个。",
+                }),
+                "prompt": ("STRING", {
+                    "default": "", "multiline": True,
+                    "tooltip": "【每段共用的一份词】只跑一种内容时填这里。\n想每段不同词，用下面的 prompts 格。",
+                }),
+                "segments": ("INT", {
+                    "default": 2, "min": 1, "max": 64, "step": 1,
+                    "tooltip": "【跑几段】一次提交跑完几段。\n填 3 = 从第 1 段跑到第 3 段。要配合 prompts 的词块数。",
+                }),
+                "seed": ("INT", {
+                    "default": 0, "min": 0, "max": 0xFFFFFFFFFFFFFFFF, "step": 1,
+                    "tooltip": "【随机种子】各段用同一个种子。\n0 是常用的固定值；想各段不同请分次提交。",
+                }),
+                "run_id": ("STRING", {
+                    "default": "relay",
+                    "tooltip": "【片子名】这部片子的名字，比如 myfilm、ep01。\n各段中间文件与读上一段都靠它定位，多段必须填。",
+                }),
+                "width": ("INT", {
+                    "default": 1344, "min": 64, "max": 8192, "step": 16,
+                    "tooltip": "【画面宽】16 的倍数，和出词节点填同一个数。",
+                }),
+                "height": ("INT", {
+                    "default": 768, "min": 64, "max": 8192, "step": 16,
+                    "tooltip": "【画面高】16 的倍数，和出词节点填同一个数。",
+                }),
+                "length": ("INT", {
+                    "default": 124, "min": 5, "max": 3600, "step": 17,
+                    "tooltip": "【每段帧数】24 帧每秒，124 帧约 5 秒。\n所有段一样长（与手动连跑一致）。",
+                }),
+                "context_frames": ("INT", {
+                    "default": 22, "min": 5, "max": 124, "step": 17,
+                    "tooltip": "【钉住窗】从上一段尾部钉多少帧进本段。\n只认 5/22/39/56/73/90/107/124，窗越长缝越稳。",
+                }),
+                "mask_mode": (list(CORE.MASK_MODES), {
+                    "default": "hard",
+                    "tooltip": "【钉住档位】hard = 钉住区每步钉回不动（推荐，默认）。\ntaper / ramp / blend / window 是实验档，只在与旧结果对照时用。",
+                }),
+                "pin_audio": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": "【钉住音频】开（默认）= 上一段尾部音频一起钉进本段。\n关 = 音频各自生成，缝处可能不连贯。",
+                }),
+            },
+            "optional": {
+                # ⚠ 链接型输入一律放 optional：必填链接 = 强制接线，
+                #   会把「纯文生成视频」「不换词」「不用声锚」这些合法用法堵死。
+                "image": ("IMAGE", {
+                    "tooltip": "【首帧图】第 1 段的第一帧，各段用同一张。\n不接 = 纯文生成视频。",
+                }),
+                "prompts": ("STRING", {
+                    "default": "", "multiline": True,
+                    "tooltip": "【每段各自的词】用单独一行三个以上短横线分块，第 1 块喂第 1 段。\n块数不够会直接报错，不会悄悄少跑。",
+                }),
+                "voice_anchor": ("LATENT", {
+                    "tooltip": "【声锚】本段说话人的音频锚，各段共用同一个。\n不接 = 用上一段自己的音频尾。",
+                }),
+                "note": ("STRING", {
+                    "default": "",
+                    "tooltip": "【备注】写进每段中间文件的备注，比如「22 帧窗 v2」。",
+                }),
+                # ⚠ 新 widget 追加在**最后一个**（widgets_values 按位置对应，插中间会整体错位）。
+                #   它是**裁量**不是后处理 —— 画布链的「裁重叠」一直能设，脚本/API 侧漏了它
+                #   就等于「换镜续接时拿不到那个旋钮」（铁律一：UI 与 API 同一套能力）。
+                "settle_frames": ("INT", {
+                    "default": 0, "min": -1, "max": CORE.SETTLE_CAP, "step": 1,
+                    "tooltip": "【按镜位选】同机位续接保持 0；换机位/换镜填 -1。\n"
+                              "沉降区 = 钉住区之后模型复现上一段的那几帧。\n"
+                              "· 同机位：裁它们正是缝处跳帧的源头（实测 0 帧 0.020、16 帧 0.055）⇒ 保持 0；\n"
+                              "· 换机位：-1 自动把硬切退回段边界（实测三档全过）。",
+                }),
+                # ⚠ 继续追加在**最后一个**（widgets_values 按位置对应，插中间会整体错位）。
+                #   from_segment 把段号整体平移：0 = 从第 1 段起跑；N = 从第 N+1 段起跑，
+                #   首段的桥自取盘上第 N 段续接 ⇒ 与画布 Chain 填 stage_index 同义。
+                "from_segment": ("INT", {
+                    "default": 0, "min": 0, "max": 9999, "step": 1,
+                    "tooltip": "【从第几段之后起跑】0 = 从第 1 段起跑（默认）。\n"
+                              "填 N = 接第 N 段往外跑；视频起段后填 1。\n"
+                              "⚠ 盘上必须有该段的边车文件，\n"
+                              "没有会在开跑前就报错，不等模型上卡。\n"
+                              "接续已有段时别接首帧图 image。",
+                }),
+            },
+        }
+
+    RETURN_TYPES = ("LATENT", "IMAGE", "AUDIO", "STRING")
+    RETURN_NAMES = ("last_latent", "images", "audio", "report")
+    FUNCTION = "run"
+    CATEGORY = CATEGORY
+    DESCRIPTION = (
+        "一次提交跑完 N 段：服务端展开整条连跑图（无需前端按钮、无头可用）。\n"
+        "每段链：ImageToVideo → CopyBridge → 采样 → LatentSave → 解码 → TrimAV → JoinAV"
+        "（上一段由桥自取，不手接 Latent Load）。"
+    )
+
+    # ⚠️ 参数表**必须**与 v3/nodes_v3.py 里 H3RelayFiniteRun.validate_inputs 同名同集
+    #    （宿主用 getfullargspec 读名字；两套不一致 ⇒ 一侧静默失效）。机检：
+    #    tests/test_v3_schema.py 的签名逐字比对。
+    #    这里只列 4 项，且每一项都**不放松**宿主自带校验：
+    #      · prompt / prompts / run_id 是 STRING —— 宿主对 STRING 没有值检查；
+    #      · segments 宿主是 min 1 / max 64，本包校验逐字相同（FINITE_MAX_SEGMENTS）。
+    #    被声明的入参会**跳过**宿主自带的 min/max/枚举检查 ⇒ width / height / length /
+    #    context_frames / mask_mode 一律不在此列（它们的边界继续由宿主把关）。
+    @classmethod
+    def VALIDATE_INPUTS(cls, prompt=None, prompts=None, segments=None, run_id=None):
+        """入队前的尽力校验：能在 ``/prompt`` 阶段说清的错误不拖到执行期。
+
+        执行期才报错的话，上游加载器已经先跑过了（冷启动 = 一次完整的模型上卡）。
+        可见性规则见 ``CORE.validate_finite_inputs_early``：看不到的（链接型入参在
+        校验期是 ``None``）一律不猜。
+        """
+        msg = CORE.validate_finite_inputs_early(
+            prompt=prompt, prompts=prompts, segments=segments, run_id=run_id)
+        return True if msg is None else msg
+
+    @_node_errors("run_id", "segments")
+    def run(self, model, clip, vae, audio_vae, sampler, sigmas, image=None,
+            prompt="", prompts="", segments=2, seed=0, run_id="relay",
+            width=1344, height=768, length=124, context_frames=22,
+            mask_mode="hard", pin_audio=True, voice_anchor=None, note="",
+            settle_frames=0, from_segment=0):
+        """建图并返回展开图（本方法**不采样**，只编排；执行由宿主对展开图进行）。
+
+        可选链接槽（image / voice_anchor）不接线时宿主整个键都不传 ⇒ 必须给默认值。
+        校验三道门：入队前 ``VALIDATE_INPUTS``（只判字面值可见的项）→ 起始段**文件**预检
+        （``from_segment>0`` 时首段要读的那份必须在盘上，否则等模型上卡后才炸）→
+        本函数里 ``build_finite_graph``（唯一真相源）。哪一项归哪道门见 docs/07-chain.md。
+        """
+        blocks, pnote = CORE.resolve_finite_prompts(prompt, prompts, segments)
+        # from_segment>0 ⇒ 首段桥要自取盘上第 from_segment-1 段。文件不在就让它在
+        # **这里**炸（上游加载器还没跑），而不是等采样器接到空 latent 才炸。
+        _fs = int(from_segment or 0)
+        if _fs > 0:
+            # 🔴 2026-10-20：`image` 与 `from_segment>0` 是**互斥**的 —— 从第 N 段起跑意味着
+            #   首段的起点由盘上第 N 段的尾巴决定，首帧图没有位置可用。原来只在 tooltip 里写，
+            #   接了就是静默错配 ⇒ 改成硬错误（铁律七：硬错误必须 raise，绝不静默降级）。
+            if image is not None:
+                raise RuntimeError(
+                    "from_segment=%d 与首帧图 image **不能同时用**：\n"
+                    "    · from_segment>0 = 接着盘上第 %d 段往外跑，起点来自那一段的尾巴；\n"
+                    "    · image = 第 1 段的第一帧，只有 from_segment=0 时才用得上。\n"
+                    "    ⇒ 二选一：要么把 from_segment 改回 0，要么把 image 断开。" % (_fs, _fs - 1))
+            _need = _stage_path(run_id, _fs - 1)
+            if not os.path.isfile(_need):
+                raise RuntimeError(
+                    "from_segment=%d ⇒ 首段要读第 %d 段当上一段，但盘上没有它的边车：%s\n"
+                    "    ⇒ 三种原因：① run_id 与起段时填的**不是一字不差**；② 那段还没跑；"
+                    "③ 你其实想从第 1 段起跑（把 from_segment 改回 0）。\n"
+                    "    已存在的段文件列在 output/relay_kit/%s/ 下（stage_NNNNN.safetensors）。"
+                    % (_fs, _fs - 1, _need, str(run_id)))
+        # 前缀由宿主在执行本节点前设好（以本节点 id 为根）⇒ 唯一
+        from comfy_execution.graph_utils import GraphBuilder
+        graph, outputs, report = CORE.build_finite_graph(
+            prefix=GraphBuilder.alloc_prefix(), segments=segments, blocks=blocks,
+            seed=seed, run_id=run_id, note=note, width=width, height=height,
+            length=length, context_frames=context_frames, mask_mode=mask_mode,
+            settle_frames=settle_frames, from_segment=from_segment, pin_audio=pin_audio,
+            model=model, clip=clip, vae=vae, audio_vae=audio_vae,
+            image=image, sampler=sampler, sigmas=sigmas, voice_anchor=voice_anchor)
+        outputs[3] = report + "\n" + pnote
+        # V1 出口：expand 图 + result（输出可以是 [展开图节点 id, 输出位] 链接）
+        return {"expand": graph, "result": tuple(outputs)}
+
+
 NODE_CLASS_MAPPINGS = {
     "H3RelayLatentSave": H3RelayLatentSave,
     "H3RelayLatentLoad": H3RelayLatentLoad,
@@ -2702,6 +2981,8 @@ NODE_CLASS_MAPPINGS = {
     "H3RelayChain": H3RelayChain,
     "H3RelayLatentUpscale": H3RelayLatentUpscale,
     "H3RelaySeedFromVideo": H3RelaySeedFromVideo,
+    "H3RelayJoinAV": H3RelayJoinAV,
+    "H3RelayFiniteRun": H3RelayFiniteRun,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -2714,4 +2995,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "H3RelayChain": "🔗 H3 Relay · Chain",
     "H3RelayLatentUpscale": "🔍 H3 Relay · Latent Upscale",
     "H3RelaySeedFromVideo": "🔗 H3 Relay · Seed from Video",
+    "H3RelayJoinAV": "🧩 H3 Relay · Join AV",
+    "H3RelayFiniteRun": "⏩ H3 Relay · Finite Run",
 }

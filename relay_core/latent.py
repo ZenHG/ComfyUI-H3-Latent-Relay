@@ -127,10 +127,18 @@ def video_tail_from_latent(
             % (frames, ", ".join(str(g) for g in GUIDE_RUNS if g > 1))
         )
     if steps > total:
+        # 2026-10-16 升级：原文案只说「上一段太短」，用户得自己反推可用窗。
+        #   实测踩过（扫窗实验第二档 CTX=56 对 39 帧源片）⇒ 改成**直接给出可用档位与出路**。
+        _maxf = pixel_frames(total)
+        _ok = [g for g in GUIDE_RUNS if 1 < g <= _maxf]
         raise ValueError(
-            "需要 %d 个 latent 步（%d 帧），但 context_latent 只有 %d 步。\n"
-            "    上一段太短，或分辨率/时长与这一段不匹配。"
-            % (steps, frames, total)
+            "需要 %d 个 latent 步（%d 帧），但上一段只有 %d 步 —— 够 %d 帧。\n"
+            "    ⚠ 硬约束：context_frames 必须 ≤ 上一段的帧数。桥按帧数取尾段，取不到就拒。\n"
+            "    （第 1 段的「上一段」就是源片／接入片。）\n"
+            "    ⇒ 三选一：① 把窗降到 %s 之一；② 把上一段加长到 ≥%d 帧；③ 改用像素路径。"
+            % (steps, frames, total, _maxf,
+               " / ".join(str(g) for g in _ok) if _ok else "（上一段太短，无可用窗）",
+               frames)
         )
     start = total - steps
     if start % 5 != 0:

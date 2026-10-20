@@ -840,6 +840,7 @@ RUN_ID_TYPES: Tuple[str, ...] = (
     "H3RelayLatentLoad",
     "H3RelayTrimAV",
     "H3RelayAudioSeam",
+    "H3RelayFiniteRun",
     "H3RelaySeedFromVideo",
 )
 

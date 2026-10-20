@@ -55,6 +55,8 @@ Chinese docs call them by **function** — the table below maps the two sides:
 | audio seam | `🔗 H3 Relay · Audio Seam` | `H3RelayAudioSeam` |
 | chain run / chain control | `🔗 H3 Relay · Chain` | `H3RelayChain` |
 | latent tiled upscale | `🔍 H3 Relay · Latent Upscale` | `H3RelayLatentUpscale` |
+| in-graph join | `🧩 H3 Relay · Join AV` | `H3RelayJoinAV` |
+| headless run | `⏩ H3 Relay · Finite Run` | `H3RelayFiniteRun` |
 
 > ⚠️ **Changing labels does not touch old graphs**: a workflow stores the **type name** (third column above) and
 > the user's own **title**, so changing a display name **does not affect saved graphs** (links, slots and
@@ -94,7 +96,7 @@ Since 0.6.19, **editing any one field ⇒ the rest of the group follows automati
 
 ### Node Chinese/EN toggle (0.6.28, **canvas-only**)
 
-Each of this pack's 8 nodes now carries a small 「**中 / EN**」 button. Clicking any one of them switches the
+Each of this pack's 10 nodes now carries a small 「**中 / EN**」 button. Clicking any one of them switches the
 titles / parameter labels / port names of **the whole pack** (not just that node).
 
 | | Behaviour |
