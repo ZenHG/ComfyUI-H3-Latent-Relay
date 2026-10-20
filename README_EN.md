@@ -126,6 +126,7 @@ Both exits have identical node names, input/output order and defaults (machine-c
 
 ### Five-minute quickstart
 
+> **Starting from an existing video?** Open [`examples/seed_from_video_ui.json`](examples/seed_from_video_ui.json) (23 nodes).
 > Fast path: open [`examples/minimal_relay_official.json`](examples/minimal_relay_official.json)
 > (notes in [`examples/README.md`](examples/README.md)) and point the 4 loader
 > dropdowns at your local model files.
@@ -412,7 +413,7 @@ ComfyUI-H3-Latent-Relay/
 ├── v3/                    # V3 shell (io.ComfyNode + comfy_entrypoint); V1 goes through NODE_CLASS_MAPPINGS
 ├── exp/history_anchor_v2/ # E1' time-invariant history anchor (top-level import ⇒ required; inert without _tiha.json)
 ├── web/                   # front-end JS: the 🧩 concat button, Chain panel, `run_id` one-field-syncs-the-group, **the node Chinese/EN toggle** (canvas only)
-├── examples/              # two openable workflows: minimal continuation (21 nodes) and full flow (47 nodes)
+├── examples/              # three openable workflows: minimal continuation (21) / full flow (47) / seed from video (23)
 ├── docs/                  # deep docs 01–10 (mechanism / parameters / sampling / canvas / troubleshooting / scripting / chain / tests / metrics / audio)
 ├── tests/                 # offline self-test (zero GPU): 632 assertions + V3 parity + prompt-dispatch pure functions
 ├── tools/                 # self-checks / forensic tools / concat CLI / bundler (incl. the en_sync docs gate)
@@ -501,5 +502,5 @@ The Chinese documents are the source of truth; `README_EN.md` and the English `d
 | [`RELEASING.md`](RELEASING.md) | **release policy (single source of truth)**: GitHub + Comfy Registry must be updated as a pair · one command `tools/release.py` · failure handling · key discipline |
 | [`SECURITY.md`](SECURITY.md) | secrets / dependencies / network behaviour disclosure |
 | [`tools/README.md`](tools/README.md) | the 20 scripts and their expected values (**15 self-check/forensic** + concat CLI + bundler + **releaser** + **voice-bank collector** + **browser smoke gate**) |
-| [`examples/README.md`](examples/README.md) | the two openable workflows (minimal continuation 21 nodes / full flow 47 nodes) · generators |
+| [`examples/README.md`](examples/README.md) | the three openable workflows (minimal continuation 21 / full flow 47 / seed from video 23 nodes) · generators |
 | [`README.md`](README.md) | **Chinese source of truth** (install / wiring / nodes / parameters / troubleshooting / FAQ) — in-depth derivations always link out to that file and `docs/` |

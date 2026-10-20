@@ -4,6 +4,7 @@
 |---|---|---|
 | `minimal_relay_official.json` | 第 2 段要接对**哪些线**（全官方节点 + 本包） | 21 节点 |
 | `fullflow_second_pass_latent_upscale_ui.json` | **一采 → 🔍 H3 Relay · Latent Upscale → 二采 → 续接** 整条链路怎么接 | 47 节点 |
+| `seed_from_video_ui.json` | **从一段已有视频起段**，再由「连跑控制」往外接 N 段（新节点 `Seed from Video` 的全功能画布） | 23 节点 |
 
 ## `minimal_relay_official.json`
 
@@ -197,3 +198,36 @@ python tools/review_050.py                                    # 期望 I3 通过
 > 🤖 要走 **API 提交**（脚本/程序化）？见 `docs/10` §7.4；示例图同样可从前端
 > 「导出（API）」得到 API 格式。Post 的 `settle_auto`（自适应糊区补偿）与 AudioSeam 的
 > `joined`（整片拼接）是 0.5.0 后期新增能力，详见 `docs/02` 参数手册。
+
+## `seed_from_video_ui.json`
+
+**从一段已有视频起段，再由「连跑控制」往外接 N 段。** 只回答一个问题：
+**「第 1 段不是我生成的，怎么接？」**
+
+```
+LoadVideo → GetVideoComponents ─┬→ 🔗 H3 Relay · Seed from Video（写 stage_00000 + 床边车）
+                                └→ （音频也接进 Seed from Video）
+Seed from Video ──→ 🔗 H3 Relay · Chain（stage_index=1，驱动外扩）
+                  → 官方出词节点(MiniMaxH3ImageToVideo) → 🔗 H3 Relay · Copy Bridge（复合桥）
+                  → KSampler → 🔗 H3 Relay · Latent Save
+                  → VAEDecode / VAEDecodeAudio → 🔗 H3 Relay · Trim AV → 🔗 H3 Relay · Post
+                                                      ↘ 🔗 H3 Relay · Audio Seam
+                  → CreateVideo → SaveVideo
+```
+
+🔴 **这张图故意不接 `context_latent`**（桥留空）—— 0.6.37 起桥会按 `run_id` + 段号−1 自己从磁盘取。
+⚠ **0.6.36 及更早**必须手动接一根线，否则提交校验直接失败。
+
+**怎么用**
+1. 把 JSON 丢进 `ComfyUI/user/default/workflows/`，在 ComfyUI 里打开。
+2. 把 4 个加载器的下拉改成你本机的模型文件（UNET / CLIP / 视频 VAE / 音频 VAE）。
+3. **把 `LoadVideo` 换成你自己的视频**（放进 `ComfyUI/input/` 再选）。源视频没有音轨也能跑（起段会给静音床）。
+4. 画布宽高（`Seed from Video` 与出词节点）**必须填同一个数**；源视频尺寸不同就把两处一起改，
+   或者把 `Seed from Video` 的宽高填 **0**（= 跟随源视频）再把出词节点改成源尺寸。
+5. **分两次提交**（图里的注释框写着步骤）：
+   - ① 只框选 `LoadVideo / GetVideoComponents / Seed from Video` 三个节点 → Queue Selected；
+   - ② 点「连跑控制」的 ▶ 按钮跑第 1..N 段。
+6. 出词节点的 `prompt` 格**留空是正常的**：词由「连跑控制」的 `prompts` 按段号分发。
+
+> ⚠️ 成片：`Chain` 的 `auto_concat` 已开 ⇒ 跑完自动拼「生成段 1..N」，**不含源视频头部**；
+> 要完整片，把源文件拼在最前。

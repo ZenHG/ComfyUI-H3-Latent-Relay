@@ -113,6 +113,7 @@ git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git  
 ### 5 分钟跑通
 
 > 懒人路线：打开 [`examples/minimal_relay_official.json`](examples/minimal_relay_official.json)（说明见 [`examples/README.md`](examples/README.md)），把 4 个加载器的下拉改成你本机的模型文件。
+> **想从一段已有视频起段**：打开 [`examples/seed_from_video_ui.json`](examples/seed_from_video_ui.json)（23 节点）。
 
 **第 1 段**：① 「段号」填 `0` → ② 在官方出词节点填 prompt → ③ 点 Queue。
 （**什么都不用做**：段号 0 时桥自动直通。0.6.37 起 `context_latent` 留空也行——桥自己按 `run_id` 读上一段。）
@@ -352,7 +353,7 @@ ComfyUI-H3-Latent-Relay/
 ├── v3/                    # V3 外壳（io.ComfyNode + comfy_entrypoint）；V1 走 NODE_CLASS_MAPPINGS
 ├── exp/history_anchor_v2/ # E1' 时不变历史锚（顶层 import ⇒ 必需；无 _tiha.json 即不生效）
 ├── web/                   # 前端 JS：🧩 拼接按钮、Chain 面板、`run_id` 一处改全组、**节点中英切换按钮**（画布用；脚本用户见 docs/10 §7.4）
-├── examples/              # 两个可直接打开的工作流：最小续接（21 节点）与全流程（47 节点）
+├── examples/              # 三个可直接打开的工作流：最小续接（21）· 全流程（47）· 视频起段（23）
 ├── docs/                  # 深度文档 01–10（原理 / 参数 / 采样链 / 画布 / 排障 / 脚本 / Chain / 测试 / 观测 / 音频）
 ├── tests/                 # 离线自测（零 GPU）：632 项断言 + V3 逐字段 + 词分发纯函数
 ├── tools/                 # 自检 / 取证 / 拼接 CLI / 打包器（含英文文档同步闸 en_sync.py）
@@ -433,5 +434,5 @@ ComfyUI-H3-Latent-Relay/
 | [`RELEASING.md`](RELEASING.md) | **发布规范（唯一真相源）**：GitHub + Comfy Registry 两个渠道必须成对、一条命令 `tools/release.py`、失败处置、密钥纪律 |
 | [`SECURITY.md`](SECURITY.md) | 密钥 / 依赖 / 网络行为声明 |
 | [`tools/README.md`](tools/README.md) | 20 个脚本的用途与期望值（**15 个自检/取证** + 拼接 CLI + 打包器 + **发布器** + **声库采集器** + **浏览器冒烟门**） |
-| [`examples/README.md`](examples/README.md) | 两份可直接打开的工作流（最小续接 21 节点 / 全流程 47 节点）· 生成器 |
+| [`examples/README.md`](examples/README.md) | 三份可直接打开的工作流（最小续接 21 节点 / 全流程 47 节点 / 视频起段 23 节点）· 生成器 |
 | [`README_EN.md`](README_EN.md) | **英文精简版**（安装 / 接线 / 节点 / 参数 / 排障 / FAQ）—— 深度推导一律外链本文件与 `docs/` |
