@@ -27,6 +27,7 @@
 - 它替你挡三件事：源视频帧数不在 H3 的时间栅格上（按帧尾裁到最近的合法档，裁掉几帧会写在报告里）；画布不是 16 的倍数或与后面各段不一致（**宽高填 0 就跟随源视频**）；源音轨和画面不等长（按画面长度裁尾或补零，没有音轨就给静音种子）。
 - **它拿不到源视频的帧率**，一律按 24 fps 处理。源不是 24 fps 的话，画面时长会跟着变——请先把源转成 24 fps 再喂进来；报告里会点名这一行。
 - 源很长时请先切段：视频编码是整段做的，显存峰值随帧数上涨。
+- 顺手放宽了一根线：「桥」的上一段输入以前**必接**，现在留空也行——它会按片名自己从磁盘读上一段。已经接好的图完全不受影响。
 
 **升级动作**：无需改图或连线。旧图不引用这个节点，逐位不变。
 
@@ -37,7 +38,7 @@
 - Until now the chain could only start from a segment this pack had generated. Now **live footage, someone else's finished shot, or an earlier run** can all be the starting point.
 - It blocks three traps for you: source frame counts off the H3 temporal grid (it trims the tail to the nearest legal step and reports how many frames it dropped); a canvas that is not a multiple of 16 or does not match your later segments (**set width and height to 0 to follow the source video**); and source audio that does not match the picture length (trimmed or zero-padded, or a silent seed when there is no audio track).
 - **It cannot read the source frame rate** and always treats the frames as 24 fps. If your source is not 24 fps the picture duration will change — convert the source to 24 fps first; the report names this line.
-- Cut long sources into pieces first: video encoding is done in one pass, so peak VRAM grows with frame count.
+- One wire relaxed as well: the bridge's previous-segment input used to be **mandatory**; leaving it empty now works — the bridge reads the previous segment from disk by the film name. Graphs that already wire it are unaffected.
 
 **Action required**: none. Existing graphs do not reference this node and are bit-identical.
 

@@ -284,7 +284,8 @@ Stage 1 has no previous stage to copy, but **neither the wiring nor the run need
 
 **Why you cannot "bypass" it** (finalized by measurement in 0.6.12):
 
-- the bridge's `context_latent` is **required** ⇒ with no line connected ⇒ submit validation reports `Required input is missing` directly;
+- since **0.6.37** the bridge's `context_latent` is **optional** (leave it empty and the bridge reads stage − 1 from disk by `run_id`);
+  in 0.6.36 and earlier it was **required** ⇒ with no line connected ⇒ submit validation reports `Required input is missing` directly;
 - **bypassing "Latent Load" does not work either** — before submitting, the host "dissolves" bypassed nodes and connects their inputs to downstream,
   and this node has no LATENT input ⇒ the bridge's required input would **disappear from the prompt** and it is rejected the same way.
 

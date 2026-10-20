@@ -115,7 +115,7 @@ git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler.git  
 > 懒人路线：打开 [`examples/minimal_relay_official.json`](examples/minimal_relay_official.json)（说明见 [`examples/README.md`](examples/README.md)），把 4 个加载器的下拉改成你本机的模型文件。
 
 **第 1 段**：① 「段号」填 `0` → ② 在官方出词节点填 prompt → ③ 点 Queue。
-（**什么都不用做**：段号 0 时桥自动直通。别为了"没有上一段"去拔线或旁路——`context_latent` 是必填。）
+（**什么都不用做**：段号 0 时桥自动直通。0.6.37 起 `context_latent` 留空也行——桥自己按 `run_id` 读上一段。）
 
 **第 2 段起**：④ 「段号」改成 `1`（**只改这一个数**）→ ⑤ prompt 换成第 2 段内容（开头接住上一段的动作/机位，别重新起手）→ ⑥ 再点 Queue。
 日志里应看到 `钉住 22 帧` / `裁首 N 帧 = 钉住 22 + 沉降 0` / `起点干净`。
@@ -379,7 +379,7 @@ ComfyUI-H3-Latent-Relay/
 | # | 硬纪律 |
 |---|---|
 | 1 | **`run_id` 六处必须一字不差**（落盘 / 桥 / 读上段 latent / 裁重叠 / 音频缝 / 连跑）。**画布上只改一处，同组的其余格会自动跟随**（名字冲突时会拦下连跑并列清单，不猜）；脚本提交 JSON 请把这一格写成同一个变量（见 [`docs/10`](docs/10-audio-seam-and-concat.md) §7.4）。段号顺序跑、**别跳段** |
-| 2 | **第 1 段什么都不用做**：桥会自动直通；`context_latent` 是必填，**别拔线、别旁路** |
+| 2 | **第 1 段什么都不用做**：桥会自动直通；0.6.37 起 `context_latent` 留空也行（桥自取上一段），接了则以接线为准 |
 | 3 | 🔴 **音频必须走裁重叠（或音频缝）的输出**，不能把 `VAEDecodeAudio` 直连落盘节点（否则每缝差 ~0.9 s 且累积） |
 | 4 | **`context_frames` 只认 `5+17k`**（5/22/39/56/73/90/107/124），须小于本段帧数；越界**直接报错不吸附** |
 | 5 | **`mask_mode` 生产档 = `hard`**（钉住区零重绘）；`taper` **不钉住**，仅对照实验用 |

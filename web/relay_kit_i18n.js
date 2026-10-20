@@ -346,7 +346,7 @@ export const H3_TIPS = {
         en: "[Wiring] This segment's initial AV latent (from a latent-building node).\nIt writes the previous segment's tail into the head and attaches a noise mask.",
     },
     "H3RelayCopyBridge.context_latent": {
-        en: "[Wiring] The previous segment's full AV latent.\nTaken from Latent Load; required, segment 1 included.\n⚠ At segment 1 it hands over an empty context and the bridge passes through — do not unplug it, a missing input fails submission.",
+        en: "[Wiring] The previous segment's full AV latent.\nLeaving it empty is fine: the bridge reads stage − 1 from disk by the film name (one less wire).\nIf you do wire it, the wire wins; segment 1's empty package still passes through.",
     },
     "H3RelayCopyBridge.context_frames": {
         en: "[Copy-window frames] How many frames are written into this segment's start.\nOnly 5+17k (5/22/39/56/73/90/107/124), and it must be shorter than the segment.\nA longer window steadies the seam but leaves fewer frames for new content.",

@@ -276,7 +276,8 @@ Chain 按一张**显式表**推进它们 —— 表就是单一真相源，漏�
 
 **为什么不能"旁路"绕**（0.6.12 实测定案）：
 
-- 桥的 `context_latent` 是 **required** ⇒ 不接线 ⇒ 提交校验直接报 `Required input is missing`；
+- 桥的 `context_latent` 在 **0.6.37 起是 optional**（留空 = 桥按 `run_id` + 段号−1 自己从磁盘取）；
+  0.6.36 及更早它是 **required** ⇒ 不接线 ⇒ 提交校验直接报 `Required input is missing`；
 - **旁路「Latent Load」同样不行** —— 宿主提交前会把 bypass 的节点"溶解"掉、把它的输入接到下游，
   而这个节点没有 LATENT 输入 ⇒ 桥的 required 输入会**从 prompt 里消失**，一样被拒。
 

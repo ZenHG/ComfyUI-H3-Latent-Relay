@@ -1435,9 +1435,6 @@ class H3RelayCopyBridge:
                 "latent": ("LATENT", {
                     "tooltip": "【接法】本段的初始 AV latent（潜空间构造节点的输出）。\n它把上一段的尾部写进开头，并附上噪声掩码。",
                 }),
-                "context_latent": ("LATENT", {
-                    "tooltip": "【接法】上一段的完整 AV latent。\n从 Latent Load 接过来；必填，第 1 段也要接。\n⚠ 第 1 段它交空上下文，桥自动直通 —— 别拔线，缺了图会被拒绝提交。",
-                }),
                 "context_frames": ("INT", {
                     "default": 22, "min": 5, "max": 124, "step": 17,
                     "tooltip": "【拷贝窗帧数】写进本段开头的帧数。\n只认 5+17k（5/22/39/56/73/90/107/124），必须小于本段帧数。\n窗越长接缝越稳，留给新内容的帧越少。"
@@ -1553,6 +1550,13 @@ class H3RelayCopyBridge:
                                "· 其余 = 显式开；缺配置文件直接报错。\n"
                                "⚠ 两者都是未实测的实验件。",
                 }),
+                # 🆕 0.6.37：**不接也行** —— 留空时桥按 run_id + 段号−1 自己从磁盘取
+                #    （与 `voice_anchor_stage` / `ref_anchor_stage` 那两处「免接线」对称）。
+                #    接了则以接线为准 ⇒ 存量工作流与全部离线断言逐位不变。
+                #    ⚠ 追加在 optional **末位**（守「新参数只追加」；它是链接型，不占 widgets 槽）。
+                "context_latent": ("LATENT", {
+                    "tooltip": "【接法】上一段的完整 AV latent。\n不接也行：留空 = 桥按片名与段号−1 自己从磁盘取（少接一根线）。\n接了 = 以接线为准；第 1 段空包照旧直通。",
+                }),
             },
         }
 
@@ -1567,7 +1571,7 @@ class H3RelayCopyBridge:
     )
 
     @_node_errors("context_frames", "mask_mode", "run_id", "voice_anchor_stage", "exp_anchor")
-    def bridge(self, latent, context_latent, context_frames,
+    def bridge(self, latent, context_latent=None, context_frames=22,
                mask_mode="hard", taper_tokens=4, seam_min=0.10, pin_audio=True,
                ramp_top=0.25, ramp_tokens=0,
                blend_top=CORE.SEAM_BLEND_TOP, blend_tokens=0,
@@ -1599,11 +1603,23 @@ class H3RelayCopyBridge:
         _ctx_empty = context_latent is None or not (
             isinstance(context_latent, dict) and context_latent.get("samples") is not None
         )
+        # 🆕 0.6.37 免接线自取：**真的没接线**（None）且段号 ≥1 时，桥自己按 run_id + 段号−1 取盘。
+        #    ⚠ 只在 `None` 时自取：`{"samples": None}`（Latent Load 第 1 段交的空包）**不走这里**，
+        #      它保持原本的直通/守卫语义 ⇒ 存量图与全部离线断言逐位不变。
+        if context_latent is None and _idx >= 1 and (run_id or "").strip():
+            _auto_path = _stage_path(run_id, _idx - 1)
+            if os.path.isfile(_auto_path):
+                context_latent = CORE.load_av_latent(_auto_path)
+                _ctx_empty = False
+                print("[H3 Relay] 复合桥：context_latent 未接线 ⇒ 自取上一段 ← %s\n"
+                      "            %s" % (_auto_path, CORE.describe_latent(context_latent)),
+                      flush=True)
         if _ctx_empty and _idx >= 1:
             raise RuntimeError(
                 "stage_index=%d 表示本段是第 %d 段，但没有可续接的上一段 latent：\n"
-                "    · context_latent 没接线（或「Latent Load」读不到文件），且\n"
-                "    · run_id 是空的（或只有空白）\n"
+                "    · context_latent 没接线，且按 run_id 自取也失败；或\n"
+                "    · 「Latent Load」接了但读不到文件；或\n"
+                "    · run_id 是空的（或只有空白）⇒ 自取无从推导路径\n"
                 "再跑下去会「静默直通」—— 产出的是独立段而不是续接段，\n"
                 "但界面与日志都显示成功。\n"
                 "    第 2 段起请把 run_id 填成与「Latent Save」完全一致的名字；\n"

@@ -40,8 +40,8 @@
           "zh": "使用方法",
           "en": "Usage",
           "mode": "condensed",
-          "h_en": "d831f4fa5af10086",
-          "h_src": "c91f8acaad04b704",
+          "h_en": "ed2db9f4dc51ffaa",
+          "h_src": "8cdfdb8b56e2df30",
           "seeded": "by-position"
         },
         {
@@ -56,8 +56,8 @@
           "zh": "配置与注意事项",
           "en": "Configuration & hard rules",
           "mode": "condensed",
-          "h_en": "893859636ee49ff9",
-          "h_src": "68fdb6c658eff3fc",
+          "h_en": "9236b88b0a527fe1",
+          "h_src": "8b19edd01b17d0e5",
           "seeded": "by-position"
         },
         {
@@ -79,7 +79,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-20",
-      "src_sha": "bc8f119916df8ff6"
+      "src_sha": "3f9c32378d414c82"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -384,8 +384,8 @@
           "zh": "第 1 段：**什么都不用做**（不用手动旁路）",
           "en": "Stage 1: **nothing to do** (no manual bypass)",
           "mode": "full",
-          "h_en": "b67672a6cd06e76e",
-          "h_src": "e26c14632a5c8dba",
+          "h_en": "89f391e5cefeb763",
+          "h_src": "ad3f3ca641cab5d2",
           "seeded": "by-position"
         },
         {
@@ -407,7 +407,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-20",
-      "src_sha": "9b57105db60b2475"
+      "src_sha": "b37ce98171074518"
     },
     "docs/08-testing.md": {
       "en": "docs/08-testing_EN.md",
@@ -424,8 +424,8 @@
           "zh": "单测（零 GPU、秒级）",
           "en": "Unit tests (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "43f07aadeccda8ea",
-          "h_src": "f26c91011e3cde5d",
+          "h_en": "13719bab5ae276d2",
+          "h_src": "efca61a2e3a57716",
           "seeded": "by-position"
         },
         {
@@ -440,8 +440,8 @@
           "zh": "🔴 改前端之后的必跑清单（2026-10-15 立，有实测依据）",
           "en": "🔴 Checklist after changing the front-end (established 2026-10-15, from measurements)",
           "mode": "full",
-          "h_en": "d3d790468e902ae5",
-          "h_src": "2ec83fe9a510908a",
+          "h_en": "3e2ab8c990f03ba3",
+          "h_src": "5dc816eb36b3c9a6",
           "seeded": "by-position"
         },
         {
@@ -456,8 +456,8 @@
           "zh": "tools/ 下的其他自检（完整清单见 [`tools/README.md`](../tools/README.md)）",
           "en": "Other self-checks under tools/ (full list in [`tools/README.md`](../tools/README.md))",
           "mode": "full",
-          "h_en": "3fcb45c7086e2d95",
-          "h_src": "514300e479575800",
+          "h_en": "4a4752c649feacd3",
+          "h_src": "b0ee05cbb18b45fd",
           "seeded": "by-position"
         },
         {
@@ -471,7 +471,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-20",
-      "src_sha": "01317d749007ef29"
+      "src_sha": "d1dbe94c4105908d"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",

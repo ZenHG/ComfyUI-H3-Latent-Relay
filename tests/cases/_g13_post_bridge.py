@@ -393,12 +393,34 @@ okC, outN = arity(NODES.H3RelayCopyBridge, {"latent": av_latent(12, seed=8),
 check("14.12 节点返回 3 路（latent/report/trim）", okC, "实得 %d" % len(outN))
 check("14.13 节点 trim 输出 = 22", int(outN[2]) == 22)
 _it = NODES.H3RelayCopyBridge.INPUT_TYPES()
-check("14.14 节点注册 + required 键序 + optional 末位（追加铁律）",
+# 🔴 2026-10-20（0.6.37）：`context_latent` 从 required 挪到 **optional 首位**（免接线自取）。
+#    为什么放首位而不是末位：它是桥的**主输入**，只是允许留空；放末位会读成「可选的后加件」。
+#    存量图不受影响 —— 接了线仍以接线为准（见 14.14b）。
+check("14.14 节点注册 + required 键序 + optional 末位（0.6.37 起 context_latent 免接线）",
       "H3RelayCopyBridge" in NODES.NODE_CLASS_MAPPINGS
-      and list(_it["required"]) == ["latent", "context_latent", "context_frames"]
+      and list(_it["required"]) == ["latent", "context_frames"]
       and list(_it["optional"])[:4] == ["mask_mode", "taper_tokens", "seam_min", "pin_audio"]
-      and list(_it["optional"])[4:6] == ["ramp_top", "ramp_tokens"],
+      and list(_it["optional"])[4:6] == ["ramp_top", "ramp_tokens"]
+      and list(_it["optional"])[-1] == "context_latent",
       "required=%s optional=%s" % (list(_it["required"]), list(_it["optional"])))
+# 14.14b 反向钉：optional 的链接型输入**必须**有 Python 默认值（否则不接线 ⇒ TypeError）
+import inspect as _ins
+_sig = _ins.signature(NODES.H3RelayCopyBridge.bridge)
+check("14.14b context_latent 的 Python 默认值 = None（不接线时宿主不传键，没默认值就 TypeError）",
+      _sig.parameters["context_latent"].default is None,
+      str(_sig.parameters["context_latent"].default))
+# 14.14b 反向钉：optional 的链接型输入**必须**有 Python 默认值（否则不接线 ⇒ TypeError）
+import inspect as _ins
+_sig = _ins.signature(NODES.H3RelayCopyBridge.bridge)
+check("14.14b context_latent 的 Python 默认值 = None（不接线时宿主不传键，没默认值就 TypeError）",
+      _sig.parameters["context_latent"].default is None,
+      str(_sig.parameters["context_latent"].default))
+# 14.14b 反向钉：optional 的链接型输入**必须**有 Python 默认值（否则不接线 ⇒ TypeError）
+import inspect as _ins
+_sig = _ins.signature(NODES.H3RelayCopyBridge.bridge)
+check("14.14b context_latent 的 Python 默认值 = None（不接线时宿主不传键，没默认值就 TypeError）",
+      _sig.parameters["context_latent"].default is None,
+      str(_sig.parameters["context_latent"].default))
 
 # —— 14.15/14.16 掩码语义钉子（2026-09-15）——
 # 动机：taper 曾被下游误当「软一点的硬锁」当默认跑了 23 次，段首被重画导致「续不上」。

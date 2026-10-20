@@ -131,8 +131,8 @@ Both exits have identical node names, input/output order and defaults (machine-c
 > dropdowns at your local model files.
 
 **Segment 1**: ① set `stage_index` to `0` → ② type a prompt into the official prompt node → ③ Queue.
-(**Do nothing else**: at stage 0 the bridge passes through. Do not unplug or bypass anything to express
-"there is no previous segment" — `context_latent` is a required input.)
+(**Do nothing else**: at stage 0 the bridge passes through. Since 0.6.37 `context_latent` may stay
+empty — the bridge reads the previous segment from disk by `run_id`.)
 
 **From segment 2 on**: ④ set `stage_index` to `1` (**this one number only**) → ⑤ replace the prompt with
 segment 2's content (open by picking up the previous segment's motion / camera; do not restart the action)
@@ -440,7 +440,7 @@ are actually loaded — the minimal distribution set in `dist/` is exactly those
 | # | Hard rule |
 |---|---|
 | 1 | **`run_id` must match character-identically across all six places** (LatentSave / bridge / LatentLoad / TrimAV / AudioSeam / Chain). **On the canvas, editing one field auto-syncs the rest of the group** (a name conflict blocks the run and lists which node holds which name — it never guesses); a script submitting JSON should write that field from a single variable (see [`docs/10`](docs/10-audio-seam-and-concat_EN.md) §7.4). Run segments in order, **never skip** |
-| 2 | **Segment 1 needs nothing special**: the bridge passes through; `context_latent` is required — **do not unplug or bypass it** |
+| 2 | **Segment 1 needs nothing special**: the bridge passes through; since 0.6.37 `context_latent` may stay empty (the bridge fetches the previous segment), and a wire still wins |
 | 3 | 🔴 **Audio must come from TrimAV (or AudioSeam) output**; never wire `VAEDecodeAudio` directly into the save node (~0.9 s per seam, accumulating) |
 | 4 | **`context_frames` only accepts `5+17k`** (5/22/39/56/73/90/107/124) and must be smaller than the segment length; out-of-range values **raise instead of snapping** |
 | 5 | **Production `mask_mode` = `hard`** (zero re-draw in the pinned region); `taper` **does not pin** and is a control arm only |
