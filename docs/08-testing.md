@@ -122,7 +122,7 @@ python tools/check_frontend.py           # 期望 通过 5 / 失败 0（前端�
 ## 🔴 改前端之后的必跑清单（2026-10-15 立，有实测依据）
 
 前端改动有个特点：**本仓所有既有判据可能同时全绿，而英文界面上仍然是错的**。
-2026-10-15 实测：一键套件 15/15 + `review_050` 124/0 + `check_tooltips` 1309 项**同时全绿**时，
+2026-10-15 实测：一键套件 15/15 + `review_050` 124/0 + `check_tooltips` 1549 项**同时全绿**时，
 下面四类问题**一个都没被拦住**（全是目检才发现的）：
 
 | 当时漏掉的 | 为什么既有判据看不见 |
@@ -138,7 +138,7 @@ python tools/check_frontend.py           # 期望 通过 5 / 失败 0（前端�
 |---|---|---|---|
 | 1 | **静态：中英两侧对读** | `python tools/check_frontend.py` | 通过 5 / 失败 0 |
 | 2 | 纯函数行为 | `node tests/test_i18n.mjs` · `node tests/test_audio_ref_budget.mjs` | 各自全过（47 条 · 47 条断言） |
-| 3 | 文案写法 | `python tools/check_tooltips.py` | 1309 项全过（**H4h** 盯这个数） |
+| 3 | 文案写法 | `python tools/check_tooltips.py` | 1549 项全过（**H4h** 盯这个数） |
 | 4 | **一键套件**（含上面三步） | 跑本机套件 `h3relay_check_all.py`（在**仓库之外**的 tools 目录里） | 全部通过 |
 
 ### 🔴 第 5 步：活体三步（改前端**必做**，别省）

@@ -157,7 +157,7 @@ failure):
 
 Front-end changes share one property: **every existing check can be green at the same time while the
 English UI is still wrong**. Measured on 2026-10-15: with the one-command suite 15/15,
-`review_050` 124/0 and `check_tooltips` 1308 items **all green at once**, none of the four classes
+`review_050` 124/0 and `check_tooltips` 1549 items **all green at once**, none of the four classes
 below was caught (all four were found by eye):
 
 | What was missed | Why the existing checks cannot see it |
@@ -174,7 +174,7 @@ includes 1–3); **step 5 cannot be reached by a machine**:
 |---|---|---|---|
 | 1 | **Static: read the two languages side by side** | `python tools/check_frontend.py` | 5 pass / 0 fail |
 | 2 | Pure-function behaviour | `node tests/test_i18n.mjs` · `node tests/test_audio_ref_budget.mjs` | all pass (47 · 47 assertions) |
-| 3 | Tooltip wording rules | `python tools/check_tooltips.py` | all pass (1308 items; **H4h** watches this number) |
+| 3 | Tooltip wording rules | `python tools/check_tooltips.py` | all pass (1549 items; **H4h** watches this number) |
 | 4 | **One-command suite** (includes 1–3) | run the machine's own `h3relay_check_all.py` (in a tools directory **outside the repo**) | all pass |
 
 ### 🔴 Step 5: the live three (mandatory after a front-end change — do not skip)

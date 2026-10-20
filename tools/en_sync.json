@@ -8,8 +8,8 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "condensed",
-          "h_en": "8543956e52b7b319",
-          "h_src": "085ad04ba75117bb",
+          "h_en": "8cad3976ed47b4dc",
+          "h_src": "17934bceb59e376d",
           "seeded": "by-position"
         },
         {
@@ -79,7 +79,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-20",
-      "src_sha": "246c664c41775a69"
+      "src_sha": "eb7b273696732186"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -448,8 +448,8 @@
           "zh": "🔴 改前端之后的必跑清单（2026-10-15 立，有实测依据）",
           "en": "🔴 Checklist after changing the front-end (established 2026-10-15, from measurements)",
           "mode": "full",
-          "h_en": "983e45de17bd001d",
-          "h_src": "337d730ff72acc4c",
+          "h_en": "553c3ceec1f37ff2",
+          "h_src": "9bf37db0fabd828d",
           "seeded": "by-position"
         },
         {
@@ -479,7 +479,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-20",
-      "src_sha": "8d3fff0b586ebc8d"
+      "src_sha": "527882b1387e608d"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",

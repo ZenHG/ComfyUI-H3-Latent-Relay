@@ -131,10 +131,10 @@ jobs:
           python tools/check_ui_workflow.py examples/minimal_relay_official.json   # 期望「问题合计 0 条」
           # 悬浮提示文案机检（2026-10-13 加）：结构 + 内容 + 禁用词 + 中英一一对应。
           # 🔴 为什么要进 CI：文案是"改一个字就回退"的东西，只在本地跑等于没跑。
-          python tools/check_tooltips.py                                             # 期望 1309 项全过
+          python tools/check_tooltips.py                                             # 期望 1549 项全过
           # 前端静态一致性（2026-10-15 加）：只做**中英两侧对读**才看得见的 3 件事 ——
           # 🔴 为什么必须进 CI：2026-10-15 实测，本地全套 15/15 + review_050 124/0 +
-          #    check_tooltips 1309 项 **同时全绿**时，这三类问题一个都没被拦：
+          #    check_tooltips 1549 项 **同时全绿**时，这三类问题一个都没被拦：
           #    英文提示落后于中文 / 英文里混全角【】/ web/*.js 新写的可见中文。
           python tools/check_frontend.py                                             # 期望 通过 5 / 失败 0
 

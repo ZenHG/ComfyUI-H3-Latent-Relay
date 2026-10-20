@@ -740,13 +740,13 @@ export const H3_TIPS = {
         en: "[Frames per segment] 24 fps, so 124 frames is about 5 seconds.\nAll segments are the same length (same as the manual chain).",
     },
     "H3RelayFiniteRun.context_frames": {
-        en: "[Copy window] How many frames are pinned from the previous segment's tail.\nOnly 5/22/39/56/73/90/107/124 are legal; a longer window is steadier at the seam.",
+        en: "[Copy window] How many frames are copied from the previous segment's tail.\nOnly 5/22/39/56/73/90/107/124 are legal; a longer window is steadier at the seam.",
     },
     "H3RelayFiniteRun.mask_mode": {
-        en: "[Mask mode] hard = the pinned zone is snapped back every step (recommended, default).\ntaper / ramp / blend / window are experiment modes, for comparing against old results only.",
+        en: "[Mask mode] hard = the copy zone is snapped back every step (recommended, default).\ntaper / ramp / blend / window are experiment modes, for comparing against old results only.",
     },
     "H3RelayFiniteRun.pin_audio": {
-        en: "[Pin audio] On (default) = the previous segment's audio tail is pinned in too.\nOff = each segment generates its own audio; the seam may sound disconnected.",
+        en: "[Pin audio] On (default) = the previous segment's audio tail is copied in too.\nOff = each segment generates its own audio; the seam may sound disconnected.",
     },
     "H3RelayFiniteRun.voice_anchor": {
         en: "[Voice anchor] The audio anchor of this segment's speaker; all segments share one.\nUnwired = use the previous segment's own audio tail.",
@@ -755,7 +755,7 @@ export const H3_TIPS = {
         en: "[Note] A note written into every segment's sidecar, e.g. \"22-frame window v2\".",
     },
     "H3RelayFiniteRun.settle_frames": {
-        en: "[Pick by camera] Keep 0 for a fixed camera; use -1 when the shot changes.\nThe settle zone is the few frames after the pinned region where the model replays the previous segment.\n· Fixed camera: trimming them causes the seam jump (0 frames → 0.020, 16 → 0.055) ⇒ keep 0;\n· Shot change: -1 moves the hard cut back to the segment boundary.",
+        en: "[Pick by camera] Keep 0 for a fixed camera; use -1 when the shot changes.\nThe settle zone is the few frames after the copy region where the model replays the previous segment.\n· Fixed camera: trimming them causes the seam jump (0 frames → 0.020, 16 → 0.055) ⇒ keep 0;\n· Shot change: -1 moves the hard cut back to the segment boundary.",
     },
     "H3RelayFiniteRun.from_segment": {
         en: "[Start after which segment] 0 = start at segment 1 (default).\nFill N to continue from segment N; fill 1 after a video seed.\n⚠ that segment's sidecar must exist on disk, or it errors\nbefore anything runs — not after the model is on the GPU.\nDo not wire the first-frame image when continuing.",

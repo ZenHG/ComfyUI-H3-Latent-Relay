@@ -19,6 +19,26 @@
 
 ---
 
+## 0.6.38 — 2026-10-20
+
+**新增两个节点：把几段拼成一条（「图内拼条」），以及一次提交跑完 N 段（「无头连跑」）。**
+
+- **图内拼条**：把每段裁好的画面与音频接到累计后面，全程在张量里做、**不重新编码**。规格不一致（分辨率 / 采样率 / 声道）会**直接报错**，不会悄悄把小图拉大去凑数。
+- **无头连跑**：一次提交把第 1 段到第 N 段整条跑完，不用点按钮、不用逐段改段号；脚本与画布走同一套节点。每段自动读上一段的落盘文件接着写。
+- 两个节点都不被已有工作流引用，**旧图完全不受影响**。
+
+**升级动作**：无需改图或连线。
+
+<!-- EN -->
+
+**Two new nodes: join several segments into one picture ("Join AV"), and run N segments in a single submission ("Finite Run").**
+
+- **Join AV**: appends each trimmed segment's picture and audio onto the accumulated result, entirely in tensors with **no re-encoding**. Mismatched specs (resolution / sample rate / channels) **stop with an error** instead of quietly stretching a smaller frame to fit.
+- **Finite Run**: runs segment 1 through N in one submission — no button clicking, no editing stage numbers by hand, and scripts use the same nodes as the canvas. Each segment reads the previous segment's saved file and continues from it.
+- Neither node is referenced by existing graphs, so **old workflows are unaffected**.
+
+**Action required**: none.
+
 ## 0.6.37 — 2026-10-20
 
 **新增「视频起段」节点：你可以拿一段已有的视频当整条链的第 1 段，之后照常往外接。**
