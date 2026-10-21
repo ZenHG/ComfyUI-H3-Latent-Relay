@@ -36,7 +36,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from ._grid import GUIDE_RUNS
+from ._grid import GUIDE_RUNS, frame_grid_floor
 from .bridge import MASK_MODES
 from .prompt import split_prompt_blocks
 from .seam import SETTLE_CAP
@@ -149,6 +149,23 @@ def validate_finite_params(*, segments: Any = None, seed: Any = None, run_id: An
             raise FinitePlanError("length 必须是整数（得到 %r）。" % (length,)) from None
         if L < 5:
             raise FinitePlanError("length 至少 5 帧（H3 最短片段；得到 %d）。" % L)
+        # 🔴 2026-10-20 真机实测补：length 必须落在 **5+17k 栅格**上。
+        #   宿主对 INT 只查 min/max、**不查 step**（execution.py 的 INT 分支没有 step
+        #   校验；`step=17` 只是前端步进）⇒ `length=96` 会被宿主放行。
+        #   上游 `MiniMaxH3ImageToVideo` 拿到 96 会 `align_frame_count` **向上吸附**到 107
+        #   ⇒ 用户填 96、实跑 107 帧（latent 32 步），裁首 22 后成片 85 帧而非 74 帧
+        #   ⇒ 帧账错 11 帧，`h3_shotcut_check` 的 C1（Σ=成片帧数，严等）假红。
+        #   实测：length=96 → 成片 85 帧 / 3.54s（`frlen96`）。
+        #   按本仓纪律「非法值直接 raise，不吸附」——段长是续接相位的前提，改了必须让人知道。
+        if (L - 5) % 17 != 0:
+            near = frame_grid_floor(L)
+            raise FinitePlanError(
+                "length=%d 不在 H3 的 5+17k 帧栅格上（合法档：%s …）。\n"
+                "    最接近的合法档是 %d。\n"
+                "    ⚠ 宿主只查 min/max 不查步长，上游会把非档值**静默吸附**到最近的档"
+                "（96 → 107）⇒ 你填的帧数与实际跑出来的不一样，帧账随之错位。\n"
+                "    这里不吸附：段长决定续接相位，改了必须让你知道。" % (
+                    L, ", ".join(str(g) for g in sorted(GUIDE_RUNS) if g >= 5), near))
     for name, val in (("width", width), ("height", height)):
         if val is None:
             continue
