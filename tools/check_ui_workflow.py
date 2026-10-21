@@ -376,6 +376,60 @@ def check_av_link(wf):
     return out
 
 
+def check_link_consistency(wf):
+    """link 编号三处一致（2026-10-22 实测翻车点，母版习惯补成机检）。
+
+    【为什么必须查】ComfyUI UI json 里同一条连线在**三处**各记一次：
+      · `links` 数组：`[link_id, 源节点, 源槽, 目标节点, 目标槽, 类型]`
+      · 目标节点 `inputs[].link` = link_id
+      · 源节点 `outputs[].links[]` = link_id
+    母版工作流（`MiniMax-H3官方续接版-latent桥-单采.json` 等）三者严格同号。
+
+    【翻车实证】`examples/finite_run_ui.json` 的 `sigmas` 线：links 数组用 link_id **8**，
+    而 FiniteRun 的 `inputs.sigmas.link` 写的是 **7**（7 已被 #1→#7 的 MODEL 线占用）。
+    后果：UI 能打开、本工具原有判据全过，但 UI→API 转换时 sigmas 取不到线 ⇒
+    宿主报 `sigmas, received_type(MODEL) mismatch input_type(SIGMAS)`（因为槽位整体错位）。
+    这正是「控制变量看起来都对、实际参数全错」的 UI 版。
+
+    【判据】（三条，全是 problem）
+      P1 link_id 全局唯一（重复 = 前端会挑一条，另一条静默丢失）
+      P2 节点 `inputs[].link` 引用的号必须在 links 数组里存在
+      P3 节点 `outputs[].links[]` 引用的号必须在 links 数组里存在
+      P4 links 数组里登记的 link_id 至少要有一端被节点引用（孤儿线 = 前端不画）
+    """
+    links = [L for L in (wf.get("links") or []) if isinstance(L, list) and len(L) >= 3]
+    nodes = [n for n in (wf.get("nodes") or []) if n.get("mode") != 4]
+    out = []
+    ids = [L[0] for L in links]
+    dup = sorted({i for i in ids if ids.count(i) > 1})
+    if dup:
+        out.append("link_id 重复（前端只会保留一条，另一条静默丢失）：%s" % dup)
+    declared = set(ids)
+    used = set()
+    for n in nodes:
+        for i in (n.get("inputs") or []):
+            lid = i.get("link")
+            if lid is None:
+                continue
+            used.add(lid)
+            if lid not in declared:
+                out.append("node %s %s: 输入 `%s` 引用 link_id=%s，但 links 数组里没有这条线"
+                           "（UI 能开、但 UI→API 转换会取不到线 ⇒ 槽位错位、参数全错）"
+                           % (n["id"], n.get("type"), i.get("name"), lid))
+        for o in (n.get("outputs") or []):
+            for lid in (o.get("links") or []):
+                if lid is None:
+                    continue
+                used.add(lid)
+                if lid not in declared:
+                    out.append("node %s %s: 输出 `%s` 引用 link_id=%s，但 links 数组里没有这条线"
+                               % (n["id"], n.get("type"), o.get("name"), lid))
+    for lid in sorted(declared - used):
+        out.append("link_id=%s 在 links 数组里，但没有任何节点的 inputs/outputs 引用它"
+                   "（孤儿线，前端不画、转换器也不认）" % lid)
+    return out
+
+
 # ── Chain 词分发/拼接自检（2026-09-22，0.6.7）──────────────────────────────
 #   视频**落盘**类：`auto_concat` 要靠它们的回显取回每段文件 ⇒ 图里一个都没有就拼不成
 VIDEO_SAVE_LIKE = ("SaveVideo", "SaveWEBM", "SaveAnimatedWEBP", "VHS_VideoCombine",
@@ -517,6 +571,7 @@ def check_file(path: str, oi: dict, verbose: bool = True) -> int:
 
     problems, warns = [], []
     problems.extend(check_av_link(wf))
+    problems.extend(check_link_consistency(wf))
     problems.extend(check_chain_prompts(wf, oi))
     for n in wf.get("nodes") or []:
         if n.get("mode") == 4:      # bypass

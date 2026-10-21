@@ -184,8 +184,14 @@ def main() -> int:
 
     nodes.append(finite_run_node(
         mod, 8,
+        # ⚠ link 号必须与下面 `links` 数组里的 link_id **逐字一致**（母版习惯：
+        #   link_id 全局唯一，且 links 数组 / inputs.link / outputs.links 三处同号）。
+        #   2026-10-22 实测教训：这里原来写 "sigmas": 7，而 links 数组里 sigmas 用的是
+        #   link_id 8（7 已被 #1→#7 的 MODEL 线占用）⇒ UI 能开、check_ui_workflow 也过，
+        #   但 UI→API 转换时 sigmas 取不到线、slot 映射错位 ⇒ 提交报
+        #   `sigmas, received_type(MODEL) mismatch input_type(SIGMAS)`。
         links={"model": 1, "clip": 2, "vae": 3, "audio_vae": 4,
-               "sampler": 6, "sigmas": 7, "image": 5},
+               "sampler": 6, "sigmas": 8, "image": 5},
         widget_values=[
             "（示例见 prompts 格：两段词用单独一行 --- 分开）",  # prompt（本示例以 prompts 为准）
             2,                # segments
@@ -265,6 +271,31 @@ def main() -> int:
         [42, 9, 0, 10, 0, "VIDEO"],
     ]
 
+    # —— 写盘前自检：link 编号三处一致（母版习惯，2026-10-22 翻车点）——
+    # links 数组的 link_id ｜ 节点 inputs.link ｜ 节点 outputs.links 必须指向同一批号。
+    # 不一致时 UI 仍能打开、check_ui_workflow 也不报，但 UI→API 转换会错位 ⇒ 提交被拒。
+    declared = {l[0] for l in links}
+    used_in = set()
+    used_out = set()
+    for nd in nodes:
+        for i in nd.get("inputs") or []:
+            if i.get("link") is not None:
+                used_in.add(i["link"])
+        for o in nd.get("outputs") or []:
+            for lid in (o.get("links") or []):
+                if lid is not None:
+                    used_out.add(lid)
+    bad = (used_in | used_out) - declared
+    if bad:
+        raise SystemExit(
+            "生成器自检失败：节点引用了 links 数组里不存在的 link_id %s\n"
+            "    已声明：%s\n"
+            "    inputs 引用：%s\n"
+            "    outputs 引用：%s" % (sorted(bad), sorted(declared),
+                                  sorted(used_in), sorted(used_out)))
+    if len(declared) != len(links):
+        raise SystemExit("生成器自检失败：link_id 有重复（必须全局唯一）")
+
     wf = {
         "id": "h3-relay-finite-run", "revision": 0, "last_node_id": 11,
         "last_link_id": 42, "nodes": nodes, "links": links, "groups": [],
@@ -272,6 +303,8 @@ def main() -> int:
     }
     Path(a.out).write_text(json.dumps(wf, ensure_ascii=False, indent=1), encoding="utf-8")
     print("已写出 %s（%d 节点 / %d 链接）" % (a.out, len(nodes), len(links)))
+    print("自检：link 编号三处一致 ✓（declared %d / inputs 引用 %d / outputs 引用 %d）"
+          % (len(declared), len(used_in), len(used_out)))
     print("复核：python tools/check_ui_workflow.py %s" % a.out)
     return 0
 
