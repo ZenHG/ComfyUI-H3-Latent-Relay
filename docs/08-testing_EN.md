@@ -275,7 +275,7 @@ real problem on its very first run** (in CI the V3 exit actually could not load)
 
 | Tool | What it judges | Expected |
 |---|---|---|
-| `tools/review_050.py` | doc–code consistency (node list / parameter table / assertion count / version / **all** example-graph slots (I1-I4: slots / node counts / widget markers) / **the three iron rules** / **the L13 English-doc sync gate** / **the H3j smoke expected values** / **H3k registry metadata** / **H3l release policy present** / **H3m no credential literals** / **H3n i18n word-table completeness** / **H3p bilingual tooltip completeness** / **H3q JS comma expression** / **H3r i18n anti-overwrite guard** / **H3s link endpoint field compat** / **H3t official locale entry** / **H3o dangling doc references** / **H3u registry package file count (true value)** / **H3v tools script count (true value)** / **H3w untracked files** /  **H3x `setdefault` to `PYTHONPATH`** / **H3y tools script registry** / **H3z release.py flags complete** / **H4a explicit env for Python children** / **H4b criterion-table self-check** / **H4c ledger consistency** / **H4d JS expected values (true value)** / **H4e dist whitelist (true value)** / **H4f `SIM115` blind spot** / **H4g artifacts carry no bytecode or symlinks** / **H7b nodes.py executable code lines (blank/comment/docstring excluded) <= cap** / **H7c nodes.py total lines <= loose hard cap** / **H7d documentation share >= floor (anti code-hidden-in-docstring)**) | **128/0** |
+| `tools/review_050.py` | doc–code consistency (node list / parameter table / assertion count / version / **all** example-graph slots (I1-I4: slots / node counts / widget markers) / **the three iron rules** / **the L13 English-doc sync gate** / **the H3j smoke expected values** / **H3k registry metadata** / **H3l release policy present** / **H3m no credential literals** / **H3n i18n word-table completeness** / **H3p bilingual tooltip completeness** / **H3q JS comma expression** / **H3r i18n anti-overwrite guard** / **H3s link endpoint field compat** / **H3t official locale entry** / **H3o dangling doc references** / **H3u registry package file count (true value)** / **H3v tools script count (true value)** / **H3w untracked files** /  **H3x `setdefault` to `PYTHONPATH`** / **H3y tools script registry** / **H3z release.py flags complete** / **H4a explicit env for Python children** / **H4b criterion-table self-check** / **H4c ledger consistency** / **H4d JS expected values (true value)** / **H4e dist whitelist (true value)** / **H4f `SIM115` blind spot** / **H4g artifacts carry no bytecode or symlinks** / **H4i dist content completeness (every real import covered)** / **H7b nodes.py executable code lines (blank/comment/docstring excluded) <= cap** / **H7c nodes.py total lines <= loose hard cap** / **H7d documentation share >= floor (anti code-hidden-in-docstring)**) | **129/0** |
 | `tools/smoke_nodes.py` | node-layer functional smoke test (the seven continuation items really run once; 🔍 the upscale node needs upstream weights and is not in the smoke test) | **22/0** |
 | `tools/assert_default_exit.py` | default exit = V3 (contract 2 + behaviour 3; includes **the node set V3 actually registers**) | **5/5** |
 | `tools/sync_deploy_check.py` | the deployed copy matches the commit state of the given commit | all `OK` |
@@ -324,11 +324,11 @@ section = red); ③ **fail-closed** (a missing/broken manifest ⇒ exit code 2, 
 python tools/make_minimal_bundle.py --zip     # → dist/ComfyUI-H3-Latent-Relay(.zip)
 ```
 
-**42 files / 1260 KB** (zip 446 KB), carrying only:
+**43 files / 1432 KB** (zip 502 KB), carrying only:
 
 | Group | Files |
 |---|---|
-| Runtime-required (25) | `__init__.py` · `relay_core/` (11 files) · `nodes.py` · `layout_contract.py` · `v3/` (4 files) · `exp/__init__.py` · `exp/history_anchor_v2/` (3 files) · `exp/voice_accum/` (3 files) |
+| Runtime-required (26) | `__init__.py` · `relay_core/` (12 files) · `nodes.py` · `layout_contract.py` · `v3/` (4 files) · `exp/__init__.py` · `exp/history_anchor_v2/` (3 files) · `exp/voice_accum/` (3 files) |
 | Front end (7) | The seven JS files under `web/` (chain / prompt dispatch / voice anchor / i18n ×2 / sync) |
 | Examples (3) | `examples/`'s two workflows + their README |
 | Metadata/legal/must-read (7) | `requirements.txt` · `pyproject.toml` · `LICENSE` · `licenses/Apache-2.0.txt` · `THIRD-PARTY-NOTICES.md` · `README.md` · `README_EN.md` |
@@ -346,13 +346,13 @@ measured 2026-09-30, two places once contradicted each other: 626 KB vs 646 KB).
    ⇒ if someone later adds a module but forgets the manifest, it **errors on the spot** instead of letting
    a user hit `ImportError` first;
 2. write out `dist/` (idempotent; only `--force` overwrites, and it deletes only directories it produced);
-3. **self-verify**: load the produced directory as a **standalone pack**, assert all 8 nodes are present,
+3. **self-verify**: load the produced directory as a **standalone pack**, assert all 11 nodes are present,
    the default exit is `v3` (no fallback), `WEB_DIRECTORY` has front-end files, the node-layer exception
    context is still there,
    and assert **not one pack module comes from the original repository** (proving this copy is
    self-sufficient).
    `--verify-only <dir>` runs only the self-verification.
 
-> Measured: unzip to **outside the repository** (another disk) and load it — the 8 nodes / slots /
+> Measured: unzip to **outside the repository** (another disk) and load it — the 11 nodes / slots /
 > default exit / front end / exception context all pass, and the count of modules from the original
 > repository = **0**.

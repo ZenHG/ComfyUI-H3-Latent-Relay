@@ -46,6 +46,9 @@ KIND = {
     "H3j": "consistency", "H3z": "consistency",
     "H3u": "truth", "H3v": "truth", "H3y": "truth", "H4b": "truth",
     "H4c": "truth", "H4d": "truth", "H4e": "truth", "H4h": "truth",
+    # H4i = 真值（**真扫包内相对 import**，再与 `MANIFEST_RUNTIME` 比集合差），
+    #   不是一致性 —— 它比的是「代码真实依赖」vs「白名单声明」，两边来源不同源。
+    "H4i": "truth",
     "H4f": "hygiene", "H4g": "hygiene",
     "H7": "truth", "H7b": "truth", "H7c": "truth", "H7d": "truth",
     "H3e": "hygiene", "H3l": "hygiene", "H3m": "hygiene", "H3n": "hygiene", "H3o": "hygiene",
@@ -95,7 +98,11 @@ MUTATION = {
     "H4b": "注入 `ck(\"X\", True)`（恒真）或两条同名 `ck()`",
     "H4c": "从本台账删掉一个编号（或 `review_050` 里加一条未登记的编号）",
     "H4d": "把 `ci.yml` 头注释里 `test_run_id_parity` 的期望数改成 22",
-    "H4e": "把 `make_minimal_bundle.py` 的 `MANIFEST_RUNTIME` 删一项（42 → 41）",
+    "H4e": "把 `make_minimal_bundle.py` 的 `MANIFEST_RUNTIME` 删一项（43 → 42）",
+    # 实测过（2026-10-22）：临时把 `relay_core/finite.py` 从白名单删掉 ⇒
+    #   H4e 只在「文档声明没跟着改」时才红；**两边一起删就全绿**。
+    #   H4i 直接报 `relay_core/__init__.py: from .finite import … ⇒ relay_core/finite.py 不在 MANIFEST_RUNTIME`。
+    "H4i": "把 `relay_core/finite.py` 从 `MANIFEST_RUNTIME` 删掉（H4e 若同时改文档仍会绿，H4i 必须红）",
     "H4h": "把 `docs/08-testing.md` 里 `check_tooltips` 的项数改成 1217",
     "H7": "把 `H3RelayJoinAV` 类撑到 401 行（它不在已知超额名单里 ⇒ 必须红）",
     "H7b": "在某个 H3Relay* 类里加 60 行可执行代码（可执行行上限 2200 ⇒ 必须红）",

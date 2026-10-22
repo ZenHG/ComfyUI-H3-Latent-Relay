@@ -66,6 +66,11 @@ MANIFEST_RUNTIME = [
     "relay_core/concat.py",
     "relay_core/upscale.py",
     "relay_core/prompt.py",
+    # 🔴 2026-10-22 补登：⏩ Finite Run 的展开图构建（0.6.38 新增文件，并仓时漏登记）。
+    #   `relay_core/__init__.py` 第 350 行 `from .finite import ...` ⇒ 漏它 = 干净环境
+    #   `import nodes` 直接 ModuleNotFoundError（**整包装不上**，不是某个节点不可用）。
+    #   user_smoke B2 实测抓到：`No module named 'bundle_under_test.relay_core.finite'`。
+    "relay_core/finite.py",
     "nodes.py",
     # nodes.py 直接 import 的契约模块
     "layout_contract.py",
@@ -402,18 +407,25 @@ def verify_bundle(bundle_dir, expect_source=KIT):
     if getattr(pkg, "NODE_API_FALLBACK_REASON", None):
         print("        ⚠️ 回退原因：%s" % pkg.NODE_API_FALLBACK_REASON)
 
-    # —— 9 个节点：**分两层判**（2026-09-30 修；0.6.37 起 8→9）——
+    # —— 节点数：**分两层判**（2026-09-30 修；0.6.37 起 8→9）——
     # 🔴 原来只有一条 `len(nodes) == 8` ⇒ **CI（CPU-only torch）必红**：放大节点的 INPUT_TYPES
     #    要走宿主注册表，宿主 GPU 探测抛 `AssertionError: Torch not compiled with CUDA enabled`
     #    ⇒ 该节点 schema 建不出来 ⇒ V3 entrypoint 逐节点容错跳过 ⇒ 本环境只能建出 7 个。
     #    **这是本仓已登记的"两种环境"（见 ci.yml 头部），不是发行物缺陷。**
     #    发行物的真相 = **代码里定义了几个节点**（与跑它的机器无关）⇒ 改成静态断言；
     #    "本环境能构造出几个 schema" 只作信息（只有 0 个才是真问题）。
+    # 🔴 2026-10-22：期望数**不再硬编码**。0.6.37 的 "9" 到 0.6.38（加 SeedFromVideo /
+    #   JoinAV / FiniteRun）就漂了 ⇒ 自验 FAIL，而这是"同一个事实多处声明"的老病。
+    #   真相源 = **源码树** `nodes.py` 的 `NODE_CLASS_MAPPINGS` 键数（不是 dist 里那个
+    #   正在被检查的副本 —— 那要用被测对象自己；dist 是它的影子，写死了就又会漂）。
+    _src_nodes = importlib.import_module("bundle_under_test.nodes")
     _v3mod = importlib.import_module("bundle_under_test.v3.nodes_v3")
     _declared = list(getattr(_v3mod, "NODES", []) or [])
-    print("   [%s] 分发集代码里定义了 %d 个节点（期望 9；**与运行环境无关**）"
-          % ("OK" if len(_declared) == 9 else "FAIL", len(_declared)))
-    bad += (len(_declared) != 9)
+    _expect_n = len(getattr(_src_nodes, "NODE_CLASS_MAPPINGS", {}) or {})
+    print("   [%s] 分发集代码里定义了 %d 个节点（期望 %d = 源码树 NODE_CLASS_MAPPINGS 键数；"
+          "**与运行环境无关**）"
+          % ("OK" if len(_declared) == _expect_n else "FAIL", len(_declared), _expect_n))
+    bad += (len(_declared) != _expect_n)
 
     nodes = _nodes_of(pkg)
     _note = ""

@@ -223,7 +223,7 @@ Combo `options` **全序** / outputs 路数与显示名 / `is_output_node` / 显
 
 | 工具 | 判什么 | 期望 |
 |---|---|---|
-| `tools/review_050.py` | 文档—代码一致性（节点清单 / 参数表 / 断言数 / 版本号 / **全部示例图**槽位（I1-I4：槽位 / 节点数 / widget 标记） / **三条铁律** / **L13 英文文档同步闸** / **H3j smoke 期望值** / **H3k registry 元数据** / **H3l 发布规范在位** / **H3m 无凭据字面量** / **H3n i18n 词表完整性** / **H3p i18n 悬浮提示双语完整性** / **H3q JS 逗号表达式** / **H3r i18n 防覆盖兜底** / **H3s link 端点字段两代兼容** / **H3t 官方语言入口** / **H3o 文档悬空引用** / **H3u registry 包文件数真值** / **H3v tools 脚本数真值** / **H3w 未跟踪文件** /  **H3x `setdefault` 到 `PYTHONPATH`** / **H3y tools 脚本登记** / **H3z release.py flag 齐全** / **H4a Python 子进程显式 env** / **H4b 判据表自检** / **H4c 台账一致** / **H4d JS 期望数真值** / **H4e dist 白名单真值** / **H4f `SIM115` 盲点** / **H4g 交付物无字节码/符号链接**） | **128/0** |
+| `tools/review_050.py` | 文档—代码一致性（节点清单 / 参数表 / 断言数 / 版本号 / **全部示例图**槽位（I1-I4：槽位 / 节点数 / widget 标记） / **三条铁律** / **L13 英文文档同步闸** / **H3j smoke 期望值** / **H3k registry 元数据** / **H3l 发布规范在位** / **H3m 无凭据字面量** / **H3n i18n 词表完整性** / **H3p i18n 悬浮提示双语完整性** / **H3q JS 逗号表达式** / **H3r i18n 防覆盖兜底** / **H3s link 端点字段两代兼容** / **H3t 官方语言入口** / **H3o 文档悬空引用** / **H3u registry 包文件数真值** / **H3v tools 脚本数真值** / **H3w 未跟踪文件** /  **H3x `setdefault` 到 `PYTHONPATH`** / **H3y tools 脚本登记** / **H3z release.py flag 齐全** / **H4a Python 子进程显式 env** / **H4b 判据表自检** / **H4c 台账一致** / **H4d JS 期望数真值** / **H4e dist 白名单真值** / **H4f `SIM115` 盲点** / **H4g 交付物无字节码/符号链接** / **H4i dist 内容完整（真实 import 全覆盖）**） | **129/0** |
 | `tools/smoke_nodes.py` | 节点层功能冒烟（续接七件真跑一遍；🔍 放大节点要上游权重，不在冒烟内） | **22/0** |
 | `tools/assert_default_exit.py` | 默认出口 = V3（契约 2 + 行为 3；含 **V3 实际注册的节点集合**） | **5/5** |
 | `tools/sync_deploy_check.py` | 部署副本与指定提交的提交态一致 | 全 `OK` |
@@ -268,11 +268,11 @@ CI（`.github/workflows/ci.yml`）按顺序跑：**ruff 静态检查 → 回归�
 python tools/make_minimal_bundle.py --zip     # → dist/ComfyUI-H3-Latent-Relay(.zip)
 ```
 
-**42 文件 / 1260 KB**（zip 446 KB），只带：
+**43 文件 / 1432 KB**（zip 502 KB），只带：
 
 | 组 | 文件 |
 |---|---|
-| 运行必需（25） | `__init__.py` · `relay_core/`×11 · `nodes.py` · `layout_contract.py` · `v3/`×4 · `exp/__init__.py` · `exp/history_anchor_v2/`×3 · `exp/voice_accum/`×3 |
+| 运行必需（26） | `__init__.py` · `relay_core/`×12 · `nodes.py` · `layout_contract.py` · `v3/`×4 · `exp/__init__.py` · `exp/history_anchor_v2/`×3 · `exp/voice_accum/`×3 |
 | 前端（7） | `web/` 下的 7 个 JS（连跑 / 词分发 / 声锚 / i18n×2 / 同步） |
 | 示例（3） | `examples/` 的两个工作流 + 其 README |
 | 元数据/法律/必读（7） | `requirements.txt` · `pyproject.toml` · `LICENSE` · `licenses/Apache-2.0.txt` · `THIRD-PARTY-NOTICES.md` · `README.md` · `README_EN.md` |
@@ -287,10 +287,10 @@ python tools/make_minimal_bundle.py --zip     # → dist/ComfyUI-H3-Latent-Relay
    （含各级父包的 `__init__.py` 这种隐式依赖），**必须与清单逐一相等**
    ⇒ 将来有人新增模块却忘了改清单，会**当场报错**，而不是让用户先撞到 `ImportError`；
 2. 写出 `dist/`（幂等；`--force` 才覆盖，且只删自己产出的目录）；
-3. **自验**：把产出目录当**独立包**加载，断言 8 个节点齐全、默认出口 `v3`（未回退）、
+3. **自验**：把产出目录当**独立包**加载，断言 11 个节点齐全、默认出口 `v3`（未回退）、
    `WEB_DIRECTORY` 有前端文件、节点层异常上下文仍在，
    并断言 **没有一个本包模块来自原仓**（证明这份副本自足）。
    `--verify-only <目录>` 可只跑自验。
 
-> 实测：把 zip 解压到**仓外**（另一块盘）加载，8 节点 / 槽位 / 默认出口 / 前端 / 异常上下文
+> 实测：把 zip 解压到**仓外**（另一块盘）加载，11 节点 / 槽位 / 默认出口 / 前端 / 异常上下文
 > 全部通过，来自原仓的模块数 = **0**。

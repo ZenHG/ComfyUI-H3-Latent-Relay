@@ -3,7 +3,7 @@
 > 🔴 **本文件由 `tools/checks_ledger.py --write` 生成，别手改**（改台账 → 重新生成）。
 > 机检：`review_050.py` 的 **H4c** 核「本台账 ↔ `review_050.py` 的编号**双向一致**」。
 
-共 **60** 条带编号的判据 ｜ 其中盯**口径数字**的 **15** 条 ｜ 有**变异测试**的 **27** 条。
+共 **61** 条带编号的判据 ｜ 其中盯**口径数字**的 **15** 条 ｜ 有**变异测试**的 **28** 条。
 
 ## 一、盯「口径数字」的判据（**这些数字不许裸写**）
 
@@ -21,7 +21,7 @@
 | **H3u** | truth | registry 包文件数（`.comfyignore` 注释里声明） | 把 `.comfyignore` 注释里的包文件数改成 47 | git |
 | **H3v** | truth | `tools/` 脚本数（`N 个脚本`） | 把 `tools/README.md` 的「15 个脚本」改成「14 个脚本」 | — |
 | **H4d** | truth | **JS 测试期望数 ×4**（`43/0` / `29/0` / `45/0` / `33/0`；ci.yml + docs/08） | 把 `ci.yml` 头注释里 `test_run_id_parity` 的期望数改成 22 | node |
-| **H4e** | truth | **dist 白名单文件数**（`make_minimal_bundle.py` 的 `MANIFEST` 总长 vs 文档声明） | 把 `make_minimal_bundle.py` 的 `MANIFEST_RUNTIME` 删一项（42 → 41） | — |
+| **H4e** | truth | **dist 白名单文件数**（`make_minimal_bundle.py` 的 `MANIFEST` 总长 vs 文档声明） | 把 `make_minimal_bundle.py` 的 `MANIFEST_RUNTIME` 删一项（43 → 42） | — |
 | **H4h** | truth | **`check_tooltips` 的项数**（`N 项`；ci.yml + docs/08 + tools/README） | 把 `docs/08-testing.md` 里 `check_tooltips` 的项数改成 1217 | host |
 | **I4** | consistency | 示例图节点数（`examples/README.md` 的「N 节点」） | — | — |
 
@@ -53,6 +53,7 @@
 | **H4c** | truth | 判据台账 | 从本台账删掉一个编号（或 `review_050` 里加一条未登记的编号） | git |
 | **H4f** | hygiene | 无「`return` 后直接跟一个 `open | 把任一受控 `*.py` 改成「`return` 后直接跟 `open(`」的形态 | — |
 | **H4g** | hygiene | 交付物无字节码/符号链接：git 受控集、`dist/`、`dist/*.zip` 名录 **硬判**，部署副本只报信息 | ① 把任一受控文件改成 `.pyc` 形态后 `git add -f`（受控集里出现字节码）；② 往 `dist/<包>/` 里放一个软链（包内符号链接，宿主规则②） | — |
+| **H4i** | truth | 分发集内容完整：包里真实 import 的每个模块都在 `MANIFEST_RUNTIME` | 把 `relay_core/finite.py` 从 `MANIFEST_RUNTIME` 删掉（H4e 若同时改文档仍会绿，H4i 必须红） | — |
 | **H7b** | truth | `nodes.py` 可执行代码行不超上限 | 在某个 H3Relay* 类里加 60 行可执行代码（可执行行上限 2200 ⇒ 必须红） | — |
 | **H7c** | truth | `nodes.py` 总行数不超宽松硬顶 | 在 `nodes.py` 末尾加 400 行注释（总行数上限 3300 ⇒ 必须红；注释不占可执行额度 ⇒ 这是唯一能拦它的） | — |
 | **H7d** | truth | 文档类占比不低于下限 | 把 `nodes.py` 里所有 `#` 注释和三引号 docstring 删掉（文档类占比 < 15% ⇒ 必须红） | — |

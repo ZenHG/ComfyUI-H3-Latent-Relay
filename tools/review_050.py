@@ -2291,6 +2291,82 @@ print("      dist 白名单：%s = **%d 文件** ｜ `dist/` 实际 = %s"
 ck("H4e dist 白名单文件数：`MANIFEST` 各段之和 == 文档声明（`dist/` 在时还核实际文件数）",
    not _bad_mb and _tot_mb > 0, "%d 处：%s" % (len(_bad_mb), _bad_mb[:4]))
 
+
+# ============================================================================
+# H4i 分发集**内容**完整性：包里真实 import 的每个模块都必须在白名单里
+# ============================================================================
+# 🔴 为什么 H4e 不够：它只核「三处**数量**相等」。2026-10-22 实测栽在这 ——
+#   `relay_core/finite.py`（⏩ Finite Run 的展开图构建）**漏登记**进 MANIFEST_RUNTIME，
+#   而 `relay_core/__init__.py` 第 350 行有 `from .finite import ...`。
+#   数量一样对得上（文档声明也跟着少一个）⇒ H4e 绿；但**干净环境一 import 就炸**：
+#       ModuleNotFoundError: No module named 'bundle_under_test.relay_core.finite'
+#   ⇒ 从 Registry / GitHub 装的所有开源用户都装不上，而本地全套机检全绿。
+#   `user_smoke.py` 的 B2 能抓到（它真去 import），但那是**手工**跑的。
+#
+# 本判据补上自动那层：**直接问被测对象自己**（铁律：判据与被测对象同源）——
+# 静态扫包内 `from .X import` / `from .relay_core.X import` 的**真实依赖**，
+# 核每个 X 都在 MANIFEST_RUNTIME 里。这比数文件数强：漏一个 import 立刻红。
+_mani_rt = set()
+for _n in _mb_tree.body:
+    if (isinstance(_n, _ast.Assign) and isinstance(_n.targets[0], _ast.Name)
+            and _n.targets[0].id == "MANIFEST_RUNTIME" and isinstance(_n.value, _ast.List)):
+        for _e in _n.value.elts:
+            if isinstance(_e, _ast.Constant) and isinstance(_e.value, str):
+                _mani_rt.add(_e.value.replace("\\", "/"))
+
+
+def _rel(importer: str, mod: str) -> str:
+    """把 `from .X import`（相对导入）解析成白名单键格式。
+
+    ⚠ `.` 指**导入方文件所在的包/目录**，不一定是 relay_core：
+      · `relay_core/__init__.py` 的 `.finite`      ⇒ `relay_core/finite.py`
+      · `nodes.py`（包根）的 `.exp.voice_accum`    ⇒ `exp/voice_accum/__init__.py`
+      · `v3/nodes_v3.py` 的 `._compat`             ⇒ `v3/_compat.py`
+    第一版写成"一律 relay_core/ 前缀" ⇒ 4 处误报（`.exp.*` / `v3/._compat`）。
+    """
+    base = os.path.dirname(importer)          # "relay_core" / "v3" / ""（包根）
+    parts = [p for p in mod.lstrip(".").split(".") if p]
+    if not parts:
+        return ""
+    stem = "/".join(([base] if base else []) + parts)
+    # 三种形态都试：包（__init__.py）/ 模块（X.py）
+    for cand in ("%s/__init__.py" % stem, "%s.py" % stem):
+        if cand in _mani_rt:
+            return cand
+    # 都不在白名单 ⇒ 返回最可能的那个（让判据报出来）
+    return "%s/__init__.py" % stem
+
+
+_dep_bad = []
+for _relf in ("relay_core/__init__.py", "nodes.py", "v3/nodes_v3.py", "v3/entrypoint.py"):
+    _p = os.path.join(KIT, _relf)
+    if not os.path.isfile(_p):
+        continue
+    try:
+        _t = _ast.parse(Path(_p).read_text(encoding="utf-8"))
+    except SyntaxError as _e:
+        _dep_bad.append("%s 解析失败：%s" % (_relf, _e))
+        continue
+    for _node in _ast.walk(_t):
+        # from .X import ...  /  from .relay_core.X import ...
+        if isinstance(_node, _ast.ImportFrom) and _node.level >= 1 and _node.module:
+            _key = _rel(_relf, _node.module)
+            if _key and _key not in _mani_rt:
+                _dep_bad.append("%s: `from %s%s import …` ⇒ %s **不在 MANIFEST_RUNTIME**"
+                                % (_relf, "." * _node.level, _node.module, _key))
+        # import relay_core.finite（绝对形态）
+        elif isinstance(_node, _ast.Import):
+            for _a in _node.names:
+                if _a.name.startswith("relay_core."):
+                    _key = _a.name.replace(".", "/") + ".py"
+                    if _key not in _mani_rt:
+                        _dep_bad.append("%s: `import %s` ⇒ %s **不在 MANIFEST_RUNTIME**"
+                                        % (_relf, _a.name, _key))
+print("      依赖闭合：扫了 4 个入口文件，包里相对 import %d 项，白名单未覆盖 %d 项"
+      % (len(_mani_rt), len(_dep_bad)))
+ck("H4i 分发集内容完整：包里真实 import 的每个模块都在 `MANIFEST_RUNTIME`（H4e 只核数量，漏文件照样绿）",
+   not _dep_bad and bool(_mani_rt), "%d 处：%s" % (len(_dep_bad), _dep_bad[:4]))
+
 # ============================================================================
 # H4f 判据的**已知盲点**：`return` 后直接跟 `open(`（2026-10-08 新增）
 # ============================================================================

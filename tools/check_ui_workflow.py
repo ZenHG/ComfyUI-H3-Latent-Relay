@@ -589,9 +589,12 @@ def check_file(path: str, oi: dict, verbose: bool = True) -> int:
             continue
         defn = oi.get(n.get("type"))
         if defn is None:
-            warns.append("node %s 类型 %s 本地与服务端都没有（本包只提供自己的 10 个节点；"
+            # ⚠ 节点数**从 schema 派生**，不手抄：手抄的代价实测过（0.6.37/0.6.38 两次加节点都漏改这里，
+            #   报告里就一直写「10 个节点」，而实际是 11 个）。
+            _n_own = sum(1 for _k in oi if _k.startswith("H3Relay"))
+            warns.append("node %s 类型 %s 本地与服务端都没有（本包只提供自己的 %d 个节点；"
                          "这类多半是前端虚拟节点或未装该包）"
-                         % (n["id"], n.get("type")))
+                         % (n["id"], n.get("type"), _n_own))
             continue
         # 🔴 标记检查必须在 widgets_values 的 null 判定**之前**做：
         #   原实现在 widgets_values 非 list 时整节点 continue ⇒ 这类问题全被漏掉（假绿）。

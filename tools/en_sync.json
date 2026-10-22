@@ -16,8 +16,8 @@
           "zh": "核心功能",
           "en": "Core features",
           "mode": "condensed",
-          "h_en": "5dfaf86a8be096d8",
-          "h_src": "7a9f25e2daee2b1e",
+          "h_en": "e910a0dce7a0e931",
+          "h_src": "8e0498e1e96a5481",
           "seeded": "by-position"
         },
         {
@@ -79,7 +79,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-22",
-      "src_sha": "eb7b273696732186"
+      "src_sha": "4e19db32d6412f15"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -352,8 +352,8 @@
           "zh": "⏩ Finite Run：一次提交跑完 N 段（无头连跑，0.6.36）",
           "en": "⏩ Finite Run: run N segments in one submission (headless, 0.6.36)",
           "mode": "full",
-          "h_en": "8865640b8d1edb06",
-          "h_src": "cfd9a64c2536e414",
+          "h_en": "bf6227f6adfc12dc",
+          "h_src": "a9077d2fce470819",
           "seeded": "by-position"
         },
         {
@@ -415,7 +415,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-22",
-      "src_sha": "35207a20cdcfe4ef"
+      "src_sha": "c1a879f3ccb9de03"
     },
     "docs/08-testing.md": {
       "en": "docs/08-testing_EN.md",
@@ -464,22 +464,22 @@
           "zh": "tools/ 下的其他自检（完整清单见 [`tools/README.md`](../tools/README.md)）",
           "en": "Other self-checks under tools/ (full list in [`tools/README.md`](../tools/README.md))",
           "mode": "full",
-          "h_en": "f8357bd8705ae9ca",
-          "h_src": "21a1d6939b8be266",
+          "h_en": "cd90ec79e8d902ad",
+          "h_src": "e2d2c843c3ba2b43",
           "seeded": "by-position"
         },
         {
           "zh": "最小可运行分发集（给用户/分发用，不是开发件）",
           "en": "Minimal runnable distribution set (for users/distribution, not a development artifact)",
           "mode": "full",
-          "h_en": "e47c8cba40f06ba1",
-          "h_src": "5e68cf32dd2fb165",
+          "h_en": "0e6481d2a7663802",
+          "h_src": "64253a55b91cd364",
           "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-10-22",
-      "src_sha": "3d5ce601f6f08746"
+      "src_sha": "0851ebd103662b9e"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",

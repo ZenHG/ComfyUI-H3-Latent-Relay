@@ -30,13 +30,15 @@ under `output/relay_kit/<run_id>/`). Mechanism and measurements: [`docs/01`](doc
 
 ## Core features
 
-**8 nodes in three layers — a minimal workflow only needs the first 3**:
+**11 nodes in five layers — a minimal workflow only needs the first 3**:
 
 | Layer | Nodes | Notes |
 |---|---|---|
 | **Required 3** | LatentSave · CopyBridge (composite) · TrimAV | without them it is not continuation |
 | **Optional 5** | Post · AudioSeam · Chain · LatentUpscale · SeedFromVideo | independent; since **0.6.34** they are **no longer bit-exact pass-through by default** (Post's `settle_auto` and AudioSeam's `patch_seconds` ship switched on — see below) |
 | **Manual routing only 1** | LatentLoad | the bridge fetches the source from disk itself; connect this only to **override the source** |
+| **Advanced 1** | headless Finite Run | only when you want **N segments in one submission** (headless / API / survives closing the browser); **use Chain for everyday runs** |
+| **Internal 1** | Join AV | **do not hand-wire** — only Finite Run's expanded graph connects it; to concatenate files use Chain's 🧩 |
 
 | Node (canvas name) | What it does |
 |---|---|
@@ -49,6 +51,8 @@ under `output/relay_kit/<run_id>/`). Mechanism and measurements: [`docs/01`](doc
 | 🔍 **H3 Relay · Latent Upscale** | **picture domain · latent level**: unpack the AV-packed latent → tile through a learned 3D upscaler → repack. **Zero denoising, not one frame moved in time, audio carried back untouched** (needs an optional upstream dependency — see Install) |
 | 🔗 **H3 Relay · Seed from Video** | **entry point**: encodes **an existing video** into segment 1 (the seed segment) sidecar; later segments continue outward as usual. It blocks three traps for you: temporal grid (5+17k frames), canvas grid (multiples of 16), and A/V equal length (trim tail / zero-pad / silent seed) |
 | 🔗 **H3 Relay · Chain** | auto-run controller: advances stage numbers and queues; since 0.6.7 it also **rotates prompts** (`prompts` split on `---`) and **concatenates** (🧩) |
+| ⏩ **H3 Relay · Finite Run** | **advanced entry point**: one submission **expands segments 1..N into a single acyclic graph** that the host executes in one go (no frontend button, headless-friendly). Every segment chain uses the **same nodes** as a manual run — the algorithm is not rewritten; `from_segment` re-runs only the later segments. ⚠ The merged output is **one in-memory tensor** ⇒ try two segments first when the segment count / resolution is high (see [`docs/07`](docs/07-chain_EN.md) §how it splits work with Chain) |
+| 🧩 **H3 Relay · Join AV** | **internal node, do not hand-wire**: `torch.cat` plus strict spec validation (a spec mismatch raises instead of silently stretching). Only Finite Run's expanded graph connects it — to concatenate files use Chain's 🧩 (file path, nothing held in memory) |
 
 > **Three domains — do not mix them up:** timeline = `H3RelayTrimAV` (frozen) / picture = `H3RelayPost` /
 > audio = `H3RelayAudioSeam`.

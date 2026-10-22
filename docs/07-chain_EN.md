@@ -219,6 +219,16 @@ always the *looser* one — it never falsely rejects.
 2.333 s, both sidecars with lineage headers; single-segment t2v (no first-frame image) also
 succeeded; the before-queueing rejection ran **not a single node**.
 
+**Second round (real GPU, 2026-10-20 — seed from a 192-frame source video, then `from_segment=1`
+ran segments 1 and 2 in one submission)**: segment length 192 / window 22 ⇒ 170 visible per segment,
+the film is **340 frames = 170 + 170** (the server log printed one "trim head 22 frames" line per
+segment, and it matches the ffprobe frame count **exactly**); `JoinAV` logged
+`accumulated 170 + this segment 170 = 340 frames; audio 226667 + 226667 = 453334 samples @ 32000 Hz`.
+**Third round (real GPU, 2026-10-22 — `examples/finite_run_ui.json` submitted from the UI canvas)**:
+segment length 73 / window 22 ⇒ the film is **124 frames = 73 + 51**; `h3_seam_latent_check` compared
+bit for bit and reported **0.000 at all 7 steps** (with `mask_mode=hard` the pinned region really is
+not redrawn).
+
 **Reproducibility**: the pipeline is **deterministic** — repeated runs of the same graph give
 bit-identical safetensors stream tensors / h264 elementary stream / decoded audio, and segment 0 of a
 2-segment run is bit-identical to a single-segment run (adding a second segment perturbs the first by
