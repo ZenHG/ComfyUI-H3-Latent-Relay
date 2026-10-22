@@ -2469,18 +2469,45 @@ ck("H4h `check_tooltips` 的期望项数在 ci.yml·docs/08·tools/README 与**�
 # 🔴 为什么需要：规范只规定「`relay_core/` 是纯算法层」，**没规定 `nodes.py` 多大该拆**。
 #   实测 0.6.35 2426 行 → 0.6.36 2445 → 0.6.37 2717 → 0.6.38 **3000**，
 #   而「拆过」拆的是算法层（`relay_core.py` → 包），**节点层从来没拆过**。
-# 判据分两条，都是**当场量真值**（不抄文档里的数）：
+# 判据分三条，都是**当场量真值**（不抄文档里的数）：
 #   ① 单个节点类：默认上限 `_H5_CLASS_CAP`；已在 `_H5_KNOWN` 里的**只许减不许增**
 #      （超了立刻红 ⇒ 想加就得先下沉，与 `check_frontend` 的 F1 基线同一个套路）。
-#   ② `nodes.py` 总行数：上限 `_H5_FILE_CAP`（今天是 3000，正好顶格 ⇒ 再加就得先拆）。
+#   ② `nodes.py` **可执行代码行**：上限 `_H5_CODE_CAP`。
+#   ③ `nodes.py` **总行数**：上限 `_H5_FILE_CAP`（宽松硬顶，只防无限膨胀）。
+# 🔴 2026-10-22 GG：「适当把行数限定做成智能限制，新加内容是要多用一些的，但依旧必须严格」。
+#   旧判据只有一条「总行数 ≤3000」⇒ 每次补文档/tooltip 都得先想办法压行，**信息完整性
+#   被行数挤掉**（实测为此把 3 段说明压成 1 行才过闸）。但完全放开又回到 0.6.38 前的膨胀。
+#   ⇒ 改成**按性质分层**：
+#      · 可执行行（去空行/注释/docstring）才是体量闸的真正目标 —— 逻辑难维护是拆分的理由，
+#        文档多少不是。上限 2200（实测现值 2063，余量 137 行 ≈ 3-4 个 tooltip）。
+#      · 总行数放宽到 3300 —— 给 docstring/tooltip/注释留增长空间，仍是硬顶。
+#      · 文档占比设**下限** 15% —— 反「把逻辑塞进 docstring 逃计数」：只设上限能钻空子，
+#        加下限就双向卡死。（实测现值 24.4%。）
 # ⚠️ 这是**结构性闸**，判的是「该不该拆」，不是「代码丑不丑」。
 _H5_CLASS_CAP = 400
 _H5_KNOWN = {"H3RelayTrimAV": 439, "H3RelayCopyBridge": 426}   # 只许减不许增
-_H5_FILE_CAP = 3000
+_H5_CODE_CAP = 2200        # 可执行代码行硬顶（去空行/注释/docstring）
+_H5_FILE_CAP = 3300        # 总行数硬顶（宽松，防无限膨胀）
+_H5_DOC_MIN_RATIO = 0.15   # 文档类占比下限（反钻空子）
 _h7_bad, _h7_lines, _cur7, _n7, _total7 = [], [], None, 0, 0
+_h7_code, _h7_blank, _h7_comment, _h7_doc, _in_doc = 0, 0, 0, 0, False
 with open(os.path.join(KIT, "nodes.py"), encoding="utf-8") as _fh7:
     for _ln in _fh7:
         _total7 += 1
+        # —— 行性质分类（供 H7b 的智能限额用）——
+        _s = _ln.strip()
+        _tq = _s.count('"""')
+        if _tq % 2 == 1:                     # 三引号开/关 ⇒ 这一行属于 docstring
+            _in_doc = not _in_doc
+            _h7_doc += 1
+        elif _in_doc:
+            _h7_doc += 1
+        elif not _s:
+            _h7_blank += 1
+        elif _s.startswith("#"):
+            _h7_comment += 1
+        else:
+            _h7_code += 1
         if _ln.startswith("class H3Relay"):
             if _cur7:
                 _h7_lines.append((_cur7, _n7))
@@ -2500,8 +2527,21 @@ ck("H7 单节点类体量：默认上限 + 已知超额项只许减不许增",
    "上限 %d ｜ 已知超额 %s ｜ 违规 %s"
    % (_H5_CLASS_CAP, "、".join("%s %d" % (k, v) for k, v in _H5_KNOWN.items()),
       "；".join(_h7_bad[:4]) or "无"))
-ck("H7b `nodes.py` 总行数不超过上限（顶格 ⇒ 再加就得先把算法段下沉到 relay_core/）",
-   _total7 <= _H5_FILE_CAP, "%d 行（上限 %d）" % (_total7, _H5_FILE_CAP))
+ck("H7b `nodes.py` 可执行代码行不超上限（去空行/注释/docstring；逻辑膨胀才该拆）",
+   _h7_code <= _H5_CODE_CAP,
+   "%d 行（上限 %d，余 %d）｜ 总行数 %d ｜ 文档类 %d（%.1f%%）"
+   % (_h7_code, _H5_CODE_CAP, _H5_CODE_CAP - _h7_code,
+      _total7, _h7_comment + _h7_doc,
+      100.0 * (_h7_comment + _h7_doc) / max(1, _total7)))
+ck("H7c `nodes.py` 总行数不超宽松硬顶（给文档/tooltip 留增长空间，仍防无限膨胀）",
+   _total7 <= _H5_FILE_CAP,
+   "%d 行（上限 %d，余 %d）" % (_total7, _H5_FILE_CAP, _H5_FILE_CAP - _total7))
+ck("H7d 文档类占比不低于下限（反「把逻辑塞进 docstring 逃可执行行计数」）",
+   (_h7_comment + _h7_doc) >= _H5_DOC_MIN_RATIO * max(1, _total7),
+   "文档类 %d / 总 %d = %.1f%%（下限 %.0f%%）｜ 可执行 %d ｜ 空行 %d"
+   % (_h7_comment + _h7_doc, _total7,
+      100.0 * (_h7_comment + _h7_doc) / max(1, _total7),
+      100.0 * _H5_DOC_MIN_RATIO, _h7_code, _h7_blank))
 
 
 # ============================================================================
@@ -2515,12 +2555,19 @@ ck("H7b `nodes.py` 总行数不超过上限（顶格 ⇒ 再加就得先把算�
 #   实测 `docs/08` 与 `tools/README` 里的期望数**长期没跟上**，而它们一个都没被扫过。
 _self_total = len(OK) + len(BAD) + 1
 _bad_r50 = []
+# 🔴 2026-10-22 修误报：旧正则 `(\d+)/0` 扫**所有**含 review_050 的行 ⇒ 把历史实测记录
+#   （"2026-10-15 实测：…review_050 126/0…"）也当期望数比对 ⇒ 加一条判据就红一次，
+#   而正确的修法是改**期望数声明**，不是改历史。改为只认两种「期望数」写法：
+#     · `期望 126/0`（ci.yml 的执行行注释）
+#     · `**126/0**`（docs/08 与 tools/README 表格的期望列）
+#   历史叙述里的裸 `N/0` 一律不当期望数 —— 那段是「那天实测是多少」，本就不该跟着今天变。
 for _fn, _txt in _doc_txt.items():
     for _ln in _txt.splitlines():
-        if "review_050" in _ln:
-            for _val in _re.findall(r"(\d+)/0", _ln):
-                if int(_val) != _self_total:
-                    _bad_r50.append("%s: %s/0（应 %d/0）" % (_fn, _val, _self_total))
+        if "review_050" not in _ln:
+            continue
+        for _val in _re.findall(r"期望\s*(\d+)/0", _ln) + _re.findall(r"\*\*(\d+)/0\*\*", _ln):
+            if int(_val) != _self_total:
+                _bad_r50.append("%s: %s/0（应 %d/0）" % (_fn, _val, _self_total))
 print("      review_050 期望：本文件实跑 = %d ｜ 扫了 %d 个文件" % (_self_total, len(_doc_txt)))
 ck("H3g review_050 的期望数在 ci.yml·docs/08·tools/README·README 与**本文件实跑**一致"
    "（自引用 ⇒ 必须排在最后）",

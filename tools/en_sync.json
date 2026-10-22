@@ -78,7 +78,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-20",
+      "stamped": "2026-10-22",
       "src_sha": "eb7b273696732186"
     },
     "docs/01-mechanism.md": {
@@ -166,7 +166,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-20",
+      "stamped": "2026-10-22",
       "src_sha": "06ca2288755a21d0"
     },
     "docs/02-parameters.md": {
@@ -190,7 +190,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-20",
+      "stamped": "2026-10-22",
       "src_sha": "3b58595bdd4d51e5"
     },
     "docs/03-sampling-and-design.md": {
@@ -222,7 +222,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-20",
+      "stamped": "2026-10-22",
       "src_sha": "e0c4d1c18fb4b8e2"
     },
     "docs/04-canvas-and-widgets.md": {
@@ -238,7 +238,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-20",
+      "stamped": "2026-10-22",
       "src_sha": "db0d87958d3a1d35"
     },
     "docs/05-troubleshooting.md": {
@@ -294,7 +294,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-20",
+      "stamped": "2026-10-22",
       "src_sha": "e81fe8e3d1216b5c"
     },
     "docs/06-continuity-scripting.md": {
@@ -318,7 +318,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-20",
+      "stamped": "2026-10-22",
       "src_sha": "c046d84ff172f569"
     },
     "docs/07-chain.md": {
@@ -414,7 +414,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-20",
+      "stamped": "2026-10-22",
       "src_sha": "35207a20cdcfe4ef"
     },
     "docs/08-testing.md": {
@@ -464,8 +464,8 @@
           "zh": "tools/ 下的其他自检（完整清单见 [`tools/README.md`](../tools/README.md)）",
           "en": "Other self-checks under tools/ (full list in [`tools/README.md`](../tools/README.md))",
           "mode": "full",
-          "h_en": "113ea8edeb1701fb",
-          "h_src": "7da79078431624b6",
+          "h_en": "f8357bd8705ae9ca",
+          "h_src": "21a1d6939b8be266",
           "seeded": "by-position"
         },
         {
@@ -478,8 +478,8 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-20",
-      "src_sha": "28f9f7649fec7dfc"
+      "stamped": "2026-10-22",
+      "src_sha": "3d5ce601f6f08746"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",
@@ -534,7 +534,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-20",
+      "stamped": "2026-10-22",
       "src_sha": "6886d24ff831c09b"
     },
     "docs/10-audio-seam-and-concat.md": {
@@ -598,7 +598,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-20",
+      "stamped": "2026-10-22",
       "src_sha": "068491bc51cdce1e"
     }
   }
