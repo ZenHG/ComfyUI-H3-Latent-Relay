@@ -153,6 +153,11 @@ def schema_from_v1(v1_cls) -> "io.Schema":
         # 两边必须同时开：V3 出口下 NodeOutput 带 expand 而 schema 没开，宿主直接拒
         # （comfy_api 对二者配对有硬校验）。
         enable_expand=bool(getattr(v1_cls, "V3_EXPAND", False)),
+        # 内部件（🧩 Join AV）：V1 类标 DEV_ONLY=True ⇒ V3 同步标。
+        # 🔴 两边**必须同时标**：默认出口是 V3，只标 V1 等于没标 —— 用户照样在菜单里看到它。
+        #   宿主语义：`dev_only` ⇒ 前端 `nodeData.skip_list = !DevMode` ⇒ 不进菜单，
+        #   但**注册照旧**（API / 展开图 / 已存工作流全部照常）。
+        is_dev_only=bool(getattr(v1_cls, "DEV_ONLY", False)),
         inputs=v1_inputs(v1_cls.INPUT_TYPES()),
         outputs=v1_outputs(getattr(v1_cls, "RETURN_TYPES", ()),
                            getattr(v1_cls, "RETURN_NAMES", ())),

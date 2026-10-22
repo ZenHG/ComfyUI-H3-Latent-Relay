@@ -32,7 +32,7 @@ anchor 与采样 latent 不同源（会漂）、只能锚第 0 帧。本包直�
 | **可选 5** | 后处理 Post · 音频缝 · 连跑 Chain · Latent Upscale · Seed from Video | 各自独立；**0.6.34 起不再默认逐位直通**（Post 的 `settle_auto` 与 AudioSeam 的 `patch_seconds` 默认开，见下） |
 | **手动接线才用 1** | Latent 读 | 桥自己会从磁盘取源；只在**显式换源**时接 |
 | **进阶 1** | 无头连跑 Finite Run | 只在「**一次提交跑完 N 段**」时才用它（无头 / API / 关掉浏览器也要跑）；**平时连跑用 Chain** |
-| **内部 1** | 拼接 Join AV | **勿手接** —— 只有 Finite Run 的展开图会接它；人要拼片用 Chain 的 🧩 |
+| **内部 1** | 拼接 Join AV | **勿手接** —— 只有 Finite Run 的展开图会接它；人要拼片用 Chain 的 🧩。**默认不进节点菜单**（勾 `Comfy.DevMode` 才见），API / 展开图 / 已存工作流照常 |
 
 | 节点 | 作用 |
 |---|---|
@@ -45,7 +45,7 @@ anchor 与采样 latent 不同源（会漂）、只能锚第 0 帧。本包直�
 | 🔍 **H3 Relay · Latent Upscale** | **画质域 · latent 层**：拆 AV 打包 latent → 逐块过学习式 3D 放大器 → 回包。**零去噪、时间维一帧不动、音频原样带回**（需可选上游依赖，见 §安装） |
 | 🔗 **H3 Relay · Chain** | 自动连跑控制器：自动推进段号并排队；0.6.7 起还能**换词**（`prompts` 按 `---` 分块）与**拼片**（🧩） |
 | ⏩ **H3 Relay · Finite Run** | **进阶入口**：一次提交把第 1..N 段**展开成一张无环图**，宿主一次执行完（无前端按钮、无头可用）。每段链与手动连跑**同一批节点**，算法零重写；`from_segment` 可只重跑后面几段。⚠ 合并输出是**一条驻留内存的张量** ⇒ 段数多 / 分辨率高先试两段（[`docs/07`](docs/07-chain.md) §与 Chain 的分工） |
-| 🧩 **H3 Relay · Join AV** | **内部节点，勿手接**：`torch.cat` + 严格规格校验（规格不符直接报错，不静默拉伸）。只有 Finite Run 的展开图会接它 —— 人要拼片请用 Chain 的 🧩（文件路，不驻留内存） |
+| 🧩 **H3 Relay · Join AV** | **内部节点，勿手接，且默认不在节点菜单里**（`DEV_ONLY`；勾 `Comfy.DevMode` 才见）：`torch.cat` + 严格规格校验（规格不符直接报错，不静默拉伸）。只有 Finite Run 的展开图会接它 —— 人要拼片请用 Chain 的 🧩（文件路，不驻留内存） |
 | 🔗 **H3 Relay · Seed from Video** | **入口**：把**一段已有视频**编码成第 1 段（种子段）的边车，之后各段照常往外接。自动挡三处坑：时序栅格（5+17k 帧）、画布栅格（16 的倍数）、音画等长（裁尾/补零/静音种子） |
 
 > **三个域别混挂**：时间轴 = `H3RelayTrimAV`（冻结）／画质域 = `H3RelayPost`／音频域 = `H3RelayAudioSeam`。
@@ -84,7 +84,9 @@ git clone https://github.com/ZenHG/ComfyUI-H3-Latent-Relay.git
 包名不允许带 "ComfyUI"。
 
 **装完必须重启 ComfyUI 后端**（ComfyUI-Manager 点 *Restart*；没装就重启 Python 进程）——
-仅刷新浏览器不会加载新节点。节点列表里搜 `🔗 H3 Relay`（8 个）+ `🔍 H3 Relay · Latent Upscale` + `🧩 H3 Relay · Join AV` + `⏩ H3 Relay · Finite Run` 即为全部 11 个。
+仅刷新浏览器不会加载新节点。节点列表里搜 `🔗 H3 Relay`（8 个）+ `🔍 H3 Relay · Latent Upscale` + `⏩ H3 Relay · Finite Run` 即为**菜单里能看到的 10 个**。
+第 11 个 `🧩 H3 Relay · Join AV` 是内部件，**默认不出现在菜单里**（它是 ⏩ Finite Run 展开图专用的张量拼接，手接没有意义）；
+要在菜单里看到它，设置里勾上 `Comfy.DevMode`。**已存工作流与 API 提交都不受影响**（注册照旧）。
 
 **可选：用 🔍 H3 Relay · Latent Upscale 才需要装**（不装不影响其他 7 个节点，用时会报一条写明仓库与权重地址的错）：
 

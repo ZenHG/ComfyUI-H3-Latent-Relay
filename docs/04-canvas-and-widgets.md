@@ -46,8 +46,14 @@
 | 音频缝 | `🔗 H3 Relay · Audio Seam` | `H3RelayAudioSeam` |
 | 连跑 / 连跑控制 | `🔗 H3 Relay · Chain` | `H3RelayChain` |
 | 潜空间分块放大 | `🔍 H3 Relay · Latent Upscale` | `H3RelayLatentUpscale` |
-| 图内拼条 | `🧩 H3 Relay · Join AV` | `H3RelayJoinAV` |
+| 图内拼条（**内部件**） | `🧩 H3 Relay · Join AV` | `H3RelayJoinAV` |
 | 无头连跑 | `⏩ H3 Relay · Finite Run` | `H3RelayFiniteRun` |
+
+> 🔴 **`🧩 H3 Relay · Join AV` 默认不出现在节点菜单里**（`DEV_ONLY = True`）。宿主语义：
+> `dev_only ⇒ nodeData.skip_list = !Comfy.DevMode` ⇒ **不进菜单，但注册照旧** ——
+> API 提交、⏩ Finite Run 展开图、已存工作流**全都不受影响**。要手接它，设置里勾 `Comfy.DevMode`。
+> 为什么隐去：它是展开图专用的张量拼接，用户手接**没有语义**（接了也没人喂累计输入），
+> 摆进菜单只会让人「发现一个不知道怎么用的节点」。
 
 > ⚠️ **改标签不动老图**：工作流里存的是**类型名**（上表第三列）与用户自己设的**标题**，
 > 所以改显示名**不影响已存的图**（连线、槽位、执行全都照旧），只是新拖出来的节点换了名字。

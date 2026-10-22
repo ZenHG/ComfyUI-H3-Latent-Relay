@@ -144,11 +144,13 @@ def main():
         v1_ids = set(nmod.NODE_CLASS_MAPPINGS)
     except Exception as e:
         why = "读不到本包 nodes.py（%s: %s）" % (type(e).__name__, e)
+    v3_sch = {}
     try:
         ext = asyncio.run(ep()) if asyncio.iscoroutinefunction(ep) else ep()
         for _n in asyncio.run(ext.get_node_list()):
             _s = _n.define_schema() if hasattr(_n, "define_schema") else _n.GET_SCHEMA()
             v3_ids.add(_s.node_id)
+            v3_sch[_s.node_id] = _s
     except Exception as e:
         why = "取不到 V3 的 get_node_list()（%s: %s）" % (type(e).__name__, e)
     # 唯一容忍项：`H3RelayLatentUpscale` 的 `INPUT_TYPES()` 会去问宿主注册表 ⇒ 某些环境抛，
@@ -176,6 +178,29 @@ def main():
     if not ok4:
         fails.append("V3 注册集合")
 
+    # —— ④ 两个出口的 `dev_only` 标记**逐节点一致**（2026-10-22 加） ——
+    # 🔴 为什么非加不可：`🧩 Join AV` 是**内部件**，靠 `DEV_ONLY=True` 从节点菜单里隐去
+    #    （宿主语义：`dev_only ⇒ skip_list = !DevMode`，注册照旧 ⇒ API/展开图/已存工作流不受影响）。
+    #   默认出口是 **V3**，所以只标 V1 等于没标 —— 用户照样在菜单里看到它、接上又不知道干什么。
+    #   现在 V3 由 `schema_from_v1` **派生**（结构性不可能分叉），这条是**回归闸**：
+    #   将来谁改 `schema_from_v1` 忘了带 `is_dev_only`，或谁手写 schema，立刻红。
+    _dev_bad = []
+    for _k in sorted(v1_ids & v3_ids):
+        _v1d = bool(getattr(nmod.NODE_CLASS_MAPPINGS[_k], "DEV_ONLY", False))
+        _v3d = bool(getattr(v3_sch.get(_k), "is_dev_only", False))
+        if _v1d != _v3d:
+            _dev_bad.append("%s（V1=%s / V3=%s）" % (_k, _v1d, _v3d))
+    ok5 = bool(v3_sch) and not _dev_bad
+    print("  [%s] 两个出口的 dev_only 标记逐节点一致（内部件不进节点菜单）"
+          % ("OK" if ok5 else "FAIL"))
+    print("         → V3 标记 %d 个内部件：%s"
+          % (sum(1 for _s in v3_sch.values() if getattr(_s, "is_dev_only", False)),
+             [k for k, _s in sorted(v3_sch.items()) if getattr(_s, "is_dev_only", False)] or "无"))
+    if _dev_bad:
+        print("         → 不一致：%s" % _dev_bad)
+    if not ok5:
+        fails.append("dev_only 标记")
+
     print()
     if fails:
         if fell_back:
@@ -187,9 +212,16 @@ def main():
             print("   宿主自己的全部 Python 依赖（实测缺过 packaging / comfy-aimdo / tqdm）。")
             print("   修法：把 ComfyUI 的 requirements.txt 装上（去掉 torch 与前端包即可）。")
         else:
-            print("❌ 默认出口不是 V3（缺 %s）。检查 __init__.py 的 NODE_API_DEFAULT。" % "、".join(fails))
+            # ⚠ 别把每条失败都推给 NODE_API_DEFAULT：`dev_only 标记` 与「注册集合」这两条
+            #   跟默认值无关（默认值可能完全正确）。按失败项分开说话，否则人被引向错方向。
+            print("❌ 断言未过：%s" % "、".join(fails))
+            if "dev_only 标记" in fails:
+                print("   → dev_only 不一致跟默认值无关：查 `v3/_compat.schema_from_v1` 是否带了")
+                print("     `is_dev_only=getattr(v1_cls, \"DEV_ONLY\", False)`，以及 V1 类上的 `DEV_ONLY`。")
+            if ("契约 1" in fails) or ("契约 2" in fails):
+                print("   → 契约项才要看 `__init__.py` 的 `NODE_API_DEFAULT`。")
         return 1
-    print("✅ 默认出口 = V3（5/5：契约 2 + 行为 3）")
+    print("✅ 默认出口 = V3（6/6：契约 2 + 行为 4）")
     return 0
 
 

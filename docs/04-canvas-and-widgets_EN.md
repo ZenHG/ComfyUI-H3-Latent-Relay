@@ -55,8 +55,14 @@ Chinese docs call them by **function** — the table below maps the two sides:
 | audio seam | `🔗 H3 Relay · Audio Seam` | `H3RelayAudioSeam` |
 | chain run / chain control | `🔗 H3 Relay · Chain` | `H3RelayChain` |
 | latent tiled upscale | `🔍 H3 Relay · Latent Upscale` | `H3RelayLatentUpscale` |
-| in-graph join | `🧩 H3 Relay · Join AV` | `H3RelayJoinAV` |
+| in-graph join (**internal**) | `🧩 H3 Relay · Join AV` | `H3RelayJoinAV` |
 | headless run | `⏩ H3 Relay · Finite Run` | `H3RelayFiniteRun` |
+
+> 🔴 **`🧩 H3 Relay · Join AV` is not in the node menu by default** (`DEV_ONLY = True`). Host semantics:/n> `dev_only ⇒ nodeData.skip_list = !Comfy.DevMode` ⇒ **absent from the menu, but still registered** —
+> API submission, the ⏩ Finite Run expanded graph and saved workflows are **all unaffected**.
+> To hand-wire it, enable `Comfy.DevMode` in settings.
+> Why hide it: it is a tensor concat meant for the expanded graph only; hand-wiring it has **no meaning**
+> (nothing would feed the accumulator inputs), and listing it only makes users "find a node they cannot use".
 
 > ⚠️ **Changing labels does not touch old graphs**: a workflow stores the **type name** (third column above) and
 > the user's own **title**, so changing a display name **does not affect saved graphs** (links, slots and

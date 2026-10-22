@@ -38,7 +38,7 @@ under `output/relay_kit/<run_id>/`). Mechanism and measurements: [`docs/01`](doc
 | **Optional 5** | Post · AudioSeam · Chain · LatentUpscale · SeedFromVideo | independent; since **0.6.34** they are **no longer bit-exact pass-through by default** (Post's `settle_auto` and AudioSeam's `patch_seconds` ship switched on — see below) |
 | **Manual routing only 1** | LatentLoad | the bridge fetches the source from disk itself; connect this only to **override the source** |
 | **Advanced 1** | headless Finite Run | only when you want **N segments in one submission** (headless / API / survives closing the browser); **use Chain for everyday runs** |
-| **Internal 1** | Join AV | **do not hand-wire** — only Finite Run's expanded graph connects it; to concatenate files use Chain's 🧩 |
+| **Internal 1** | Join AV | **do not hand-wire** — only Finite Run's expanded graph connects it; to concatenate files use Chain's 🧩. **Hidden from the node menu by default** (enable `Comfy.DevMode` to see it); API / expanded graphs / saved workflows are unaffected |
 
 | Node (canvas name) | What it does |
 |---|---|
@@ -52,7 +52,7 @@ under `output/relay_kit/<run_id>/`). Mechanism and measurements: [`docs/01`](doc
 | 🔗 **H3 Relay · Seed from Video** | **entry point**: encodes **an existing video** into segment 1 (the seed segment) sidecar; later segments continue outward as usual. It blocks three traps for you: temporal grid (5+17k frames), canvas grid (multiples of 16), and A/V equal length (trim tail / zero-pad / silent seed) |
 | 🔗 **H3 Relay · Chain** | auto-run controller: advances stage numbers and queues; since 0.6.7 it also **rotates prompts** (`prompts` split on `---`) and **concatenates** (🧩) |
 | ⏩ **H3 Relay · Finite Run** | **advanced entry point**: one submission **expands segments 1..N into a single acyclic graph** that the host executes in one go (no frontend button, headless-friendly). Every segment chain uses the **same nodes** as a manual run — the algorithm is not rewritten; `from_segment` re-runs only the later segments. ⚠ The merged output is **one in-memory tensor** ⇒ try two segments first when the segment count / resolution is high (see [`docs/07`](docs/07-chain_EN.md) §how it splits work with Chain) |
-| 🧩 **H3 Relay · Join AV** | **internal node, do not hand-wire**: `torch.cat` plus strict spec validation (a spec mismatch raises instead of silently stretching). Only Finite Run's expanded graph connects it — to concatenate files use Chain's 🧩 (file path, nothing held in memory) |
+| 🧩 **H3 Relay · Join AV** | **internal node, do not hand-wire, and not in the node menu by default** (`DEV_ONLY`; enable `Comfy.DevMode` to see it): `torch.cat` plus strict spec validation (a spec mismatch raises instead of silently stretching). Only Finite Run's expanded graph connects it — to concatenate files use Chain's 🧩 (file path, nothing held in memory) |
 
 > **Three domains — do not mix them up:** timeline = `H3RelayTrimAV` (frozen) / picture = `H3RelayPost` /
 > audio = `H3RelayAudioSeam`.
@@ -91,10 +91,13 @@ Or **ComfyUI Manager → Custom Nodes Manager → search `h3-latent-relay`**
 name because the registry forbids "ComfyUI" in a pack name.
 
 **Restart the ComfyUI backend afterwards** (ComfyUI-Manager → *Restart*; otherwise restart the Python
-process) — refreshing the browser alone does not load new nodes. Search the node list for `🔗 H3 Relay` (7)
-+ `🔍 H3 Relay · Latent Upscale` to see all 9.
+process) — refreshing the browser alone does not load new nodes. Search the node list for `🔗 H3 Relay` (8)
++ `🔍 H3 Relay · Latent Upscale` + `⏩ H3 Relay · Finite Run` — the **10 visible in the menu**.
+The 11th, `🧩 H3 Relay · Join AV`, is internal and **not in the menu by default** (it is the tensor concat
+used only by the ⏩ Finite Run expanded graph; hand-wiring it has no meaning). Enable `Comfy.DevMode`
+in settings to see it. **Saved workflows and API submission are unaffected** (registration is unchanged).
 
-**Optional: only needed for 🔍 latent tile upscaling** (not installing it does not affect the other 7
+**Optional: only needed for 🔍 latent tile upscaling** (not installing it does not affect the other 10
 nodes; using it then raises an error naming the repository and the weights):
 
 ```bash

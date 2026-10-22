@@ -16,8 +16,8 @@
           "zh": "核心功能",
           "en": "Core features",
           "mode": "condensed",
-          "h_en": "e910a0dce7a0e931",
-          "h_src": "8e0498e1e96a5481",
+          "h_en": "fb1bbc86b9384660",
+          "h_src": "0b384055d96f401b",
           "seeded": "by-position"
         },
         {
@@ -32,8 +32,8 @@
           "zh": "安装",
           "en": "Install",
           "mode": "condensed",
-          "h_en": "f6ef3d1e1f0d123e",
-          "h_src": "9d7ec1b013ab7dad",
+          "h_en": "dbbf6837663743a5",
+          "h_src": "46ebabba5134d8ca",
           "seeded": "by-position"
         },
         {
@@ -79,7 +79,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-22",
-      "src_sha": "4e19db32d6412f15"
+      "src_sha": "6dbd368160f7b93a"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -232,14 +232,14 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "full",
-          "h_en": "df77ca798a328945",
-          "h_src": "db0d87958d3a1d35",
+          "h_en": "f06d8decfa98c668",
+          "h_src": "285e4de2b2516475",
           "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-10-22",
-      "src_sha": "db0d87958d3a1d35"
+      "src_sha": "285e4de2b2516475"
     },
     "docs/05-troubleshooting.md": {
       "en": "docs/05-troubleshooting_EN.md",
@@ -456,16 +456,16 @@
           "zh": "V3 外壳与默认出口（零 GPU、秒级）",
           "en": "V3 shell and default exit (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "6779ea29760b897a",
-          "h_src": "1c106402c200d141",
+          "h_en": "44219a43eedf61d8",
+          "h_src": "c8cfe305997f60f6",
           "seeded": "by-position"
         },
         {
           "zh": "tools/ 下的其他自检（完整清单见 [`tools/README.md`](../tools/README.md)）",
           "en": "Other self-checks under tools/ (full list in [`tools/README.md`](../tools/README.md))",
           "mode": "full",
-          "h_en": "cd90ec79e8d902ad",
-          "h_src": "e2d2c843c3ba2b43",
+          "h_en": "da48c5b8520f181b",
+          "h_src": "7389c8c5439bd643",
           "seeded": "by-position"
         },
         {
@@ -479,7 +479,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-22",
-      "src_sha": "ee36eb577eea921f"
+      "src_sha": "2c0f06cae2b2fa9d"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",
