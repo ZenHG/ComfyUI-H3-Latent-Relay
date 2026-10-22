@@ -472,14 +472,14 @@
           "zh": "最小可运行分发集（给用户/分发用，不是开发件）",
           "en": "Minimal runnable distribution set (for users/distribution, not a development artifact)",
           "mode": "full",
-          "h_en": "0e6481d2a7663802",
-          "h_src": "64253a55b91cd364",
+          "h_en": "55627b16e6faea10",
+          "h_src": "26c5a192c984f5c4",
           "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-10-22",
-      "src_sha": "0851ebd103662b9e"
+      "src_sha": "ee36eb577eea921f"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",

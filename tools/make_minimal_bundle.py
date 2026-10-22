@@ -121,6 +121,12 @@ MANIFEST_EXAMPLES = [
     "examples/README.md",
     "examples/minimal_relay_official.json",
     "examples/fullflow_second_pass_latent_upscale_ui.json",
+    # 🔴 2026-10-22 补登：README / docs/07 都在叫用户「打开 examples/seed_from_video_ui.json」
+    #   与「示例：examples/finite_run_ui.json」，但**这两张图不在分发集里** ⇒ 从 Registry /
+    #   GitHub 安装的用户按文档去找会找不到（功能做了、示例没给 = 等于没做）。
+    #   两张合计 +85 KB，换「下载即有两张能跑的新节点图」。
+    "examples/seed_from_video_ui.json",
+    "examples/finite_run_ui.json",
 ]
 
 MANIFEST_META = [

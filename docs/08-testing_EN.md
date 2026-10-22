@@ -324,13 +324,13 @@ section = red); ③ **fail-closed** (a missing/broken manifest ⇒ exit code 2, 
 python tools/make_minimal_bundle.py --zip     # → dist/ComfyUI-H3-Latent-Relay(.zip)
 ```
 
-**43 files / 1432 KB** (zip 502 KB), carrying only:
+**45 files / 1517 KB** (zip 516 KB), carrying only:
 
 | Group | Files |
 |---|---|
 | Runtime-required (26) | `__init__.py` · `relay_core/` (12 files) · `nodes.py` · `layout_contract.py` · `v3/` (4 files) · `exp/__init__.py` · `exp/history_anchor_v2/` (3 files) · `exp/voice_accum/` (3 files) |
 | Front end (7) | The seven JS files under `web/` (chain / prompt dispatch / voice anchor / i18n ×2 / sync) |
-| Examples (3) | `examples/`'s two workflows + their README |
+| Examples (5) | `examples/`'s four workflows (minimal / full-flow / seed-from-video / headless run) + their README |
 | Metadata/legal/must-read (7) | `requirements.txt` · `pyproject.toml` · `LICENSE` · `licenses/Apache-2.0.txt` · `THIRD-PARTY-NOTICES.md` · `README.md` · `README_EN.md` |
 
 **Not included**: `docs/` · `tests/` · `tools/` · `.github/` · `CHANGES.md` · `CONTRIBUTING.md` ·

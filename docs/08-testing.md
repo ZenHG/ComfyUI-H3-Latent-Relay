@@ -268,13 +268,13 @@ CI（`.github/workflows/ci.yml`）按顺序跑：**ruff 静态检查 → 回归�
 python tools/make_minimal_bundle.py --zip     # → dist/ComfyUI-H3-Latent-Relay(.zip)
 ```
 
-**43 文件 / 1432 KB**（zip 502 KB），只带：
+**45 文件 / 1517 KB**（zip 516 KB），只带：
 
 | 组 | 文件 |
 |---|---|
 | 运行必需（26） | `__init__.py` · `relay_core/`×12 · `nodes.py` · `layout_contract.py` · `v3/`×4 · `exp/__init__.py` · `exp/history_anchor_v2/`×3 · `exp/voice_accum/`×3 |
 | 前端（7） | `web/` 下的 7 个 JS（连跑 / 词分发 / 声锚 / i18n×2 / 同步） |
-| 示例（3） | `examples/` 的两个工作流 + 其 README |
+| 示例（5） | `examples/` 的四个工作流（最小图 / 全流程 / 视频起段 / 无头连跑）+ 其 README |
 | 元数据/法律/必读（7） | `requirements.txt` · `pyproject.toml` · `LICENSE` · `licenses/Apache-2.0.txt` · `THIRD-PARTY-NOTICES.md` · `README.md` · `README_EN.md` |
 
 **不带**：`docs/` · `tests/` · `tools/` · `.github/` · `CHANGES.md` · `CONTRIBUTING.md` ·
