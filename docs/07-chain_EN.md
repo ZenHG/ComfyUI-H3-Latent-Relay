@@ -228,6 +228,15 @@ segment, and it matches the ffprobe frame count **exactly**); `JoinAV` logged
 segment length 73 / window 22 ⇒ the film is **124 frames = 73 + 51**; `h3_seam_latent_check` compared
 bit for bit and reported **0.000 at all 7 steps** (with `mask_mode=hard` the pinned region really is
 not redrawn).
+**Fourth round (real GPU, 2026-10-22 — **3 segments** at 1216×672 / length 192 / window 22 / 6 steps, 合伙人 footage)**:
+the film is **510 frames = 170 + 170 + 170** (the server log prints one "trim head 22 frames" line per
+segment and it matches ffprobe **exactly**); `JoinAV` logged three accumulations
+`0+170=170 → 170+170=340 → 340+170=510`, audio `680001 samples @32000 Hz = 21.2500 s` versus picture
+`510/24 = 21.2500 s` (**1 sample apart**); `h3_seam_latent_check` reported **0.000 at all 7 steps on all 3 seams**.
+⚠ Same round: when a segment prompt contains 3 `[Shot]` blocks, `h3_shotcut_check`'s **C3/C4/C6 premises fail**
+(cuts inside a segment are intended, and the boundary may legitimately stay on the same setup), and C8
+additionally needs sound near the cut. Full evidence and the cause of the "segment 3 tail scene drift"
+are in the handover note `FiniteRun-三段真机实测-合伙人-2026-10-22.md`.
 
 **Reproducibility**: the pipeline is **deterministic** — repeated runs of the same graph give
 bit-identical safetensors stream tensors / h264 elementary stream / decoded audio, and segment 0 of a
@@ -241,8 +250,10 @@ segments / high resolution, try two segments at low resolution first); AudioSeam
 included. The settle mode (`settle_frames`) is **trim policy** ⇒ it is sent down per segment, so
 script and canvas paths have the same capability; the remaining Trim AV picture-domain knobs
 (`match_prev` / `lowfreq_pull` / histogram / white balance…) stay canvas-chain only.
-⚠️ **Still unverified**: seam look by human eye, ≥3 segments, memory peak on long films,
-frame-by-frame comparison against canvas Chain. Example: `examples/finite_run_ui.json`.
+⚠️ **Still unverified**: seam look by human eye, memory peak on long films (3 segments at 1216×672
+only accumulate ~1.3 GiB, far from the ~10-segment ceiling), frame-by-frame comparison against
+canvas Chain. (**≥3 segments was verified on 2026-10-22** — see the fourth round above.)
+Example: `examples/finite_run_ui.json`.
 
 ---
 
