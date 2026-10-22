@@ -376,6 +376,17 @@ def check_av_link(wf):
     return out
 
 
+def _is_prompt_node(node_type) -> bool:
+    """是不是「出词节点」（决定 length/width/height 的那一个）。
+
+    按类型名宽松匹配：官方 `MiniMaxH3ImageToVideo` 及其 Tail 变体、
+    以及任何名字里带 ImageToVideo / I2V 的同类。宽松是为了不漏 ——
+    漏一个出词节点就等于那条链的段长没人管。
+    """
+    t = str(node_type or "")
+    return ("ImageToVideo" in t) or ("I2V" in t) or ("image_to_video" in t)
+
+
 def check_link_consistency(wf):
     """link 编号三处一致（2026-10-22 实测翻车点，母版习惯补成机检）。
 
@@ -599,6 +610,35 @@ def check_file(path: str, oi: dict, verbose: bool = True) -> int:
             msg, hard = check_value(defn, k, v)
             if msg:
                 (problems if hard else warns).append("node %s %s: %s" % (n["id"], n["type"], msg))
+            # 🔴 段长/画幅栅格（2026-10-22）：**Chain 画布连跑那条路的 length 漏洞**。
+            #   宿主 `execution.py` 的 INT 分支只查 min/max、**不查 step** ⇒ 出词节点的
+            #   `length=96` 会被放行；上游 `MiniMaxH3ImageToVideo.align_frame_count` 再把
+            #   它**向上吸附**到 107 ⇒ 用户填 96、实跑 107，段长静默偏差 11 帧。
+            #   ⏩ FiniteRun 有 `validate_finite_params` 拦，但 🔗 Chain 那条路**没有** ——
+            #   Chain 只管带 `stage_index` 的节点（桥/落盘/读上段/音频缝），length 在出词
+            #   节点上，前端按钮与机检都不看它 ⇒ 这里补上跑批前的最后一道门。
+            if _is_prompt_node(n.get("type")):
+                if k == "length" and isinstance(v, int):
+                    # 🔴 判据走 relay_core 单一真相源（2026-10-22）：不在这里另写取模式。
+                    #    「段长在 5+17k 档上」这条规则三处都要（本机检 / FiniteRun 执行期 /
+                    #    h3_extend_run 脚本侧），各写一遍 ⇒ 漏改一处就是半边漏洞。
+                    _rc = relay_core_mod()
+                    _ok = _rc.is_frame_grid(v) if _rc else ((v - 5) % 17 == 0)
+                    if not _ok:
+                        _lo, _hi = (_rc.frame_grid_neighbors(v) if _rc
+                                    else (5 + 17 * ((v - 5) // 17),
+                                          5 + 17 * ((v - 5) // 17 + 1)))
+                        problems.append(
+                            "node %s %s: `length=%d` 不在 H3 的 5+17k 帧栅格上"
+                            "（合法档：5/22/39/56/73/90/107/124/158/192/226…，最接近 %d）。"
+                            "宿主只查 min/max 不查步长，上游会把它**静默吸附**成 %d ⇒ 你填的帧数与实跑不一致。"
+                            "（⏩ Finite Run 会拦这条路；🔗 Chain 画布连跑不拦 ⇒ 由本机检兜底）"
+                            % (n["id"], n["type"], v, _hi, _hi))
+                elif k in ("width", "height") and isinstance(v, int) and v % 16 != 0:
+                    problems.append(
+                        "node %s %s: `%s=%d` 不是 16 的倍数（H3 画布栅格）。"
+                        "latent 空间尺寸 = //16 ⇒ 非倍数会被上游按整数除法静默缩小，桥跨段比对时直接拒。"
+                        % (n["id"], n["type"], k, v))
 
         if len(wv) > len(exp):
             nm = n.get("widgets_values_named")

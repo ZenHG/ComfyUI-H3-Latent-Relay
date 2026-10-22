@@ -76,6 +76,45 @@ def snap_guide_run(n: int) -> int:
     return 0
 
 
+def is_frame_grid(n: int) -> bool:
+    """``n`` 是否落在 **5+17k 段长档**上（帧数栅格谓词，唯一真相源）。
+
+    🔴 为什么必须是这一个函数、而不是各处写 ``(n - 5) % 17 != 0``：
+    「段长必须在 5+17k 档上」这条事实**同时被三处需要** ——
+    ⏩ FiniteRun 的 ``validate_finite_params``（执行期硬闸）·
+    ``tools/check_ui_workflow.py`` 的跑批前体检（拦 🔗 Chain 画布那条路）·
+    跑批脚本的 ``--length`` 校验（脚本侧）。
+    2026-10-22 实测：三处各写一遍取模表达式 ⇒ 改档位规则要改三个地方，
+    漏一个就出现「FiniteRun 拦、Chain 不拦」的半边漏洞。这正是
+    《H仓规范补条-节点层体量与拆分》要治的「同一个事实在多处声明」。
+
+    档位同样由 ``FRAME_PER_TOKEN`` 推导（与 `frame_grid_floor` 同一套常量，不硬编码 5/17）。
+    """
+    n = int(n)
+    epoch = sum(FRAME_PER_TOKEN[:2])      # 5
+    cycle = sum(FRAME_PER_TOKEN)          # 17
+    if n < epoch:
+        return False
+    return (n - epoch) % cycle == 0
+
+
+def frame_grid_neighbors(n: int) -> Tuple[int, int]:
+    """``n`` 的下邻/上邻合法段长档（供报错文案"最接近的合法档是 X"）。
+
+    返回 ``(floor, ceil)``：``floor ≤ n ≤ ceil``，两者都在 5+17k 档上。
+    ``n`` 本身在档上时两者相等。
+    """
+    n = int(n)
+    epoch = sum(FRAME_PER_TOKEN[:2])
+    cycle = sum(FRAME_PER_TOKEN)
+    if n < epoch:
+        return (0, epoch)
+    k = (n - epoch) // cycle
+    lo = int(epoch + cycle * k)
+    hi = lo if lo == n else int(epoch + cycle * (k + 1))
+    return (lo, hi)
+
+
 def frame_grid_floor(n: int) -> int:
     """≤ n 的最大**段长档**（5+17k）；不足 5 帧返回 0。
 

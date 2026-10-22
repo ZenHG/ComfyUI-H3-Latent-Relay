@@ -36,7 +36,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from ._grid import GUIDE_RUNS, frame_grid_floor
+from ._grid import (GUIDE_RUNS, frame_grid_neighbors, frame_grid_floor,
+                    is_frame_grid)
 from .bridge import MASK_MODES
 from .prompt import split_prompt_blocks
 from .seam import SETTLE_CAP
@@ -157,15 +158,18 @@ def validate_finite_params(*, segments: Any = None, seed: Any = None, run_id: An
         #   ⇒ 帧账错 11 帧，`h3_shotcut_check` 的 C1（Σ=成片帧数，严等）假红。
         #   实测：length=96 → 成片 85 帧 / 3.54s（`frlen96`）。
         #   按本仓纪律「非法值直接 raise，不吸附」——段长是续接相位的前提，改了必须让人知道。
-        if (L - 5) % 17 != 0:
-            near = frame_grid_floor(L)
+        # 🔴 判据走 `_grid.is_frame_grid` 单一真相源（2026-10-22）：这条规则三处都要
+        #   （本处执行期硬闸 / check_ui_workflow 跑批前体检 / h3_extend_run 脚本侧），
+        #   各处自己写取模表达式 ⇒ 漏改一处就出现「FiniteRun 拦、Chain 不拦」的半边漏洞。
+        if not is_frame_grid(L):
+            lo, hi = frame_grid_neighbors(L)
             raise FinitePlanError(
                 "length=%d 不在 H3 的 5+17k 帧栅格上（合法档：%s …）。\n"
-                "    最接近的合法档是 %d。\n"
+                "    最接近的合法档是 %d（下邻 %d / 上邻 %d）。\n"
                 "    ⚠ 宿主只查 min/max 不查步长，上游会把非档值**静默吸附**到最近的档"
                 "（96 → 107）⇒ 你填的帧数与实际跑出来的不一样，帧账随之错位。\n"
                 "    这里不吸附：段长决定续接相位，改了必须让你知道。" % (
-                    L, ", ".join(str(g) for g in sorted(GUIDE_RUNS) if g >= 5), near))
+                    L, ", ".join(str(g) for g in sorted(GUIDE_RUNS) if g >= 5), hi, lo, hi))
     for name, val in (("width", width), ("height", height)):
         if val is None:
             continue
@@ -350,17 +354,43 @@ def build_finite_graph(
         graph[join] = {"class_type": "H3RelayJoinAV", "inputs": join_inputs}
         prev_join = join
 
+    # —— 合并输出的显存账（2026-10-22 补：原来只有一句"长片先小分辨率验证"，没数字）——
+    # JoinAV 用 `torch.cat` 逐段累加 ⇒ **驻留 = Σ各段帧**（不是最大值，是总和），
+    # 且每接一段都要把已累计的全部拷贝一遍 ⇒ 拷贝量 = O(N²)。
+    # 实测口径（RTX 5070 12GB / 合伙人项目 192 帧·1216×672）：
+    #    2 段 0.9 GiB ｜ 6 段 2.6 GiB ｜ 10 段 4.4 GiB ｜ **37 段 16.2 GiB ⇒ 必爆**
+    # 12GB 卡的实务上限约 10 段；更长必须分批提交，或走 🔗 Chain 的**文件路**拼接
+    # （那段不把全片驻留内存，而是逐段落盘后拼）。
+    _mib_frame = float(width) * float(height) * 3.0 / (1024.0 * 1024.0)
+    _acc_gib = n * float(length) * _mib_frame / 1024.0
+    _copy_gib = sum((i + 1) for i in range(n)) * float(length) * _mib_frame / 1024.0
+    if _acc_gib > 10.0:
+        _vram_note = (
+            "\n🔴 合并输出需 **%.1f GiB** 显存/内存（%d 段 × %d 帧 × %d×%d），"
+            "累计拷贝 %.0f GiB。**12GB 卡装不下**（实测 10 段 4.4 GiB、37 段 16.2 GiB）。"
+            "\n   两条路：① 分批提交，每批 ≤10 段（各自一个 run_id 段区间）；"
+            "② 走 🔗 Chain 的「🧩 拼成一条」——那段逐落盘后拼，不把全片驻留内存。" % (
+                _acc_gib, n, int(length), int(width), int(height), _copy_gib))
+    elif _acc_gib > 6.0:
+        _vram_note = (
+            "\n⚠ 合并输出需 **%.1f GiB**（累计拷贝 %.0f GiB）—— 已接近 12GB 卡的实务上限"
+            "（约 10 段 / 4.4 GiB）。再长请分批提交或走 🔗 Chain 文件路拼接。" % (
+                _acc_gib, _copy_gib))
+    else:
+        _vram_note = (
+            "\n合并输出驻留内存约 **%.2f GiB**（累计拷贝 %.1f GiB）—— 在 12GB 卡实务范围内。"
+            % (_acc_gib, _copy_gib))
+
     report = (
         "一次提交展开 %d 段（seed=%d，run_id=%s，context_frames=%d，mask_mode=%s，"
         "settle_frames=%d，from_segment=%d）。\n"
         "每段链：ImageToVideo → CopyBridge → 采样 → LatentSave → 解码 → TrimAV → JoinAV"
         "（上一段由桥自取，不再手接 Latent Load；trim_frames 由桥给，settle_frames 见上）。\n"
-        "边车：output/relay_kit/%s/stage_%05d..%05d（含谱系头）%s。\n"
-        "⚠ 合并输出驻留内存：%d 段全画面在一条张量里，长片先小分辨率验证。"
+        "边车：output/relay_kit/%s/stage_%05d..%05d（含谱系头）%s。%s"
         % (n, int(seed), rid or "（空）", int(context_frames), str(mask_mode),
            int(settle_frames), fs, rid or "<run_id>", fs, fs + n - 1,
            ("；首段读 stage_%05d 续接" % (fs - 1)) if fs > 0 else "；首段不接上一段（直通）",
-           n)
+           _vram_note)
     )
     return graph, [[samp, 0], [prev_join, 0], [prev_join, 1], report], report
 
