@@ -154,7 +154,7 @@ console.log("[7] chain.js 阶段表 ↔ say() 相位串 一致性（静态扫描
         && /rowFallbackBound/.test(src)
         && /document\.addEventListener\("pointerdown"/.test(src));
 
-    // 🔴 7.7~7.9 = 2026-10-12 第二轮（GG 点名三条"优雅处理"）的静态锁。
+    // 🔴 7.7~7.9 = 2026-10-12 第二轮（重点三条"优雅处理"）的静态锁。
     check("7.7 「队列被清空」兜底在位：`status` 监听 + `onQueueStatus` 两条判据（remaining==0 且 !hostBusy）",
         /addEventListener\("status"/.test(src)
         && /s\.onQueueStatus\(detail\)/.test(src)

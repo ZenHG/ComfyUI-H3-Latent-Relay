@@ -9,7 +9,7 @@
   · `tools/make_minimal_bundle.py` 验的是 `dist/`（registry / zip 那条渠道）。但 **git clone 那条
     渠道拿的不是 `dist/`**（是整仓受控文件）⇒ 两条渠道的"缺文件"方式**不同**，必须各验一次。
 
-【两条路都要过（GG 要求：UI 版与 API 版都正常）】
+【两条路都要过（要求：UI 版与 API 版都正常）】
   A. **干净副本**：按 `git ls-files` 复制出 `<tmp>/H3Pack`（不带 `.git` / `__pycache__` / 未跟踪文件）
      ① 默认出口 = V3：`NODE_CLASS_MAPPINGS is None` + `comfy_entrypoint().get_node_list()` 出 N 节点
      ② `H3RELAY_NODE_API=v1`（**独立子进程**）：`NODE_CLASS_MAPPINGS` 出 N 节点，
