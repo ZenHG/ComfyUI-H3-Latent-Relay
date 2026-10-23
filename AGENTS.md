@@ -176,7 +176,7 @@ python tools/release.py            # 预演；--go 才真发；唯一真相源 =
 
 **新增一条口径数字 = 必须同时**：① 加判据；② 在 `tools/checks_ledger.py` 登记（否则 **H4c** 红）；
 ③ 按上面两条写。
-| **I1–I4** | 示例图：widget 值不超槽位 / 取值在候选内 / 带 `widget` 标记 / `examples/README.md` 节点数与实际一致 |
+| **I1–I5** | 示例图：widget 值不超槽位 / 取值在候选内 / 带 `widget` 标记 / `examples/README.md` 节点数 / 素材引用为中性占位名（两套编码一致、无 CJK） |
 | **J1 / J3** | 存量工作流无过期输出数组 / `custom_nodes` 无同包第二份副本 |
 | **L2–L13** | 音频缝契约与文档口径（含 L10/L11 铁律在位、L13 英文同步闸） |
 | 🔴 **`user_smoke.py`（铁律九）** | **不在 CI**：要一个活宿主 ⇒ 与 `ui_smoke.cjs` 同档，**只能靠人记得跑** ⇒ 发布前必跑（见 §2 表） |

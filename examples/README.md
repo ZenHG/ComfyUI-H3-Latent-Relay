@@ -232,3 +232,33 @@ Seed from Video ──→ 🔗 H3 Relay · Chain（stage_index=1，驱动外扩�
 
 > ⚠️ 成片：`Chain` 的 `auto_concat` 已开 ⇒ 跑完自动拼「生成段 1..N」，**不含源视频头部**；
 > 要完整片，把源文件拼在最前。
+
+---
+
+## `finite_run_ui.json`
+
+**一次提交跑完 N 段（服务端展开，无头可用）。** 只回答一个问题：
+**「不点按钮、脚本/API 怎么把 2 段以上一把跑完？」**
+
+```
+UNETLoader / CLIPLoader / VAELoader×2 ─┬→ ⏩ H3 Relay · Finite Run（内部展开 N 段）
+LoadImage（定妆照，可拔）──────────────┤        ↑ model / clip / vae / audio_vae
+KSamplerSelect + BasicScheduler ──────┘        ↑ sampler / sigmas
+Finite Run ──→ CreateVideo → SaveVideo
+```
+
+🔴 **这张图把 `LoadImage` 接在 `ref_image_1`（定妆照），不是 `image`（首帧图）** ——
+续接要人物与场景稳定，走参考图；而且官方两个节点**各缺对方那一槽**，同时接会被硬拦。
+`ref_image_2/3` 故意留空（第 2 个人 / 场景按需再补），槽位顺序 = 词里 `<Picture N>` 的编号。
+
+**怎么用**
+1. 把 JSON 丢进 `ComfyUI/user/default/workflows/`，在 ComfyUI 里打开。
+2. 把 4 个加载器的下拉改成你本机的模型文件（UNET / CLIP / 视频 VAE / 音频 VAE）。
+3. **把 `LoadImage` 换成你自己的定妆照**（放进 `ComfyUI/input/` 再选）。不想用定妆照就把它拔掉
+   ⇒ 退化成纯文生视频，参数与行为都不变。
+4. `prompts` 格里两段词用**单独一行 `---`** 分开；块数必须等于 `segments`，不够会直接报错。
+5. `from_segment` 默认 0（从第 1 段自己起头）；接已有段填那一段的段号。
+6. 一次提交跑完，成片在 `output/video/` 下；`report` 输出口写明每段裁了多少帧。
+
+> ⚠️ 合并输出是**一条驻留内存的张量** ⇒ 段数多 / 分辨率高时，先把 `width/height` 调小试两段。
+> ⚠️ 这张图**不含**音频缝补丁与画质域后处理（要那些请用画布连跑逐段接）。

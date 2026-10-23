@@ -620,6 +620,36 @@ for _fn, _wf in _EX:
 ck("I4 examples/README.md 的「N 节点」与 JSON 实际一致（且每张图都在表里）",
    not _bad_cnt, "不符=%s" % _bad_cnt[:3])
 
+# 🔴 I5（2026-10-23 新增）：示例里的 `Load*` 素材引用必须是**中性占位名**。
+#   两条判据：
+#     ① `widgets_values` 与 `widgets_values_named` 若**同时存在**必须取到同一个文件名
+#        —— 两者是同一个值的两套编码，不一致 = 只改了一半 ⇒ UI→API 转换时取哪个不定。
+#     ② 文件名不含 CJK / 路径分隔符 —— 示例**不随包带素材**，用户机器上不可能有我们的文件；
+#        写成私有文件名既泄漏本机信息、又让用户一打开就缺文件。
+#   实证：`seed_from_video_ui.json` 的 `widgets_values` 写着 `seed.mp4`，而
+#   `widgets_values_named` 写着项目私有名（某部片子的成片文件名）—— 手改只改了一半。
+#   H3e 扫不到它：那条只认「本机盘符 + 冒号 + 斜杠」与 Windows 家目录两种**路径**形态，
+#   不认裸文件名。
+_LOAD_KEY = {"LoadImage": "image", "LoadVideo": "file", "LoadAudio": "audio"}
+_CJK = _re.compile(r"[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]")
+_bad_ref = []
+for _fn, _wf in _EX:
+    for _n in (_wf.get("nodes") or []):
+        _t = _n.get("type")
+        if _t not in _LOAD_KEY:
+            continue
+        _wv = _n.get("widgets_values") or []
+        _wn = _n.get("widgets_values_named") or {}
+        _a = _wv[0] if _wv else None
+        _b = _wn.get(_LOAD_KEY[_t])
+        if _a is not None and _b is not None and _a != _b:
+            _bad_ref.append("%s N%s(%s)：widgets_values=%r / named=%r" % (_fn, _n.get("id"), _t, _a, _b))
+        _name = _b if _b is not None else _a
+        if _name and (_CJK.search(_name) or "/" in _name or "\\" in _name):
+            _bad_ref.append("%s N%s(%s)：素材名不是中性占位 %r" % (_fn, _n.get("id"), _t, _name))
+ck("I5 示例的素材引用是中性占位名（两套编码一致 / 无 CJK 与路径符）",
+   not _bad_ref, "不符=%s" % _bad_ref[:3])
+
 print()
 print("=" * 78)
 print("J. 存量 UI 工作流的「节点定义过期」扫描（0.5.0 新增输出/新增 widget 的影响面）")

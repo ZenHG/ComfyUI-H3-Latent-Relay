@@ -509,6 +509,16 @@ check("37.108 枚举的唯一真相源在 relay_core（节点层直接用同一�
       list(CORE.REFS_MODES) == list(NODES.H3RelayFiniteRun.INPUT_TYPES()["optional"]["refs_mode"][0])
       and list(CORE.ANCHOR_MODES) == list(
           NODES.H3RelayFiniteRun.INPUT_TYPES()["optional"]["ref_anchor_mode"][0]))
+# 外观锚「一段都用不上」必须报错，不许静默 no-op：roll 在 stage 0 没有上一段、
+# first 在 stage 0 的锚就是它自己 ⇒ 两种模式都等于「参数填了但没生效」。
+expect_raise("37.109 roll 锚 + 本批只有第 0 段 ⇒ raise（不是静默 no-op）",
+             lambda: _build(1, image=None, ref_anchor_mode="roll"), "一段都用不上")
+expect_raise("37.110 first 锚 + 本批只有第 0 段 ⇒ raise（锚就是它自己）",
+             lambda: _build(1, image=None, ref_anchor_mode="first"), "一段都用不上")
+_g111, _o111, _r111 = _build(1, image=None, ref_anchor_mode="roll", from_segment=1)
+check("37.111 反证：roll + from_segment=1 只跑 1 段**合法**（锚指 stage 0，判据不是一刀切禁单段）",
+      _inputs_of(_g111, "seg0_bridge").get("ref_anchor_stage") == 0,
+      str(_inputs_of(_g111, "seg0_bridge").get("ref_anchor_stage")))
 
 
 

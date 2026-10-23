@@ -2882,16 +2882,10 @@ class H3RelayFiniteRun:
                               "与下面三个参考图槽不能同时接：官方两个节点各缺对方那一槽。\n"
                               "续接要人物与场景稳定请用参考图，别用首帧图。",
                 }),
-                # 🔴 2026-10-22：**参考图路**（官方 `MiniMaxH3ReferenceToVideo`）。
-                #    为什么必须加：本节点组主打**续接**，而续接最容易翻车的不是接缝本身，
-                #    是「每段参考的图不一样 ⇒ 拷贝窗那几帧一过，模型按本段的新参考图重新认人
-                #    ⇒ 一次硬切」。解法就是把 refs 做成**全片共用一组**：三张槽接一次，
-                #    展开图里每段的参考图节点都接同一批图 ⇒ 模型没有"新图"可参考。
-                #    ⚠ 槽数 3 不是随手定的：官方 Autogrow 上限 9 槽，但每槽是**单张图**，
-                #      多帧 batch 会被官方当"视频参考"裁档（不是多张独立图）⇒ 这里按
-                #      「人物 2 + 场景 1」这个最常见配伍给 3 槽；要 4 张以上请用画布模式。
+                # 🔴 参考图路（官方 ReferenceToVideo）：每段接**同一批图** —— 逐段换图会在
+                # 钉住区过后重新认人 ⇒ 硬切。3 槽 = 「人物 2 + 场景 1」，要更多用画布模式。
                 "ref_image_1": ("IMAGE", {
-                    "tooltip": "【参考图 1】外观参考，对应词里的 @图片1。人物或场景，全片共用。\n"
+                    "tooltip": "【参考图 1】外观参考，对应词里的 <Picture 1>。人物或场景，全片共用。\n"
                               "接了任意一张就走官方参考图生视频，与首帧图不能同时接。",
                 }),
                 "ref_image_2": ("IMAGE", {
@@ -2932,13 +2926,12 @@ class H3RelayFiniteRun:
                               "没有会在开跑前就报错，不等模型上卡。\n"
                               "接续已有段时别接首帧图 image。",
                 }),
-                # ⚠ 继续追加在**最后一个**（widgets_values 按位置对应，插中间会整体错位）。
+                # ⚠ 以下 4 个新 widget 一律追加在**末尾**（widgets_values 按位置对应，插中间整体错位）。
                 "ref_image_size": (["match", "max"], {
                     "default": "match",
                     "tooltip": "【参考图尺寸】match（默认）= 按画面尺寸缩每张参考图（只缩不放，保持比例）。\n"
                               "max = 保留更大尺寸。只在接了参考图时生效。",
                 }),
-                # ⚠ 继续追加在**最后一个**（widgets_values 按位置对应，插中间会整体错位）。
                 "refs_mode": (list(CORE.REFS_MODES), {
                     "default": "lock",
                     "tooltip": "【定妆照用法】lock（默认）= 全片同一组，一镜到底的唯一无冲突解。\n"
@@ -2955,7 +2948,7 @@ class H3RelayFiniteRun:
                 }),
                 "ref_anchor_frames": ("INT", {
                     "default": 5, "min": 1, "max": 64, "step": 1,
-                    "tooltip": "【外观参考帧数】从参考段开头取几帧当基准，默认 5。\n取多了会把参考段的动作也拖进来。",
+                    "tooltip": "【外观参考帧数】从参考段开头取几帧当基准，默认 5。\n取多了会把参考段的动作也拖进来。\n只在 ref_anchor_mode 不是 off 时生效。",
                 }),
             },
         }
@@ -3031,8 +3024,8 @@ class H3RelayFiniteRun:
                     % (_fs, _fs - 1, _need, str(run_id)))
         # 前缀由宿主在执行本节点前设好（以本节点 id 为根）⇒ 唯一
         from comfy_execution.graph_utils import GraphBuilder
-        # 参考图：三张槽按 1/2/3 顺序（对应词里的 @图片1/2/3），未接的槽为 None ⇒ 剔除。
-        # ⚠ 顺序即语义：`ref_images.ref_image_0` 必须对应 `@图片1`，错位 = 静默换人。
+        # 参考图按 1/2/3 顺序剔除空槽。⚠ 顺序即语义：`ref_image_1` 必须对应 `<Picture 1>`，
+        # 错位 = 静默换人（官方按**已接线顺序** 1-based 发标签，见 text_encoders/minimax.py）。
         _refs = [r for r in (ref_image_1, ref_image_2, ref_image_3) if r is not None]
         graph, outputs, report = CORE.build_finite_graph(
             prefix=GraphBuilder.alloc_prefix(), segments=segments, blocks=blocks,

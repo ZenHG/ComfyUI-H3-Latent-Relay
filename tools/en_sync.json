@@ -8,16 +8,16 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "condensed",
-          "h_en": "8cad3976ed47b4dc",
-          "h_src": "17934bceb59e376d",
+          "h_en": "7eff89a608548ff3",
+          "h_src": "c9e6e8fa7172964f",
           "seeded": "by-position"
         },
         {
           "zh": "核心功能",
           "en": "Core features",
           "mode": "condensed",
-          "h_en": "fb1bbc86b9384660",
-          "h_src": "0b384055d96f401b",
+          "h_en": "5fa5c3a7dc1d8644",
+          "h_src": "0d2f4a0237f906dd",
           "seeded": "by-position"
         },
         {
@@ -79,7 +79,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-23",
-      "src_sha": "6dbd368160f7b93a"
+      "src_sha": "a17a647c21a60fb0"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -352,8 +352,8 @@
           "zh": "⏩ Finite Run：一次提交跑完 N 段（无头连跑，0.6.36）",
           "en": "⏩ Finite Run: run N segments in one submission (headless, 0.6.36)",
           "mode": "full",
-          "h_en": "d4c19ff0070ab2c3",
-          "h_src": "da81b62ccca23904",
+          "h_en": "efb07e2b9a05fe13",
+          "h_src": "d9bc1dca8c9f33bc",
           "seeded": "by-position"
         },
         {
@@ -416,14 +416,14 @@
           "zh": "续接的参考图怎么给：全片同一组，或跟着镜头走",
           "en": "How to feed reference images to a continuation: one set for the whole run, or follow the shot",
           "mode": "full",
-          "h_en": "4ba7823aa02945bf",
-          "h_src": "6bc64df95e8f1cd4",
+          "h_en": "e167637b12b32c13",
+          "h_src": "0185a732e4e10e3f",
           "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-10-23",
-      "src_sha": "2dfc405e2f6901bb"
+      "src_sha": "84db139de8f11902"
     },
     "docs/08-testing.md": {
       "en": "docs/08-testing_EN.md",
@@ -440,8 +440,8 @@
           "zh": "单测（零 GPU、秒级）",
           "en": "Unit tests (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "af0404cdc4917dad",
-          "h_src": "68f4eba22362f095",
+          "h_en": "60f9f7dfad021ce4",
+          "h_src": "f1893cef26c4883e",
           "seeded": "by-position"
         },
         {
@@ -472,8 +472,8 @@
           "zh": "tools/ 下的其他自检（完整清单见 [`tools/README.md`](../tools/README.md)）",
           "en": "Other self-checks under tools/ (full list in [`tools/README.md`](../tools/README.md))",
           "mode": "full",
-          "h_en": "4fe52f31c366e3c0",
-          "h_src": "40597d84bbd64b8c",
+          "h_en": "dcbbcc069dd57049",
+          "h_src": "f80cfa79c3969766",
           "seeded": "by-position"
         },
         {
@@ -487,7 +487,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-23",
-      "src_sha": "237c9d2c8cdbbbac"
+      "src_sha": "9a12b6ef317e0169"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",

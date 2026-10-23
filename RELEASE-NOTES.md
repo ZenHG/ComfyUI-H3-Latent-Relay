@@ -19,6 +19,34 @@
 
 ---
 
+## 0.6.39 — 2026-10-23
+
+**⏩ Finite Run 现在能接「定妆照」了：全片同一组参考图，一镜到底不再在新段开头跳一下。**
+
+- 新增 3 个参考图槽 `ref_image_1..3`（只接 1 张也行），外加 `ref_image_size` / `refs_mode` / `ref_anchor_mode` / `ref_anchor_frames` 四个开关。
+- 🔴 **参考图与首帧图 `image` 不能同时接** —— 官方两个生视频节点各缺对方那一槽，同时接会在开跑前直接报错，不会悄悄挑一个用。要人物与场景稳定就留参考图、断开 `image`。
+- `refs_mode` 默认 `lock` = 全片共用同一组图，这是「一镜到底」唯一没有冲突的用法；`first_only` = 只喂本批第 1 段，后续段靠外观参考跟随镜头。
+- 槽位顺序就是词里 `<Picture 1>` / `<Picture 2>` / `<Picture 3>` 的编号；中间跳过一个槽，后面的编号会整体前移 —— 不报错，但会接错人。
+- 另新增 `from_segment`：Finite Run 能从第 N 段起跑，「视频起段 → 一次提交跑完剩下的段」这条路通了。
+- 旧图逐位不变：不接参考图时，行为与之前完全一致。
+
+**升级动作**：图 / 连线 / 参数都不用动；刷新浏览器页面即可。
+
+<!-- EN -->
+
+**Finite Run can now take reference stills: one set for the whole run, so a one-take continuation no longer jumps at the start of a new segment.**
+
+- Three new slots, `ref_image_1..3` (wiring just one is fine), plus `ref_image_size`, `refs_mode`, `ref_anchor_mode` and `ref_anchor_frames`.
+- 🔴 **Reference stills and the first-frame image `image` are mutually exclusive.** The two official text-to-video nodes each lack the other's slot, so wiring both raises an error before anything runs — nothing is silently chosen for you. Keep the stills and drop `image` when cast and set must stay stable.
+- `refs_mode` defaults to `lock`: every segment sees the same stills, the only conflict-free way to hold a single take. `first_only` feeds this batch's first segment only and lets the appearance anchor carry the rest.
+- Slot order is the `<Picture 1>` / `<Picture 2>` / `<Picture 3>` numbering in your prompt. Leaving a middle slot empty shifts every later number down — no error, just the wrong face.
+- Also new: `from_segment`, so Finite Run can start at segment N. "Seed from a video, then run the rest in one submission" now works.
+- Existing graphs are unchanged: without reference stills the behaviour is exactly as before.
+
+**Action required**: none — no graph, wiring or parameter changes; just refresh the browser page.
+
+---
+
 ## 0.6.38 — 2026-10-20
 
 **新增两个节点：把几段拼成一条（「图内拼条」），以及一次提交跑完 N 段（「无头连跑」）。**

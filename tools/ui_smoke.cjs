@@ -136,7 +136,12 @@ const SKIP = (why) => {
     }
     if (!health) { await browser.close(); SKIP('宿主没起来（' + BASE + '/h3relay/health 无响应）'); }
     ok('宿主在线且本包已加载（v' + health.version + ' / ' + health.nodes_registered + ' 节点）',
-        health.nodes_registered === 8);
+       // 不写死节点数：本包每加一个节点都会让这个数过期（实测写死 8 时已红，
+       // 而包早就是 11 个）。判据改成 health **自带的自洽契约**：
+       // 契约通过 + 登记数与实际列表一致 + 默认出口真是 v3。
+       health.contract_ok === true
+       && health.nodes_registered === (health.nodes || []).length
+       && health.node_api_default === 'v3');
 
     // ---- 2. 打开页面 + 载入图 -------------------------------------------
     await page.goto(BASE + '/', { waitUntil: 'domcontentloaded', timeout: 90000 });
@@ -181,9 +186,9 @@ const SKIP = (why) => {
         await browser.close();
         SKIP('这张图里没有 Chain 节点（按钮无从谈起）—— 换一张图或检查 examples/');
     }
-    const queueEmpty = async () => {
+    const queueLen = async () => {
         const q = await page.evaluate(async (b) => (await (await fetch(b + '/queue')).json()), BASE);
-        return (q.queue_running || []).length === 0 && (q.queue_pending || []).length === 0;
+        return (q.queue_running || []).length + (q.queue_pending || []).length;
     };
 
     // ---- 3. 结构：七个按钮 + 钩子 ---------------------------------------
@@ -244,19 +249,23 @@ const SKIP = (why) => {
         catch (e) { return 'threw: ' + String(e).slice(0, 140); }
     }, frag);
 
+    // 🔴 判据是「队列长度**没有变长**」，不是「队列为空」：这台宿主是**共享**的，
+    //   别人（或上一个会话）排队里的活会让「队列为空」恒假 ⇒ 假红。
+    //   2026-10-23 实测：第一次跑 3 条红，队列里躺着别人的故事板任务；复跑全绿。
     for (const [frag, expectSubmit] of [['Run', true], ['连跑', true], ['Approve', true], ['续跑', true]]) {
         pageErrors.length = 0;
+        const q0 = await queueLen();
         const r = await clickBtn(frag);
         await page.waitForTimeout(2500);
-        const q = await queueEmpty();
+        const q1 = await queueLen();
         const st = await snap();
         // 🔴 按钮被 `guard()` 包着：内部异常会被 **catch 掉并写进 status**（不抛给页面）。
         //   ⇒ 判断"按钮内部炸了"要**读 status 里有没有「内部出错」**，而不是等 pageerror。
         //   （今天实测：变异态下 pageerror 为空、r 仍是 clicked，只有 status 露馅。）
         const internalErr = /内部出错/.test(st.status);
         ok(`「${frag}」点了没内部出错、且没排队（冲突时应被 run_id 闸拦住）`,
-            r === 'clicked' && pageErrors.length === 0 && q && !internalErr,
-            `r=${r} queue空=${q} status=${JSON.stringify(st.status.slice(0, 90))} pageerr=${JSON.stringify(pageErrors.slice(0, 1))}`);
+            r === 'clicked' && pageErrors.length === 0 && q1 <= q0 && !internalErr,
+            `r=${r} 队列 ${q0}→${q1} status=${JSON.stringify(st.status.slice(0, 90))} pageerr=${JSON.stringify(pageErrors.slice(0, 1))}`);
     }
 
     // 不提交的三个：Stop / Reset / 拼成一条
@@ -268,13 +277,14 @@ const SKIP = (why) => {
             `r=${r} ${JSON.stringify(pageErrors.slice(0, 1))}`);
     }
     pageErrors.length = 0;
+    const q0Cat = await queueLen();
     const rCat = await clickBtn('拼成一条');
     await page.waitForTimeout(4000);
-    const qAfterCat = await queueEmpty();
+    const qAfterCat = await queueLen();
     const stCat = await snap();
     ok('「拼成一条」点了没内部出错、也不排队（它只发 /h3relay/concat）',
-        rCat === 'clicked' && pageErrors.length === 0 && qAfterCat && !/内部出错/.test(stCat.status),
-        `r=${rCat} status=${JSON.stringify(stCat.status.slice(0, 80))} ${JSON.stringify(pageErrors.slice(0, 1))}`);
+        rCat === 'clicked' && pageErrors.length === 0 && qAfterCat <= q0Cat && !/内部出错/.test(stCat.status),
+        `r=${rCat} 队列 ${q0Cat}→${qAfterCat} status=${JSON.stringify(stCat.status.slice(0, 80))} ${JSON.stringify(pageErrors.slice(0, 1))}`);
     ok('「拼成一条」给了明确结论（成功或明确拒绝，不许静默）',
         stCat.status.trim().length > 0, JSON.stringify(stCat.status.slice(0, 60)));
 

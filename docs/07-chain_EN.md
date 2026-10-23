@@ -228,15 +228,15 @@ segment, and it matches the ffprobe frame count **exactly**); `JoinAV` logged
 segment length 73 / window 22 ⇒ the film is **124 frames = 73 + 51**; `h3_seam_latent_check` compared
 bit for bit and reported **0.000 at all 7 steps** (with `mask_mode=hard` the pinned region really is
 not redrawn).
-**Fourth round (real GPU, 2026-10-22 — **3 segments** at 1216×672 / length 192 / window 22 / 6 steps, 合伙人 footage)**:
+**Fourth round (real GPU, 2026-10-22 — **3 segments** at 1216×672 / length 192 / window 22 / 6 steps, real project footage)**:
 the film is **510 frames = 170 + 170 + 170** (the server log prints one "trim head 22 frames" line per
 segment and it matches ffprobe **exactly**); `JoinAV` logged three accumulations
 `0+170=170 → 170+170=340 → 340+170=510`, audio `680001 samples @32000 Hz = 21.2500 s` versus picture
 `510/24 = 21.2500 s` (**1 sample apart**); `h3_seam_latent_check` reported **0.000 at all 7 steps on all 3 seams**.
 ⚠ Same round: when a segment prompt contains 3 `[Shot]` blocks, `h3_shotcut_check`'s **C3/C4/C6 premises fail**
 (cuts inside a segment are intended, and the boundary may legitimately stay on the same setup), and C8
-additionally needs sound near the cut. Full evidence and the cause of the "segment 3 tail scene drift"
-are in the handover note `FiniteRun-三段真机实测-合伙人-2026-10-22.md`.
+additionally needs sound near the cut. The cause of the "segment 3 tail scene drift" is that the third
+segment switched scene references — see "How to feed reference images" above.
 
 **Reproducibility**: the pipeline is **deterministic** — repeated runs of the same graph give
 bit-identical safetensors stream tensors / h264 elementary stream / decoded audio, and segment 0 of a
@@ -861,6 +861,11 @@ Two correct paths:
 | A real wardrobe / cast / set change | — | — | that is a **shot change**: use `settle_frames=-1` to move the hard cut back to the segment boundary |
 
 🔴 This pack **deliberately has no** "different references per segment": that is not a parameter gap, it is
-not done by design. The three reference slots (`ref_image_1..3`, matching `@Image1/2/3` in the prompt) are
-shared by the whole run, and they are **mutually exclusive** with the first-frame image `image`
-(each official node lacks the other's slot, so wiring both raises an error).
+not done by design. The three reference slots (`ref_image_1..3`) are shared by the whole run, and they are
+**mutually exclusive** with the first-frame image `image` (each official node lacks the other's slot, so
+wiring both raises an error).
+
+**How slots map to the prompt**: the official tokenizer emits tags in **wired order, 1-based** ⇒
+`ref_image_1` is `<Picture 1>`, `ref_image_2` is `<Picture 2>`, and so on
+(`add_text("<Picture %d>: ")` in `comfy/text_encoders/minimax.py`). Leaving a middle slot empty shifts
+every later number down — no error, just the wrong face.

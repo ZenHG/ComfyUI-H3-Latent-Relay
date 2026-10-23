@@ -10,7 +10,7 @@ not coupled to any third-party H3 node pack.
 
 | Item | Value |
 |---|---|
-| Version | **0.6.38** |
+| Version | **0.6.39** |
 | License | **MIT** (third-party attribution in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) |
 | Host | **ComfyUI ≥ 0.35.0 with MiniMax-H3 support** (the host itself is GPL-3.0, see License) |
 
@@ -51,7 +51,7 @@ under `output/relay_kit/<run_id>/`). Mechanism and measurements: [`docs/01`](doc
 | 🔍 **H3 Relay · Latent Upscale** | **picture domain · latent level**: unpack the AV-packed latent → tile through a learned 3D upscaler → repack. **Zero denoising, not one frame moved in time, audio carried back untouched** (needs an optional upstream dependency — see Install) |
 | 🔗 **H3 Relay · Seed from Video** | **entry point**: encodes **an existing video** into segment 1 (the seed segment) sidecar; later segments continue outward as usual. It blocks three traps for you: temporal grid (5+17k frames), canvas grid (multiples of 16), and A/V equal length (trim tail / zero-pad / silent seed) |
 | 🔗 **H3 Relay · Chain** | auto-run controller: advances stage numbers and queues; since 0.6.7 it also **rotates prompts** (`prompts` split on `---`) and **concatenates** (🧩) |
-| ⏩ **H3 Relay · Finite Run** | **advanced entry point**: one submission **expands segments 1..N into a single acyclic graph** that the host executes in one go (no frontend button, headless-friendly). Every segment chain uses the **same nodes** as a manual run — the algorithm is not rewritten; `from_segment` re-runs only the later segments. ⚠ The merged output is **one in-memory tensor** ⇒ try two segments first when the segment count / resolution is high (see [`docs/07`](docs/07-chain_EN.md) §how it splits work with Chain) |
+| ⏩ **H3 Relay · Finite Run** | **advanced entry point**: one submission **expands segments 1..N into a single acyclic graph** that the host executes in one go (no frontend button, headless-friendly). Every segment chain uses the **same nodes** as a manual run — the algorithm is not rewritten; `from_segment` re-runs only the later segments. **Reference images** (`ref_image_1..3`) are one set shared by the whole run, with `refs_mode` / `ref_anchor_mode` to pin cast and set (see [`docs/07`](docs/07-chain_EN.md) §how to feed reference images). ⚠ The merged output is **one in-memory tensor** ⇒ try two segments first when the segment count / resolution is high (see [`docs/07`](docs/07-chain_EN.md) §how it splits work with Chain) |
 | 🧩 **H3 Relay · Join AV** | **internal node, do not hand-wire, and not in the node menu by default** (`DEV_ONLY`; enable `Comfy.DevMode` to see it): `torch.cat` plus strict spec validation (a spec mismatch raises instead of silently stretching). Only Finite Run's expanded graph connects it — to concatenate files use Chain's 🧩 (file path, nothing held in memory) |
 
 > **Three domains — do not mix them up:** timeline = `H3RelayTrimAV` (frozen) / picture = `H3RelayPost` /

@@ -767,13 +767,13 @@ export const H3_TIPS = {
         en: "[Start after which segment] 0 = start at segment 1 (default).\nFill N to continue from segment N; fill 1 after a video seed.\n⚠ that segment's sidecar must exist on disk, or it errors\nbefore anything runs — not after the model is on the GPU.\nDo not wire the first-frame image when continuing.",
     },
     "H3RelayFiniteRun.ref_image_1": {
-        en: "[Reference 1 / @Image1 in the prompt] Appearance reference (person or place), shared by every segment.\nWiring any of the three switches to the official ReferenceToVideo path; it cannot be combined with the first-frame image.",
+        en: "[Reference 1 / <Picture 1> in the prompt] Appearance reference (person or place), shared by every segment.\nWiring any of the three switches to the official ReferenceToVideo path; it cannot be combined with the first-frame image.",
     },
     "H3RelayFiniteRun.ref_image_2": {
-        en: "[Reference 2 / @Image2] Second appearance reference, e.g. a second person's identity and wardrobe.\nLeave it unwired to use only one reference.",
+        en: "[Reference 2 / <Picture 2>] Second appearance reference, e.g. a second person's identity and wardrobe.\nLeave it unwired to use only one reference.",
     },
     "H3RelayFiniteRun.ref_image_3": {
-        en: "[Reference 3 / @Image3] Third appearance reference, e.g. the room and its materials.\nLeave it unwired to use only the first two.",
+        en: "[Reference 3 / <Picture 3>] Third appearance reference, e.g. the room and its materials.\nLeave it unwired to use only the first two.",
     },
     "H3RelayFiniteRun.ref_image_size": {
         en: "[Reference size] match (default) scales each reference to the canvas (down only, keeps aspect).\nmax keeps the larger size. Only used when a reference is wired.",
@@ -785,7 +785,7 @@ export const H3_TIPS = {
         en: "[Appearance reference target] off = none; first = segment 1; roll = the previous segment.\nfirst keeps identity stable but goes stale in a new place.\nroll follows the shot but drifts on long runs.\nReference and stills share one layer, so mismatches fight.\nGood pairs: first with lock, roll with first_only.",
     },
     "H3RelayFiniteRun.ref_anchor_frames": {
-        en: "[Anchor frames] How many frames from the start of the anchor segment are used, default 5.\nMore frames also drag the anchor segment's motion in.",
+        en: "[Anchor frames] How many frames from the start of the anchor segment are used, default 5.\nMore frames also drag the anchor segment's motion in.\nOnly used when ref_anchor_mode is not off.",
     },
 };
 

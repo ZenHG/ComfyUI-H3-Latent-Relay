@@ -41,7 +41,8 @@
      "name": "MODEL",
      "type": "MODEL",
      "links": [
-      1
+      1,
+      7
      ]
     }
    ],
@@ -241,11 +242,11 @@
     "Node name for S&R": "LoadImage"
    },
    "widgets_values": [
-    "DS_A1_00002_.png",
+    "ref_person.png",
     "image"
    ],
    "widgets_values_named": {
-    "image": "DS_A1_00002_.png",
+    "image": "ref_person.png",
     "upload": "image"
    }
   },
@@ -307,7 +308,7 @@
     {
      "name": "model",
      "type": "MODEL",
-     "link": 1
+     "link": 7
     },
     {
      "name": "scheduler",
@@ -339,7 +340,7 @@
      "name": "SIGMAS",
      "type": "SIGMAS",
      "links": [
-      7
+      8
      ]
     }
    ],
@@ -480,12 +481,12 @@
     {
      "name": "image",
      "type": "IMAGE",
-     "link": 5
+     "link": null
     },
     {
      "name": "ref_image_1",
      "type": "IMAGE",
-     "link": null
+     "link": 5
     },
     {
      "name": "ref_image_2",
@@ -571,7 +572,7 @@
     {
      "name": "last_latent",
      "type": "LATENT",
-     "links": []
+     "links": null
     },
     {
      "name": "images",
@@ -610,8 +611,7 @@
     "日式赛璐璐 2D 动画，暖琥珀主光，超现实咖啡厨房。\n[Shot 1] 中近景，Yuki 与 Kara 近身缠斗，一记右直拳擦过耳侧，白发随拳风甩起……\n文字：全片画面无任何文字与符号。\noverall_soundscape: 拳风破空、拳掌相交的闷响、两人急促的呼吸、厨房低频底噪。无音乐。\n---\n承接上一段结尾：Yuki 收拳侧步，Kara 借势后撤撞上料理台，杯碟摇晃。\n[Shot 1] 同机位同光位，动作相位严格接住上一帧，不重新起手、不切镜。\n文字：全片画面无任何文字与符号。\noverall_soundscape: 杯碟碰撞、布料摩擦、两人呼吸渐稳、厨房低频底噪。无音乐。",
     "",
     0,
-    0
-   ,
+    0,
     "match",
     "lock",
     "off",
@@ -752,7 +752,7 @@
     {
      "name": "video",
      "type": "VIDEO",
-     "links": []
+     "links": null
     }
    ],
    "properties": {
@@ -827,7 +827,7 @@
    5,
    0,
    8,
-   6,
+   7,
    "IMAGE"
   ],
   [
