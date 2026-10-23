@@ -120,6 +120,12 @@ export const H3_WIDGETS = {
     ref_anchor_latent: { zh: "外观参考（接线）", en: "appearance reference" },
     ref_anchor_stage: { zh: "外观参考段号", en: "appearance reference stage" },
     ref_anchor_frames: { zh: "外观参考帧数", en: "appearance reference frames" },
+    ref_image_1: { zh: "参考图 1", en: "reference image 1" },
+    ref_image_2: { zh: "参考图 2", en: "reference image 2" },
+    ref_image_3: { zh: "参考图 3", en: "reference image 3" },
+    ref_image_size: { zh: "参考图尺寸", en: "reference image size" },
+    refs_mode: { zh: "定妆照用法", en: "reference usage" },
+    ref_anchor_mode: { zh: "外观参考指向", en: "appearance anchor mode" },
     audio_ref_seconds: { zh: "音频参考窗", en: "audio ref window" },
     voice_anchor: { zh: "声音参考", en: "voice reference" },
     voice_anchor_stage: { zh: "声音参考段号", en: "voice reference stage" },
@@ -713,7 +719,7 @@ export const H3_TIPS = {
         en: "[Wiring] The sigma schedule (steps and scheduler); shared by every segment.",
     },
     "H3RelayFiniteRun.image": {
-        en: "[First frame] The first frame of segment 1; every segment uses the same image.\nLeave it unwired = text-to-video only.",
+        en: "[First frame] The first frame of segment 1; every segment uses the same image. Leave it unwired = text-to-video only.\nIt cannot be combined with the three reference-image slots below: each official node lacks the other's slot.\nFor stable people and places in a continuation, use the reference images instead.",
     },
     "H3RelayFiniteRun.prompt": {
         en: "[One prompt for every segment] Fill this when all segments share one prompt.\nFor per-segment prompts use the `prompts` field below.",
@@ -759,6 +765,27 @@ export const H3_TIPS = {
     },
     "H3RelayFiniteRun.from_segment": {
         en: "[Start after which segment] 0 = start at segment 1 (default).\nFill N to continue from segment N; fill 1 after a video seed.\n⚠ that segment's sidecar must exist on disk, or it errors\nbefore anything runs — not after the model is on the GPU.\nDo not wire the first-frame image when continuing.",
+    },
+    "H3RelayFiniteRun.ref_image_1": {
+        en: "[Reference 1 / @Image1 in the prompt] Appearance reference (person or place), shared by every segment.\nWiring any of the three switches to the official ReferenceToVideo path; it cannot be combined with the first-frame image.",
+    },
+    "H3RelayFiniteRun.ref_image_2": {
+        en: "[Reference 2 / @Image2] Second appearance reference, e.g. a second person's identity and wardrobe.\nLeave it unwired to use only one reference.",
+    },
+    "H3RelayFiniteRun.ref_image_3": {
+        en: "[Reference 3 / @Image3] Third appearance reference, e.g. the room and its materials.\nLeave it unwired to use only the first two.",
+    },
+    "H3RelayFiniteRun.ref_image_size": {
+        en: "[Reference size] match (default) scales each reference to the canvas (down only, keeps aspect).\nmax keeps the larger size. Only used when a reference is wired.",
+    },
+    "H3RelayFiniteRun.refs_mode": {
+        en: "[Reference usage] lock (default) = one set for every segment, the only conflict-free way to keep one take.\nfirst_only = feed only this batch's first segment; later ones follow the appearance reference.\nNo per-segment option: that is a shot change.",
+    },
+    "H3RelayFiniteRun.ref_anchor_mode": {
+        en: "[Appearance reference target] off = none; first = segment 1; roll = the previous segment.\nfirst keeps identity stable but goes stale in a new place.\nroll follows the shot but drifts on long runs.\nReference and stills share one layer, so mismatches fight.\nGood pairs: first with lock, roll with first_only.",
+    },
+    "H3RelayFiniteRun.ref_anchor_frames": {
+        en: "[Anchor frames] How many frames from the start of the anchor segment are used, default 5.\nMore frames also drag the anchor segment's motion in.",
     },
 };
 

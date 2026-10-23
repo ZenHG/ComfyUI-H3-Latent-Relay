@@ -33,7 +33,7 @@ namespace** — the same globals and the same order as the single-file flat scri
 fixtures shared across groups remain visible. ⚠️ Case file names start with `_`, so `pytest tests/`
 does **not** collect them separately (otherwise every assertion would run twice).
 
-**635 assertions, zero GPU, no model loading**, covering thirty-six aspects:
+**747 assertions, zero GPU, no model loading**, covering thirty-six aspects:
 
 ### Counting and declaration discipline (the two notes from former README §8, moved in with the slimming)
 
@@ -44,7 +44,7 @@ does **not** collect them separately (otherwise every assertion would run twice)
   the other two drifted for a long time unnoticed).
 - ⚠️ **When writing a correction note, do not restate the old wrong number** — that pollutes the regexes
   of the machine checks above.
-- This file's line "635 assertions / thirty-six aspects" + the `| 21 |` row of the table below are
+- This file's line "747 assertions / thirty-six aspects" + the `| 21 |` row of the table below are
   machine-checked by **H3c** (since 2026-09-30; after the README slimming the criterion moved from the
   README to this file).
 
@@ -157,7 +157,7 @@ failure):
 
 Front-end changes share one property: **every existing check can be green at the same time while the
 English UI is still wrong**. Measured on 2026-10-15: with the one-command suite 15/15,
-`review_050` 126/0 and `check_tooltips` 1549 items **all green at once**, none of the four classes
+`review_050` 126/0 and `check_tooltips` 1615 items **all green at once**, none of the four classes
 below was caught (all four were found by eye):
 
 | What was missed | Why the existing checks cannot see it |
@@ -174,7 +174,7 @@ includes 1–3); **step 5 cannot be reached by a machine**:
 |---|---|---|---|
 | 1 | **Static: read the two languages side by side** | `python tools/check_frontend.py` | 5 pass / 0 fail |
 | 2 | Pure-function behaviour | `node tests/test_i18n.mjs` · `node tests/test_audio_ref_budget.mjs` | all pass (47 · 47 assertions) |
-| 3 | Tooltip wording rules | `python tools/check_tooltips.py` | all pass (1549 items; **H4h** watches this number) |
+| 3 | Tooltip wording rules | `python tools/check_tooltips.py` | all pass (1615 items; **H4h** watches this number) |
 | 4 | **One-command suite** (includes 1–3) | run the machine's own `h3relay_check_all.py` (in a tools directory **outside the repo**) | all pass |
 
 ### 🔴 Step 5: the live three (mandatory after a front-end change — do not skip)
@@ -210,7 +210,7 @@ being green as "the front-end is fine".
 ## V3 shell and default exit (zero GPU, seconds)
 
 ```bash
-COMFYUI_PATH=<root> python tests/test_v3_schema.py      # expected 98/0 (11 nodes / 165 inputs; same tier with or without the host registry)
+COMFYUI_PATH=<root> python tests/test_v3_schema.py      # expected 98/0 (11 nodes / 172 inputs; same tier with or without the host registry)
 COMFYUI_PATH=<root> python tools/assert_default_exit.py  # expected 6/6
 ```
 
@@ -275,7 +275,7 @@ real problem on its very first run** (in CI the V3 exit actually could not load)
 
 | Tool | What it judges | Expected |
 |---|---|---|
-| `tools/review_050.py` | doc–code consistency (node list / parameter table / assertion count / version / **all** example-graph slots (I1-I4: slots / node counts / widget markers) / **the three iron rules** / **the L13 English-doc sync gate** / **the H3j smoke expected values** / **H3k registry metadata** / **H3l release policy present** / **H3m no credential literals** / **H3n i18n word-table completeness** / **H3p bilingual tooltip completeness** / **H3q JS comma expression** / **H3r i18n anti-overwrite guard** / **H3s link endpoint field compat** / **H3t official locale entry** / **H3o dangling doc references** / **H3u registry package file count (true value)** / **H3v tools script count (true value)** / **H3w untracked files** /  **H3x `setdefault` to `PYTHONPATH`** / **H3y tools script registry** / **H3z release.py flags complete** / **H4a explicit env for Python children** / **H4b criterion-table self-check** / **H4c ledger consistency** / **H4d JS expected values (true value)** / **H4e dist whitelist (true value)** / **H4f `SIM115` blind spot** / **H4g artifacts carry no bytecode or symlinks** / **H4i dist content completeness (every real import covered)** / **H7b nodes.py executable code lines (blank/comment/docstring excluded) <= cap** / **H7c nodes.py total lines <= loose hard cap** / **H7d documentation share >= floor (anti code-hidden-in-docstring)**) | **129/0** |
+| `tools/review_050.py` | doc–code consistency (node list / parameter table / assertion count / version / **all** example-graph slots (I1-I4: slots / node counts / widget markers) / **the three iron rules** / **the L13 English-doc sync gate** / **the H3j smoke expected values** / **H3k registry metadata** / **H3l release policy present** / **H3m no credential literals** / **H3n i18n word-table completeness** / **H3p bilingual tooltip completeness** / **H3q JS comma expression** / **H3r i18n anti-overwrite guard** / **H3s link endpoint field compat** / **H3t official locale entry** / **H3o dangling doc references** / **H3u registry package file count (true value)** / **H3v tools script count (true value)** / **H3w untracked files** /  **H3x `setdefault` to `PYTHONPATH`** / **H3y tools script registry** / **H3z release.py flags complete** / **H4a explicit env for Python children** / **H4b criterion-table self-check** / **H4c ledger consistency** / **H4d JS expected values (true value)** / **H4e dist whitelist (true value)** / **H4f `SIM115` blind spot** / **H4g artifacts carry no bytecode or symlinks** / **H4i dist content completeness (every real import covered)** / **H7b nodes.py executable code lines (blank/comment/docstring excluded) <= cap** / **H7c nodes.py total lines <= loose hard cap** / **H7d documentation share >= floor (anti code-hidden-in-docstring)**) | **130/0** |
 | `tools/smoke_nodes.py` | node-layer functional smoke test (the seven continuation items really run once; 🔍 the upscale node needs upstream weights and is not in the smoke test) | **22/0** |
 | `tools/assert_default_exit.py` | default exit = V3 (contract 2 + behaviour 4; includes **the node set V3 actually registers** and **per-node `dev_only` parity across both exits**) | **6/6** |
 | `tools/sync_deploy_check.py` | the deployed copy matches the commit state of the given commit | all `OK` |

@@ -20,7 +20,7 @@ python tests/test_relay_core.py
 跨组共享的夹具变量照旧可见。⚠️ 分片文件名以 `_` 开头 ⇒ `pytest tests/` **不会**单独收集它们
 （否则每条断言会跑两遍）。
 
-**635 项断言，零 GPU、不加载模型**，覆盖三十六个方面：
+**747 项断言，零 GPU、不加载模型**，覆盖三十六个方面：
 
 ### 计数与声明的纪律（原 README §8 的两条注，随瘦身搬入）
 
@@ -29,7 +29,7 @@ python tests/test_relay_core.py
   **其余一律写「失败 0」** —— 写死数字**必然漂移**（2026-09-25 实测：同一个数字在四处声明，
   只有一处有机检，另外两处漂了很久没人发现）。
 - ⚠️ **写更正说明时别复述旧的错误数字** —— 那会污染上面这些机检的正则。
-- 本文这行的「635 项断言 / 三十六个方面」+ 下面表格的 `| 21 |` 行由 **H3c** 机检（2026-09-30 起，
+- 本文这行的「747 项断言 / 三十六个方面」+ 下面表格的 `| 21 |` 行由 **H3c** 机检（2026-09-30 起，
   README 瘦身后判据从 README 移到本文件）。
 
 | 组 | 覆盖 |
@@ -122,7 +122,7 @@ python tools/check_frontend.py           # 期望 通过 5 / 失败 0（前端�
 ## 🔴 改前端之后的必跑清单（2026-10-15 立，有实测依据）
 
 前端改动有个特点：**本仓所有既有判据可能同时全绿，而英文界面上仍然是错的**。
-2026-10-15 实测：一键套件 15/15 + `review_050` 126/0 + `check_tooltips` 1549 项**同时全绿**时，
+2026-10-15 实测：一键套件 15/15 + `review_050` 126/0 + `check_tooltips` 1615 项**同时全绿**时，
 下面四类问题**一个都没被拦住**（全是目检才发现的）：
 
 | 当时漏掉的 | 为什么既有判据看不见 |
@@ -138,7 +138,7 @@ python tools/check_frontend.py           # 期望 通过 5 / 失败 0（前端�
 |---|---|---|---|
 | 1 | **静态：中英两侧对读** | `python tools/check_frontend.py` | 通过 5 / 失败 0 |
 | 2 | 纯函数行为 | `node tests/test_i18n.mjs` · `node tests/test_audio_ref_budget.mjs` | 各自全过（47 条 · 47 条断言） |
-| 3 | 文案写法 | `python tools/check_tooltips.py` | 1549 项全过（**H4h** 盯这个数） |
+| 3 | 文案写法 | `python tools/check_tooltips.py` | 1615 项全过（**H4h** 盯这个数） |
 | 4 | **一键套件**（含上面三步） | 跑本机套件 `h3relay_check_all.py`（在**仓库之外**的 tools 目录里） | 全部通过 |
 
 ### 🔴 第 5 步：活体三步（改前端**必做**，别省）
@@ -169,7 +169,7 @@ python tools/check_frontend.py           # 期望 通过 5 / 失败 0（前端�
 ## V3 外壳与默认出口（零 GPU、秒级）
 
 ```bash
-COMFYUI_PATH=<根> python tests/test_v3_schema.py        # 期望 98/0（11 节点 / 165 个 input；有没有宿主注册表都是这一档）
+COMFYUI_PATH=<根> python tests/test_v3_schema.py        # 期望 98/0（11 节点 / 172 个 input；有没有宿主注册表都是这一档）
 COMFYUI_PATH=<根> python tools/assert_default_exit.py   # 期望 6/6
 ```
 
@@ -185,7 +185,7 @@ Combo `options` **全序** / outputs 路数与显示名 / `is_output_node` / 显
 >   （宿主自带注册 `latent_upscale_models`）⇒ 不抛。
 > · 注册表**拿不到**（宿主 `nodes` 导不进来 / 被本包目录遮成影子模块）⇒ 同样收敛成
 >   **RuntimeError** ⇒ 同样被吞 ⇒ **它照样在场**。
-> ⇒ 两种环境**都是 11 节点 / 165 input / 79 项**，所以现在**只有一个数**。
+> ⇒ 两种环境**都是 11 节点 / 172 input / 79 项**，所以现在**只有一个数**。
 >
 > 🔴 2026-10-07 之前不是这样：`_comfy_registry()` 里的 `import nodes` 若抛 **ImportError** 会
 >   **穿透**出去（`_upscaler_module()` 只 `except RuntimeError`）⇒ INPUT_TYPES 抛 ⇒ V3 外壳的
@@ -223,7 +223,7 @@ Combo `options` **全序** / outputs 路数与显示名 / `is_output_node` / 显
 
 | 工具 | 判什么 | 期望 |
 |---|---|---|
-| `tools/review_050.py` | 文档—代码一致性（节点清单 / 参数表 / 断言数 / 版本号 / **全部示例图**槽位（I1-I4：槽位 / 节点数 / widget 标记） / **三条铁律** / **L13 英文文档同步闸** / **H3j smoke 期望值** / **H3k registry 元数据** / **H3l 发布规范在位** / **H3m 无凭据字面量** / **H3n i18n 词表完整性** / **H3p i18n 悬浮提示双语完整性** / **H3q JS 逗号表达式** / **H3r i18n 防覆盖兜底** / **H3s link 端点字段两代兼容** / **H3t 官方语言入口** / **H3o 文档悬空引用** / **H3u registry 包文件数真值** / **H3v tools 脚本数真值** / **H3w 未跟踪文件** /  **H3x `setdefault` 到 `PYTHONPATH`** / **H3y tools 脚本登记** / **H3z release.py flag 齐全** / **H4a Python 子进程显式 env** / **H4b 判据表自检** / **H4c 台账一致** / **H4d JS 期望数真值** / **H4e dist 白名单真值** / **H4f `SIM115` 盲点** / **H4g 交付物无字节码/符号链接** / **H4i dist 内容完整（真实 import 全覆盖）**） | **129/0** |
+| `tools/review_050.py` | 文档—代码一致性（节点清单 / 参数表 / 断言数 / 版本号 / **全部示例图**槽位（I1-I4：槽位 / 节点数 / widget 标记） / **三条铁律** / **L13 英文文档同步闸** / **H3j smoke 期望值** / **H3k registry 元数据** / **H3l 发布规范在位** / **H3m 无凭据字面量** / **H3n i18n 词表完整性** / **H3p i18n 悬浮提示双语完整性** / **H3q JS 逗号表达式** / **H3r i18n 防覆盖兜底** / **H3s link 端点字段两代兼容** / **H3t 官方语言入口** / **H3o 文档悬空引用** / **H3u registry 包文件数真值** / **H3v tools 脚本数真值** / **H3w 未跟踪文件** /  **H3x `setdefault` 到 `PYTHONPATH`** / **H3y tools 脚本登记** / **H3z release.py flag 齐全** / **H4a Python 子进程显式 env** / **H4b 判据表自检** / **H4c 台账一致** / **H4d JS 期望数真值** / **H4e dist 白名单真值** / **H4f `SIM115` 盲点** / **H4g 交付物无字节码/符号链接** / **H4i dist 内容完整（真实 import 全覆盖）**） | **130/0** |
 | `tools/smoke_nodes.py` | 节点层功能冒烟（续接七件真跑一遍；🔍 放大节点要上游权重，不在冒烟内） | **22/0** |
 | `tools/assert_default_exit.py` | 默认出口 = V3（契约 2 + 行为 4；含 **V3 实际注册的节点集合** 与 **两个出口的 `dev_only` 标记逐节点一致**） | **6/6** |
 | `tools/sync_deploy_check.py` | 部署副本与指定提交的提交态一致 | 全 `OK` |

@@ -834,3 +834,33 @@ compared on the lossless sidecar):**
 
 ⚠️ **Criterion discipline**: this repo's SECS scores are **uncalibrated** (same-speaker and different-speaker
 ranges overlap) ⇒ **they cannot judge timbre**; the conclusion above rests on **listening**, nothing else.
+
+## How to feed reference images to a continuation: one set for the whole run, or follow the shot
+
+On a single continuous take, the usual failure is not the seam itself — it is **the reference images being
+swapped between segments**.
+
+Mechanism (verified against the host source): each reference image goes through `vae.encode` into a
+`minimax_refs` block (`comfy_extras/nodes_minimax_h3.py`), and `comfy/model_base.py` puts those blocks into
+`PackedLayout(refs=...)` ⇒ **refs are extra tokens in the DiT sequence, present at every attention step**.
+The frames the copy bridge pins are **rows of the target sequence** and cannot be repainted; **once the pinned
+region ends**, only the ref tokens speak ⇒ if this segment's references differ from the previous segment's
+appearance, the model "re-identifies" right there ⇒ a hard cut.
+
+The appearance reference (`ref_anchor_*`) **cannot fix this**: `build_anchor_ref` in `relay_core/plan.py`
+builds a `minimax_refs` block of `kind="video"` as well ⇒ it sits on the **same layer** as the stills.
+When the two disagree it is not "the anchor pulls the picture back", it is **two ref blocks fighting**
+(half-swapped faces, smeared faces — sometimes worse than a hard cut).
+
+Two correct paths:
+
+| Situation | `refs_mode` | `ref_anchor_mode` | Why |
+|---|---|---|---|
+| One continuous take, same place and same people | `lock` (default) | `off` or `first` | the model holds no "new image", so the conflict cannot exist |
+| One continuous take, the camera walks into a new place | `first_only` | `roll` | the stills feed only the first segment; appearance is carried by the previous segment's own frames, same source as the pinned region |
+| A real wardrobe / cast / set change | — | — | that is a **shot change**: use `settle_frames=-1` to move the hard cut back to the segment boundary |
+
+🔴 This pack **deliberately has no** "different references per segment": that is not a parameter gap, it is
+not done by design. The three reference slots (`ref_image_1..3`, matching `@Image1/2/3` in the prompt) are
+shared by the whole run, and they are **mutually exclusive** with the first-frame image `image`
+(each official node lacks the other's slot, so wiring both raises an error).

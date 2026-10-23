@@ -483,6 +483,21 @@
      "link": 5
     },
     {
+     "name": "ref_image_1",
+     "type": "IMAGE",
+     "link": null
+    },
+    {
+     "name": "ref_image_2",
+     "type": "IMAGE",
+     "link": null
+    },
+    {
+     "name": "ref_image_3",
+     "type": "IMAGE",
+     "link": null
+    },
+    {
      "name": "prompts",
      "type": "STRING",
      "link": null,
@@ -517,6 +532,38 @@
      "link": null,
      "widget": {
       "name": "from_segment"
+     }
+    },
+    {
+     "name": "ref_image_size",
+     "type": "COMBO",
+     "link": null,
+     "widget": {
+      "name": "ref_image_size"
+     }
+    },
+    {
+     "name": "refs_mode",
+     "type": "COMBO",
+     "link": null,
+     "widget": {
+      "name": "refs_mode"
+     }
+    },
+    {
+     "name": "ref_anchor_mode",
+     "type": "COMBO",
+     "link": null,
+     "widget": {
+      "name": "ref_anchor_mode"
+     }
+    },
+    {
+     "name": "ref_anchor_frames",
+     "type": "INT",
+     "link": null,
+     "widget": {
+      "name": "ref_anchor_frames"
      }
     }
    ],
@@ -564,6 +611,11 @@
     "",
     0,
     0
+   ,
+    "match",
+    "lock",
+    "off",
+    5
    ]
   },
   {

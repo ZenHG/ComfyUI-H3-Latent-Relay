@@ -172,17 +172,21 @@ _FR = NODES.H3RelayFiniteRun
 check("37.38 FiniteRun 标了 V3_EXPAND（V3 外壳据此开 enable_expand）",
       getattr(_FR, "V3_EXPAND", False) is True)
 _it = _FR.INPUT_TYPES()
-check("37.39 输入槽 22 个（16 必填 + 6 可选）",
-      len(_it["required"]) == 16 and len(_it["optional"]) == 6,
+check("37.39 输入槽 29 个（16 必填 + 13 可选；2026-10-23 加参考图 3 槽与 4 个参考策略 widget）",
+      len(_it["required"]) == 16 and len(_it["optional"]) == 13,
       "必填 %d / 可选 %d" % (len(_it["required"]), len(_it["optional"])))
 check("37.40 四路输出（末段 latent / 画面 / 音频 / 报告）",
       _FR.RETURN_TYPES == ("LATENT", "IMAGE", "AUDIO", "STRING")
       and _FR.RETURN_NAMES == ("last_latent", "images", "audio", "report"))
 check("37.41 链接型输入全在 optional（必填链接会堵掉纯文生成/不换词/不用声锚）",
-      list(_it["optional"]) == ["image", "prompts", "voice_anchor", "note",
-                                "settle_frames", "from_segment"]
+      list(_it["optional"]) == ["image", "ref_image_1", "ref_image_2", "ref_image_3",
+                                "prompts", "voice_anchor", "note",
+                                "settle_frames", "from_segment",
+                                "ref_image_size", "refs_mode", "ref_anchor_mode",
+                                "ref_anchor_frames"]
       and all(t in ("IMAGE", "LATENT") for t in
-              (_it["optional"]["image"][0], _it["optional"]["voice_anchor"][0])))
+              (_it["optional"]["image"][0], _it["optional"]["voice_anchor"][0],
+               _it["optional"]["ref_image_1"][0])))
 
 _JV = NODES.H3RelayJoinAV
 _imgs = torch.zeros(2, 4, 4, 3)
@@ -250,8 +254,11 @@ try:
     _e60 = ""
 except RuntimeError as _exc60:
     _e60 = str(_exc60)
-check("37.60 无 stage_index 的节点报错不带「段号」话术（读起来不像第二个问题）",
-      bool(_e60) and "段号" not in _e60.splitlines()[0], _e60.splitlines()[0][:70])
+# ⚠ 契约在 0.6.x 变过：现在**明说**「段号未提供（本节点无 stage_index 入参）」，
+#   比"完全不提段号"更好读 —— 关键是**不许伪造**一个「第 N 段」出来。
+check("37.60 无 stage_index 的节点报错**明说**段号缺失，不伪造「第 N 段」",
+      bool(_e60) and "段号未提供" in _e60.splitlines()[0]
+      and "第 " not in _e60.splitlines()[0], _e60.splitlines()[0][:70])
 check("37.61 报错首行点出节点名与关键入参",
       "H3RelayFiniteRun" in _e60.splitlines()[0] and "run_id=r" in _e60.splitlines()[0],
       _e60.splitlines()[0][:70])
@@ -403,4 +410,105 @@ check("37.83 from_segment=1 时 report 里点名要读的那一份（不读源�
       "首段读 stage_00000 续接" in _raw82["result"][3])
 NODES._stage_path = _OLD_SP3
 _sh3.rmtree(_TMP3, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+print("[10] 参考图路（ref_image_1..3）：全片同一组 + 与首帧路互斥 + 外观锚")
+# ---------------------------------------------------------------------------
+#   为什么这一组必须有：本节点组主打**续接**，而续接最真实的翻车不是接缝本身，是
+#   「每段参考的图不一样 ⇒ 拷贝窗那几帧一过，模型按本段的新参考图重新认人 ⇒ 硬切」。
+#   解法是结构性的：refs 一组、全片共用。断言就锁这条结构 —— 只要哪天有人"顺手"
+#   让 refs 逐段变化，这里立刻红。
+_g10, _o10, _r10 = _build(3, ref_images=["R1", "R2", "R3"], image=None)
+check("37.84 接参考图 ⇒ 每段起点节点换成官方 MiniMaxH3ReferenceToVideo",
+      {_cls_of(_g10, "seg%d_i2v" % k) for k in range(3)} == {"MiniMaxH3ReferenceToVideo"},
+      str({_cls_of(_g10, "seg%d_i2v" % k) for k in range(3)}))
+check("37.85 三张图按顺序落在 ref_image_0/1/2（错位 = 静默换人）",
+      [_inputs_of(_g10, "seg0_i2v")["ref_images.ref_image_%d" % i] for i in range(3)]
+      == ["R1", "R2", "R3"])
+check("37.86 🔴 每一段接的都是**同一组**参考图（全片一致，这是防硬切的结构保证）",
+      all([_inputs_of(_g10, "seg%d_i2v" % k)["ref_images.ref_image_%d" % i] for i in range(3)]
+          == ["R1", "R2", "R3"] for k in range(3)))
+check("37.87 参考图路必须带 vae + audio_vae（官方：不给 vae 时参考图只影响文本编码器）",
+      all(_inputs_of(_g10, "seg%d_i2v" % k).get("vae") == "VAE"
+          and _inputs_of(_g10, "seg%d_i2v" % k).get("audio_vae") == "AVAE" for k in range(3)))
+check("37.88 ref_image_size 透传到每段（默认 match）",
+      {_inputs_of(_g10, "seg%d_i2v" % k)["ref_image_size"] for k in range(3)} == {"match"})
+check("37.89 参考图路**没有** first_frame 键（官方那个节点没这槽，多写就是死链）",
+      not any("first_frame" in _inputs_of(_g10, "seg%d_i2v" % k) for k in range(3)))
+check("37.90 报告点名「全片共用同一组」与 ReferenceToVideo 路（用户不看源码也能确认）",
+      "全片共用同一组" in _r10 and "ReferenceToVideo" in _r10)
+expect_raise("37.91 🔴 参考图与首帧图同时给 ⇒ raise（两个官方节点各缺对方那槽，不能悄悄挑一个）",
+             lambda: _build(2, ref_images=["R1"], image="IMG"), "不能同时用")
+check("37.92 只给首帧图（refs 为空列表）⇒ 仍是 ImageToVideo（参考图路不偷偷接管）",
+      _cls_of(_build(2, ref_images=[], image="IMG")[0], "seg0_i2v") == "MiniMaxH3ImageToVideo")
+_g93, _o93, _r93 = _build(3, ref_images=["R1"], image=None, ref_anchor_mode="first", ref_anchor_frames=7)
+check("37.93 外观锚 first：段 0 不设（它就是要产出的那段），段 1/2 都固定指 0",
+      [_inputs_of(_g93, "seg%d_bridge" % k).get("ref_anchor_stage") for k in range(3)]
+      == [None, 0, 0],
+      str([_inputs_of(_g93, "seg%d_bridge" % k).get("ref_anchor_stage") for k in range(3)]))
+check("37.94 外观锚取帧数随段下传（默认 5，这里 7）",
+      {_inputs_of(_g93, "seg%d_bridge" % k).get("ref_anchor_frames") for k in (1, 2)} == {7})
+check("37.95 ref_anchor_mode=off（默认）⇒ 桥上根本不出现这两个键（存量图逐位不变）",
+      all("ref_anchor_stage" not in _inputs_of(_g3, "seg%d_bridge" % k) for k in range(3)))
+expect_raise("37.96 first 锚但本批只有第 0 段这一段 ⇒ raise（锚就是它自己，一段都用不上）",
+             lambda: _build(1, ref_anchor_mode="first"), "一段都用不上")
+expect_raise("37.97 外观锚取帧数 < 1 ⇒ raise",
+             lambda: _build(3, ref_anchor_mode="first", ref_anchor_frames=0), "至少取 1 帧")
+# 节点层：三张槽 → 一组（未接的槽必须被剔除，不能留 None 在 refs 里）
+_raw98 = _FR().run(model="M", clip="C", vae="V", audio_vae="AV", sampler="S", sigmas="G",
+                   prompt="词", prompts="", segments=2, seed=0, run_id="rfx", width=608,
+                   height=1056, length=124, context_frames=22, mask_mode="hard",
+                   pin_audio=True, ref_image_1="A", ref_image_2=None, ref_image_3="C")
+_i98 = [n["inputs"] for nid, n in _raw98["expand"].items() if nid.endswith("seg1_i2v")][0]
+check("37.98 节点层：未接的槽被剔除（ref_image_1=A / ref_image_3=C ⇒ 只两槽，不出现 None）",
+      _i98.get("ref_images.ref_image_0") == "A" and _i98.get("ref_images.ref_image_1") == "C"
+      and "ref_images.ref_image_2" not in _i98,
+      str(sorted(k for k in _i98 if k.startswith("ref_images"))))
+_raw99 = _FR().run(model="M", clip="C", vae="V", audio_vae="AV", sampler="S", sigmas="G",
+                   prompt="词", prompts="", segments=2, seed=0, run_id="rfx", width=608,
+                   height=1056, length=124, context_frames=22, mask_mode="hard",
+                   pin_audio=True)
+check("37.99 节点层：三个槽全不接 ⇒ 走 ImageToVideo（默认行为不变）",
+      [n["class_type"] for nid, n in _raw99["expand"].items() if nid.endswith("seg0_i2v")]
+      == ["MiniMaxH3ImageToVideo"])
+
+# ---------------------------------------------------------------------------
+print("[11] 滚动外观锚 + 定妆照只喂首段（治「每段参考图不同 ⇒ 拷贝窗后硬切」）")
+# ---------------------------------------------------------------------------
+#   机理：定妆照和外观锚**同层**（都是 minimax_refs 的 ref 块，每步都骑乘）。
+#   定妆照逐段不同 ⇒ 与钉住区/锚抢 ⇒ 拷贝窗一过就跳。两条正路：
+#     ① lock（全片一组定妆照）—— 不给模型"新图"；
+#     ② first_only + roll —— 定妆照只喂首段，之后靠"上一段自己的画面"跟随镜头。
+_g100, _o100, _r100 = _build(3, ref_images=["R1"], image=None, ref_anchor_mode="roll")
+check("37.100 roll 锚：段 0 不设、段 1 指 0、段 2 指 1（每段指上一段，跟随镜头）",
+      [_inputs_of(_g100, "seg%d_bridge" % k).get("ref_anchor_stage") for k in range(3)]
+      == [None, 0, 1],
+      str([_inputs_of(_g100, "seg%d_bridge" % k).get("ref_anchor_stage") for k in range(3)]))
+_g101, _o101, _r101 = _build(3, ref_images=["R1", "R2"], image=None, refs_mode="first_only",
+                             ref_anchor_mode="roll")
+check("37.101 first_only：只有第 1 段接定妆照，后续段走 ImageToVideo（不带 ref 块）",
+      [_cls_of(_g101, "seg%d_i2v" % k) for k in range(3)]
+      == ["MiniMaxH3ReferenceToVideo", "MiniMaxH3ImageToVideo", "MiniMaxH3ImageToVideo"],
+      str([_cls_of(_g101, "seg%d_i2v" % k) for k in range(3)]))
+check("37.102 first_only 后续段**没有**任何 ref_images 键（不是接了空，是压根不接）",
+      not any(k.startswith("ref_images") for k in _inputs_of(_g101, "seg1_i2v")))
+check("37.103 报告写明「只喂本批第 N 段」与滚动锚（用户不看源码也能确认）",
+      "只喂本批第 0 段" in _r101 and "滚动" in _r101,
+      " | ".join(l for l in _r101.splitlines() if "参考图" in l or "外观锚" in l)[:160])
+check("37.104 roll + lock（两个 ref 块在抢）⇒ 报告点名提醒改 first_only",
+      "两个 ref 块在条件层抢" in _r100)
+_g105, _o105, _r105 = _build(2, ref_images=["R1"], image=None, from_segment=2, refs_mode="first_only")
+check("37.105 first_only + from_segment=2 ⇒ 定妆照喂的是**本批第 1 段（stage 2）**，不是 stage 0",
+      [_cls_of(_g105, "seg%d_i2v" % k) for k in range(2)]
+      == ["MiniMaxH3ReferenceToVideo", "MiniMaxH3ImageToVideo"])
+expect_raise("37.106 非法 refs_mode ⇒ raise（枚举外不许静默当 lock）",
+             lambda: _build(2, refs_mode="per_segment"), "不认识")
+expect_raise("37.107 非法 ref_anchor_mode ⇒ raise",
+             lambda: _build(2, ref_anchor_mode="fixed"), "不认识")
+check("37.108 枚举的唯一真相源在 relay_core（节点层直接用同一份，不许各写一份）",
+      list(CORE.REFS_MODES) == list(NODES.H3RelayFiniteRun.INPUT_TYPES()["optional"]["refs_mode"][0])
+      and list(CORE.ANCHOR_MODES) == list(
+          NODES.H3RelayFiniteRun.INPUT_TYPES()["optional"]["ref_anchor_mode"][0]))
+
+
 

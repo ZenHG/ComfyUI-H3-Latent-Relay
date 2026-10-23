@@ -49,6 +49,8 @@ KIND = {
     # H4i = 真值（**真扫包内相对 import**，再与 `MANIFEST_RUNTIME` 比集合差），
     #   不是一致性 —— 它比的是「代码真实依赖」vs「白名单声明」，两边来源不同源。
     "H4i": "truth",
+    # H4j = 真值（**真去数** `tests/cases/` 的磁盘集合，再与运行器里的 `_CASES` 比集合差）
+    "H4j": "truth",
     "H4f": "hygiene", "H4g": "hygiene",
     "H7": "truth", "H7b": "truth", "H7c": "truth", "H7d": "truth",
     "H3e": "hygiene", "H3l": "hygiene", "H3m": "hygiene", "H3n": "hygiene", "H3o": "hygiene",
@@ -81,6 +83,7 @@ CALIBER = {
     "H4d": "**JS 测试期望数 ×4**（`43/0` / `29/0` / `45/0` / `33/0`；ci.yml + docs/08）",
     "H4e": "**dist 白名单文件数**（`make_minimal_bundle.py` 的 `MANIFEST` 总长 vs 文档声明）",
     "H4h": "**`check_tooltips` 的项数**（`N 项`；ci.yml + docs/08 + tools/README）",
+    "H4j": "**测试分片登记数**（`tests/cases/*.py` vs `_CASES`；不登记 = 从不执行）",
 }
 
 # ── 变异测试（注入什么 ⇒ 这一条**必须**变红）────────────────────────────────
@@ -103,6 +106,9 @@ MUTATION = {
     #   H4e 只在「文档声明没跟着改」时才红；**两边一起删就全绿**。
     #   H4i 直接报 `relay_core/__init__.py: from .finite import … ⇒ relay_core/finite.py 不在 MANIFEST_RUNTIME`。
     "H4i": "把 `relay_core/finite.py` 从 `MANIFEST_RUNTIME` 删掉（H4e 若同时改文档仍会绿，H4i 必须红）",
+    # 实测过（2026-10-23）：把 `_CASES` 里 `"_g37_finite_run.py"` 那行删掉 ⇒ H4j 精确报出漏登记。
+    #   （这正是本仓真实发生过的事：那个分片 0.6.36 就写好，80+ 条断言从未执行。）
+    "H4j": "从 `tests/test_relay_core.py` 的 `_CASES` 里删掉任一分片名（断言不再执行 ⇒ 必须红）",
     "H4h": "把 `docs/08-testing.md` 里 `check_tooltips` 的项数改成 1217",
     "H7": "把 `H3RelayJoinAV` 类撑到 401 行（它不在已知超额名单里 ⇒ 必须红）",
     "H7b": "在某个 H3Relay* 类里加 60 行可执行代码（可执行行上限 2200 ⇒ 必须红）",

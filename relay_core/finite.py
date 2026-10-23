@@ -48,6 +48,20 @@ FINITE_MAX_SEGMENTS = 64
 #: 每段节点数（上面链路里数出来的；改链路必须同步这个数）。
 _NODES_PER_SEGMENT = 10
 
+#: 参考图（定妆照）怎么用到各段。
+#:   · lock       —— **全片同一组**（默认）。一镜到底的唯一无冲突解：模型没有"新图"可参考。
+#:   · first_only —— 只喂本批第 1 段，后续段不带定妆照，外观靠**滚动外观锚**跟随镜头。
+#: 🔴 刻意**不提供** per_segment（逐段换一组定妆照）：那是「换镜」不是「续接」。
+#:   它会让条件层每段换一个"长相"，与钉住区/外观锚抢 ⇒ 拷贝窗一过必跳。
+REFS_MODES: Tuple[str, ...] = ("lock", "first_only")
+
+#: 外观锚（`minimax_refs` 的 kind="video" 块）指向哪一段。
+#:   · off   —— 不用（默认，存量行为）。
+#:   · first —— 固定指向全片第 1 段：身份最稳，但镜头走到新环境/新光位时会变"过时"。
+#:   · roll  —— 滚动：每段指向**上一段**：跟随镜头、不会过时，代价是逐段累积误差（会漂）。
+#: ⚠ 两种锚治的病不同，没有哪个恒对 —— 见 build_finite_graph 的 docstring。
+ANCHOR_MODES: Tuple[str, ...] = ("off", "first", "roll")
+
 
 class FinitePlanError(ValueError):
     """连跑参数在建图期就不合法（在任何 GPU 工作之前拦住）。"""
@@ -257,6 +271,11 @@ def build_finite_graph(
     sampler: Any = None,
     sigmas: Any = None,
     voice_anchor: Any = None,
+    ref_images: Any = None,
+    ref_image_size: str = "match",
+    refs_mode: str = "lock",
+    ref_anchor_mode: str = "off",
+    ref_anchor_frames: int = 5,
 ) -> Tuple[Dict[str, Dict[str, Any]], List[Any], str]:
     """构建 N 段展开图。返回 ``(graph, outputs, 报告)``。
 
@@ -265,6 +284,32 @@ def build_finite_graph(
     ``blocks`` 长度必须 == segments（由 ``resolve_finite_prompts`` 产出）。
     ``outputs`` 顺序 = 节点 RETURN_TYPES：末段 latent 链接、拼成一条的画面/音频链接、
     报告字符串（字面值）。
+
+    🔴 **参考图（refs）为什么必须「全片同一组」**（2026-10-22 补，来自真实机理）：
+    H3 的参考图是**每一步都在生效的条件**（不是只影响第一帧）。本包靠「拷贝桥」把上一段
+    尾部若干帧钉进本段开头；钉住区里模型不能重绘 ⇒ 看不出差异；**钉住区一过**，模型就按
+    **本段的 refs** 去理解人物与场景 ⇒ 若本段 refs 与上一段不同，就会在这里「重新认人」
+    ⇒ 表现为一次硬切。所以本函数把 ``ref_images`` 设计成**一组、全片共用**：
+    每段的 ``MiniMaxH3ReferenceToVideo`` 接同一批图，模型没有"新图"可参考，就不会跳。
+    想逐段换参考 = 那是在**换镜**，不是续接 —— 该用画布模式显式接，不走本函数。
+
+    🔬 **机理（按宿主源码逐行核过，2026-10-23）** —— 为什么"外观锚不一定够用"：
+      · 参考图不是"只看第一帧"：``nodes_minimax_h3.py`` 把每张参考图 VAE 编码成
+        ``ref_blocks``，``conditioning_set_values(cond, {"minimax_refs": ...})``；
+        ``model_base.py`` 再把它塞进 ``payload["refs"]`` 与 ``PackedLayout(refs=...)``
+        ⇒ **refs 是 DiT 序列里的额外 token 块，每一步 attention 都看得见**。
+      · 拷贝桥钉住的 22 帧是**目标序列里的行**（denoise_mask 保护 + cond timestep 注入），
+        不是 ref token ⇒ 它和 refs 是**两套并行的信号**。
+      · 外观锚（``build_anchor_ref``）**也是** ``minimax_refs`` 的 ``kind="video"`` 块
+        —— 它和定妆照**同层**，不是"潜空间软约束"。
+        ⇒ 当定妆照与本段实际外观不一致时，两个 ref 块**互相抢**；
+          结果不是"锚把它拉回来"，而是折中/换脸半途/闪 ⇒ 有时比硬切更难看。
+      · 所以治「每段参考图不同」只有两条正路：
+        ① **定妆照全片一组**（``refs_mode=lock``）—— 干脆不给模型"新图"；
+        ② **定妆照只喂首段 + 滚动锚**（``refs_mode=first_only`` + ``ref_anchor_mode=roll``）
+           —— 外观改由"上一段自己的画面"传递，条件层与钉住区同源，不打架。
+        而"外观锚固定指第 1 段"（``first``）适合**同一环境内**的长片身份稳定；
+        镜头进入新环境/新光位后它会变过时，这时该用 ``roll``，或者干脆按切镜处理。
     """
     if len(blocks) != int(segments):
         raise FinitePlanError(
@@ -284,6 +329,50 @@ def build_finite_graph(
     fs = int(from_segment)
     rid = "" if run_id is None else str(run_id)
     nt = "" if note is None else str(note)
+    # 参考图：过滤掉未接线的 None 槽（V1 的 optional 链接槽不接线时整个键不传）。
+    refs = [r for r in (ref_images or []) if r is not None]
+    # 🔴 参考图路与首帧路**互斥**：官方 `MiniMaxH3ReferenceToVideo` 根本没有 first_frame 槽
+    #    （只有 ref_images / ref_videos / ref_audios）⇒ 同时给两个输入必须硬错误，
+    #    不能悄悄挑一个用（铁律七：硬错误必须 raise，绝不静默降级）。
+    if refs and image is not None:
+        raise FinitePlanError(
+            "参考图（ref_image_*）与首帧图（image）**不能同时用**：\n"
+            "    · 参考图走官方 MiniMaxH3ReferenceToVideo —— 它只有 ref_images 槽，没有 first_frame；\n"
+            "    · 首帧图走官方 MiniMaxH3ImageToVideo —— 它没有 ref_images 槽。\n"
+            "    ⇒ 二选一：要人物/场景一致（续接推荐）就留 ref_image_*、断开 image；\n"
+            "      只要「从这张图开始」就断开 ref_image_*。")
+    _rm = "lock" if refs_mode is None else str(refs_mode)
+    _am = "off" if ref_anchor_mode is None else str(ref_anchor_mode)
+    if _rm not in REFS_MODES:
+        raise FinitePlanError(
+            "refs_mode=%r 不认识。合法值：%s。\n"
+            "    · lock = 定妆照全片同一组（默认，一镜到底推荐）；\n"
+            "    · first_only = 定妆照只喂本批第 1 段，后续段靠外观锚跟随。"
+            % (_rm, " / ".join(REFS_MODES)))
+    if _am not in ANCHOR_MODES:
+        raise FinitePlanError(
+            "ref_anchor_mode=%r 不认识。合法值：%s。\n"
+            "    · off = 不用（默认）；first = 固定指第 1 段；roll = 每段指上一段。"
+            % (_am, " / ".join(ANCHOR_MODES)))
+    _raf = 5 if ref_anchor_frames is None else int(ref_anchor_frames)
+    if _am != "off" and _raf < 1:
+        raise FinitePlanError(
+            "ref_anchor_frames=%d 不合法：至少取 1 帧（默认 5）。" % (_raf,))
+    if _am == "first" and fs + n - 1 < 1:
+        # 只有「从第 0 段起跑且只跑 1 段」这种情况一段都用不上（锚就是它自己）。
+        raise FinitePlanError(
+            "ref_anchor_mode=first 但本批只有第 0 段这一段 ⇒ 外观锚一段都用不上"
+            "（锚就是它自己）。\n    ⇒ 跑 2 段以上，或把 ref_anchor_mode 改回 off。")
+
+    def _anchor_for(stage: int):
+        """本段该用的外观锚段号（None = 不用）。⚠ 锚必须是**更早且已落盘**的段。"""
+        if _am == "off":
+            return None
+        if _am == "first":
+            return 0 if stage > 0 else None
+        return (stage - 1) if stage >= 1 else None
+
+
     graph: Dict[str, Dict[str, Any]] = {}
     prev_join: Optional[str] = None
 
@@ -295,14 +384,30 @@ def build_finite_graph(
         save, vdec, adec = tag + "save", tag + "vdec", tag + "adec"
         trim, join = tag + "trim", tag + "join"
 
-        # ① 词 → conditioning + 空 AV latent（官方节点；first_frame 可选 = t2v 模式）
+        # ① 词 → conditioning + 空 AV latent（官方节点）。三条路互斥，见函数 docstring：
+        #    参考图路（refs 全片共用一组）/ 首帧路 / 纯词路。
         i2v_inputs: Dict[str, Any] = {
             "clip": clip, "vae": vae, "prompt": blocks[k],
             "width": int(width), "height": int(height), "length": int(length),
         }
-        if image is not None:
-            i2v_inputs["first_frame"] = image
-        graph[i2v] = {"class_type": "MiniMaxH3ImageToVideo", "inputs": i2v_inputs}
+        # 定妆照只在「lock（每段都用）」或「first_only（只本批第 1 段用）」时才接。
+        _use_refs = bool(refs) and (_rm == "lock" or stage == fs)
+        if _use_refs:
+            # 参考图路：官方 Autogrow 槽名是 `ref_images.ref_image_<i>`（max=9）。
+            # ⚠ 每槽是**单张图**；一个多帧 batch 会被官方当「视频参考」裁到 5+17k 档
+            #   （nodes_minimax_h3.py 的 guide_frames 逻辑）⇒ 别拿 batch 表达多张独立图。
+            i2v_inputs["ref_image_size"] = str(ref_image_size or "match")
+            # vae / audio_vae 在参考图路是**让参考图真正进入 latent 条件**的开关；
+            # 官方 tooltip 明说「不给 vae 时参考图只影响文本编码器」⇒ 必须带上。
+            i2v_inputs["vae"] = vae
+            i2v_inputs["audio_vae"] = audio_vae
+            for _i, _r in enumerate(refs):
+                i2v_inputs["ref_images.ref_image_%d" % _i] = _r
+            graph[i2v] = {"class_type": "MiniMaxH3ReferenceToVideo", "inputs": i2v_inputs}
+        else:
+            if image is not None:
+                i2v_inputs["first_frame"] = image
+            graph[i2v] = {"class_type": "MiniMaxH3ImageToVideo", "inputs": i2v_inputs}
 
         # ② 上一段 latent **不接了** —— 桥自己按 run_id + 段号−1 从磁盘取（0.6.37 起免接线）。
         #    stage ≥ 1 时取的是上一段；stage = 0（from_segment=0 且 k=0）没有上一段
@@ -320,6 +425,15 @@ def build_finite_graph(
         }
         if voice_anchor is not None:
             bridge_inputs["voice_anchor"] = voice_anchor
+        # 外观锚（`minimax_refs` 的 kind="video" 块，取自锚段**开头**几帧）：
+        # 它和定妆照在**同一层**（都是 ref token 块，每步都骑乘）⇒ 两者外观不一致时会互相抢。
+        # 所以：`first` 配 `lock` 是「身份圣经 + 定妆照同源」，稳；
+        #       `roll` 配 `first_only` 是「跟随镜头、不带外挂定妆照」，稳；
+        #       其余组合能跑，但两个 sink 在打架 —— 报告里会点名。
+        _anc = _anchor_for(stage)
+        if _anc is not None:
+            bridge_inputs["ref_anchor_stage"] = int(_anc)
+            bridge_inputs["ref_anchor_frames"] = int(_raf)
         graph[bridge] = {"class_type": "H3RelayCopyBridge", "inputs": bridge_inputs}
 
         # ④ 采样三件套（核心节点；sigmas/sampler 由外层用户自配）
@@ -384,16 +498,44 @@ def build_finite_graph(
             "\n合并输出驻留内存约 **%.2f GiB**（累计拷贝 %.1f GiB）—— 在 12GB 卡实务范围内。"
             % (_acc_gib, _copy_gib))
 
+    if refs and _rm == "lock":
+        _src_note = (
+            "\n参考图：**%d 张、全片共用同一组**（官方 ReferenceToVideo 路）"
+            "—— 这是防「拷贝窗过后模型转向新参考图 ⇒ 硬切」的结构性做法。" % (len(refs),))
+    elif refs and _rm == "first_only":
+        _src_note = (
+            "\n参考图：**%d 张，只喂本批第 %d 段**（后续段不带定妆照）。\n"
+            "    ⇒ 后续段的外观由「钉住区 + 外观锚」跟随镜头，不与定妆照抢条件层。" % (len(refs), fs))
+    elif image is not None:
+        _src_note = ("\n起点：首帧图（官方 ImageToVideo 路）。"
+                     "长片只靠首帧锁人/景会漂 ⇒ 续接建议改用 ref_image_*。")
+    else:
+        _src_note = "\n起点：纯词（官方 ImageToVideo 路的无图模式）。"
+    if _am == "first":
+        _src_note += ("\n外观锚：**固定**指向 stage_%05d 开头 %d 帧（身份圣经；"
+                      "镜头进新环境/新光位时会变过时）。" % (0, _raf))
+    elif _am == "roll":
+        _src_note += ("\n外观锚：**滚动**（每段指向上一段）开头 %d 帧"
+                      "（跟随镜头；代价是逐段累积误差，长片会漂）。" % (_raf,))
+    # 两个 sink 打架的组合：说清楚，别让用户以为是"参数没生效"。
+    if _am == "first" and refs and _rm == "lock":
+        pass  # 同源，稳
+    elif _am == "roll" and refs and _rm == "lock":
+        _src_note += ("\n⚠ 组合提醒：定妆照全片固定 + 滚动锚 ⇒ 两个 ref 块在条件层抢。"
+                      "一镜到底建议改成 refs_mode=first_only。")
+
     report = (
         "一次提交展开 %d 段（seed=%d，run_id=%s，context_frames=%d，mask_mode=%s，"
         "settle_frames=%d，from_segment=%d）。\n"
-        "每段链：ImageToVideo → CopyBridge → 采样 → LatentSave → 解码 → TrimAV → JoinAV"
+        "每段链：%s → CopyBridge → 采样 → LatentSave → 解码 → TrimAV → JoinAV"
         "（上一段由桥自取，不再手接 Latent Load；trim_frames 由桥给，settle_frames 见上）。\n"
-        "边车：output/relay_kit/%s/stage_%05d..%05d（含谱系头）%s。%s"
+        "边车：output/relay_kit/%s/stage_%05d..%05d（含谱系头）%s。%s%s"
         % (n, int(seed), rid or "（空）", int(context_frames), str(mask_mode),
-           int(settle_frames), fs, rid or "<run_id>", fs, fs + n - 1,
+           int(settle_frames), fs,
+           "ReferenceToVideo" if refs else "ImageToVideo",
+           rid or "<run_id>", fs, fs + n - 1,
            ("；首段读 stage_%05d 续接" % (fs - 1)) if fs > 0 else "；首段不接上一段（直通）",
-           _vram_note)
+           _vram_note, _src_note)
     )
     return graph, [[samp, 0], [prev_join, 0], [prev_join, 1], report], report
 

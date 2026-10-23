@@ -347,14 +347,15 @@ from .upscale import (
 from .prompt import (PROMPT_SEPARATOR_MIN_DASHES, _lines_like_js, pick_prompt_block, split_prompt_blocks)
 
 # —— finite：服务端「一次提交跑完 N 段」的展开图构建（纯函数，节点侧只做编排）。
-from .finite import (FINITE_MAX_SEGMENTS, FinitePlanError, build_finite_graph,
-                     finite_graph_node_count, resolve_finite_prompts,
+from .finite import (ANCHOR_MODES, FINITE_MAX_SEGMENTS, REFS_MODES, FinitePlanError,
+                     build_finite_graph, finite_graph_node_count, resolve_finite_prompts,
                      validate_finite_inputs_early, validate_finite_params)
 
 __all__ = [
     "ADVISE_WITHIN",
     "ANALYSIS_SHORT_SIDE",
     "ANALYSIS_SHORT_SIDE_ALT",
+    "ANCHOR_MODES",
     "ANCHOR_VOICED_MARGIN_S",
     "ANCHOR_VOICED_MIN_FRAC",
     "AUDIO_DECLICK_BG_PCT",
@@ -446,6 +447,7 @@ __all__ = [
     "PROMPT_SEPARATOR_MIN_DASHES",
     "QUANTILE_MAX_ELEMS",
     "QUANTILE_SAMPLE_ELEMS",
+    "REFS_MODES",
     "REPEAT_MAE",
     "REPEAT_MIN_RUN",
     "REPEAT_SCAN",
@@ -957,6 +959,8 @@ _OWNER = {
     # finite
     "FINITE_MAX_SEGMENTS": "finite",
     "FinitePlanError": "finite",
+    "ANCHOR_MODES": "finite",
+    "REFS_MODES": "finite",
     "build_finite_graph": "finite",
     "finite_graph_node_count": "finite",
     "resolve_finite_prompts": "finite",

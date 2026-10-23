@@ -2797,9 +2797,15 @@ class H3RelayFiniteRun:
     逐段手改段号（脚本/API 与画布同一套实现），每段读上一段落盘文件续接（和手动
     连跑同一条链、同一批节点）。展开图里全部是已有节点，算法零重写。
 
-    ⚠ 边界（诚实声明）：各段用**同一张首帧图、同一个种子、同一段长**（与手动连跑
-    同语义）；不含音频缝补丁与画质域后处理节点；合并输出是**一条驻留内存的张量**。
+    ⚠ 边界（诚实声明）：各段用**同一组参考图 / 同一张首帧图、同一个种子、同一段长**
+    （与手动连跑同语义）；不含音频缝补丁与画质域后处理节点；合并输出是**一条驻留内存的张量**。
     沉降档（``settle_frames``）是**裁量**不是后处理 ⇒ 随段下传，换镜续接时脚本侧也能设。
+
+    🔴 **续接的正确用法**（2026-10-22 补）：本节点组主打续接，所以
+      ① 用**一镜到底**的片段（每段词里不要塞多个 `[Shot]` —— 多镜 = 段内硬切，
+         判据 C3/C4/C6 的前提直接失效）；
+      ② 用**参考图**锁人/景（`ref_image_1..3`），**不要**用首帧图；
+      ③ 参考图必须**全片同一组** —— 每段换参考图 ⇒ 拷贝窗一过模型就按新图重新认人 ⇒ 硬切。
     """
 
     # V3 外壳据此开启 enable_expand（V1 出口无需声明，返回 expand 字典即生效）。
@@ -2872,7 +2878,27 @@ class H3RelayFiniteRun:
                 # ⚠ 链接型输入一律放 optional：必填链接 = 强制接线，
                 #   会把「纯文生成视频」「不换词」「不用声音参考」这些合法用法堵死。
                 "image": ("IMAGE", {
-                    "tooltip": "【首帧图】第 1 段的第一帧，各段用同一张。\n不接 = 纯文生成视频。",
+                    "tooltip": "【首帧图】第 1 段的第一帧，各段用同一张。不接 = 纯文生成视频。\n"
+                              "与下面三个参考图槽不能同时接：官方两个节点各缺对方那一槽。\n"
+                              "续接要人物与场景稳定请用参考图，别用首帧图。",
+                }),
+                # 🔴 2026-10-22：**参考图路**（官方 `MiniMaxH3ReferenceToVideo`）。
+                #    为什么必须加：本节点组主打**续接**，而续接最容易翻车的不是接缝本身，
+                #    是「每段参考的图不一样 ⇒ 拷贝窗那几帧一过，模型按本段的新参考图重新认人
+                #    ⇒ 一次硬切」。解法就是把 refs 做成**全片共用一组**：三张槽接一次，
+                #    展开图里每段的参考图节点都接同一批图 ⇒ 模型没有"新图"可参考。
+                #    ⚠ 槽数 3 不是随手定的：官方 Autogrow 上限 9 槽，但每槽是**单张图**，
+                #      多帧 batch 会被官方当"视频参考"裁档（不是多张独立图）⇒ 这里按
+                #      「人物 2 + 场景 1」这个最常见配伍给 3 槽；要 4 张以上请用画布模式。
+                "ref_image_1": ("IMAGE", {
+                    "tooltip": "【参考图 1】外观参考，对应词里的 @图片1。人物或场景，全片共用。\n"
+                              "接了任意一张就走官方参考图生视频，与首帧图不能同时接。",
+                }),
+                "ref_image_2": ("IMAGE", {
+                    "tooltip": "【参考图 2】第二张外观参考，常见用法是第二个人的身份与服装。\n不接 = 只用一张。",
+                }),
+                "ref_image_3": ("IMAGE", {
+                    "tooltip": "【参考图 3】第三张外观参考，常见用法是场景空间与材质。\n不接 = 只用前两张。",
                 }),
                 "prompts": ("STRING", {
                     "default": "", "multiline": True,
@@ -2906,6 +2932,31 @@ class H3RelayFiniteRun:
                               "没有会在开跑前就报错，不等模型上卡。\n"
                               "接续已有段时别接首帧图 image。",
                 }),
+                # ⚠ 继续追加在**最后一个**（widgets_values 按位置对应，插中间会整体错位）。
+                "ref_image_size": (["match", "max"], {
+                    "default": "match",
+                    "tooltip": "【参考图尺寸】match（默认）= 按画面尺寸缩每张参考图（只缩不放，保持比例）。\n"
+                              "max = 保留更大尺寸。只在接了参考图时生效。",
+                }),
+                # ⚠ 继续追加在**最后一个**（widgets_values 按位置对应，插中间会整体错位）。
+                "refs_mode": (list(CORE.REFS_MODES), {
+                    "default": "lock",
+                    "tooltip": "【定妆照用法】lock（默认）= 全片同一组，一镜到底的唯一无冲突解。\n"
+                              "first_only = 只喂本批第 1 段，后续段靠外观参考跟随镜头。\n"
+                              "没有「每段换一组」这一档：那是换镜，不是续接。",
+                }),
+                "ref_anchor_mode": (list(CORE.ANCHOR_MODES), {
+                    "default": "off",
+                    "tooltip": "【外观参考指向】off 不用；first 指第 1 段；roll 指上一段。\n"
+                              "first 身份最稳，但进新环境会过时。\n"
+                              "roll 跟随镜头，但长片会漂。\n"
+                              "参考与定妆照同层，不一致会互相抢。\n"
+                              "建议配对：first 配 lock，roll 配 first_only。",
+                }),
+                "ref_anchor_frames": ("INT", {
+                    "default": 5, "min": 1, "max": 64, "step": 1,
+                    "tooltip": "【外观参考帧数】从参考段开头取几帧当基准，默认 5。\n取多了会把参考段的动作也拖进来。",
+                }),
             },
         }
 
@@ -2915,8 +2966,9 @@ class H3RelayFiniteRun:
     CATEGORY = CATEGORY
     DESCRIPTION = (
         "一次提交跑完 N 段：服务端展开整条连跑图（无需前端按钮、无头可用）。\n"
-        "每段链：ImageToVideo → CopyBridge → 采样 → LatentSave → 解码 → TrimAV → JoinAV"
-        "（上一段由桥自取，不手接 Latent Load）。"
+        "每段链：ImageToVideo/ReferenceToVideo → CopyBridge → 采样 → LatentSave → 解码 → TrimAV → JoinAV"
+        "（上一段由桥自取，不手接 Latent Load）。\n"
+        "续接推荐接参考图（全片同一组）锁人/景，并用一镜到底的片段。"
     )
 
     # ⚠️ 参数表**必须**与 v3/nodes_v3.py 里 H3RelayFiniteRun.validate_inputs 同名同集
@@ -2944,7 +2996,10 @@ class H3RelayFiniteRun:
             prompt="", prompts="", segments=2, seed=0, run_id="relay",
             width=1344, height=768, length=124, context_frames=22,
             mask_mode="hard", pin_audio=True, voice_anchor=None, note="",
-            settle_frames=0, from_segment=0):
+            settle_frames=0, from_segment=0,
+            ref_image_1=None, ref_image_2=None, ref_image_3=None,
+            ref_image_size="match", refs_mode="lock",
+            ref_anchor_mode="off", ref_anchor_frames=5):
         """建图并返回展开图（本方法**不采样**，只编排；执行由宿主对展开图进行）。
 
         可选链接槽（image / voice_anchor）不接线时宿主整个键都不传 ⇒ 必须给默认值。
@@ -2976,13 +3031,18 @@ class H3RelayFiniteRun:
                     % (_fs, _fs - 1, _need, str(run_id)))
         # 前缀由宿主在执行本节点前设好（以本节点 id 为根）⇒ 唯一
         from comfy_execution.graph_utils import GraphBuilder
+        # 参考图：三张槽按 1/2/3 顺序（对应词里的 @图片1/2/3），未接的槽为 None ⇒ 剔除。
+        # ⚠ 顺序即语义：`ref_images.ref_image_0` 必须对应 `@图片1`，错位 = 静默换人。
+        _refs = [r for r in (ref_image_1, ref_image_2, ref_image_3) if r is not None]
         graph, outputs, report = CORE.build_finite_graph(
             prefix=GraphBuilder.alloc_prefix(), segments=segments, blocks=blocks,
             seed=seed, run_id=run_id, note=note, width=width, height=height,
             length=length, context_frames=context_frames, mask_mode=mask_mode,
             settle_frames=settle_frames, from_segment=from_segment, pin_audio=pin_audio,
             model=model, clip=clip, vae=vae, audio_vae=audio_vae,
-            image=image, sampler=sampler, sigmas=sigmas, voice_anchor=voice_anchor)
+            image=image, sampler=sampler, sigmas=sigmas, voice_anchor=voice_anchor,
+            ref_images=_refs, ref_image_size=ref_image_size, refs_mode=refs_mode,
+            ref_anchor_mode=ref_anchor_mode, ref_anchor_frames=ref_anchor_frames)
         outputs[3] = report + "\n" + pnote
         # V1 出口：expand 图 + result（输出可以是 [展开图节点 id, 输出位] 链接）
         return {"expand": graph, "result": tuple(outputs)}

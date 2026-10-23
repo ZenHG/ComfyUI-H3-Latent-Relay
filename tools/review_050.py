@@ -1213,7 +1213,7 @@ for _nm, _st in (("input", _decl_in), ("节点数", _decl_nd), ("项数", _decl_
 #      常量两侧覆盖法：本机跑验到 (8,116) 与 (7,103)，CI 跑验到 (7,103)；两者合起来覆盖全部两项。
 #   ⚠️ 只扫 `_v3_docs`（4 个声明文件）：`exp/`、`LOCAL-*.md`、tests 注释里的是**历史数字**，
 #      它们本来就该保持旧值（改它们反而抹掉历史），不纳入。
-_V3_LEGIT_PAIRS = [(11, 165)]           # (节点数, input 数) —— 2026-10-07 收敛成一个
+_V3_LEGIT_PAIRS = [(11, 172)]           # (节点数, input 数) —— 2026-10-23 加 7 个参考图/锚入参
 #   2026-10-16：10→11 / 153→163（新增 Seed from Video 10 参；见 §H3h 下行注释）
 #   2026-10-15：8→10 / 129→153（新增 Join AV 4 参 + Finite Run 20 参；见 §H3h 下行注释）
 #   2026-10-12：124 → 127（「潜空间分块放大」加 3 个空间分块参数）。
@@ -2366,6 +2366,27 @@ print("      依赖闭合：扫了 4 个入口文件，包里相对 import %d �
       % (len(_mani_rt), len(_dep_bad)))
 ck("H4i 分发集内容完整：包里真实 import 的每个模块都在 `MANIFEST_RUNTIME`（H4e 只核数量，漏文件照样绿）",
    not _dep_bad and bool(_mani_rt), "%d 处：%s" % (len(_dep_bad), _dep_bad[:4]))
+
+# ---------------------------------------------------------------------------
+# H4j：`tests/cases/*.py` 里**每一个**分片都必须在 `test_relay_core.py` 的 `_CASES` 里
+# ---------------------------------------------------------------------------
+# 🔴 2026-10-23 实测出来的洞：`_g37_finite_run.py` 0.6.36 就写好了（80+ 条断言），
+#   却**从来没进过 `_CASES`** ⇒ 那些断言**一次都没跑过**，而全套机检一路全绿。
+#   这是"绿着但没测"的典型：文件在、断言在、`review_050` 绿 —— 唯独没人执行它。
+#   判据：目录里的分片集合 == `_CASES` 列表集合（双向，多写一个不存在的也算错）。
+_cases_dir = os.path.join(KIT, "tests", "cases")
+_cases_on_disk = sorted(_f for _f in os.listdir(_cases_dir)
+                        if _f.endswith(".py") and not _f.startswith("__"))
+_txt_runner = Path(os.path.join(KIT, "tests", "test_relay_core.py")).read_text(
+    encoding="utf-8", errors="ignore")
+_cases_registered = sorted(_re.findall(r'^\s*"(_g[0-9A-Za-z_]+\.py)",\s*$', _txt_runner, _re.M))
+_miss = [c for c in _cases_on_disk if c not in _cases_registered]
+_ghost = [c for c in _cases_registered if c not in _cases_on_disk]
+print("      分片登记：磁盘 %d 个 / 登记 %d 个 / 漏登记 %d / 登记了但文件不存在 %d"
+      % (len(_cases_on_disk), len(_cases_registered), len(_miss), len(_ghost)))
+ck("H4j `tests/cases/*.py` 每个分片都登记在 `_CASES`（不登记 = 断言从不执行，全套照样绿）",
+   not _miss and not _ghost and bool(_cases_on_disk),
+   "漏登记 %s ｜ 幽灵 %s" % (_miss[:4], _ghost[:4]))
 
 # ============================================================================
 # H4f 判据的**已知盲点**：`return` 后直接跟 `open(`（2026-10-08 新增）

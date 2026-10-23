@@ -186,6 +186,10 @@ _CASES = [
     "_g36_spatial_tile.py",
     # ⚠ 同上：**新写的**（0.6.36 的防漏连：桥第 3 路没人接 ⇒ 提交前硬拦）。
     "_g37_trim_link_guard.py",
+    # 🔴 2026-10-23：**补登记** —— 这个分片 0.6.36 就写好了，却一直没进 `_CASES`
+    #    ⇒ 展开图结构 / 参考图路 / 外观锚 / from_segment 那 80 多条断言**从未跑过**
+    #    （"绿着但没测"：全套机检绿，因为根本没执行）。见 checks_ledger H4j。
+    "_g37_finite_run.py",
 ]
 for _case in _CASES:
     _case_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cases", _case)

@@ -78,7 +78,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-22",
+      "stamped": "2026-10-23",
       "src_sha": "6dbd368160f7b93a"
     },
     "docs/01-mechanism.md": {
@@ -166,7 +166,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-22",
+      "stamped": "2026-10-23",
       "src_sha": "06ca2288755a21d0"
     },
     "docs/02-parameters.md": {
@@ -190,7 +190,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-22",
+      "stamped": "2026-10-23",
       "src_sha": "3b58595bdd4d51e5"
     },
     "docs/03-sampling-and-design.md": {
@@ -222,7 +222,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-22",
+      "stamped": "2026-10-23",
       "src_sha": "e0c4d1c18fb4b8e2"
     },
     "docs/04-canvas-and-widgets.md": {
@@ -238,7 +238,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-22",
+      "stamped": "2026-10-23",
       "src_sha": "285e4de2b2516475"
     },
     "docs/05-troubleshooting.md": {
@@ -294,7 +294,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-22",
+      "stamped": "2026-10-23",
       "src_sha": "e81fe8e3d1216b5c"
     },
     "docs/06-continuity-scripting.md": {
@@ -318,7 +318,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-22",
+      "stamped": "2026-10-23",
       "src_sha": "c046d84ff172f569"
     },
     "docs/07-chain.md": {
@@ -408,14 +408,22 @@
           "zh": "声锚（voice_anchor，0.6.19）：跨说话人续接时锁定音色",
           "en": "Voice anchor (voice_anchor, 0.6.19): lock timbre when continuing across speakers",
           "mode": "full",
-          "h_en": "33ca5a1ac75acc7b",
-          "h_src": "c421988947806cbb",
+          "h_en": "d60b3727ed0d5d55",
+          "h_src": "6f2d42af864e64c7",
+          "seeded": "by-position"
+        },
+        {
+          "zh": "续接的参考图怎么给：全片同一组，或跟着镜头走",
+          "en": "How to feed reference images to a continuation: one set for the whole run, or follow the shot",
+          "mode": "full",
+          "h_en": "4ba7823aa02945bf",
+          "h_src": "6bc64df95e8f1cd4",
           "seeded": "by-position"
         }
       ],
       "acks": [],
-      "stamped": "2026-10-22",
-      "src_sha": "61bcf161497fc5d4"
+      "stamped": "2026-10-23",
+      "src_sha": "2dfc405e2f6901bb"
     },
     "docs/08-testing.md": {
       "en": "docs/08-testing_EN.md",
@@ -432,8 +440,8 @@
           "zh": "单测（零 GPU、秒级）",
           "en": "Unit tests (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "ce16645302cda672",
-          "h_src": "7239c1033a5edaeb",
+          "h_en": "af0404cdc4917dad",
+          "h_src": "68f4eba22362f095",
           "seeded": "by-position"
         },
         {
@@ -448,24 +456,24 @@
           "zh": "🔴 改前端之后的必跑清单（2026-10-15 立，有实测依据）",
           "en": "🔴 Checklist after changing the front-end (established 2026-10-15, from measurements)",
           "mode": "full",
-          "h_en": "35b7f38bb935e916",
-          "h_src": "98117f66b620b2c3",
+          "h_en": "5d3edce4f0632442",
+          "h_src": "fbdffb0164d99827",
           "seeded": "by-position"
         },
         {
           "zh": "V3 外壳与默认出口（零 GPU、秒级）",
           "en": "V3 shell and default exit (zero GPU, seconds)",
           "mode": "full",
-          "h_en": "44219a43eedf61d8",
-          "h_src": "c8cfe305997f60f6",
+          "h_en": "4a1cede495e22c3f",
+          "h_src": "ed05ad902d97808e",
           "seeded": "by-position"
         },
         {
           "zh": "tools/ 下的其他自检（完整清单见 [`tools/README.md`](../tools/README.md)）",
           "en": "Other self-checks under tools/ (full list in [`tools/README.md`](../tools/README.md))",
           "mode": "full",
-          "h_en": "da48c5b8520f181b",
-          "h_src": "7389c8c5439bd643",
+          "h_en": "4fe52f31c366e3c0",
+          "h_src": "40597d84bbd64b8c",
           "seeded": "by-position"
         },
         {
@@ -478,8 +486,8 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-22",
-      "src_sha": "2c0f06cae2b2fa9d"
+      "stamped": "2026-10-23",
+      "src_sha": "237c9d2c8cdbbbac"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",
@@ -534,7 +542,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-22",
+      "stamped": "2026-10-23",
       "src_sha": "6886d24ff831c09b"
     },
     "docs/10-audio-seam-and-concat.md": {
@@ -598,7 +606,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-22",
+      "stamped": "2026-10-23",
       "src_sha": "068491bc51cdce1e"
     }
   }
