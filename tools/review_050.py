@@ -927,7 +927,7 @@ ck("K15 mask_mode 分型写进 tooltip（五档都说到 + 推荐档 + 修正后
    and _mm[1]["default"] == "hard")
 _opt_cb = N.H3RelayCopyBridge.INPUT_TYPES()["optional"]
 ck("K15b 掩码族专属参数全部点明「只在哪一档生效」（改档位名必须同步这里）",
-   # 2026-10-13：标签从内部记号（🔴实验档 X 专属）改成用户说法（仅 X 档）。
+   # 2026-10-13：标签统一成「仅 X 档」的直说式命名，不再用档位内部记号。
    all("只在 taper 档生效" in _opt_cb[k][1]["tooltip"] for k in ("taper_tokens", "seam_min"))
    and all("只在 ramp 档生效" in _opt_cb[k][1]["tooltip"] for k in ("ramp_top", "ramp_tokens"))
    and all("只在 blend 档生效" in _opt_cb[k][1]["tooltip"] for k in ("blend_top", "blend_tokens"))
