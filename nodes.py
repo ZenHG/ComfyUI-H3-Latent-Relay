@@ -2843,6 +2843,13 @@ class H3RelayFiniteRun:
                 }),
                 "seed": ("INT", {
                     "default": 0, "min": 0, "max": 0xFFFFFFFFFFFFFFFF, "step": 1,
+                    # 🔴 显式声明 seed 控件：ComfyUI 前端会给名为 `seed` 的 INT 输入**额外插一个**
+                    #   `control_after_generate` widget（fixed / increment / decrement / randomize），
+                    #   它**不在后端 schema 里** ⇒ 保存的工作流 `widgets_values` 必须比 schema 的
+                    #   widget 数多一个，否则其后每个值都错位一格（2026-10-23 实测：随包示例因此
+                    #   提交被拒 HTTP 400，`from_segment` 收到 'match'）。声明它 = 把这个事实写进
+                    #   schema，示例生成器据此插入对应值（见 examples/make_finite_run_workflow.py）。
+                    "control_after_generate": True,
                     "tooltip": "【随机种子】各段用同一个种子。\n0 是常用的固定值；想各段不同请分次提交。",
                 }),
                 "run_id": ("STRING", {

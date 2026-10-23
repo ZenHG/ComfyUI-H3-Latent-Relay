@@ -524,6 +524,58 @@ def upstream_prompts(wf, node, oi):
     return (cands[0] if len(cands) == 1 else None), up.get("id")
 
 
+def check_extra_widget_slots(wf, oi) -> list:
+    """`widgets_values` 长度必须对上**前端实际会建的 widget 数**，不只是后端 schema 的。
+
+    🔴 为什么单列这一条（2026-10-23 实证）：ComfyUI 前端会给带 `control_after_generate`
+    的 INT 输入**额外插一个** seed 控件 widget（`fixed`/`increment`/…），它**不在后端
+    schema 里**。本包自己的扩展还会在末尾追加一个语言栏 widget（它在最后，取不到值就用
+    默认，不占值）。⇒ 后端 schema 数出 18 个 widget，前端建 20 个；示例若只给 18 个值，
+    `seed` 之后每个值都错位一格。
+
+    症状极其隐蔽：UI 能打开、原有判据全过、`graphToPrompt()` 也能转换，但**一提交就被拒**
+    （HTTP 400 `Failed to convert an input value to a INT value … from_segment, match`）。
+    随包示例 `finite_run_ui.json` 正是这么坏的 —— 每个开源用户打开它点 Queue 都会撞上。
+
+    ⇒ 判据：对每个**本包**节点，`len(widgets_values)` 必须 ==
+       schema 的 widget 数 + 声明了 `control_after_generate` 的输入数。
+       ⚠ 只查本包节点：官方节点有它自己的前端槽（如 `LoadImage` 的 `upload`），
+       不在这条判据的模型里。
+    """
+    out = []
+    _WT = {"INT", "FLOAT", "STRING", "BOOLEAN", "COMBO"}
+    for n in wf.get("nodes") or []:
+        if n.get("mode") == 4:
+            continue
+        if not str(n.get("type") or "").startswith("H3Relay"):
+            continue
+        defn = oi.get(n.get("type"))
+        wv = n.get("widgets_values")
+        if defn is None or not isinstance(wv, list):
+            continue
+        want = 0
+        for group in ("required", "optional"):
+            for _name, spec in ((defn.get("input") or {}).get(group) or {}).items():
+                # ⚠ 两种形态都要认：服务端 /object_info 是 **list**，而本包节点被
+                #   `merge_defs` 用本地 INPUT_TYPES()（**tuple**）覆盖过。
+                if not isinstance(spec, (list, tuple)) or not spec:
+                    continue
+                t0 = spec[0]
+                if isinstance(t0, (list, tuple)):
+                    t0 = "COMBO"          # 候选列表 = COMBO
+                if t0 not in _WT:
+                    continue          # 链接型输入不占 widget 值
+                want += 1
+                opts = spec[1] if len(spec) > 1 and isinstance(spec[1], dict) else {}
+                if opts.get("control_after_generate"):
+                    want += 1        # 前端额外插的 seed 控件槽
+        if len(wv) != want:
+            out.append("node %s %s：widgets_values 给了 %d 个值，但前端会建 %d 个 widget"
+                       "（差 %+d）⇒ seed 之后的值整体错位，提交会被拒"
+                       % (n["id"], n.get("type"), len(wv), want, len(wv) - want))
+    return out
+
+
 def check_chain_prompts(wf, oi):
     """Chain 词分发 / 自动拼接自检（0.6.7）。
 
@@ -584,6 +636,7 @@ def check_file(path: str, oi: dict, verbose: bool = True) -> int:
     problems.extend(check_av_link(wf))
     problems.extend(check_link_consistency(wf))
     problems.extend(check_chain_prompts(wf, oi))
+    problems.extend(check_extra_widget_slots(wf, oi))
     for n in wf.get("nodes") or []:
         if n.get("mode") == 4:      # bypass
             continue

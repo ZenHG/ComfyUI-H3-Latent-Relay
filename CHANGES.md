@@ -155,6 +155,37 @@
 paper，**正向写法也没压住**）；② 段 1 焦点转移时机位整体下移、脸出画（规格要的是"脸留在
 上方柔出焦外"）。
 
+### ⑱ 修（2026-10-23，发布冒烟当场抓出）：随包示例**谁都提交不了**
+
+**症状**：`examples/finite_run_ui.json` 能打开、`check_ui_workflow` 全过、
+`graphToPrompt()` 也能转换，但**一点 Queue 就被拒**：
+`HTTP 400 Failed to convert an input value to a INT value … from_segment, match`。
+
+**根因**：ComfyUI 前端给名为 `seed` 的 INT 输入**额外插一个** `control_after_generate`
+widget（`fixed`/`increment`/`decrement`/`randomize`），它**不在后端 schema 里**；
+本包自己的扩展还会在末尾追加一个语言栏 widget。⇒ 后端数出 18 个 widget，前端建 20 个，
+示例只给 18 个值 ⇒ `seed` 之后每个值错位一格（`from_segment` 拿到 `'match'`）。
+这是「UI 与 API 同一套实现」在**工作流文件**上的对应漏洞：以前所有判据都只比对后端
+schema，没有一个问过「前端到底建几个 widget」。
+
+**修法**（三处，缺一不可）：
+1. `nodes.py` 在 `seed` 上显式声明 `"control_after_generate": True` —— 把这个事实写进
+   schema，而不是靠「前端恰好会加」。
+2. `v3/_compat.py` 的 `_OPTS` 承载该键 —— 否则 V3 出口不声明它，两出口 schema 不一致
+   （`test_v3_schema` 的 8.1/8.2 当场拦住）。
+3. `examples/make_finite_run_workflow.py` 按 schema 声明**自动插入**对应值（不硬编码名字），
+   重生成示例 ⇒ `widgets_values` 18 → 19（`seed` 后多一个 `'fixed'`）。
+
+**新判据**：`check_ui_workflow.py` 加 `check_extra_widget_slots` —— 对本包节点比
+`len(widgets_values)` 与「schema widget 数 + 声明了 `control_after_generate` 的输入数」。
+变异测试：把示例里的 `'fixed'` 删掉 ⇒ 立刻红（差 -1）。
+⚠ 只查本包节点：官方节点有它自己的前端槽（如 `LoadImage` 的 `upload`），不在这条判据的模型里。
+
+**发布冒烟结论**：修好后把随包示例真载进画布 → `graphToPrompt()` → 真提交，
+**端到端跑通**（2 段 / 73 帧 / 124 帧成片 = 73+51，帧账严等；136 s）。
+⚠ 示例自身的接缝自检报一条 WARN（6.5×）—— 那是 73 帧短段 + 高动作演示内容的固有现象，
+节点在如实报告，不是缺陷。
+
 **发布前收口**（2026-10-23，未提交）：注释按 `CONTRIBUTING` §写作纪律瘦身（docstring ≤6 行、
 行内 ≤2 行、不写日期）；`@图片N` 这种**只在我们自己稿子里**的写法从文案清掉，统一改成官方
 `<Picture N>`；`ref_anchor_mode=roll` 在「本批只有第 0 段」时由**静默 no-op 改为 raise**

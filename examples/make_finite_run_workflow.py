@@ -96,6 +96,13 @@ def finite_run_node(mod, node_id, links, widget_values):
                     dv = spec[1].get("default") if isinstance(spec, tuple) and len(spec) > 1 else None
                     wv.append(dv)
                     print("  ⚠ widget `%s` 示例没给值 ⇒ 用 schema 默认 %r" % (name, dv))
+                # 🔴 `control_after_generate`：前端给这个 widget **额外插一个** seed 控件槽，
+                #   它不在后端 schema 里 ⇒ `widgets_values` 必须比 schema 的 widget 数多一个，
+                #   否则其后每个值错位一格（2026-10-23 实测：随包示例因此提交被拒 HTTP 400）。
+                #   槽位声明在 schema 里 ⇒ 这里按声明插值，不靠硬编码名字。
+                if isinstance(spec, tuple) and len(spec) > 1 and isinstance(spec[1], dict) \
+                        and spec[1].get("control_after_generate"):
+                    wv.append("fixed")
             else:
                 link = links.get(name)
                 inputs.append({"name": name, "type": t, "link": link})

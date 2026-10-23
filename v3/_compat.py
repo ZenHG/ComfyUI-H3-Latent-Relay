@@ -72,6 +72,9 @@ _OPTS = {
     "dynamicPrompts": "dynamic_prompts",
     "label_on": "label_on",
     "label_off": "label_off",
+    # seed 控件（fixed / increment / decrement / randomize）—— 前端会给这类 INT 输入
+    # 额外插一个 widget，V1/V3 两个出口都必须声明它，否则两边 schema 不一致。
+    "control_after_generate": "control_after_generate",
 }
 
 
