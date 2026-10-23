@@ -65,3 +65,4 @@ local_tests/
 
 # ---- 离线备份（git bundle，不入库）----
 *.bundle
+.cm*.txt
