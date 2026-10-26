@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 排障表 / Troubleshooting
+    url: https://github.com/ZenHG/ComfyUI-H3-Latent-Relay/blob/main/docs/05-troubleshooting.md
+    about: 报错、跑不通、接缝不对 —— 先查这张表；英文版见 docs/05-troubleshooting_EN.md
+  - name: 参数与机制 / Parameters and mechanism
+    url: https://github.com/ZenHG/ComfyUI-H3-Latent-Relay/blob/main/docs/02-parameters.md
+    about: 每个旋钮的默认值、推荐值与开关理由
+  - name: Registry 节点页 / Registry page
+    url: https://registry.comfy.org/nodes/h3-latent-relay
+    about: 版本、下载量与最新 changelog

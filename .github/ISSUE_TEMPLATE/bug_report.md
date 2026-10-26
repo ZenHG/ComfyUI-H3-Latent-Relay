@@ -36,8 +36,10 @@ labels: bug
 ## 已排除
 
 - [ ] 已重启 ComfyUI 后端（不是只刷新浏览器）
-- [ ] 已跑 `python tests/test_relay_core.py`（期望**失败 0**。⚠ **不写死总数** —— 它随版本变，
-      写在这儿的那份**没有任何机检盯着**，必漂；以输出末尾的"通过 N / 失败 0"为准，
-      未装可选依赖时会少几条）
+- [ ] 已贴 `/h3relay/health` 的返回 JSON（或说明这条请求连不上、启动日志里没有 `[H3 Relay]` 那行）
+- [ ] 已查排障表 [docs/05-troubleshooting.md](../../docs/05-troubleshooting.md)
+- [ ] （**只有 `git clone` 装的才有 `tests/`**；Manager / Registry 装的没有）
+      已跑 `python tests/test_relay_core.py`，以输出末尾的「通过 N / 失败 0」为准
+      —— ⚠ 不写死总数：它随版本变，写死的那份必漂
 
 > ⚠️ 请不要粘贴本机绝对路径、模型路径或任何凭证（见 SECURITY.md）。

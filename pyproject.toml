@@ -17,12 +17,26 @@
 [project]
 name = "h3-latent-relay"
 version = "0.6.39"
-description = "Latent bridge for MiniMax-H3 multi-segment continuation: the previous segment's AV latent is spliced into this segment's conditioning — zero re-encoding."
+description = "Latent bridge for MiniMax-H3 multi-segment continuation: the previous segment's AV latent is pinned into this segment at its true position — zero re-encoding, no decoded-frame cache, no extra pip or node-pack dependencies."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [{ name = "ZenHG" }]
-keywords = ["comfyui", "minimax", "h3", "video", "continuation", "latent"]
+keywords = [
+    "comfyui",
+    "minimax",
+    "minimax-h3",
+    "h3",
+    "video",
+    "text-to-video",
+    "long-video",
+    "video-generation",
+    "continuation",
+    "seamless",
+    "one-take",
+    "latent",
+    "latent-bridge",
+]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",

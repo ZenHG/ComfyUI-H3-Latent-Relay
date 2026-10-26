@@ -4,9 +4,42 @@
 
 🌐 **English** · [中文](README.md)
 
-A **latent bridge** for MiniMax-H3 multi-segment continuation — a standalone ComfyUI node pack with
-**zero third-party node-pack dependencies**. It needs only ComfyUI's own `torch` and `safetensors`, and is
-not coupled to any third-party H3 node pack.
+![H3 Latent Relay](https://raw.githubusercontent.com/ZenHG/ComfyUI-H3-Latent-Relay/main/banner.png)
+
+**MiniMax-H3 renders about 15 seconds per run with open weights (ComfyUI docs). This pack splices segments
+into one film — the previous segment's AV latent is pinned into the next one at its true position, with zero
+re-encoding, no decoded frames on disk, and video/audio trimmed together.**
+
+| | Official, as shipped | This pack |
+|---|---|---|
+| Length | about **15 s** per run (open weights, 768p / 24 fps — ComfyUI docs) | **As long as your segment count**: N × one segment; each segment is its own sample, Chain advances the stage number |
+| Continuation | you build it: decode the previous mp4 → VAE re-encode → use as an anchor. Lossy, drifts, can only anchor frame 0 | **slice the tail of the previous latent** and write it into `minimax_keyframes` at its true position — no second VAE round trip |
+| A/V alignment | video and audio trimmed separately; the seam drifts about 0.9 s and **accumulates** per segment | **one trim for both** (Trim AV), length-preserving |
+| Extra dependencies | — | **None**: no third-party H3 node pack, no extra pip package (only the host's own `torch` / `safetensors`) |
+
+**A fit** for H3 films **longer than 15 s spliced from segments**, where the seam must not replay, jump, or
+change voice. **Not a fit** for single-shot clips (use the official template) · for raising picture quality
+(**quality is decided by the model and weights; this pack promises nothing there**) · for hosts other than
+**ComfyUI ≥ 0.35.0 with H3 support** (on older hosts the nodes still appear, but **continuation silently does nothing**).
+
+> **Start here (3 minutes)**: open [`examples/minimal_relay_official.json`](examples/minimal_relay_official.json)
+> → point the 4 loaders at your local files → set the stage to `0` → Queue.
+> The four slots are **UNET / text encoder (CLIP) / video VAE / audio VAE**. The filenames pre-filled in the
+> example (`minimax_h3_hybrid_fl2va_ref2va_b25-49-int8` · `qwen3vl_32b_minimax_h3_nvfp4` ·
+> `minimax_h3_video_vae_int8_convrot` · `minimax_h3_audio_vae_fp32`) are just **one** distribution set —
+> your pruned / bf16 / fp8 builds have different names; pick whichever you have in the dropdown.
+> The weights are **not** bundled: download them from the templates in the
+> [official ComfyUI H3 guide](https://docs.comfy.org/tutorials/video/minimax/minimax-h3)
+> (weights live in [`Comfy-Org/MiniMax-H3`](https://huggingface.co/Comfy-Org/MiniMax-H3)).
+>
+> 🎙 **One wire that will block you**: the example wires the voice anchor (`voice_anchor`) to `anchor_zy.wav`,
+> the author's demo clip — **you do not have it**. Either swap it for your own audio (drop it into
+> `ComfyUI/input/` first), **or just unplug the bridge's `voice_anchor` link** (unwired = bit-identical to the
+> old behaviour). Leave it as is and the run fails on a missing audio file.
+
+> **Nothing runs? Run this first**: `curl -s 127.0.0.1:8188/h3relay/health`
+> — it returns pack version / API exit / registered node count / timing contract / host H3 status / torch / OS
+> in one shot. Paste it into an issue and half the diagnosis is done.
 
 | Item | Value |
 |---|---|
@@ -14,9 +47,9 @@ not coupled to any third-party H3 node pack.
 | License | **MIT** (third-party attribution in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)) |
 | Host | **ComfyUI ≥ 0.35.0 with MiniMax-H3 support** (the host itself is GPL-3.0, see License) |
 
-> 🔴 **One iron rule**: **every feature has two usage paths — canvas by hand (most users) and graph JSON
-> submitted to the API — and both must go through the same node implementation.** A feature that only
-> exists in a script is not a feature of this pack.
+> 🔴 **One iron rule (for people changing this repo)**: every feature has two usage paths — canvas by hand
+> (most users) and graph JSON submitted to the API — and both must go through the **same node implementation**.
+> A feature that only exists in a script is not a feature of this pack. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 **What problem it solves.** When generating in segments, "continuation" answers "how does the new segment
 know the state the previous one ended in". The mainstream approach is **pixel continuation** (decode the
@@ -97,8 +130,8 @@ The 11th, `🧩 H3 Relay · Join AV`, is internal and **not in the menu by defau
 used only by the ⏩ Finite Run expanded graph; hand-wiring it has no meaning). Enable `Comfy.DevMode`
 in settings to see it. **Saved workflows and API submission are unaffected** (registration is unchanged).
 
-**Optional: only needed for 🔍 latent tile upscaling** (not installing it does not affect the other 10
-nodes; using it then raises an error naming the repository and the weights):
+**Optional: only needed for 🔍 latent tile upscaling** (not installing it does not affect any other node;
+using it then raises an error naming the repository and the weights):
 
 ```bash
 cd ComfyUI/custom_nodes
@@ -361,7 +394,7 @@ Implementation details and more (**audio-reference budget**, BGM, emotion, multi
 ### Node Chinese/EN toggle (0.6.28, **canvas button**)
 
 Every node of this pack now carries a small 「**中 / EN**」 button: one click switches the titles, parameter
-labels, port names and **hover tooltips** of **all 8 nodes** between Chinese and English (dropdowns show
+labels, port names and **hover tooltips** of **all 11 nodes** (one of them hidden by default) between Chinese and English (dropdowns show
 Chinese while their **stored value stays untouched**).
 
 - It **follows the official language setting by default** (Settings → `Language`, i.e.
@@ -415,7 +448,7 @@ Details and the word table: [`docs/04`](docs/04-canvas-and-widgets_EN.md) §Node
 ComfyUI-H3-Latent-Relay/
 ├── __init__.py            # entry point: /h3relay/concat route, V1/V3 exit selection, startup banner
 ├── relay_core/            # business core (single source of truth, 11-file package): timing grid / copy bridge / TrimAV / AudioSeam / concat
-├── nodes.py               # node layer (the 8 nodes' inputs, outputs and human-readable reports)
+├── nodes.py               # node layer (the 11 nodes' inputs, outputs and human-readable reports)
 ├── layout_contract.py     # layout contract: pass through + leave a trace when upstream is missing, raise only on a real mismatch
 ├── v3/                    # V3 shell (io.ComfyNode + comfy_entrypoint); V1 goes through NODE_CLASS_MAPPINGS
 ├── exp/history_anchor_v2/ # E1' time-invariant history anchor (top-level import ⇒ required; inert without _tiha.json)

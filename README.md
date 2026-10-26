@@ -1,9 +1,38 @@
 # ComfyUI-H3-Latent-Relay
 
-🌐 **中文** · [English (condensed)](README_EN.md)
+🌐 **中文** · [English](README_EN.md)
 
-MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独立使用、**零第三方节点包依赖**的 ComfyUI 节点包。
-只依赖 ComfyUI 自带的 `torch` 与 `safetensors`，不与任何第三方 H3 节点包耦合。
+![H3 Latent Relay](https://raw.githubusercontent.com/ZenHG/ComfyUI-H3-Latent-Relay/main/banner.png)
+
+**MiniMax-H3 开权重档单次约 15 秒（官方文档口径）。本包把多段接成一条片子 —— 上一段的 AV latent 按真实位置钉进本段，
+零重编码、不在磁盘上落解码帧、音画同裁。**
+
+| | 官方原生 | 本包 |
+|---|---|---|
+| 出片长度 | 单次约 **15 s**（开权重档 768p / 24 fps，官方文档口径） | **按段拼长**：段数 × 单段；每段各自采样，Chain 自动推进段号 |
+| 段间接续 | 自己要搭：解码上段 mp4 → VAE 重编码 → 当 anchor。有损、会漂、只能锚第 0 帧 | **切上段 latent 的尾段**，按真实位置写进 `minimax_keyframes` —— 不做第二次 VAE 往返 |
+| 音画对齐 | 视频、音频各裁一次，缝上易差 ~0.9 s 且**逐段累积** | **裁重叠一次裁两边**（音画同裁），长度守恒 |
+| 额外依赖 | — | **无**：不需要第三方 H3 节点包，不需要额外 pip 包（只用宿主自带的 `torch` / `safetensors`） |
+
+**适合**：要出 **> 15 秒、多段拼一条**的 H3 片子，且接缝处不能重播、跳帧、换嗓。
+**不适合**：单段就够的短片（用官方模板即可）· 想靠节点把画质提上去（**画质由模型与权重决定，本包不承诺**）·
+宿主不是 **ComfyUI ≥ 0.35.0 且带 H3 支持**（旧版上节点照样出现，但**续接静默无效**）。
+
+> **从这里开始（3 分钟）**：打开 [`examples/minimal_relay_official.json`](examples/minimal_relay_official.json)
+> → 把 4 个加载器改成你本机的文件 → 段号填 `0` → Queue。
+> 4 个槽位分别是 **UNET / 文本编码器（CLIP）/ 视频 VAE / 音频 VAE**；示例里预填的文件名
+> （`minimax_h3_hybrid_fl2va_ref2va_b25-49-int8` · `qwen3vl_32b_minimax_h3_nvfp4` ·
+> `minimax_h3_video_vae_int8_convrot` · `minimax_h3_audio_vae_fp32`）只是**一个**发行组合，
+> 你手上的 pruned / bf16 / fp8 版本名字会不同 —— 下拉里选你有的那个就行。
+> 权重**不在本包里**：按 [ComfyUI 官方 H3 教程](https://docs.comfy.org/tutorials/video/minimax/minimax-h3)
+> 的模板下载（权重在 [`Comfy-Org/MiniMax-H3`](https://huggingface.co/Comfy-Org/MiniMax-H3)）。
+>
+> 🎙 **一根会挡路的线**：示例把声锚（`voice_anchor`）接到了 `anchor_zy.wav` —— 那是作者的演示语音，
+> **你机器上一定没有**。打开后先把它换成你自己的语音（放进 `ComfyUI/input/` 再选），
+> **或直接把桥的 `voice_anchor` 那根线拔掉**（不接 = 与旧版逐位一致）。不处理它会直接报找不到音频文件。
+
+> **跑不通，先跑这一条**：`curl -s 127.0.0.1:8188/h3relay/health`
+> —— 一次给出本包版本 / 出口模式 / 节点注册数 / 时序契约 / 宿主 H3 状态 / torch / OS，贴进 issue 就能定位一半问题。
 
 | 项 | 值 |
 |---|---|
@@ -11,8 +40,8 @@ MiniMax-H3 多段续接的 **latent 桥**（零重编码）—— 一个可独�
 | 许可 | **MIT**（第三方出处见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)） |
 | 宿主 | **ComfyUI ≥ 0.35.0，且带 MiniMax-H3 支持**（宿主自身为 GPL-3.0，见 §许可与出处） |
 
-> 🔴 **一条铁律**：**每个功能都有两条用法 —— 画布手动（多数用户）与 API 提交图 JSON，二者必须走同一套节点实现。**
-> 只写在脚本里的功能不算本包的功能（判据见 [`CONTRIBUTING.md`](CONTRIBUTING.md)）。
+> 🔴 **一条铁律（改这个仓库的人看）**：每个功能都有两条用法 —— 画布手动（多数用户）与 API 提交图 JSON，
+> 二者必须走**同一套节点实现**；只写在脚本里的功能不算本包的功能。判据见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 
 **它解决什么**：H3 分段生成时，"续接"要回答"新的一段怎么知道上一段结束在什么状态"。
 主流做法是**像素续接**（解码上一段 mp4 → VAE 重编码 → 当 anchor），代价是多一次 VAE 往返（有损）、
@@ -88,7 +117,7 @@ git clone https://github.com/ZenHG/ComfyUI-H3-Latent-Relay.git
 第 11 个 `🧩 H3 Relay · Join AV` 是内部件，**默认不出现在菜单里**（它是 ⏩ Finite Run 展开图专用的张量拼接，手接没有意义）；
 要在菜单里看到它，设置里勾上 `Comfy.DevMode`。**已存工作流与 API 提交都不受影响**（注册照旧）。
 
-**可选：用 🔍 H3 Relay · Latent Upscale 才需要装**（不装不影响其他 7 个节点，用时会报一条写明仓库与权重地址的错）：
+**可选：用 🔍 H3 Relay · Latent Upscale 才需要装**（不装不影响其他节点，用时会报一条写明仓库与权重地址的错）：
 
 ```bash
 cd ComfyUI/custom_nodes
@@ -312,7 +341,7 @@ python tools/voice_bank.py advise --bank <声库> --prompt-file 段N.md --prev-f
 
 ### 节点中英切换（0.6.28，**画布按钮**）
 
-每个本包节点上多一个「**中 / EN**」按钮：点一下，**本包 8 个节点**的标题、参数标签、
+每个本包节点上多一个「**中 / EN**」按钮：点一下，**本包 11 个节点**（含默认隐藏的 1 个）的标题、参数标签、
 端口名、**鼠标悬浮提示**一起切成中文 / 英文（下拉框显示中文、**存档值不变**）。
 
 - **默认跟随官方语言设置**（设置 → `Language`，即 `Comfy.Locale`）⇒ 界面是英文就别把节点翻成中文；
@@ -354,7 +383,7 @@ python tools/voice_bank.py advise --bank <声库> --prompt-file 段N.md --prev-f
 ComfyUI-H3-Latent-Relay/
 ├── __init__.py            # 包入口：注册 /h3relay/concat 路由、选 V1/V3 出口、启动横幅
 ├── relay_core/            # 业务内核（唯一真相源，11 文件包）：时序网格 / 拷贝桥 / 裁重叠 / 音频缝 / 拼接
-├── nodes.py               # 节点层（8 个节点的输入输出与人话报告），直接 import relay_core
+├── nodes.py               # 节点层（11 个节点的输入输出与人话报告），直接 import relay_core
 ├── layout_contract.py     # 布局契约：找不到上游时放行 + 留痕，只在真的不一致时 raise
 ├── v3/                    # V3 外壳（io.ComfyNode + comfy_entrypoint）；V1 走 NODE_CLASS_MAPPINGS
 ├── exp/history_anchor_v2/ # E1' 时不变历史锚（顶层 import ⇒ 必需；无 _tiha.json 即不生效）

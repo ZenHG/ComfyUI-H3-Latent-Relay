@@ -324,7 +324,7 @@ section = red); ③ **fail-closed** (a missing/broken manifest ⇒ exit code 2, 
 python tools/make_minimal_bundle.py --zip     # → dist/ComfyUI-H3-Latent-Relay(.zip)
 ```
 
-**45 files / 1517 KB** (zip 516 KB), carrying only:
+**45 files / 1538 KB** (zip 525 KB), carrying only:
 
 | Group | Files |
 |---|---|

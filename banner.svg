@@ -57,7 +57,7 @@
     previous segment's AV latent &#8594; next segment's conditioning
   </text>
   <text x="618" y="486" font-family="Arial, sans-serif" font-size="28" fill="#7E96AD">
-    zero re-encoding &#183; 8 ComfyUI nodes &#183; no third-party packs
+    zero re-encoding &#183; 11 ComfyUI nodes &#183; no third-party packs
   </text>
 
   <text x="618" y="612" font-family="Arial, sans-serif" font-size="24" fill="#41586F">

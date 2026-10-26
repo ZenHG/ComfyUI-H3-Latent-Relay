@@ -8,8 +8,8 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "condensed",
-          "h_en": "7eff89a608548ff3",
-          "h_src": "c9e6e8fa7172964f",
+          "h_en": "a9fcbfb7793d0555",
+          "h_src": "45eecbae064fc593",
           "seeded": "by-position"
         },
         {
@@ -32,24 +32,24 @@
           "zh": "安装",
           "en": "Install",
           "mode": "condensed",
-          "h_en": "dbbf6837663743a5",
-          "h_src": "46ebabba5134d8ca",
+          "h_en": "acde15ebe41a8856",
+          "h_src": "8390d7fb560249c2",
           "seeded": "by-position"
         },
         {
           "zh": "使用方法",
           "en": "Usage",
           "mode": "condensed",
-          "h_en": "956cec76e1de3c51",
-          "h_src": "88959cb335e2faee",
+          "h_en": "2e52f4592c5270e6",
+          "h_src": "9712e91ecd81be4f",
           "seeded": "by-position"
         },
         {
           "zh": "目录结构",
           "en": "Repository layout",
           "mode": "condensed",
-          "h_en": "ace1bbff0abe4d11",
-          "h_src": "3ace67c8e7a6cce5",
+          "h_en": "7483ef686cea8e9c",
+          "h_src": "8fc71ade5b67b161",
           "seeded": "by-position"
         },
         {
@@ -78,8 +78,8 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-23",
-      "src_sha": "a17a647c21a60fb0"
+      "stamped": "2026-10-26",
+      "src_sha": "15b455b138401705"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -166,7 +166,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-23",
+      "stamped": "2026-10-26",
       "src_sha": "06ca2288755a21d0"
     },
     "docs/02-parameters.md": {
@@ -190,7 +190,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-23",
+      "stamped": "2026-10-26",
       "src_sha": "3b58595bdd4d51e5"
     },
     "docs/03-sampling-and-design.md": {
@@ -222,7 +222,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-23",
+      "stamped": "2026-10-26",
       "src_sha": "e0c4d1c18fb4b8e2"
     },
     "docs/04-canvas-and-widgets.md": {
@@ -238,7 +238,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-23",
+      "stamped": "2026-10-26",
       "src_sha": "285e4de2b2516475"
     },
     "docs/05-troubleshooting.md": {
@@ -294,7 +294,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-23",
+      "stamped": "2026-10-26",
       "src_sha": "e81fe8e3d1216b5c"
     },
     "docs/06-continuity-scripting.md": {
@@ -318,7 +318,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-23",
+      "stamped": "2026-10-26",
       "src_sha": "c046d84ff172f569"
     },
     "docs/07-chain.md": {
@@ -422,7 +422,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-23",
+      "stamped": "2026-10-26",
       "src_sha": "84db139de8f11902"
     },
     "docs/08-testing.md": {
@@ -480,14 +480,14 @@
           "zh": "最小可运行分发集（给用户/分发用，不是开发件）",
           "en": "Minimal runnable distribution set (for users/distribution, not a development artifact)",
           "mode": "full",
-          "h_en": "55627b16e6faea10",
-          "h_src": "26c5a192c984f5c4",
+          "h_en": "8789da709a9109ff",
+          "h_src": "ea822eed5846dbce",
           "seeded": "by-position"
         }
       ],
       "acks": [],
-      "stamped": "2026-10-23",
-      "src_sha": "9a12b6ef317e0169"
+      "stamped": "2026-10-26",
+      "src_sha": "64e984e9b68507a8"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",
@@ -542,7 +542,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-23",
+      "stamped": "2026-10-26",
       "src_sha": "6886d24ff831c09b"
     },
     "docs/10-audio-seam-and-concat.md": {
@@ -606,7 +606,7 @@
         }
       ],
       "acks": [],
-      "stamped": "2026-10-23",
+      "stamped": "2026-10-26",
       "src_sha": "068491bc51cdce1e"
     }
   }
