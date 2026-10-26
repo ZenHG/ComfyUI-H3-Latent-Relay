@@ -268,7 +268,7 @@ CI（`.github/workflows/ci.yml`）按顺序跑：**ruff 静态检查 → 回归�
 python tools/make_minimal_bundle.py --zip     # → dist/ComfyUI-H3-Latent-Relay(.zip)
 ```
 
-**45 文件 / 1538 KB**（zip 525 KB），只带：
+**45 文件 / 1539 KB**（zip 526 KB），只带：
 
 | 组 | 文件 |
 |---|---|

@@ -8,8 +8,8 @@
           "zh": "(preamble)",
           "en": "(preamble)",
           "mode": "condensed",
-          "h_en": "a9fcbfb7793d0555",
-          "h_src": "45eecbae064fc593",
+          "h_en": "3c4784a0341d3263",
+          "h_src": "bcd9d280ee0ebe56",
           "seeded": "by-position"
         },
         {
@@ -79,7 +79,7 @@
       ],
       "acks": [],
       "stamped": "2026-10-26",
-      "src_sha": "15b455b138401705"
+      "src_sha": "da90562311874589"
     },
     "docs/01-mechanism.md": {
       "en": "docs/01-mechanism_EN.md",
@@ -480,14 +480,14 @@
           "zh": "最小可运行分发集（给用户/分发用，不是开发件）",
           "en": "Minimal runnable distribution set (for users/distribution, not a development artifact)",
           "mode": "full",
-          "h_en": "8789da709a9109ff",
-          "h_src": "ea822eed5846dbce",
+          "h_en": "82d7fbb0c289cb44",
+          "h_src": "01ed40c44215cde2",
           "seeded": "by-position"
         }
       ],
       "acks": [],
       "stamped": "2026-10-26",
-      "src_sha": "64e984e9b68507a8"
+      "src_sha": "63b94a9550fd4a61"
     },
     "docs/09-metrics.md": {
       "en": "docs/09-metrics_EN.md",

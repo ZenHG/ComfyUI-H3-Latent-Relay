@@ -32,10 +32,12 @@ change voice. **Not a fit** for single-shot clips (use the official template) ·
 > [official ComfyUI H3 guide](https://docs.comfy.org/tutorials/video/minimax/minimax-h3)
 > (weights live in [`Comfy-Org/MiniMax-H3`](https://huggingface.co/Comfy-Org/MiniMax-H3)).
 >
-> 🎙 **One wire that will block you**: the example wires the voice anchor (`voice_anchor`) to `anchor_zy.wav`,
-> the author's demo clip — **you do not have it**. Either swap it for your own audio (drop it into
-> `ComfyUI/input/` first), **or just unplug the bridge's `voice_anchor` link** (unwired = bit-identical to the
-> old behaviour). Leave it as is and the run fails on a missing audio file.
+> 🎙 **The voice anchor is optional and ships unwired**: the `LoadAudio → VAEEncodeAudio` pair in the lower
+> left of the graph is the voice anchor, and **its output is deliberately left empty** — wiring it would require
+> the author's demo clip `anchor_zy.wav`, which you do not have, so the first run would die on a missing file.
+> **Unwired = bit-identical to the old behaviour**, so nothing blocks the first run. To lock timbre: connect the
+> VAE's `LATENT` to the bridge's `voice_anchor`, then pick your own clip in `LoadAudio` (≥0.9 s, drop it into
+> `ComfyUI/input/` first).
 
 > **Nothing runs? Run this first**: `curl -s 127.0.0.1:8188/h3relay/health`
 > — it returns pack version / API exit / registered node count / timing contract / host H3 status / torch / OS

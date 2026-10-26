@@ -7,10 +7,21 @@
 # subprocess / git 调用送进安全扫描面。分发包（我们发的 zip）的真相源是
 # tools/make_minimal_bundle.py 的**白名单**清单（文件数与体积见 `tools/README.md`）。
 # ⚠️ 两者**机制不同、口径不必相等**（2026-10-07 实测）：本文件是**黑名单**，作用在
-#    「git 跟踪文件」上 ⇒ registry 包 = 53 文件；白名单 dist = 42 文件。差的 6 个 =
-#    图标/横幅 4（Registry 卡片要用）+ `exp/history_anchor_v2/` 里 2 个开发件
-#    （有意不排 `exp/` 整块 —— 少一条特例少一个坑）。**别把「两者相等」当判据。**
+#    「git 跟踪文件」上 ⇒ registry 包 = 51 文件；白名单 dist = 45 文件。差的 6 个 =
+#    图标/横幅 4（`banner.png` `banner.svg` `icon.png` `icon.svg`，Registry 卡片要用）
+#    + `examples/` 里另两个生成器脚本 2（`make_finite_run_workflow.py`
+#    `make_seed_from_video_workflow.py`；要不要一并排掉属**发布口径**，未定）。**别把「两者相等」当判据。**
 # 机检：tools/review_050.py 的 H3k（缺文件或漏排某条 = 红）。
+#
+# 🔴 2026-10-26（registry 安全扫描整改）：`exp/history_anchor_v2/` 下**两个开发件必须排掉** ——
+#   它们此前随包发出，是 `node publish` 被自动化判 `NodeVersionStatusFlagged` 的两条直接原因：
+#     · `test_history_anchor.py` → `python_command_injection_risk`（测试里用 subprocess，any-code-execute）
+#     · `precheck_tiha.py`       → `python_environment_manipulation`（`os.environ.get("RELAY_KIT_ROOT")`）
+#   ⚠️ 原来这里写着「test_history_anchor.py 是死重量，但**不做例外**：运行期目录就该整块走」——
+#      那条「少一条特例少一个坑」的取舍，换来的坑是**整个版本被 flag、Manager 侧不可装**。
+#      判据改为：**用户机器上永远不会执行的文件，就不该进发布包**（运行期只需 `__init__.py` /
+#      `history_anchor.py` / `h3_adapter.py` 三个）。
+
 
 # —— 开发件（对使用者无价值）——
 docs/
@@ -43,14 +54,18 @@ RELEASING.md
 # —— 示例目录里的生成器脚本（只留两个可直接打开的工作流 + 说明）——
 examples/make_minimal_workflow.py
 
+# —— 运行期目录里的开发件（只排单文件，**别排 exp/ 整块** —— 那会 ImportError）——
+# 判据：用户机器上永远不会执行的文件不进发布包。这两条是 registry 扫描的两条 was-flagged 来源。
+exp/history_anchor_v2/test_history_anchor.py
+exp/history_anchor_v2/precheck_tiha.py
+
 # —— 本仓本地的规范/调研笔记（若被跟踪）——
 LOCAL-*.md
 RESEARCH_*.md
 
 # 🔴 以下**绝不能排**（排了就是 ImportError / 起不来），列在这里是给后来人看的：
 #   exp/                 → nodes.py 顶层 import history_anchor（exp/history_anchor_v2/）
-#                          整个目录一并随包（其中 test_history_anchor.py 是死重量，
-#                          但**不做例外**：运行期目录就该整块走，少一条特例少一个坑）
+#                          ⇒ **整块排掉 = 起不来**；但**目录里的开发件要单独排**（见文件头 2026-10-26 那条）
 #   relay_core/          → 业务内核（2026-10-07 由单文件 relay_core.py 拆成 11 文件包；
 #                          对外导入名仍是 relay_core，靠 __init__.py 全量再导出）
 #   v3/  web/  examples/ → 出口外壳 / 前端 JS / 示例工作流

@@ -27,9 +27,10 @@
 > 权重**不在本包里**：按 [ComfyUI 官方 H3 教程](https://docs.comfy.org/tutorials/video/minimax/minimax-h3)
 > 的模板下载（权重在 [`Comfy-Org/MiniMax-H3`](https://huggingface.co/Comfy-Org/MiniMax-H3)）。
 >
-> 🎙 **一根会挡路的线**：示例把声锚（`voice_anchor`）接到了 `anchor_zy.wav` —— 那是作者的演示语音，
-> **你机器上一定没有**。打开后先把它换成你自己的语音（放进 `ComfyUI/input/` 再选），
-> **或直接把桥的 `voice_anchor` 那根线拔掉**（不接 = 与旧版逐位一致）。不处理它会直接报找不到音频文件。
+> 🎙 **声锚是可选件，示例里默认没接**：图左下角那对 `LoadAudio → VAEEncodeAudio` 就是声锚，
+> 但**输出故意空着** —— 接上就要求本机有作者的演示语音 `anchor_zy.wav`，而你没有 ⇒ 首跑必挂。
+> **不接 = 与旧版逐位一致**，所以第一跑不会因为缺文件停下。要锁音色：把 VAE 的 `LATENT` 连到桥的
+> `voice_anchor`，再在 `LoadAudio` 里选你自己的语音（≥0.9 秒，放进 `ComfyUI/input/`）。
 
 > **跑不通，先跑这一条**：`curl -s 127.0.0.1:8188/h3relay/health`
 > —— 一次给出本包版本 / 出口模式 / 节点注册数 / 时序契约 / 宿主 H3 状态 / torch / OS，贴进 issue 就能定位一半问题。

@@ -20,7 +20,9 @@
               → CreateVideo → SaveVideo
 
 🔗 读上段 latent ──→ 拷贝桥的 context_latent（第 1 段它交「空上下文」→ 桥自动直通）
-🎙 LoadAudio → VAEEncodeAudio ──→ 拷贝桥的 voice_anchor（声锚，**默认已接好**；换成你自己的角色语音）
+🎙 LoadAudio → VAEEncodeAudio ──→ 拷贝桥的 voice_anchor（声锚；**本示例默认不接这根线**——
+                                   接上就要求本机有作者的演示语音，你没有 ⇒ 首跑必挂。要声锚自己连，
+                                   接法/取舍见下方「声锚」一段）
 ```
 
 图里有一个 `段号`（`PrimitiveInt`）同时喂给「Latent Load」「Copy Bridge」「Latent Save」三处的 `stage_index`，
@@ -37,19 +39,25 @@
 **怎么用**
 1. 把 JSON 丢进 `ComfyUI/user/default/workflows/`，在 ComfyUI 里打开（或直接拖进画布）。
 2. 把 4 个加载器的下拉改成你本机的模型文件（UNET / CLIP / 视频 VAE / 音频 VAE）。
-3. **声锚（左下「🎙 声锚源」）**：把 `LoadAudio` 换成**本段说话人**的一段干净语音（≥0.9 秒，放进
-   `ComfyUI/input/` 再选）；**不想用就把它的 `voice_anchor` 那根线拔掉**（不接 = 逐位同旧版）。
+3. **声锚是可选件，本示例默认没接**（左下角那对 🎙 节点就是它，`VAEEncodeAudio` 的输出**故意空着**）：
+   `LoadAudio` 里预填的是作者的演示语音，`widgets_values` 已清空 —— 不接线它就不执行，首跑不会因为缺文件挂掉。
+   要用就两步：把 `VAEEncodeAudio` 的 `LATENT` 连到桥的 `voice_anchor`，再把 `LoadAudio` 换成**本段说话人**
+   的一段干净语音（≥0.9 秒，放进 `ComfyUI/input/` 再选）。
 4. 段号 = 0 → 填 prompt → Queue（第 1 段）。
 5. 段号 = 1 → 换 prompt → Queue（第 2 段）。
 6. 日志出现 `钉住 22 帧` + `裁首 22 帧 = 钉住 22 + 沉降 0` + `起点干净` = 接通了。
 
-> 🎙 **声锚为什么默认接好、以及它为什么不会拖累你**：不接时桥的 `audio_ref` = **上一段音频尾**
-> ⇒ 上段说话人的嗓音会污染本段音色（台词逐段换人时尤其明显：实测同一角色 F0 漂 +15%、谱质心漂 +27%）。
-> 四道兜底：① 拔线 = 逐位同旧版（图/参数都不用改）；② 接了**没有内容**的锚（全零/常量/静音/NaN）
+> 🎙 **声锚：本示例为什么默认不接，以及什么时候该接**：接上就要求磁盘上存在示例里写死的那个语音文件
+> （作者的演示语音，用户机器上必然没有）⇒ **首跑直接报「找不到文件」**。不接时桥的 `audio_ref` =
+> **上一段音频尾**，与 0.6.19 之前**逐位一致**。
+> 什么时候该接：台词逐段换人、上段嗓音会污染本段音色时（实测同一角色 F0 漂 +15%、谱质心漂 +27%）。
+> 四道兜底：① 不接线 = 逐位同旧版（图/参数都不用改）；② 接了**没有内容**的锚（全零/常量/静音/NaN）
 > ⇒ **当场报错**（0.6.20 起 fail-closed），绝不静默出坏片；③ 锚比窗口短 ⇒ 取全长 + report 提醒；
 > ④ `pin_audio=False` ⇒ 忽略并写明。
 > 🔴 **别把 `context_latent` 接到 `voice_anchor`**：那是上一段的 AV latent，拿它当锚 = 锚源就是默认的
 > 「上一段音频尾」⇒ 看着像开了，其实空转。详见主 README「跨说话人音色：声锚」与 `docs/07` §声锚。
+> ℹ️ `fullflow_second_pass_latent_upscale_ui.json`（另一张图）**仍然把声锚接好了** —— 那张图本来就是
+> 「全接线参考」，且它另需参考图 `DS_A1_00002_.png` 与一个 LoRA，不是「打开就能跑」的定位。
 
 > **后处理 Post（`#14`）可整节点删掉**：17 个旋钮全部默认 0 = **逐位直通**，
 > 不接它行为与 0.4.x 一致。也**可以不接 `guide`**——只有 `match_prev` 与 `lowfreq_pull`
@@ -69,7 +77,8 @@
 加载器(UNET/CLIP/视频VAE/音频VAE/LoRA) + 模型补丁链(attention 后端/BSA/chunkFFN/sigma shift)
   → 出词 MiniMaxH3ReferenceToVideo(0.3MP · 6s→158 帧 · 1 张参考图)
   → 🔗 H3 Relay · Copy Bridge       第 2 段起：拷上段尾 22 帧 + 钉帧 conditioning
-                                    声锚：LoadAudio → VAEEncodeAudio → voice_anchor（**默认已接好**）
+                                    声锚：LoadAudio → VAEEncodeAudio → voice_anchor（**本图接好了**；
+                                          但需要你自己的语音文件，作者的演示语音你机器上没有）
   → 一采 SamplerCustomAdvanced(5 步)
   → 🔗 H3 Relay · Latent Save     ★ 存的是**一采终态 = 原生域**，这才是续接契约
   → 🔍 H3 Relay · Latent Upscale     26×46 → 30×54 latent（chunks=1，音频流原样带回）
@@ -101,8 +110,8 @@
 > `SelfLiftH3Sampler`（AV 采样器）来自第三方 `comfyui-SelfLift` —— 后两者**都不是本包的依赖**，
 > 只是"可以替换进来"的件（本包本身**零第三方节点包依赖**）。
 
-**怎么用**：① 装齐本包 8 个节点 + KJNodes + 🔍 的放大权重（主 README §安装·可选）；② 把 `LoadImage` 换成自己的
-参考图、把**声锚的 `LoadAudio` 换成自己的角色语音**（不想用声锚就拔掉桥的 `voice_anchor` 那根线）、
+**怎么用**：① 装齐本包（本图用到其中 8 个节点）+ KJNodes + 🔍 的放大权重（主 README §安装·可选）；② 把 `LoadImage` 换成自己的
+参考图、把**声锚的 `LoadAudio` 换成自己的角色语音**（这张图的声锚**是接好的**；不想用就拔掉桥的 `voice_anchor` 那根线）、
 把 Chain 的 `prompts` 格换成自己的 N 段词（**段数与 `segments` 一致**）；
 ③ 点 Chain 上的 **⏩ 连跑** 出 N 段，再点 **🧩 拼成一条**。手动跑就改段号逐段 Queue。
 
